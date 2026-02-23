@@ -1,0 +1,15 @@
+{
+  "appId": "com.hipago.app",
+  "appName": "HiPaGo",
+  "webDir": "out",
+  "plugins": {
+    "CapacitorSQLite": {
+      "iosDatabaseLocation": "Library/CapacitorDatabase",
+      "iosIsEncryption": false,
+      "androidIsEncryption": false
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
