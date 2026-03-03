@@ -1,0 +1,26 @@
+name: 'Setup Rust Native Dependencies'
+description: 'Install LLVM/libclang and cmake required by boring-sys2 (via rquest)'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install LLVM + cmake (Ubuntu)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm-dev libclang-dev clang cmake
+
+    - name: Install LLVM + cmake (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install llvm cmake
+        echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+
+    - name: Install LLVM + cmake (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        choco install llvm cmake --yes
+        echo "LIBCLANG_PATH=C:\Program Files\LLVM\lib" >> $env:GITHUB_ENV

@@ -2,9 +2,10 @@
   "name": "hipago",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
-    "postinstall": "cp node_modules/sql.js/dist/sql-wasm-browser.wasm public/",
-    "dev": "next dev",
+    "postinstall": "node scripts/postinstall.mjs",
+    "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -12,10 +13,13 @@
     "test:watch": "vitest",
     "format": "prettier --write 'src/**/*.{ts,tsx}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx}'",
-    "build:static": "bash scripts/build-static.sh",
+    "build:static": "node scripts/build-static.mjs",
+    "build:napi": "node scripts/build-napi.mjs",
     "build:tauri": "tauri build",
-    "build:android": "bash scripts/build-static.sh && cap sync android && cd android && ./gradlew assembleDebug",
-    "build:ios": "bash scripts/build-static.sh && cap sync ios",
+    "build:bypass:android": "node scripts/build-android.mjs",
+    "build:bypass:ios": "node scripts/build-ios.mjs",
+    "build:android": "node scripts/build-android.mjs && node scripts/build-static.mjs && cap sync android && cd android && ./gradlew assembleDebug",
+    "build:ios": "node scripts/build-ios.mjs && node scripts/build-static.mjs && cap sync ios",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "cap:sync": "cap sync",
@@ -34,14 +38,13 @@
     "@tanstack/react-query": "^5.90.21",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-sql": "^2",
-    "clsx": "^2.1.1",
     "fflate": "^0.8.2",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "sql.js": "^1.12.0",
-    "tailwind-merge": "^3.4.0",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.11",
+    "@hipago/bypass-napi": "file:crates/bypass-napi"
   },
   "devDependencies": {
     "@capacitor/android": "^6",
@@ -61,6 +64,7 @@
     "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4",
     "typescript": "^5.9.3",
+    "lightningcss": "^1.30.2",
     "vitest": "^4.0.18"
   }
 }

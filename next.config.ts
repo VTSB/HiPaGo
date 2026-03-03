@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     '@tauri-apps/plugin-sql',
     '@capacitor-community/sqlite',
+    '@hipago/bypass-napi',
   ],
   turbopack: {
     resolveAlias: {

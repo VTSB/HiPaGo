@@ -25,16 +25,34 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const imgRef = useRef<HTMLImageElement>(null);
   const mountedRef = useRef(true);
   const loadedRef = useRef(false);
+  const retryCountRef = useRef(0);
   const [visible, setVisible] = useState(loading === 'eager');
 
-  // Reset loaded state when src changes
+  // Reset loaded/retry state when src changes
   useEffect(() => {
     loadedRef.current = false;
+    retryCountRef.current = 0;
   }, [src]);
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
     loadedRef.current = true;
+    retryCountRef.current = 0;
+  }, []);
+
+  // Retry on error (up to 10 times with exponential backoff)
+  const handleError = useCallback(() => {
+    if (loadedRef.current || retryCountRef.current >= 10) return;
+    retryCountRef.current += 1;
+    const delay = Math.min(1000 * 2 ** (retryCountRef.current - 1), 10000);
+    setTimeout(() => {
+      const img = imgRef.current;
+      if (img && mountedRef.current && !loadedRef.current) {
+        const cur = img.src;
+        img.src = '';
+        img.src = cur;
+      }
+    }, delay);
   }, []);
 
   // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded)
@@ -85,6 +103,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       style={style}
       draggable={draggable}
       onLoad={handleLoad}
+      onError={handleError}
     />
   );
 }

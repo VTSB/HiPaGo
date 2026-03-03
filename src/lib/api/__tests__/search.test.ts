@@ -502,6 +502,41 @@ describe('search.ts', () => {
         },
       ]);
     });
+
+    it('should return empty array when count is zero', () => {
+      const buffer = new ArrayBuffer(4);
+      const view = new DataView(buffer);
+      view.setInt32(0, 0, false); // count = 0
+
+      const result = decodeSuggestionData(buffer, null);
+      expect(result).toEqual([]);
+    });
+
+    it('should return empty array when count is negative', () => {
+      const buffer = new ArrayBuffer(4);
+      const view = new DataView(buffer);
+      view.setInt32(0, -1, false); // count = -1
+
+      const result = decodeSuggestionData(buffer, null);
+      expect(result).toEqual([]);
+    });
+
+    it('should use non-TagType string tagType override as-is', () => {
+      // tagType is truthy non-null — cast straight through regardless of value
+      const buffer = createSuggestionBuffer([
+        { ns: 'artist', tag: 'someartist', count: 7 },
+      ]);
+
+      // Pass a raw string that happens to match a TagType value
+      const result = decodeSuggestionData(buffer, 'character');
+      expect(result).toEqual([
+        {
+          tag: 'someartist',
+          tagType: 'character' as TagType,
+          amount: 7,
+        },
+      ]);
+    });
   });
 
   describe('decodeNode', () => {

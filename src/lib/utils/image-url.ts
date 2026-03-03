@@ -73,15 +73,6 @@ export function imageHashCode(hash: string): number {
 }
 
 /**
- * @deprecated Use ggM() directly. Kept for backward compatibility.
- * Returns '1' or '2' based on gg.m(g) + 1.
- */
-export function subdomainSuffix(hashCode: number, config: GgConfig): string {
-  const m = ggM(hashCode, config);
-  return String(1 + m);
-}
-
-/**
  * Get the full image URL for a gallery file.
  *
  * Based on hitomi.la's url_from_hash + url_from_url logic:
@@ -181,7 +172,3 @@ export function galleryImageToFile(image: GalleryImage): GalleryFile {
   };
 }
 
-/** Cache the gg config for thumbnail use in native platforms (future). */
-export function setGgConfigForThumbnails(_config: GgConfig): void {
-  // Reserved for future native platform direct URL support.
-}

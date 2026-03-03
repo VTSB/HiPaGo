@@ -1,10 +1,9 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/shared/providers/providers';
 import { ErrorBoundary } from '@/shared/components/ErrorBoundary';
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
@@ -16,6 +15,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link
+          rel="stylesheet"
+          as="style"
+          crossOrigin="anonymous"
+          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css"
+        />
         <script dangerouslySetInnerHTML={{ __html: `
           (function() {
             try {
@@ -25,17 +30,13 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 var theme = parsed.state && parsed.state.theme;
                 if (theme === 'dark') {
                   document.documentElement.classList.add('dark');
-                } else if (theme === 'system') {
-                  if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                    document.documentElement.classList.add('dark');
-                  }
                 }
               }
-            } catch(e) {}
+            } catch(e) { /* Recoverable: localStorage parse failure — default to light theme */ }
           })();
         ` }} />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistMono.variable} antialiased`}>
         <Providers>
           <ErrorBoundary>{children}</ErrorBoundary>
         </Providers>

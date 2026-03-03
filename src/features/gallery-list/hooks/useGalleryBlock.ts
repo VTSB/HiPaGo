@@ -11,10 +11,10 @@ async function resolveBlock(id: number): Promise<GalleryBlock> {
     const local = await getGalleryBlock(id);
     if (local) return local;
   } catch {
-    // DB not available — fall through to remote
+    // Recoverable: WASM DB not initialized or query failed — fall through to remote fetch
   }
   const block = await fetchGalleryBlockHtmlById(id);
-  saveGalleryBlock(block).catch(() => {});
+  saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
   return block;
 }
 

@@ -4,14 +4,18 @@ import { useEffect, useRef } from 'react';
 import { initializeDatabase } from '@/lib/db/schema';
 import { checkDbReady } from '@/lib/db/init';
 import { runTagSync } from '@/lib/db/tag-sync';
+import { cleanupStaleCache } from '@/lib/db/gallery';
+import { useDbStatusStore } from '@/lib/store/db-status';
 
 /**
  * Invisible component that initializes the SQLite database on mount,
  * checks DB readiness, and triggers background tag sync if needed.
  * If no SQLite platform is available (plain browser), falls back to remote API.
+ * Also triggers background re-sync when tags are stale (> 7 days old).
  */
 export function DbInitializer() {
   const ran = useRef(false);
+  const tagsStale = useDbStatusStore((s) => s.tagsStale);
 
   useEffect(() => {
     if (ran.current) return;
@@ -20,6 +24,7 @@ export function DbInitializer() {
     initializeDatabase()
       .then(() => checkDbReady())
       .then((ready) => {
+        cleanupStaleCache().catch((e) => console.warn('[db] Cache cleanup failed:', e));
         if (!ready) {
           runTagSync();
         }
@@ -29,6 +34,13 @@ export function DbInitializer() {
         // dbReady stays false — app uses remote API
       });
   }, []);
+
+  // Background re-sync when tags are stale
+  useEffect(() => {
+    if (tagsStale) {
+      runTagSync();
+    }
+  }, [tagsStale]);
 
   return null;
 }

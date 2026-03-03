@@ -1,25 +1,24 @@
-import { getDb } from './adapter';
-import { apiClient } from '@/lib/api/client';
-import { resolveTagIndexUrl } from '@/lib/api/url-resolver';
+import { ensureDb, withTransaction } from './adapter';
 import { useDbStatusStore } from '@/lib/store/db-status';
-import { markTagSyncCompleted, markTagSyncLoading, parseSyncData, SYNC_KEY_TAGS } from './init';
+import { markTagSyncCompleted, markTagSyncLoading, SYNC_KEY_TAGS } from './init';
 import { getSyncStatus, setSyncStatus } from './sync-status';
 import { TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
-import koreanTags from '@/lib/data/korean-tags.json';
+import { createTagFetcher, TagFetcher } from '@/lib/api/tag-fetcher';
+import { parseTagsFromHtml, parseNavUrls, TAG_TYPES, ParsedTag } from '@/lib/api/tag-parser';
 
 /**
- * Tag sync fields to download from tagindex.hitomi.la.
+ * Map JSON type strings to TagType enum values.
  */
-const SYNC_FIELDS: Array<{ field: string; tagType: TagType }> = [
-  { field: 'female', tagType: TagType.FEMALE },
-  { field: 'male', tagType: TagType.MALE },
-  { field: 'artist', tagType: TagType.ARTIST },
-  { field: 'series', tagType: TagType.SERIES },
-  { field: 'group', tagType: TagType.GROUP },
-  { field: 'character', tagType: TagType.CHARACTER },
-  { field: 'tag', tagType: TagType.TAG },
-];
+const TYPE_STRING_MAP: Record<string, TagType> = {
+  artist: TagType.ARTIST,
+  series: TagType.SERIES,
+  character: TagType.CHARACTER,
+  group: TagType.GROUP,
+  tag: TagType.TAG,
+  female: TagType.FEMALE,
+  male: TagType.MALE,
+};
 
 /**
  * Korean localization field mapping.
@@ -33,57 +32,24 @@ const KOREAN_FIELD_MAP: Record<string, TagType> = {
   type: TagType.TYPE,
 };
 
-const PREFIXES = 'abcdefghijklmnopqrstuvwxyz0123456789'.split('');
-const CONCURRENCY = 3;
+/** Delay between page fetches to avoid rate limiting */
+const PAGE_DELAY_MS = 2000;
 
 /** Yield to the event loop so the UI stays responsive. */
 function yieldToMain(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-/**
- * Fetch tags from tagindex API for a given field and prefix character.
- */
-async function fetchTagsForPrefix(
-  field: string,
-  prefix: string,
-): Promise<Array<[string, number, string]>> {
-  try {
-    const response = await apiClient.fetchUrl(resolveTagIndexUrl(`${field}/${prefix}.json`));
-    return await response.json();
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Run tasks with concurrency limit.
- */
-async function runWithConcurrency<T>(
-  tasks: Array<() => Promise<T>>,
-  limit: number,
-): Promise<T[]> {
-  const results: T[] = [];
-  let index = 0;
-
-  async function worker() {
-    while (index < tasks.length) {
-      const i = index++;
-      results[i] = await tasks[i]();
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
  * Build a lookup map of existing tags for a given type byte.
- * Key: tag name, Value: { tagId, count }
  */
 async function buildExistingTagMap(typeByte: number): Promise<Map<string, { tagId: number; count: number }>> {
-  const existing = await getDb().query<{ tagId: number; name: string; count: number }>(
+  const db = await ensureDb();
+  const existing = await db.query<{ tagId: number; name: string; count: number }>(
     'SELECT tagId, name, count FROM tag WHERE type = ?',
     [typeByte],
   );
@@ -98,7 +64,8 @@ async function buildExistingTagMap(typeByte: number): Promise<Map<string, { tagI
  * Apply Korean localization data to existing tags in DB.
  */
 async function applyKoreanLocalization(): Promise<number> {
-  const db = getDb();
+  const { default: koreanTags } = await import('@/lib/data/korean-tags.json');
+  const db = await ensureDb();
   let count = 0;
   const typedKoreanTags = koreanTags as Record<string, Record<string, string>>;
 
@@ -107,7 +74,6 @@ async function applyKoreanLocalization(): Promise<number> {
     if (tagType === undefined) continue;
     const typeByte = TAG_TYPE_TO_BYTE[tagType];
 
-    // Pre-load all tags of this type into a name→tagId map
     const existingTags = await db.query<{ tagId: number; name: string }>(
       'SELECT tagId, name FROM tag WHERE type = ?',
       [typeByte],
@@ -117,17 +83,18 @@ async function applyKoreanLocalization(): Promise<number> {
       nameToId.set(tag.name, tag.tagId);
     }
 
-    // Bulk write i18n records
-    for (const [englishName, koreanName] of Object.entries(translations)) {
-      const tagId = nameToId.get(englishName);
-      if (tagId !== undefined) {
-        await db.execute(
-          'INSERT OR REPLACE INTO tag_i18n (tagId, local) VALUES (?, ?)',
-          [tagId, koreanName],
-        );
-        count++;
+    await withTransaction(async () => {
+      for (const [englishName, koreanName] of Object.entries(translations)) {
+        const tagId = nameToId.get(englishName);
+        if (tagId !== undefined) {
+          await db.execute(
+            'INSERT OR REPLACE INTO tag_i18n (tagId, local) VALUES (?, ?)',
+            [tagId, koreanName],
+          );
+          count++;
+        }
       }
-    }
+    });
 
     await yieldToMain();
   }
@@ -136,123 +103,204 @@ async function applyKoreanLocalization(): Promise<number> {
 }
 
 /**
- * Main tag sync function.
- * Downloads all tags from tagindex.hitomi.la, populates the local DB,
- * and applies Korean localization.
+ * Upsert tags into DB for a single tag type.
  */
-export async function runTagSync(): Promise<void> {
-  const store = useDbStatusStore.getState();
-  if (store.isSyncing) return;
+async function upsertTagsForType(
+  typeByte: number,
+  tags: Array<[string, number]>,
+): Promise<number> {
+  const db = await ensureDb();
+  const existingMap = await buildExistingTagMap(typeByte);
 
-  // Check for resume checkpoint from interrupted sync
-  const raw = await getSyncStatus(SYNC_KEY_TAGS);
-  const syncData = parseSyncData(raw);
-  let resumeFieldIndex = 0;
-  let totalTagCount = 0;
+  const toInsert: Array<{ type: number; name: string; count: number }> = [];
+  const toUpdate: Array<{ tagId: number; count: number }> = [];
 
-  if (syncData?.status === 'loading' && syncData.checkpoint) {
-    resumeFieldIndex = syncData.checkpoint.fieldIndex + 1;
-    totalTagCount = syncData.checkpoint.tagCount;
-  } else {
-    await markTagSyncLoading();
+  for (const [name, count] of tags) {
+    const existing = existingMap.get(name);
+    if (existing) {
+      if (existing.count !== count) {
+        toUpdate.push({ tagId: existing.tagId, count });
+      }
+    } else {
+      toInsert.push({ type: typeByte, name, count });
+      existingMap.set(name, { tagId: -1, count });
+    }
   }
 
-  useDbStatusStore.getState().setIsSyncing(true);
+  // Insert/update in batches to avoid blocking the UI thread
+  const BATCH_SIZE = 500;
 
-  const totalSteps = SYNC_FIELDS.length * PREFIXES.length;
-  let completedSteps = resumeFieldIndex * PREFIXES.length;
-
-  try {
-    const db = getDb();
-
-    for (let fi = resumeFieldIndex; fi < SYNC_FIELDS.length; fi++) {
-      const { field, tagType } = SYNC_FIELDS[fi];
-      const typeByte = TAG_TYPE_TO_BYTE[tagType];
-
-      // Pre-load existing tags for this type into memory
-      let existingMap = await buildExistingTagMap(typeByte);
-
-      // Collect all tags from all prefixes for this field
-      const allNewTags: Array<[string, number]> = [];
-
-      const tasks = PREFIXES.map((prefix) => async () => {
-        const tags = await fetchTagsForPrefix(field, prefix);
-        completedSteps++;
-        useDbStatusStore.getState().setSyncProgress(
-          Math.round((completedSteps / totalSteps) * 95),
-        );
-        return tags;
-      });
-
-      const results = await runWithConcurrency(tasks, CONCURRENCY);
-
-      // Flatten all prefix results
-      for (const tags of results) {
-        for (const [tagName, count] of tags) {
-          if (tagName) {
-            allNewTags.push([tagName, count]);
-          }
-        }
-      }
-
-      if (allNewTags.length === 0) {
-        await saveCheckpoint(fi, totalTagCount);
-        await yieldToMain();
-        continue;
-      }
-
-      // Diff against existing map and prepare operations
-      const toInsert: Array<{ type: number; name: string; count: number }> = [];
-      const toUpdate: Array<{ tagId: number; count: number }> = [];
-
-      for (const [tagName, count] of allNewTags) {
-        const existing = existingMap.get(tagName);
-        if (existing) {
-          if (existing.count !== count) {
-            toUpdate.push({ tagId: existing.tagId, count });
-          }
-        } else {
-          toInsert.push({ type: typeByte, name: tagName, count });
-          existingMap.set(tagName, { tagId: -1, count });
-        }
-      }
-
-      // Bulk insert new tags
-      for (const { type, name, count } of toInsert) {
+  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+    const batch = toInsert.slice(i, i + BATCH_SIZE);
+    await withTransaction(async () => {
+      for (const { type, name, count } of batch) {
         await db.execute(
           'INSERT INTO tag (type, name, count) VALUES (?, ?, ?)',
           [type, name, count],
         );
       }
+    });
+    await yieldToMain();
+  }
 
-      // Bulk update changed counts
-      for (const { tagId, count } of toUpdate) {
+  for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+    const batch = toUpdate.slice(i, i + BATCH_SIZE);
+    await withTransaction(async () => {
+      for (const { tagId, count } of batch) {
         await db.execute(
           'UPDATE tag SET count = ? WHERE tagId = ?',
           [count, tagId],
         );
       }
+    });
+    await yieldToMain();
+  }
 
-      totalTagCount += allNewTags.length;
-      await saveCheckpoint(fi, totalTagCount);
-      await yieldToMain();
+  return tags.length;
+}
+
+/**
+ * Insert a batch of ParsedTag objects into the DB, grouped by type.
+ */
+async function insertParsedTags(tags: ParsedTag[]): Promise<void> {
+  const grouped = new Map<number, Array<[string, number]>>();
+  for (const tag of tags) {
+    const tagType = TYPE_STRING_MAP[tag.type];
+    if (tagType === undefined) continue;
+    const typeByte = TAG_TYPE_TO_BYTE[tagType];
+    let list = grouped.get(typeByte);
+    if (!list) {
+      list = [];
+      grouped.set(typeByte, list);
+    }
+    list.push([tag.name, tag.count]);
+  }
+  for (const [typeByte, tagList] of grouped) {
+    await upsertTagsForType(typeByte, tagList);
+  }
+}
+
+/**
+ * Update sync progress in the store.
+ * Reserves 5% for fetch start and 5% for localization; 90% for page processing.
+ */
+function updateProgress(completed: number, total: number): void {
+  const progress = 5 + Math.round((completed / Math.max(total, 1)) * 90);
+  useDbStatusStore.getState().setSyncProgress(Math.min(progress, 95));
+}
+
+/** Persist sync checkpoint so interrupted syncs can resume. */
+async function saveCheckpoint(typeIndex: number, letterIndex: number, tagCount: number): Promise<void> {
+  await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({
+    status: 'loading',
+    timestamp: Date.now(),
+    checkpoint: { typeIndex, letterIndex, tagCount },
+  }));
+}
+
+/**
+ * Runtime tag sync: fetches hitomi.la tag pages directly, page by page.
+ * Falls back to bundled JSON if this fails.
+ */
+async function runRuntimeTagSync(): Promise<void> {
+  const store = useDbStatusStore.getState();
+  const fetcher = createTagFetcher();
+
+  try {
+    let totalTagCount = 0;
+    let pagesCompleted = 0;
+    let totalPagesEstimate = TAG_TYPES.length * 26; // rough estimate, refined as we go
+
+    const failedPages: Array<{ url: string; defaultType: string }> = [];
+
+    for (let typeIdx = 0; typeIdx < TAG_TYPES.length; typeIdx++) {
+      const { urlType, defaultType } = TAG_TYPES[typeIdx];
+      const firstUrl = `all${urlType}-a.html`;
+
+      // Fetch first page
+      store.setSyncDetail(`${urlType} 태그 가져오는 중...`);
+      const firstHtml = await fetcher.fetchPage(firstUrl);
+      const firstTags = parseTagsFromHtml(firstHtml, defaultType);
+      const navUrls = parseNavUrls(firstHtml);
+
+      // Insert first page tags
+      if (firstTags.length > 0) {
+        await insertParsedTags(firstTags);
+        totalTagCount += firstTags.length;
+      }
+      pagesCompleted++;
+      updateProgress(pagesCompleted, totalPagesEstimate);
+
+      // Fetch remaining letter pages
+      for (let letterIdx = 0; letterIdx < navUrls.length; letterIdx++) {
+        await sleep(PAGE_DELAY_MS);
+
+        try {
+          const html = await fetcher.fetchPage(navUrls[letterIdx]);
+          const tags = parseTagsFromHtml(html, defaultType);
+          if (tags.length > 0) {
+            await insertParsedTags(tags);
+            totalTagCount += tags.length;
+          }
+        } catch {
+          failedPages.push({ url: navUrls[letterIdx], defaultType });
+        }
+
+        pagesCompleted++;
+        updateProgress(pagesCompleted, totalPagesEstimate);
+        store.setSyncDetail(`${urlType} (${letterIdx + 2}/${navUrls.length + 1})`);
+
+        await saveCheckpoint(typeIdx, letterIdx, totalTagCount);
+        await yieldToMain();
+      }
     }
 
-    // Apply Korean localization after all tags are synced
+    // Pass 2: retry failed pages
+    if (failedPages.length > 0) {
+      store.setSyncDetail(`실패한 페이지 재시도 (${failedPages.length}개)...`);
+      await sleep(5000); // cooldown
+
+      for (const { url, defaultType } of failedPages) {
+        try {
+          await sleep(PAGE_DELAY_MS * 2);
+          const html = await fetcher.fetchPage(url);
+          const tags = parseTagsFromHtml(html, defaultType);
+          if (tags.length > 0) {
+            await insertParsedTags(tags);
+            totalTagCount += tags.length;
+          }
+        } catch {
+          console.warn(`[tag-sync] Failed to fetch ${url} after retry`);
+        }
+      }
+    }
+
+    // Apply Korean localization
+    store.setSyncDetail('한국어 태그 적용 중...');
     await applyKoreanLocalization();
 
     await markTagSyncCompleted(totalTagCount);
+  } finally {
+    await fetcher.dispose();
+  }
+}
+
+/**
+ * Main tag sync entry point.
+ * Fetches tag pages from hitomi.la directly, page by page.
+ */
+export async function runTagSync(): Promise<void> {
+  const store = useDbStatusStore.getState();
+  if (store.isSyncing) return;
+
+  await markTagSyncLoading();
+  useDbStatusStore.getState().setIsSyncing(true);
+
+  try {
+    useDbStatusStore.getState().setSyncProgress(5);
+    await runRuntimeTagSync();
   } catch (error) {
     console.error('[tag-sync] Sync failed:', error);
     useDbStatusStore.getState().setIsSyncing(false);
   }
-}
-
-/** Persist sync checkpoint so interrupted syncs can resume. */
-async function saveCheckpoint(fieldIndex: number, tagCount: number): Promise<void> {
-  await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({
-    status: 'loading',
-    timestamp: Date.now(),
-    checkpoint: { fieldIndex, tagCount },
-  }));
 }

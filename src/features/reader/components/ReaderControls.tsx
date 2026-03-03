@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useT } from '@/lib/i18n/useT';
+import { useSettingsStore } from '@/lib/store/settings';
 
 export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeChange, onNextPage, onPrevPage, onPageChange }: {
   onBack: () => void; currentPage: number; totalPages: number; mode: 'page' | 'scroll';
@@ -12,6 +13,10 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const t = useT();
+  const dualPage = useSettingsStore((s) => s.dualPage);
+  const setDualPage = useSettingsStore((s) => s.setDualPage);
+  const scrollWidth = useSettingsStore((s) => s.scrollWidth);
+  const setScrollWidth = useSettingsStore((s) => s.setScrollWidth);
 
   const startEditing = useCallback(() => {
     setEditValue(String(currentPage + 1));
@@ -72,6 +77,36 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]"><path d="M2 4.25A2.25 2.25 0 014.25 2h11.5A2.25 2.25 0 0118 4.25v8.5A2.25 2.25 0 0115.75 15h-11.5A2.25 2.25 0 012 12.75v-8.5zM4.25 3.5a.75.75 0 00-.75.75v8.5c0 .414.336.75.75.75h11.5a.75.75 0 00.75-.75v-8.5a.75.75 0 00-.75-.75H4.25z" /><path d="M5 18a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z" /></svg>
           )}
         </button>
+        {mode === 'page' && (
+          <button onClick={() => setDualPage(!dualPage)} className={`rounded-full p-2 transition-colors hover:bg-white/10 active:bg-white/10 ${dualPage ? 'text-white' : 'text-zinc-400 hover:text-white'}`} aria-label={dualPage ? '1-page' : '2-page'}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]">
+              {dualPage ? (
+                <><rect x="1.5" y="3" width="7.5" height="14" rx="1" /><rect x="11" y="3" width="7.5" height="14" rx="1" /></>
+              ) : (
+                <rect x="4" y="2" width="12" height="16" rx="1.5" />
+              )}
+            </svg>
+          </button>
+        )}
+        {mode === 'scroll' && (
+          <select
+            value={scrollWidth}
+            onChange={(e) => setScrollWidth(Number(e.target.value))}
+            className="rounded bg-white/10 px-1.5 py-1 text-xs text-zinc-300 outline-none hover:bg-white/20 [&>option]:bg-zinc-900 [&>option]:text-white"
+          >
+            <option value={10}>10%</option>
+            <option value={25}>25%</option>
+            <option value={50}>50%</option>
+            <option value={75}>75%</option>
+            <option value={100}>100%</option>
+            <option value={125}>125%</option>
+            <option value={150}>150%</option>
+            <option value={200}>200%</option>
+            <option value={300}>300%</option>
+            <option value={500}>500%</option>
+            <option value={0}>Full</option>
+          </select>
+        )}
       </div>
     </div>
   );

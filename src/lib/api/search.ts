@@ -121,6 +121,7 @@ async function getNodeAtAddress(
     );
     return decodeNode(data);
   } catch {
+    // Recoverable: binary search tree node fetch/decode failed — treat as empty subtree
     return null;
   }
 }
@@ -200,26 +201,29 @@ export function parseCompoundQuery(query: string): string[] {
 }
 
 /**
- * Intersect multiple sorted ID arrays.
- * All input arrays should be sorted descending (newest first).
+ * Intersect multiple ID arrays using Set-based lookup.
+ * Nozomi files are mostly descending but have occasional ordering violations,
+ * so a sorted-merge approach doesn't work reliably.
  */
 function intersectIdSets(sets: number[][]): number[] {
   if (sets.length === 0) return [];
   if (sets.length === 1) return sets[0];
 
-  // Use the smallest set as base for intersection
+  // Start with the shortest set for the initial lookup set
   const sorted = [...sets].sort((a, b) => a.length - b.length);
-  const base = new Set(sorted[0]);
+  let currentSet = new Set(sorted[0]);
 
   for (let i = 1; i < sorted.length; i++) {
-    const other = new Set(sorted[i]);
-    for (const id of base) {
-      if (!other.has(id)) base.delete(id);
+    const next = new Set<number>();
+    for (const id of sorted[i]) {
+      if (currentSet.has(id)) next.add(id);
     }
+    currentSet = next;
+    if (currentSet.size === 0) return [];
   }
 
-  // Return in descending order (newest first)
-  return [...base].sort((a, b) => b - a);
+  // Preserve the order from the first (shortest) set
+  return sorted[0].filter((id) => currentSet.has(id));
 }
 
 export function decodeGalleryIdData(buffer: ArrayBuffer): number[] {
@@ -273,9 +277,9 @@ async function getGalleryIdsForSingleTerm(
     return fetchNozomiSearch(area, nozomiTag, nozomiLanguage, sort);
   }
 
-  // Untyped queries → B-tree galleries index
+  // Untyped queries → B-tree galleries index (lowercase for case-insensitive match)
   const field = 'galleries';
-  const term = query;
+  const term = query.toLowerCase();
 
   const versionDir = getVersionDir(field);
   const version = await fetchIndexVersion(versionDir);
@@ -407,7 +411,7 @@ export async function getSuggestionsForQuery(
 ): Promise<Suggestion[]> {
   const { tagType, tag } = parseQuery(query);
   const field = tagType || 'global';
-  const term = tag || query;
+  const term = (tag || query).toLowerCase();
 
   if (!term) return [];
 
@@ -429,6 +433,7 @@ export async function getSuggestionsForQuery(
       return { tag: tagName, tagType: resolvedType, amount: count };
     });
   } catch {
+    // Recoverable: remote suggestion fetch failed — return empty suggestions
     return [];
   }
 }

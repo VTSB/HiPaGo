@@ -1,3 +1,11 @@
+// bypass-core native addon (Rust → Node.js via napi-rs)
+declare module '@hipago/bypass-napi' {
+  export function bypassFetch(
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<{ status: number; headers: Record<string, string>; body: Uint8Array }>;
+}
+
 // Runtime-only modules — installed when Tauri/Capacitor is set up
 declare module '@tauri-apps/plugin-sql' {
   interface QueryResult {

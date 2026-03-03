@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bypass-core",
+    "crates/bypass-napi",
+    "crates/bypass-uniffi",
+]
+# src-tauri is excluded: it is a separate Cargo project with its own
+# Cargo.lock managed by tauri-cli. Including it would force all crates
+# to share a single lock with Tauri's 200+ dependencies, increasing
+# rebuild churn when only bypass crates change. Tauri's build system
+# (tauri-action, `pnpm tauri build`) expects src-tauri to be standalone.
+exclude = ["src-tauri"]

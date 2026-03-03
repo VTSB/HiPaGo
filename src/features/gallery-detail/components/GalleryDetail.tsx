@@ -8,33 +8,39 @@ import { TagChip } from '@/shared/components/TagChip';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
 import { AbortableImage } from '@/shared/components/AbortableImage';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { addFavorite, removeFavorite, isFavorite, recordVisit } from '@/lib/db/gallery';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { recordVisit } from '@/lib/db/gallery';
 import { Spinner } from '@/shared/components/Spinner';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import { useGalleryBlock } from '@/features/gallery-list/hooks/useGalleryBlock';
 import { getGgConfig } from '@/lib/api/client';
-import { downloadGalleryAsZip, type DownloadProgress } from '@/lib/utils/download-zip';
 import type { GalleryBlock } from '@/lib/utils/types';
+import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
+import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
+
+const TAG_ORDER: Record<string, number> = {
+  [TagType.ARTIST]: 0,
+  [TagType.GROUP]: 1,
+  [TagType.SERIES]: 2,
+  [TagType.CHARACTER]: 3,
+  [TagType.FEMALE]: 4,
+  [TagType.MALE]: 5,
+  [TagType.TAG]: 6,
+};
 
 export function GalleryDetail({ id }: { id: number }) {
   const { block, images, info, isLoading, error } = useGalleryDetail(id);
   // Use cached block from list page as instant preview while full info loads
   const cachedBlock = useGalleryBlock(id);
-  const queryClient = useQueryClient();
   const router = useRouter();
-  const [isFav, setIsFav] = useState(false);
-  const [dlProgress, setDlProgress] = useState<DownloadProgress | null>(null);
-  const dlAbortRef = useRef<AbortController | null>(null);
+  const [copied, setCopied] = useState(false);
   const t = useT();
 
   useEffect(() => {
-    isFavorite(id).then(setIsFav).catch(() => {});
-    recordVisit(id).catch(() => {});
+    recordVisit(id).catch((e) => console.warn('[detail] Visit record failed:', e));
     // Warm gg.js cache so reader opens instantly
-    getGgConfig().catch(() => {});
+    getGgConfig().catch((e) => console.warn('[detail] GgConfig warm failed:', e));
   }, [id]);
 
   // Use full block from gallery-info when available, fall back to cached block from list
@@ -47,56 +53,24 @@ export function GalleryDetail({ id }: { id: number }) {
 
   const relatedIds = displayBlock?.related?.slice(0, 12) ?? [];
 
-  const toggleFavoriteMutation = useMutation({
-    mutationFn: async () => {
-      if (isFav) {
-        await removeFavorite(id);
-      } else {
-        await addFavorite(id);
-      }
-    },
-    onSuccess: () => {
-      setIsFav(!isFav);
-      queryClient.invalidateQueries({ queryKey: ['favorites'] });
-    },
-  });
+  const { isFav, isPending: favPending, toggle: toggleFav } = useFavoriteToggle(id);
+  const { progress: dlProgress, start: handleDownload, cancel: handleCancelDownload } = useDownloadGallery(
+    id,
+    displayBlock?.title || `Gallery ${id}`,
+    info?.files || [],
+  );
 
-  const handleDownload = useCallback(async () => {
-    if (dlProgress || !info) return;
+  const handleShare = useCallback(async () => {
     try {
-      const config = await getGgConfig();
-      dlAbortRef.current = new AbortController();
-      setDlProgress({ current: 0, total: info.files.length });
-      await downloadGalleryAsZip(
-        id,
-        displayBlock?.title || `Gallery ${id}`,
-        info.files,
-        config,
-        setDlProgress,
-        dlAbortRef.current.signal,
-      );
-    } catch (e) {
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      console.error('Download failed:', e);
-    } finally {
-      setDlProgress(null);
-      dlAbortRef.current = null;
+      await navigator.clipboard.writeText(String(id));
+    } catch {
+      // Fallback: prompt user to copy manually (execCommand is deprecated)
+      window.prompt('Copy gallery ID:', String(id));
     }
-  }, [id, info, displayBlock?.title, dlProgress]);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [id]);
 
-  const handleCancelDownload = useCallback(() => {
-    dlAbortRef.current?.abort();
-  }, []);
-
-  const TAG_ORDER: Record<string, number> = {
-    [TagType.ARTIST]: 0,
-    [TagType.GROUP]: 1,
-    [TagType.SERIES]: 2,
-    [TagType.CHARACTER]: 3,
-    [TagType.FEMALE]: 4,
-    [TagType.MALE]: 5,
-    [TagType.TAG]: 6,
-  };
   const tagEntries = displayBlock
     ? (Object.entries(displayBlock.tags) as [TagType, string[]][])
         .sort(([a], [b]) => (TAG_ORDER[a] ?? 99) - (TAG_ORDER[b] ?? 99))
@@ -118,8 +92,8 @@ export function GalleryDetail({ id }: { id: number }) {
         <Link href={`/gallery/${id}/reader`} className="group relative self-start overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
           {bigThumbnail ? <AbortableImage src={bigThumbnail} alt={displayBlock.title} className="w-full object-cover transition-transform group-hover:scale-[1.02]" /> : displayBlock.thumbnail ? <img src={displayBlock.thumbnail} alt={displayBlock.title} className="w-full object-cover transition-transform group-hover:scale-[1.02]" /> : <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">{t('detail.noImage')}</div>}
           <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFavoriteMutation.mutate(); }}
-            disabled={toggleFavoriteMutation.isPending}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFav(); }}
+            disabled={favPending}
             className={`absolute left-2 top-2 rounded-full bg-black/50 p-1.5 backdrop-blur-sm transition-colors disabled:opacity-50 ${isFav ? 'text-yellow-400' : 'text-white/70 hover:text-white'}`}
             aria-label={isFav ? t('detail.removeFavorite') : t('detail.addFavorite')}
           >
@@ -129,7 +103,15 @@ export function GalleryDetail({ id }: { id: number }) {
           </button>
         </Link>
         <div className="space-y-4">
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">{displayBlock.title || `Gallery #${id}`}</h1>
+          <div>
+            <button
+              onClick={handleShare}
+              className="mb-1 inline-flex items-center gap-1 text-sm tabular-nums text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+            >
+              #{id}
+            </button>
+            <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">{displayBlock.title || `Gallery #${id}`}</h1>
+          </div>
           {info && (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
               <Link href={`/search?q=${encodeURIComponent(`type:${info.type}`)}`} className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300">{info.type}</Link>
@@ -217,6 +199,11 @@ export function GalleryDetail({ id }: { id: number }) {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {relatedIds.map((rid) => <GalleryCardById key={rid} id={rid} />)}
           </div>
+        </div>
+      )}
+      {copied && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-4 py-2 text-sm text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900">
+          {t('detail.copied')}
         </div>
       )}
     </div>

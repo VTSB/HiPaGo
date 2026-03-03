@@ -44,7 +44,7 @@ export function useGalleryList(viewingPage = 1, sort: SortOrder = 'date_added') 
     if (loadedPages < targetPages) {
       query.fetchNextPage();
     }
-  }, [query.data?.pages.length, query.isFetchingNextPage, query.hasNextPage, viewingPage]);
+  }, [query.data?.pages.length, query.isFetchingNextPage, query.hasNextPage, query.fetchNextPage, viewingPage]);
 
   const ids = query.data?.pages.flatMap((p) => p.ids) ?? [];
   const totalLength = query.data?.pages[0]?.totalLength ?? 0;

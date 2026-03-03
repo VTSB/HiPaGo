@@ -1,4 +1,4 @@
-import { setDb, isDbInitialized } from './adapter';
+import { setDb, isDbInitialized, setEnsureInit } from './adapter';
 import type { DbAdapter } from './adapter';
 import { SCHEMA_SQL } from './schema-sql';
 
@@ -95,6 +95,9 @@ export async function initializeDatabase(): Promise<void> {
 
   return _initPromise;
 }
+
+// Register initializer so ensureDb() can auto-init
+setEnsureInit(() => initializeDatabase());
 
 async function detectPlatformAdapter(): Promise<DbAdapter> {
   // Tauri desktop

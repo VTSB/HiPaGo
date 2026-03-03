@@ -1,37 +1,33 @@
 import { NextRequest } from 'next/server';
+import { parseGgJs } from '@/lib/utils/image-url';
+import type { GgConfig } from '@/lib/utils/types';
+import { bypassFetch } from '@/lib/server/bypass-fetch';
 
-// Force edge runtime — streams bytes directly without Node.js buffering
-export const runtime = 'edge';
+// Node.js runtime required for bypass (net/tls modules). Streaming is preserved
+// via WHATWG ReadableStream — bypassFetch returns a standard Response object.
+export const runtime = 'nodejs';
 
 const CDN_DOMAIN = 'gold-usergeneratedcontent.net';
 const LTN_BASE = `https://ltn.${CDN_DOMAIN}`;
 
 // Cached gg.js config for thumbnail subdomain resolution (tn → atn/btn)
-let ggConfig: { mDefault: number; mCases: Set<number>; mCaseValue: number } | null = null;
+let ggConfig: GgConfig | null = null;
 let ggConfigAt = 0;
 const GG_TTL = 30 * 60 * 1000; // 30 minutes
 
 async function getGgConfig() {
   if (ggConfig && Date.now() - ggConfigAt < GG_TTL) return ggConfig;
   try {
-    const resp = await fetch(`${LTN_BASE}/gg.js?_=${Date.now()}`, {
+    const resp = await bypassFetch(`${LTN_BASE}/gg.js?_=${Date.now()}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://hitomi.la/',
       },
+      signal: AbortSignal.timeout(10000),
     });
     const text = await resp.text();
 
-    const mDefault = parseInt((/var\s+o\s*=\s*(\d+)/.exec(text) || ['', '1'])[1], 10);
-    const caseAssignMatch = /case\s+\d+:[^}]*?o\s*=\s*(\d+)\s*;?\s*break/.exec(text);
-    const mCaseValue = caseAssignMatch ? parseInt(caseAssignMatch[1], 10) : (1 - mDefault);
-
-    const mCases = new Set<number>();
-    const re = /case\s+(\d+):/g;
-    let m;
-    while ((m = re.exec(text)) !== null) mCases.add(parseInt(m[1], 10));
-
-    ggConfig = { mDefault, mCases, mCaseValue };
+    ggConfig = parseGgJs(text);
     ggConfigAt = Date.now();
     return ggConfig;
   } catch {
@@ -59,6 +55,16 @@ export async function GET(
   const [subdomain, ...rest] = path;
   const targetPath = rest.join('/');
 
+  // Validate subdomain to prevent SSRF via subdomain injection
+  if (!/^[a-z0-9]{1,4}$/.test(subdomain)) {
+    return new Response(null, { status: 400 });
+  }
+
+  // Validate targetPath to prevent path traversal
+  if (/\.\.|\/\/|\x00/.test(targetPath) || !/^[\w.\-/]+$/.test(targetPath)) {
+    return new Response(null, { status: 400 });
+  }
+
   let actualSubdomain = subdomain;
   if (subdomain === 'tn') {
     const config = await getGgConfig();
@@ -70,12 +76,13 @@ export async function GET(
   const targetUrl = `https://${actualSubdomain}.${CDN_DOMAIN}/${targetPath}`;
 
   try {
-    const response = await fetch(targetUrl, {
+    const response = await bypassFetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://hitomi.la/',
         'Accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
       },
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!response.ok) {
@@ -93,8 +100,7 @@ export async function GET(
     headers.set('Cache-Control', 'public, max-age=86400');
 
     // Stream the upstream body directly to the client — no buffering.
-    // Edge runtime + passing ReadableStream ensures true byte-level streaming,
-    // so the browser can progressively render the image as chunks arrive.
+    // Both bypassFetch and native fetch return Response with ReadableStream body.
     return new Response(response.body, {
       status: 200,
       headers,

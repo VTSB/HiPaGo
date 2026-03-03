@@ -17,15 +17,32 @@ import {
 } from '../init';
 
 // ---------------------------------------------------------------------------
-// Mock apiClient for tag-sync (must be before import)
+// Mock runtime tag fetching (must be before import)
 // ---------------------------------------------------------------------------
 
-const mockFetchUrl = vi.fn();
+interface MockTag { name: string; count: number; type: string }
 
-vi.mock('@/lib/api/client', () => ({
-  apiClient: {
-    fetchUrl: (...args: unknown[]) => mockFetchUrl(...args),
+let mockParsedTags: MockTag[] = [];
+let mockFetchPageShouldFail = false;
+
+vi.mock('@/lib/api/tag-fetcher', () => ({
+  createTagFetcher: () => ({
+    fetchPage: () => {
+      if (mockFetchPageShouldFail) return Promise.reject(new Error('Mock: fetch failed'));
+      return Promise.resolve('<html>mock</html>');
+    },
+    dispose: () => Promise.resolve(),
+  }),
+}));
+
+vi.mock('@/lib/api/tag-parser', () => ({
+  TAG_TYPES: [{ urlType: 'mock', defaultType: 'tag' }],
+  parseTagsFromHtml: () => {
+    const tags = [...mockParsedTags];
+    mockParsedTags = [];
+    return tags;
   },
+  parseNavUrls: () => [],
 }));
 
 // Import tag-sync AFTER mock is set up
@@ -40,23 +57,19 @@ function resetStore() {
     dbReady: false,
     syncProgress: 0,
     isSyncing: false,
+    syncDetail: '',
+    tagsStale: false,
   });
 }
 
-/** Create a mock JSON response for fetchUrl */
-function mockJsonResponse(data: unknown): Response {
-  return {
-    json: () => Promise.resolve(data),
-    ok: true,
-    status: 200,
-  } as unknown as Response;
-}
-
-/** Create tag API data: [tagName, count, namespace] tuples */
-function makeTagData(
-  tags: Array<{ name: string; count: number; ns?: string }>,
-): Array<[string, number, string]> {
-  return tags.map(({ name, count, ns }) => [name, count, ns || '']);
+/** Set mock tags that runTagSync will "parse" from runtime pages */
+function setMockTags(tags: Record<string, Array<[string, number]>>): void {
+  mockParsedTags = [];
+  for (const [type, entries] of Object.entries(tags)) {
+    for (const [name, count] of entries) {
+      mockParsedTags.push({ name, count, type });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +87,9 @@ afterAll(async () => {
 beforeEach(async () => {
   await clearAllTables();
   resetStore();
-  mockFetchUrl.mockReset();
+  mockParsedTags = [];
+  mockFetchPageShouldFail = false;
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -124,6 +139,16 @@ describe('useDbStatusStore', () => {
     expect(state.dbReady).toBe(true);
     expect(state.syncProgress).toBe(50);
     expect(state.isSyncing).toBe(true);
+  });
+
+  it('setSyncDetail updates syncDetail', () => {
+    useDbStatusStore.getState().setSyncDetail('artists (3/26)');
+    expect(useDbStatusStore.getState().syncDetail).toBe('artists (3/26)');
+  });
+
+  it('setTagsStale updates tagsStale', () => {
+    useDbStatusStore.getState().setTagsStale(true);
+    expect(useDbStatusStore.getState().tagsStale).toBe(true);
   });
 });
 
@@ -245,24 +270,10 @@ describe('markTagSyncLoading', () => {
 // ===========================================================================
 
 describe('runTagSync — full flow', () => {
-  it('inserts tags from API responses into DB and marks completed', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/a.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([
-            { name: 'ahegao', count: 5000 },
-            { name: 'anal', count: 3000 },
-          ]),
-        ));
-      }
-      if (url === '/api/tagindex/male/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([
-            { name: 'blowjob', count: 4000 },
-          ]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+  it('inserts tags into DB and marks completed', async () => {
+    setMockTags({
+      female: [['ahegao', 5000], ['anal', 3000]],
+      male: [['blowjob', 4000]],
     });
 
     await runTagSync();
@@ -299,13 +310,8 @@ describe('runTagSync — full flow', () => {
       [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'ahegao', 100],
     );
 
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/a.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'ahegao', count: 9999 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['ahegao', 9999]],
     });
 
     await runTagSync();
@@ -329,13 +335,8 @@ describe('runTagSync — full flow', () => {
       [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'ahegao', 5000],
     );
 
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/a.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'ahegao', count: 5000 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['ahegao', 5000]],
     });
 
     await runTagSync();
@@ -347,63 +348,31 @@ describe('runTagSync — full flow', () => {
     expect(tag!.count).toBe(5000);
   });
 
-  it('skips empty tagName entries', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/a.json') {
-        return Promise.resolve(mockJsonResponse([
-          ['', 100, 'female'],
-          ['ahegao', 200, 'female'],
-        ]));
-      }
-      return Promise.resolve(mockJsonResponse([]));
-    });
-
-    await runTagSync();
-
-    const allFemale = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE]],
-    );
-    expect(allFemale).toHaveLength(1);
-    expect(allFemale[0].name).toBe('ahegao');
-  });
-
   it('prevents duplicate sync when isSyncing=true', async () => {
     useDbStatusStore.getState().setIsSyncing(true);
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
+    setMockTags({ female: [['test', 1]] });
 
     await runTagSync();
 
-    expect(mockFetchUrl).not.toHaveBeenCalled();
-  });
-
-  it('handles API errors gracefully — returns empty for failed prefix', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/a.json') {
-        return Promise.reject(new Error('Network error'));
-      }
-      if (url === '/api/tagindex/female/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'beauty mark', count: 300 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
-    });
-
-    await runTagSync();
-
-    const allFemale = await queryAll<{ name: string }>(
+    // sync was skipped — no tags inserted
+    const tags = await queryAll<{ name: string }>(
       'SELECT name FROM tag WHERE type = ?',
       [TAG_TYPE_TO_BYTE[TagType.FEMALE]],
     );
-    const names = allFemale.map((t) => t.name);
-    expect(names).toContain('beauty mark');
-    expect(names).not.toContain('ahegao');
-
-    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(tags).toHaveLength(0);
   });
 
-  it('updates syncProgress as prefixes complete', async () => {
+  it('handles API errors gracefully — sets isSyncing=false on fetch failure', async () => {
+    mockFetchPageShouldFail = true;
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runTagSync();
+    consoleSpy.mockRestore();
+
+    expect(useDbStatusStore.getState().isSyncing).toBe(false);
+  });
+
+  it('updates syncProgress as types complete', async () => {
     const progressValues: number[] = [];
     const originalSetSyncProgress = useDbStatusStore.getState().setSyncProgress;
 
@@ -414,54 +383,24 @@ describe('runTagSync — full flow', () => {
       },
     });
 
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
+    setMockTags({});
     await runTagSync();
 
     expect(progressValues.length).toBeGreaterThan(0);
     for (let i = 1; i < progressValues.length; i++) {
       expect(progressValues[i]).toBeGreaterThanOrEqual(progressValues[i - 1]);
     }
-    const maxBeforeCompletion = Math.max(...progressValues.filter((v) => v < 100));
-    expect(maxBeforeCompletion).toBeLessThanOrEqual(95);
-  });
-
-  it('fetches all 7 fields x 36 prefixes = 252 API calls', async () => {
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
-    await runTagSync();
-    expect(mockFetchUrl).toHaveBeenCalledTimes(252);
-  });
-
-  it('calls correct URL pattern for each field/prefix', async () => {
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
-    await runTagSync();
-
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/female/a.json');
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/male/z.json');
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/artist/0.json');
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/series/9.json');
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/group/m.json');
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/character/k.json');
-    expect(mockFetchUrl).toHaveBeenCalledWith('/api/tagindex/tag/x.json');
   });
 
   it('inserts tags into correct type bytes per field', async () => {
-    const fieldData: Record<string, Array<[string, number, string]>> = {
-      'female/t': makeTagData([{ name: 'test_female', count: 1 }]),
-      'male/t': makeTagData([{ name: 'test_male', count: 2 }]),
-      'artist/t': makeTagData([{ name: 'test_artist', count: 3 }]),
-      'series/t': makeTagData([{ name: 'test_series', count: 4 }]),
-      'group/t': makeTagData([{ name: 'test_group', count: 5 }]),
-      'character/t': makeTagData([{ name: 'test_character', count: 6 }]),
-      'tag/t': makeTagData([{ name: 'test_tag', count: 7 }]),
-    };
-
-    mockFetchUrl.mockImplementation((url: string) => {
-      for (const [key, data] of Object.entries(fieldData)) {
-        if (url === `/api/tagindex/${key}.json`) {
-          return Promise.resolve(mockJsonResponse(data));
-        }
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['test_female', 1]],
+      male: [['test_male', 2]],
+      artist: [['test_artist', 3]],
+      series: [['test_series', 4]],
+      group: [['test_group', 5]],
+      character: [['test_character', 6]],
+      tag: [['test_tag', 7]],
     });
 
     await runTagSync();
@@ -493,14 +432,7 @@ describe('runTagSync — full flow', () => {
 
 describe('runTagSync — catastrophic failure', () => {
   it('sets isSyncing=false on unexpected error during sync', async () => {
-    let callCount = 0;
-    mockFetchUrl.mockImplementation(() => {
-      callCount++;
-      if (callCount > 5) {
-        throw new Error('Catastrophic failure');
-      }
-      return Promise.resolve(mockJsonResponse([]));
-    });
+    mockFetchPageShouldFail = true;
 
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     await runTagSync();
@@ -516,23 +448,9 @@ describe('runTagSync — catastrophic failure', () => {
 
 describe('Korean localization', () => {
   it('populates tag_i18n for matching tags after sync', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'blowjob', count: 10000 }]),
-        ));
-      }
-      if (url === '/api/tagindex/female/l.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'loli', count: 8000 }]),
-        ));
-      }
-      if (url === '/api/tagindex/male/m.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'muscle', count: 3000 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['blowjob', 10000], ['loli', 8000]],
+      male: [['muscle', 3000]],
     });
 
     await runTagSync();
@@ -575,13 +493,8 @@ describe('Korean localization', () => {
   });
 
   it('does not create i18n entry for tags without Korean translation', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/x.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'xray', count: 500 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['xray', 500]],
     });
 
     await runTagSync();
@@ -599,13 +512,8 @@ describe('Korean localization', () => {
   });
 
   it('applies series localization correctly', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/series/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'bleach', count: 2000 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      series: [['bleach', 2000]],
     });
 
     await runTagSync();
@@ -624,13 +532,8 @@ describe('Korean localization', () => {
   });
 
   it('applies character localization correctly', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/character/s.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'sailor moon', count: 1500 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      character: [['sailor moon', 1500]],
     });
 
     await runTagSync();
@@ -649,7 +552,7 @@ describe('Korean localization', () => {
   });
 
   it('skips fields not in KOREAN_FIELD_MAP', async () => {
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
+    setMockTags({});
     await runTagSync();
     expect(useDbStatusStore.getState().dbReady).toBe(true);
   });
@@ -665,7 +568,7 @@ describe('Full lifecycle', () => {
     expect(ready1).toBe(false);
     expect(useDbStatusStore.getState().dbReady).toBe(false);
 
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
+    setMockTags({});
     await runTagSync();
 
     const ready2 = await checkDbReady();
@@ -687,7 +590,7 @@ describe('Full lifecycle', () => {
     const ready1 = await checkDbReady();
     expect(ready1).toBe(false);
 
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
+    setMockTags({});
     await runTagSync();
 
     const ready2 = await checkDbReady();
@@ -695,7 +598,7 @@ describe('Full lifecycle', () => {
   });
 
   it('sync_status persists across checkDbReady calls', async () => {
-    mockFetchUrl.mockResolvedValue(mockJsonResponse([]));
+    setMockTags({});
     await runTagSync();
 
     resetStore();
@@ -744,50 +647,19 @@ describe('sync_status CRUD with init keys', () => {
 });
 
 // ===========================================================================
-// 11. Concurrency behavior
-// ===========================================================================
-
-describe('Concurrency control', () => {
-  it('does not exceed 3 concurrent requests per field', async () => {
-    let maxConcurrent = 0;
-    let currentConcurrent = 0;
-
-    mockFetchUrl.mockImplementation(() => {
-      currentConcurrent++;
-      maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
-      return new Promise<Response>((resolve) => {
-        setTimeout(() => {
-          currentConcurrent--;
-          resolve(mockJsonResponse([]));
-        }, 1);
-      });
-    });
-
-    await runTagSync();
-
-    expect(maxConcurrent).toBeLessThanOrEqual(3);
-  });
-});
-
-// ===========================================================================
-// 12. Multiple tags per prefix — batch insert correctness
+// 11. Multiple tags — batch insert correctness
 // ===========================================================================
 
 describe('Batch insert correctness', () => {
-  it('inserts multiple tags from a single prefix response', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/artist/a.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([
-            { name: 'artist_a1', count: 100 },
-            { name: 'artist_a2', count: 200 },
-            { name: 'artist_a3', count: 300 },
-            { name: 'artist_a4', count: 400 },
-            { name: 'artist_a5', count: 500 },
-          ]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+  it('inserts multiple tags from a single type in the JSON response', async () => {
+    setMockTags({
+      artist: [
+        ['artist_a1', 100],
+        ['artist_a2', 200],
+        ['artist_a3', 300],
+        ['artist_a4', 400],
+        ['artist_a5', 500],
+      ],
     });
 
     await runTagSync();
@@ -803,18 +675,9 @@ describe('Batch insert correctness', () => {
   });
 
   it('tags from different fields but same name are stored separately', async () => {
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'blowjob', count: 10000 }]),
-        ));
-      }
-      if (url === '/api/tagindex/male/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'blowjob', count: 8000 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['blowjob', 10000]],
+      male: [['blowjob', 8000]],
     });
 
     await runTagSync();
@@ -837,23 +700,15 @@ describe('Batch insert correctness', () => {
 });
 
 // ===========================================================================
-// 13. Integration with local search after sync
+// 12. Integration with local search after sync
 // ===========================================================================
 
 describe('Local search works after sync', () => {
   it('searchLocalTags finds tags inserted by runTagSync', async () => {
     const { searchLocalTags } = await import('../search-local');
 
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([
-            { name: 'beauty mark', count: 34000 },
-            { name: 'big breasts', count: 120000 },
-          ]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['beauty mark', 34000], ['big breasts', 120000]],
     });
 
     await runTagSync();
@@ -867,13 +722,8 @@ describe('Local search works after sync', () => {
   it('searchLocalTags finds Korean i18n after sync', async () => {
     const { searchLocalTags } = await import('../search-local');
 
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/female/b.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'blowjob', count: 50000 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      female: [['blowjob', 50000]],
     });
 
     await runTagSync();
@@ -885,13 +735,8 @@ describe('Local search works after sync', () => {
   it('hasLocalSearchData returns true after sync', async () => {
     const { hasLocalSearchData } = await import('../search-local');
 
-    mockFetchUrl.mockImplementation((url: string) => {
-      if (url === '/api/tagindex/tag/a.json') {
-        return Promise.resolve(mockJsonResponse(
-          makeTagData([{ name: 'action', count: 1000 }]),
-        ));
-      }
-      return Promise.resolve(mockJsonResponse([]));
+    setMockTags({
+      tag: [['action', 1000]],
     });
 
     expect(await hasLocalSearchData()).toBe(false);

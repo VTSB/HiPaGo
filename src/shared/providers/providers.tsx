@@ -3,9 +3,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DbInitializer } from '@/shared/components/DbInitializer';
-import { initLocaleOnce } from '@/lib/store/settings';
+import { initLocaleOnce, useSettingsStore } from '@/lib/store/settings';
+
+const LOCALE_TO_LANG: Record<string, string> = { en: 'en', ko: 'ko' };
 
 export function Providers({ children }: { children: ReactNode }) {
+  const locale = useSettingsStore((s) => s.locale);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -22,6 +25,17 @@ export function Providers({ children }: { children: ReactNode }) {
   useEffect(() => {
     initLocaleOnce();
   }, []);
+
+  // Sync html lang attribute with locale (Issue 15)
+  useEffect(() => {
+    document.documentElement.lang = LOCALE_TO_LANG[locale] || 'en';
+  }, [locale]);
+
+  // Sync dark mode class with theme setting
+  const theme = useSettingsStore((s) => s.theme);
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }, [theme]);
 
   return (
     <QueryClientProvider client={queryClient}>

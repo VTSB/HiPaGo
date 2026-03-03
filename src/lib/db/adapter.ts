@@ -20,12 +20,29 @@ export interface DbAdapter {
 
   /** Close the database connection. */
   close(): Promise<void>;
+
+  /** Immediately persist the database (no-op on adapters that auto-commit). */
+  persist?(): Promise<void>;
 }
 
 // --- Global database singleton ---
 
 let _db: DbAdapter | null = null;
+let _ensureInit: (() => Promise<void>) | null = null;
 
+/** Register the database initializer (called once from schema.ts). */
+export function setEnsureInit(fn: () => Promise<void>): void {
+  _ensureInit = fn;
+}
+
+/** Get the DB adapter, ensuring initialization first. Use this in all production code. */
+export async function ensureDb(): Promise<DbAdapter> {
+  if (!_db && _ensureInit) await _ensureInit();
+  if (!_db) throw new Error('Database not initialized.');
+  return _db;
+}
+
+/** Get the DB adapter synchronously. Only for tests and internal use where DB is guaranteed ready. */
 export function getDb(): DbAdapter {
   if (!_db) throw new Error('Database not initialized. Call setDb() first.');
   return _db;
@@ -46,9 +63,16 @@ export async function closeDb(): Promise<void> {
   }
 }
 
+/** Immediately persist the database to storage (for critical writes on web). No-op on adapters without persist(). */
+export async function persistDb(): Promise<void> {
+  if (_db?.persist) {
+    await _db.persist();
+  }
+}
+
 /** Execute multiple statements inside a transaction. */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  const db = getDb();
+  const db = await ensureDb();
   await db.exec('BEGIN');
   try {
     const result = await fn();

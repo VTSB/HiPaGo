@@ -5,7 +5,6 @@ import type {
   GalleryImages,
   GalleryInfo,
   GalleryTagJson,
-  TagWithAmount,
 } from '@/lib/utils/types';
 import { GalleryBlockType, ImageType, TagType } from '@/lib/utils/types';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
@@ -167,11 +166,23 @@ export function galleryInfoToBlock(info: GalleryInfo): GalleryBlock {
   const thumbnail =
     info.files.length > 0 ? getThumbnailUrl(info.files[0]) : '';
   const tags = categorizeTags(info.tags);
-  // Merge top-level artist/group/character/series (parody) fields
-  if (info.artists.length > 0) tags[TagType.ARTIST] = [...(tags[TagType.ARTIST] || []), ...info.artists];
-  if (info.groups.length > 0) tags[TagType.GROUP] = [...(tags[TagType.GROUP] || []), ...info.groups];
-  if (info.characters.length > 0) tags[TagType.CHARACTER] = [...(tags[TagType.CHARACTER] || []), ...info.characters];
-  if (info.parodys.length > 0) tags[TagType.SERIES] = [...(tags[TagType.SERIES] || []), ...info.parodys];
+  // Merge top-level artist/group/character/series (parody) fields, deduplicating
+  if (info.artists.length > 0) {
+    const existing = new Set(tags[TagType.ARTIST] || []);
+    tags[TagType.ARTIST] = [...existing, ...info.artists.filter(a => !existing.has(a))];
+  }
+  if (info.groups.length > 0) {
+    const existing = new Set(tags[TagType.GROUP] || []);
+    tags[TagType.GROUP] = [...existing, ...info.groups.filter(g => !existing.has(g))];
+  }
+  if (info.characters.length > 0) {
+    const existing = new Set(tags[TagType.CHARACTER] || []);
+    tags[TagType.CHARACTER] = [...existing, ...info.characters.filter(c => !existing.has(c))];
+  }
+  if (info.parodys.length > 0) {
+    const existing = new Set(tags[TagType.SERIES] || []);
+    tags[TagType.SERIES] = [...existing, ...info.parodys.filter(p => !existing.has(p))];
+  }
   return {
     id: info.id,
     type: GalleryBlockType.DETAILED,
@@ -247,18 +258,3 @@ export function parseIndexVersion(text: string): string {
   return text.trim();
 }
 
-export function parseTagListHtml(html: string): TagWithAmount[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  const results: TagWithAmount[] = [];
-  const links = doc.querySelectorAll('a');
-  for (const link of links) {
-    const tag = link.textContent?.trim() || '';
-    const amountMatch = /\((\d+)\)/.exec(
-      link.nextSibling?.textContent || link.textContent || '',
-    );
-    const amount = amountMatch ? parseInt(amountMatch[1], 10) : 0;
-    if (tag) results.push({ tag, amount });
-  }
-  return results;
-}

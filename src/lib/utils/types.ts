@@ -82,13 +82,6 @@ export enum ImageType {
   AVIF = 'avif',
 }
 
-export enum NumberLoadMode {
-  NEW = '',
-  SEARCH = '[search]',
-  RECENTLY_WATCHED = '[recently_watched]',
-  FAVORITE = '[favorite]',
-}
-
 export interface GalleryBlock {
   id: number;
   type: GalleryBlockType;

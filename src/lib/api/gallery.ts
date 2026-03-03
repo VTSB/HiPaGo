@@ -30,6 +30,7 @@ export async function fetchGalleryBlockHtmlById(
     const text = await apiClient.fetchLtnText(`galleryblock/${id}.html`);
     return parseGalleryBlockHtml(text, id);
   } catch {
+    // Recoverable: HTML fetch/parse failed — return placeholder so UI still renders
     return createFailedBlock(id);
   }
 }
@@ -41,6 +42,7 @@ export async function fetchGalleryBlockDetailed(
     const info = await fetchGalleryInfo(id);
     return galleryInfoToBlock(info);
   } catch {
+    // Recoverable: detailed gallery info fetch failed — return placeholder block
     return createFailedBlock(id);
   }
 }

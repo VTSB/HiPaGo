@@ -12,7 +12,8 @@ const IDB_KEY = 'main';
 export class WebAdapter implements DbAdapter {
   private db: SqlJsDatabase;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private dirty = false;
+  private unloadHandler: (() => void) | null = null;
+  dirty = false;
 
   static async create(): Promise<WebAdapter> {
     const SQL = await initSqlJs({
@@ -24,8 +25,30 @@ export class WebAdapter implements DbAdapter {
     const db = saved ? new SQL.Database(saved) : new SQL.Database();
 
     const adapter = new WebAdapter(db);
-    db.run('PRAGMA journal_mode = WAL');
     db.run('PRAGMA foreign_keys = ON');
+
+    // Flush pending writes before tab close to prevent data loss
+    if (typeof window !== 'undefined') {
+      const handler = () => {
+        if (adapter.dirty) {
+          const data = db.export();
+          // Synchronous IDB write via blocking transaction isn't possible,
+          // but navigator.sendBeacon doesn't help for IDB. Best-effort persist.
+          try {
+            const req = indexedDB.open(IDB_NAME, 1);
+            req.onsuccess = () => {
+              const tx = req.result.transaction(IDB_STORE, 'readwrite');
+              tx.objectStore(IDB_STORE).put(data, IDB_KEY);
+            };
+          } catch {
+            // Recoverable: IndexedDB write during tab close — best effort persistence
+          }
+        }
+      };
+      window.addEventListener('beforeunload', handler);
+      adapter.unloadHandler = handler;
+    }
+
     return adapter;
   }
 
@@ -42,11 +65,15 @@ export class WebAdapter implements DbAdapter {
       stmt.free();
     }
     const changes = this.db.getRowsModified();
-    const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const lastInsertRowId =
-      result.length > 0 ? (result[0].values[0][0] as number) : 0;
+    const db = this.db;
     this.scheduleSave();
-    return { changes, lastInsertRowId };
+    return {
+      changes,
+      get lastInsertRowId() {
+        const result = db.exec('SELECT last_insert_rowid() as id');
+        return result.length > 0 ? (result[0].values[0][0] as number) : 0;
+      },
+    };
   }
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -66,6 +93,14 @@ export class WebAdapter implements DbAdapter {
   }
 
   async close(): Promise<void> {
+    if (this.unloadHandler && typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', this.unloadHandler);
+      this.unloadHandler = null;
+    }
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
     await this.persist();
     this.db.close();
   }
@@ -78,7 +113,7 @@ export class WebAdapter implements DbAdapter {
       this.saveTimer = null;
       if (this.dirty) {
         this.dirty = false;
-        this.persist().catch(() => {});
+        this.persist().catch((e) => console.warn('[db] Persist failed:', e));
       }
     }, 1000);
   }
@@ -113,6 +148,7 @@ async function loadFromIndexedDB(): Promise<Uint8Array | null> {
       req.onerror = () => reject(req.error);
     });
   } catch {
+    // Recoverable: IndexedDB unavailable or blocked — fall back to fresh WASM init
     return null;
   }
 }

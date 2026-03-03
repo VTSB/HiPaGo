@@ -2,6 +2,7 @@ import { MI_URL } from '@/lib/utils/constants';
 import type { GgConfig } from '@/lib/utils/types';
 import { parseGgJs } from '@/lib/utils/image-url';
 import { resolveLtnUrl, getNativeHeaders } from './url-resolver';
+import { isTauri, isCapacitor } from '@/lib/utils/platform';
 
 class ApiError extends Error {
   constructor(
@@ -50,7 +51,39 @@ class ApiClient {
       if (options.range) {
         headers['Range'] = options.range;
       }
-      const response = await fetch(url, { ...options, headers });
+
+      let response: Response;
+
+      if (isTauri()) {
+        // Tauri: use Rust bypass-core via tauri::command
+        const { invoke } = await import('@tauri-apps/api/core');
+        const resp = (await invoke('bypass_fetch', {
+          url,
+          headers,
+        })) as { status: number; headers: Record<string, string>; body: string };
+        const bodyBytes = Uint8Array.from(atob(resp.body), c => c.charCodeAt(0));
+        response = new Response(bodyBytes, {
+          status: resp.status,
+          headers: new Headers(resp.headers),
+        });
+      } else if (isCapacitor()) {
+        // Capacitor: use Rust bypass-core via Capacitor plugin
+        const { Bypass } = await import('@/lib/plugins/bypass');
+        const resp = await Bypass.fetch({ url, headers });
+        const bodyBytes = new Uint8Array(resp.body);
+        response = new Response(bodyBytes, {
+          status: resp.status,
+          headers: new Headers(resp.headers),
+        });
+      } else {
+        // Browser: normal fetch (goes through /api/ proxy routes with napi bypass)
+        response = await fetch(url, {
+          ...options,
+          headers,
+          signal: options.signal ?? AbortSignal.timeout(30000),
+        });
+      }
+
       if (!response.ok && response.status !== 206) {
         throw new ApiError(
           response.status,
@@ -119,12 +152,15 @@ export async function getGgConfig(): Promise<GgConfig> {
   }
   if (ggConfigPromise) return ggConfigPromise;
   ggConfigPromise = (async () => {
-    const text = await apiClient.fetchGgJs();
-    const config = parseGgJs(text);
-    cachedGgConfig = config;
-    cachedGgConfigAt = Date.now();
-    ggConfigPromise = null;
-    return config;
+    try {
+      const text = await apiClient.fetchGgJs();
+      const config = parseGgJs(text);
+      cachedGgConfig = config;
+      cachedGgConfigAt = Date.now();
+      return config;
+    } finally {
+      ggConfigPromise = null;
+    }
   })();
   return ggConfigPromise;
 }

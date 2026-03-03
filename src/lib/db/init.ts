@@ -4,13 +4,18 @@ import { useDbStatusStore } from '@/lib/store/db-status';
 /** Sync status keys */
 export const SYNC_KEY_TAGS = 'init:tags';
 
+/** Tags older than 7 days are considered stale and will be re-synced in background */
+const TAG_SYNC_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 interface SyncStatusData {
   status: 'loading' | 'completed';
   timestamp: number;
   count?: number;
   checkpoint?: {
-    fieldIndex: number;
+    fieldIndex?: number;
     tagCount: number;
+    typeIndex?: number;
+    letterIndex?: number;
   };
 }
 
@@ -19,12 +24,14 @@ export function parseSyncData(raw: string | null): SyncStatusData | null {
   try {
     return JSON.parse(raw) as SyncStatusData;
   } catch {
+    // Recoverable: corrupted localStorage entry — treat as no prior sync status
     return null;
   }
 }
 
 /**
  * Check if the tag DB has been initialized and set dbReady accordingly.
+ * Also checks for staleness (> 7 days) and sets tagsStale if needed.
  * Called once on app mount.
  */
 export async function checkDbReady(): Promise<boolean> {
@@ -32,6 +39,12 @@ export async function checkDbReady(): Promise<boolean> {
   const data = parseSyncData(raw);
   const ready = data?.status === 'completed';
   useDbStatusStore.getState().setDbReady(ready);
+
+  // Check if tags are stale (older than 7 days)
+  if (ready && data?.timestamp && Date.now() - data.timestamp > TAG_SYNC_MAX_AGE_MS) {
+    useDbStatusStore.getState().setTagsStale(true);
+  }
+
   return ready;
 }
 

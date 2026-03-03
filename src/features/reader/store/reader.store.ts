@@ -16,8 +16,8 @@ interface ReaderStoreState {
   setScrollPosition: (position: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  nextPage: () => void;
-  prevPage: () => void;
+  nextPage: (step?: number) => void;
+  prevPage: (step?: number) => void;
   reset: () => void;
 }
 
@@ -45,10 +45,10 @@ export const useReaderStore = create<ReaderStoreState>((set) => ({
   setScrollPosition: (position) => set({ scrollPosition: position }),
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
-  nextPage: () =>
-    set((s) => ({ currentPage: Math.min(s.currentPage + 1, s.totalPages - 1) })),
-  prevPage: () =>
-    set((s) => ({ currentPage: Math.max(s.currentPage - 1, 0) })),
+  nextPage: (step = 1) =>
+    set((s) => ({ currentPage: Math.min(s.currentPage + step, s.totalPages - 1) })),
+  prevPage: (step = 1) =>
+    set((s) => ({ currentPage: Math.max(s.currentPage - step, 0) })),
   reset: () =>
     set({
       galleryId: null,

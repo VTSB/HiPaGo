@@ -12,6 +12,15 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Rust crates (including build artifacts and generated loaders)
+    "target/**",
+    "crates/**",
+    "src-tauri/**",
+    // Native platform build artifacts
+    "android/**",
+    "ios/**",
+    // Test coverage output
+    "coverage/**",
   ]),
 ]);
 

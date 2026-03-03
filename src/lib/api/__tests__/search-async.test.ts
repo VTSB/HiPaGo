@@ -34,7 +34,7 @@ describe('getGalleryIdsForQuery', () => {
 
       const result = await getGalleryIdsForQuery('female:stockings', 'all');
 
-      expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:stockings', 'all');
+      expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:stockings', 'all', undefined);
       expect(result).toEqual([100, 200]);
     });
 
@@ -43,7 +43,7 @@ describe('getGalleryIdsForQuery', () => {
 
       const result = await getGalleryIdsForQuery('male:glasses', 'japanese');
 
-      expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'male:glasses', 'japanese');
+      expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'male:glasses', 'japanese', undefined);
       expect(result).toEqual([300]);
     });
 
@@ -52,7 +52,7 @@ describe('getGalleryIdsForQuery', () => {
 
       const result = await getGalleryIdsForQuery('language:korean', 'all');
 
-      expect(fetchNozomiSearch).toHaveBeenCalledWith('', 'index', 'korean');
+      expect(fetchNozomiSearch).toHaveBeenCalledWith('', 'index', 'korean', undefined);
       expect(result).toEqual([1, 2, 3]);
     });
 
@@ -61,7 +61,7 @@ describe('getGalleryIdsForQuery', () => {
 
       const result = await getGalleryIdsForQuery('artist:testartist', 'all');
 
-      expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'testartist', 'all');
+      expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'testartist', 'all', undefined);
       expect(result).toEqual([500, 600]);
     });
 
@@ -70,7 +70,7 @@ describe('getGalleryIdsForQuery', () => {
 
       const result = await getGalleryIdsForQuery('series:testseries', 'english');
 
-      expect(fetchNozomiSearch).toHaveBeenCalledWith('series', 'testseries', 'english');
+      expect(fetchNozomiSearch).toHaveBeenCalledWith('series', 'testseries', 'english', undefined);
       expect(result).toEqual([700]);
     });
 
@@ -79,7 +79,7 @@ describe('getGalleryIdsForQuery', () => {
 
       await getGalleryIdsForQuery('artist:test', '');
 
-      expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'test', 'all');
+      expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'test', 'all', undefined);
     });
   });
 
@@ -116,6 +116,104 @@ describe('getGalleryIdsForQuery', () => {
       vi.mocked(apiClient.fetchLtnBinary).mockResolvedValueOnce(nodeBuffer);
 
       const result = await getGalleryIdsForQuery('nonexistent', 'all');
+
+      expect(result).toEqual([]);
+    });
+
+    it('traverses subnode when root key is less than the search hash (lo = mid+1 path)', async () => {
+      vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
+
+      // Hash "subterm" to determine what the subnode key must be
+      const targetHash = new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode('subterm')),
+      ).slice(0, 4);
+
+      // Root node: one key that is LESS than targetHash (all-zeros < any real hash)
+      // so compareKeys(targetHash, rootKey) > 0 → lo = mid+1 = 1
+      // subIdx = lo = 1, which must be non-zero
+      const B = 16;
+      const numberOfSubNodes = B + 1;
+      const subAddrs = new Array<number>(numberOfSubNodes).fill(0);
+      subAddrs[1] = 9999; // subnode address at index 1
+
+      const rootBuffer = buildMultiKeyNode(
+        [new Uint8Array([0x00, 0x00, 0x00, 0x01])], // key < targetHash
+        [{ offset: 0, length: 4 }],
+        subAddrs,
+      );
+
+      // Subnode: contains exactly targetHash as key, with data pointing to gallery IDs
+      const subnodeBuffer = buildNodeWithKeyAndData(targetHash, { offset: 0, length: 8 });
+
+      vi.mocked(apiClient.fetchLtnBinary)
+        .mockResolvedValueOnce(rootBuffer)    // root node
+        .mockResolvedValueOnce(subnodeBuffer) // subnode
+        .mockResolvedValueOnce(buildGalleryIdBuffer([777, 888])); // data
+
+      const result = await getGalleryIdsForQuery('subterm', 'all');
+
+      expect(result).toEqual([777, 888]);
+    });
+
+    it('returns empty array when subnode fetch throws (getNodeAtAddress catch block)', async () => {
+      vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
+
+      const targetHash = new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode('failterm')),
+      ).slice(0, 4);
+
+      const B = 16;
+      const numberOfSubNodes = B + 1;
+      const subAddrs = new Array<number>(numberOfSubNodes).fill(0);
+      subAddrs[1] = 8888; // non-zero so subnode traversal is attempted
+
+      const rootBuffer = buildMultiKeyNode(
+        [new Uint8Array([0x00, 0x00, 0x00, 0x01])], // key < targetHash
+        [{ offset: 0, length: 4 }],
+        subAddrs,
+      );
+
+      vi.mocked(apiClient.fetchLtnBinary)
+        .mockResolvedValueOnce(rootBuffer)             // root node succeeds
+        .mockRejectedValueOnce(new Error('fetch fail')); // subnode fetch throws → catch returns null
+
+      const result = await getGalleryIdsForQuery('failterm', 'all');
+
+      expect(result).toEqual([]);
+    });
+
+    it('exercises lo = mid+1 then hi = mid-1 before exiting (two-key node, hash between keys)', async () => {
+      vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
+
+      const targetHash = new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode('midterm')),
+      ).slice(0, 4);
+
+      // Construct two keys that straddle the target hash:
+      //   key0 = targetHash with last byte decremented (strictly less)
+      //   key1 = targetHash with last byte incremented (strictly greater)
+      // so: cmp(target, key0) > 0 → lo = 1
+      //     cmp(target, key1) < 0 → hi = 0
+      //     loop exits with lo=1 > hi=0; subIdx=1; subNodeAddresses[1]=0 → return null
+      const key0 = new Uint8Array(targetHash);
+      key0[3] = Math.max(0, key0[3] - 1);
+      const key1 = new Uint8Array(targetHash);
+      key1[3] = Math.min(255, key1[3] + 1);
+
+      // If decrement/increment collide with targetHash (e.g. targetHash[3] === 0 or 255),
+      // adjust byte at index 2 instead to ensure strict ordering
+      if (key0[3] === targetHash[3]) { key0[2] = Math.max(0, key0[2] - 1); }
+      if (key1[3] === targetHash[3]) { key1[2] = Math.min(255, key1[2] + 1); }
+
+      const rootBuffer = buildMultiKeyNode(
+        [key0, key1],
+        [{ offset: 0, length: 4 }, { offset: 4, length: 4 }],
+        // all sub-node addresses = 0 → traversal returns null after binary search misses
+      );
+
+      vi.mocked(apiClient.fetchLtnBinary).mockResolvedValueOnce(rootBuffer);
+
+      const result = await getGalleryIdsForQuery('midterm', 'all');
 
       expect(result).toEqual([]);
     });
@@ -204,6 +302,130 @@ describe('getSuggestionsForQuery', () => {
   });
 });
 
+describe('getGalleryIdsForQuery — multi-term intersection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns intersection of two typed terms that share IDs', async () => {
+    // female:loli returns [500, 300, 100] (descending)
+    // artist:yam returns [400, 300, 200, 100] (descending)
+    // intersection: [300, 100]
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([500, 300, 100])
+      .mockResolvedValueOnce([400, 300, 200, 100]);
+
+    const result = await getGalleryIdsForQuery('female:loli artist:yam', 'all');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual([300, 100]);
+  });
+
+  it('returns empty array when two typed terms have no overlapping IDs', async () => {
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([500, 300, 100])
+      .mockResolvedValueOnce([400, 200]);
+
+    const result = await getGalleryIdsForQuery('female:loli artist:yam', 'all');
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns intersection of three typed terms', async () => {
+    // female:loli → [600, 500, 300, 200, 100]
+    // artist:yam  → [500, 300, 100, 50]
+    // series:test → [700, 500, 100]
+    // intersection of all three: [500, 100]
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([600, 500, 300, 200, 100])
+      .mockResolvedValueOnce([500, 300, 100, 50])
+      .mockResolvedValueOnce([700, 500, 100]);
+
+    const result = await getGalleryIdsForQuery('female:loli artist:yam series:test', 'all');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(3);
+    expect(result).toEqual([500, 100]);
+  });
+
+  it('returns empty array early when intermediate intersection is empty', async () => {
+    // First two terms produce empty intersection; third term is never consulted
+    // but all three are fetched in parallel before intersecting
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([300, 200])   // female:loli
+      .mockResolvedValueOnce([100, 50])    // artist:yam — no overlap with above
+      .mockResolvedValueOnce([300, 200]);  // series:test (fetched in parallel)
+
+    const result = await getGalleryIdsForQuery('female:loli artist:yam series:test', 'all');
+
+    expect(result).toEqual([]);
+  });
+
+  it('returns multiple IDs shared across all terms in descending order', async () => {
+    // 999 and 42 appear in all three sets; 500, 200, 100 do not
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([999, 500, 42])
+      .mockResolvedValueOnce([999, 200, 42])
+      .mockResolvedValueOnce([999, 100, 42]);
+
+    const result = await getGalleryIdsForQuery('female:loli artist:yam character:char', 'all');
+
+    expect(result).toEqual([999, 42]);
+  });
+
+  it('passes language to each term fetch', async () => {
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([10])
+      .mockResolvedValueOnce([10]);
+
+    await getGalleryIdsForQuery('female:loli artist:yam', 'japanese');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'japanese', undefined);
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'yam', 'japanese', undefined);
+  });
+});
+
+describe('getSuggestionsForQuery — encodeTagIndexChar special characters', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('encodes forward slash as "slash" in the URL path', async () => {
+    const mockResponse = {
+      json: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+
+    await getSuggestionsForQuery('a/b');
+
+    // 'a' → 'a', '/' → 'slash', 'b' → 'b'
+    expect(apiClient.fetchUrl).toHaveBeenCalledWith('/api/tagindex/global/a/slash/b.json');
+  });
+
+  it('encodes dot as "dot" in the URL path', async () => {
+    const mockResponse = {
+      json: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+
+    await getSuggestionsForQuery('a.b');
+
+    // 'a' → 'a', '.' → 'dot', 'b' → 'b'
+    expect(apiClient.fetchUrl).toHaveBeenCalledWith('/api/tagindex/global/a/dot/b.json');
+  });
+
+  it('encodes both slash and dot in the same query', async () => {
+    const mockResponse = {
+      json: vi.fn().mockResolvedValue([]),
+    };
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+
+    await getSuggestionsForQuery('a/.b');
+
+    // 'a' → 'a', '/' → 'slash', '.' → 'dot', 'b' → 'b'
+    expect(apiClient.fetchUrl).toHaveBeenCalledWith('/api/tagindex/global/a/slash/dot/b.json');
+  });
+});
+
 // --- Helpers ---
 
 function buildNodeWithKeyAndData(
@@ -233,6 +455,52 @@ function buildNodeWithKeyAndData(
 
   for (let i = 0; i < numberOfSubNodes; i++) {
     view.setBigInt64(pos, BigInt(0), false); pos += 8;
+  }
+
+  return buffer;
+}
+
+/**
+ * Build a node buffer with multiple keys, one data entry per key, and
+ * configurable sub-node addresses.
+ *
+ * keys       — sorted array of 4-byte Uint8Arrays
+ * datas      — one {offset, length} per key (same length as keys)
+ * subAddrs   — array of (B+1) = 17 sub-node addresses (default all 0)
+ */
+function buildMultiKeyNode(
+  keys: Uint8Array[],
+  datas: { offset: number; length: number }[],
+  subAddrs?: number[],
+): ArrayBuffer {
+  const B = 16;
+  const numberOfSubNodes = B + 1;
+  const resolvedSubAddrs = subAddrs ?? new Array<number>(numberOfSubNodes).fill(0);
+
+  let size = 4; // numberOfKeys
+  for (const k of keys) size += 4 + k.length;
+  size += 4; // numberOfDatas
+  size += datas.length * 12; // each data: 8 (bigint64) + 4 (int32)
+  size += numberOfSubNodes * 8;
+
+  const buffer = new ArrayBuffer(size);
+  const view = new DataView(buffer);
+  let pos = 0;
+
+  view.setInt32(pos, keys.length, false); pos += 4;
+  for (const k of keys) {
+    view.setInt32(pos, k.length, false); pos += 4;
+    new Uint8Array(buffer, pos, k.length).set(k); pos += k.length;
+  }
+
+  view.setInt32(pos, datas.length, false); pos += 4;
+  for (const d of datas) {
+    view.setBigInt64(pos, BigInt(d.offset), false); pos += 8;
+    view.setInt32(pos, d.length, false); pos += 4;
+  }
+
+  for (let i = 0; i < numberOfSubNodes; i++) {
+    view.setBigInt64(pos, BigInt(resolvedSubAddrs[i] ?? 0), false); pos += 8;
   }
 
   return buffer;

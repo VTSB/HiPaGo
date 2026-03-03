@@ -5,7 +5,6 @@ import {
   searchLocalTags,
   searchLocalGalleryIdsByTag,
   searchLocalGalleryIdsByTitle,
-  searchLocalGalleryIds,
   hasLocalSearchData,
 } from '../search-local';
 import { TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
@@ -156,42 +155,6 @@ describe('searchLocalGalleryIdsByTitle', () => {
   });
 });
 
-describe('searchLocalGalleryIds', () => {
-  it('tagType query returns tag-matched gallery IDs', async () => {
-    const tagIds = await seedTags();
-    await seedGalleries(tagIds);
-    const ids = await searchLocalGalleryIds('artist:artist_alpha');
-    expect(ids).toEqual([200, 100]);
-  });
-
-  it('general query merges tag + title results with dedup', async () => {
-    const tagIds = await seedTags();
-    await seedGalleries(tagIds);
-    const ids = await searchLocalGalleryIds('art');
-    expect(ids).toContain(100);
-    expect(ids).toContain(200);
-    expect(ids).toContain(300);
-    const unique = [...new Set(ids)];
-    expect(ids.length).toBe(unique.length);
-    for (let i = 0; i < ids.length - 1; i++) {
-      expect(ids[i]).toBeGreaterThanOrEqual(ids[i + 1]);
-    }
-  });
-
-  it('title-only match when no tags match', async () => {
-    await getDb().execute(
-      "INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [400, 1, 'Unique Title XYZ', '2024-04-01', '', '', ''],
-    );
-    const ids = await searchLocalGalleryIds('unique title');
-    expect(ids).toContain(400);
-  });
-
-  it('empty db returns empty array', async () => {
-    const ids = await searchLocalGalleryIds('anything');
-    expect(ids).toEqual([]);
-  });
-});
 
 describe('hasLocalSearchData', () => {
   it('returns true when tags exist', async () => {

@@ -1,28 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSearchStore } from '@/features/search/store/search.store';
 import { useSearch } from '@/features/search/hooks/useSearch';
-import { useSettingsStore } from '@/lib/store/settings';
-import { TagChip } from '@/shared/components/TagChip';
-import { getTagColor, TAG_TYPE_DISPLAY } from '@/lib/utils/types';
-import type { TagType, Suggestion } from '@/lib/utils/types';
+import { ChipInput } from '@/shared/components/ChipInput';
+import type { Suggestion } from '@/lib/utils/types';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { useT } from '@/lib/i18n/useT';
-
-/** Parse a single token like "female:loli" into { type, tag } or null for free text. */
-function parseToken(token: string): { type: TagType; tag: string } | null {
-  const colonIdx = token.indexOf(':');
-  if (colonIdx <= 0) return null;
-  const type = token.slice(0, colonIdx);
-  const tag = token.slice(colonIdx + 1);
-  if (!tag) return null;
-  const validTypes = ['artist', 'group', 'series', 'character', 'tag', 'male', 'female', 'type', 'language'];
-  if (!validTypes.includes(type)) return null;
-  return { type: type as TagType, tag };
-}
+import { useClickOutside } from '@/shared/hooks/useClickOutside';
+import { RecentSearchesDropdown, parseToken } from './RecentSearchesDropdown';
+import { SuggestionDropdown } from './SuggestionDropdown';
 
 /** Build query string from chips + active input. */
 function buildQuery(chips: string[], activeInput: string): string {
@@ -32,10 +21,14 @@ function buildQuery(chips: string[], activeInput: string): string {
   return parts.join(' ');
 }
 
+interface Snapshot {
+  chips: string[];
+  activeInput: string;
+}
+
 export function SearchBar() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const ignoreMouseRef = useRef(false);
   const query = useSearchStore((s) => s.query);
@@ -51,18 +44,35 @@ export function SearchBar() {
   const addRecentSearch = useSearchStore((s) => s.addRecentSearch);
   const removeRecentSearch = useSearchStore((s) => s.removeRecentSearch);
   const clearRecentSearches = useSearchStore((s) => s.clearRecentSearches);
-  const locale = useSettingsStore((s) => s.locale);
   const dbReady = useDbStatusStore((s) => s.dbReady);
   const t = useT();
   const [popularTags, setPopularTags] = useState<Suggestion[]>([]);
 
+  // Undo/redo stacks
+  const undoStack = useRef<Snapshot[]>([]);
+  const redoStack = useRef<Snapshot[]>([]);
+
+  const pushUndo = useCallback(() => {
+    undoStack.current.push({ chips: [...chips], activeInput });
+    redoStack.current = [];
+  }, [chips, activeInput]);
+
   const searchParams = useSearchParams();
 
-  // Parse query string into chips
+  // Parse query string: tags → chips, plain text → activeInput
   const syncFromQuery = useCallback((q: string) => {
     const tokens = q.trim().split(/\s+/).filter(Boolean);
-    setChips(tokens);
-    setActiveInput('');
+    const tagChips: string[] = [];
+    const textParts: string[] = [];
+    for (const token of tokens) {
+      if (parseToken(token)) {
+        tagChips.push(token);
+      } else {
+        textParts.push(token);
+      }
+    }
+    setChips(tagChips);
+    setActiveInput(textParts.join(' '));
   }, []);
 
   // Sync from URL when navigating via tag links
@@ -71,7 +81,7 @@ export function SearchBar() {
     if (urlQuery) {
       syncFromQuery(urlQuery);
     }
-  }, [searchParams]);
+  }, [searchParams, syncFromQuery]);
 
   // Trigger auto-fetch of suggestions
   useSearch();
@@ -81,23 +91,23 @@ export function SearchBar() {
     setSelectedIndex(-1);
   }, [suggestions]);
 
-  // Load popular tags once DB is ready (shown after chip selection)
+  // Load popular tags once DB is ready
   useEffect(() => {
     if (dbReady) {
-      searchLocalTags('').then(setPopularTags).catch(() => {});
+      searchLocalTags('').then(setPopularTags).catch((e) => console.warn('[search] Popular tags load failed:', e));
     }
   }, [dbReady]);
 
-  // Sync active input to store for autocomplete (only active input, not chips)
+  // Sync active input to store for autocomplete
   useEffect(() => {
     setQuery(activeInput);
   }, [activeInput, setQuery]);
 
   const appendTag = useCallback(
     (tag: string, tagType: string) => {
+      pushUndo();
       const newTag = `${tagType}:${tag.replace(/ /g, '_')}`;
       if (editingIndex !== null) {
-        // Replace the chip being edited
         setChips((prev) => {
           const next = [...prev];
           next[editingIndex] = newTag;
@@ -114,7 +124,7 @@ export function SearchBar() {
       setTimeout(() => { ignoreMouseRef.current = false; }, 300);
       inputRef.current?.focus();
     },
-    [editingIndex, clearSuggestions],
+    [editingIndex, clearSuggestions, pushUndo],
   );
 
   const handleSuggestionClick = useCallback(
@@ -124,40 +134,31 @@ export function SearchBar() {
     [appendTag],
   );
 
+  const doSubmit = useCallback(() => {
+    const fullQuery = buildQuery(chips, activeInput);
+    if (!fullQuery) return;
+    setShowDropdown(false);
+    clearSuggestions();
+    setEditingIndex(null);
+    addRecentSearch(fullQuery);
+    router.push(`/search?q=${encodeURIComponent(fullQuery)}`);
+  }, [activeInput, chips, router, clearSuggestions, addRecentSearch]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
-      // If there's active input, add it as a chip first
-      const trimmed = activeInput.trim();
-      const finalChips = trimmed ? [...chips, trimmed] : chips;
-      if (finalChips.length === 0) return;
-      const fullQuery = finalChips.join(' ');
-      setChips(finalChips);
-      setActiveInput('');
-      setShowDropdown(false);
-      clearSuggestions();
-      setEditingIndex(null);
-      addRecentSearch(fullQuery);
-      router.push(`/search?q=${encodeURIComponent(fullQuery)}`);
+      doSubmit();
     },
-    [activeInput, chips, router, clearSuggestions, addRecentSearch],
+    [doSubmit],
   );
 
-  const removeChip = useCallback((index: number) => {
-    setChips((prev) => prev.filter((_, i) => i !== index));
-    if (editingIndex === index) {
-      setEditingIndex(null);
-      setActiveInput('');
-    }
-    inputRef.current?.focus();
-  }, [editingIndex]);
-
   const editChip = useCallback((index: number) => {
+    pushUndo();
     const chip = chips[index];
     setActiveInput(chip);
     setEditingIndex(index);
     inputRef.current?.focus();
-  }, [chips]);
+  }, [chips, pushUndo]);
 
   const handleHistoryClick = useCallback((search: string) => {
     syncFromQuery(search);
@@ -167,50 +168,114 @@ export function SearchBar() {
     router.push(`/search?q=${encodeURIComponent(search)}`);
   }, [syncFromQuery, clearSuggestions, addRecentSearch, router]);
 
+  const handleInputChange = useCallback((text: string) => {
+    setActiveInput(text);
+    setSelectedIndex(-1);
+  }, []);
+
+  const handleRemoveChip = useCallback((index: number) => {
+    pushUndo();
+    setChips((prev) => prev.filter((_, i) => i !== index));
+  }, [pushUndo]);
+
+  // Paste handler: parse tags from pasted text
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+    const tokens = text.trim().split(/[\s\n]+/).filter(Boolean);
+    const hasTag = tokens.some((t) => parseToken(t));
+    if (!hasTag) return; // let input handle plain text paste
+    e.preventDefault();
+    pushUndo();
+    const newChips: string[] = [];
+    const textParts: string[] = [];
+    for (const token of tokens) {
+      if (parseToken(token)) {
+        newChips.push(token);
+      } else {
+        textParts.push(token);
+      }
+    }
+    if (newChips.length > 0) setChips((prev) => [...prev, ...newChips]);
+    if (textParts.length > 0) setActiveInput((prev) => prev + textParts.join(' '));
+  }, [pushUndo]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // Backspace on empty input: remove last chip
-      if (e.key === 'Backspace' && activeInput === '' && chips.length > 0 && editingIndex === null) {
+      // Guard IME composition
+      if (e.nativeEvent.isComposing) return;
+
+      // Ctrl+Z: undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        setChips((prev) => prev.slice(0, -1));
+        if (undoStack.current.length > 0) {
+          redoStack.current.push({ chips: [...chips], activeInput });
+          const prev = undoStack.current.pop()!;
+          setChips(prev.chips);
+          setActiveInput(prev.activeInput);
+          setEditingIndex(null);
+        }
         return;
       }
 
-      // Cancel editing on Escape
-      if (e.key === 'Escape' && editingIndex !== null) {
-        setEditingIndex(null);
-        setActiveInput('');
+      // Ctrl+Shift+Z or Ctrl+Y: redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        if (redoStack.current.length > 0) {
+          undoStack.current.push({ chips: [...chips], activeInput });
+          const next = redoStack.current.pop()!;
+          setChips(next.chips);
+          setActiveInput(next.activeInput);
+          setEditingIndex(null);
+        }
         return;
       }
 
+      // Enter: submit or accept suggestion
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const currentList = suggestions.length > 0 ? suggestions
+          : (activeInput === '' && chips.length > 0 && popularTags.length > 0) ? popularTags : [];
+        if (selectedIndex >= 0 && selectedIndex < currentList.length) {
+          const s = currentList[selectedIndex];
+          appendTag(s.tag, s.tagType);
+          setSelectedIndex(-1);
+        } else {
+          doSubmit();
+        }
+        return;
+      }
+
+      // Escape
+      if (e.key === 'Escape') {
+        if (showDropdown) {
+          setShowDropdown(false);
+          clearSuggestions();
+        }
+        if (editingIndex !== null) {
+          setEditingIndex(null);
+          setActiveInput('');
+        }
+        return;
+      }
+
+      // ArrowDown/Up: navigate dropdown
       const currentList = suggestions.length > 0 ? suggestions
         : (activeInput === '' && chips.length > 0 && popularTags.length > 0) ? popularTags : [];
-      if (!showDropdown || currentList.length === 0) return;
-
-      switch (e.key) {
-        case 'ArrowDown':
+      if (showDropdown && currentList.length > 0) {
+        if (e.key === 'ArrowDown') {
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev < currentList.length - 1 ? prev + 1 : 0,
-          );
-          break;
-        case 'ArrowUp':
+          setSelectedIndex((prev) => prev < currentList.length - 1 ? prev + 1 : 0);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
           e.preventDefault();
-          setSelectedIndex((prev) =>
-            prev > 0 ? prev - 1 : currentList.length - 1,
-          );
-          break;
-        case 'Enter':
-          if (selectedIndex >= 0 && selectedIndex < currentList.length) {
-            e.preventDefault();
-            const s = currentList[selectedIndex];
-            appendTag(s.tag, s.tagType);
-            setSelectedIndex(-1);
-          }
-          break;
+          setSelectedIndex((prev) => prev > 0 ? prev - 1 : currentList.length - 1);
+          return;
+        }
       }
     },
-    [showDropdown, suggestions, popularTags, selectedIndex, appendTag, activeInput, chips.length, editingIndex],
+    [showDropdown, suggestions, popularTags, selectedIndex, appendTag, activeInput, chips, editingIndex, doSubmit, clearSuggestions],
   );
 
   // Show dropdown when we have suggestions and input is focused
@@ -221,29 +286,19 @@ export function SearchBar() {
   }, [suggestions]);
 
   // Handle click outside
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node) &&
-        !dropdownRef.current?.contains(e.target as Node)
-      ) {
-        setShowDropdown(false);
-        // Finalize editing if clicking outside
-        if (editingIndex !== null) {
-          setEditingIndex(null);
-          setActiveInput('');
-        }
-      }
+  const handleClickOutside = useCallback(() => {
+    setShowDropdown(false);
+    if (editingIndex !== null) {
+      setEditingIndex(null);
+      setActiveInput('');
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [editingIndex]);
+  useClickOutside([inputRef, dropdownRef], handleClickOutside);
 
   // Handle keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey && e.key === 'k') || (e.key === '/' && !(document.activeElement instanceof HTMLInputElement))) {
+      if ((e.ctrlKey && e.key === 'k') || (e.key === '/' && !(document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement))) {
         e.preventDefault();
         inputRef.current?.focus();
       }
@@ -263,47 +318,19 @@ export function SearchBar() {
   return (
     <div className="relative w-full max-w-md">
       <form onSubmit={handleSubmit}>
-        <div
-          ref={containerRef}
-          onClick={() => inputRef.current?.focus()}
-          className="flex min-h-[36px] w-full cursor-text flex-wrap items-center gap-1 rounded-md border border-zinc-300 bg-zinc-50 px-2 py-1 text-sm focus-within:border-zinc-500 focus-within:bg-white focus-within:ring-1 focus-within:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-within:border-zinc-500 dark:focus-within:bg-zinc-800"
-        >
-          {chips.map((chip, i) => {
-            const parsed = parseToken(chip);
-            const isEditing = editingIndex === i;
-            if (isEditing) return null; // Hide chip being edited
-            return (
-              <span
-                key={`${chip}-${i}`}
-                className={`inline-flex items-center gap-0.5 rounded-full text-xs font-medium pl-2 pr-1 py-0.5 cursor-pointer ${
-                  parsed ? getTagColor(parsed.type) : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300'
-                }`}
-                onClick={(e) => { e.stopPropagation(); editChip(i); }}
-              >
-                {parsed ? `${parsed.tag.replace(/_/g, ' ')}${TAG_TYPE_DISPLAY[parsed.type]}` : chip}
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); removeChip(i); }}
-                  className="ml-0.5 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-                    <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                  </svg>
-                </button>
-              </span>
-            );
-          })}
-          <input
-            ref={inputRef}
-            type="text"
-            value={activeInput}
-            onChange={(e) => setActiveInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setShowDropdown(true)}
-            placeholder={chips.length === 0 ? t('search.placeholder') : ''}
-            className="min-w-[60px] flex-1 bg-transparent py-0.5 text-sm text-zinc-900 placeholder-zinc-400 outline-none dark:text-zinc-100"
-          />
-        </div>
+        <ChipInput
+          chips={chips}
+          activeInput={activeInput}
+          onInputChange={handleInputChange}
+          onRemoveChip={handleRemoveChip}
+          onKeyDown={handleKeyDown}
+          onFocus={() => setShowDropdown(true)}
+          onEditChip={editChip}
+          onPaste={handlePaste}
+          editingIndex={editingIndex}
+          placeholder={chips.length === 0 ? t('search.placeholder') : ''}
+          inputRef={inputRef}
+        />
       </form>
 
       {(() => {
@@ -313,78 +340,27 @@ export function SearchBar() {
 
         if (historyVisible) {
           return (
-            <div ref={dropdownRef} className="absolute top-full mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 z-50 max-h-80 overflow-y-auto">
-              <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
-                <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t('search.recentSearches')}</span>
-                <button
-                  type="button"
-                  onClick={() => clearRecentSearches()}
-                  className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                >
-                  {t('search.clearHistory')}
-                </button>
-              </div>
-              {recentSearches.map((search) => {
-                const tokens = search.split(/\s+/).filter(Boolean);
-                return (
-                  <button
-                    key={search}
-                    type="button"
-                    onClick={() => handleHistoryClick(search)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-zinc-400">
-                      <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
-                    </svg>
-                    <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-                      {tokens.map((token, i) => {
-                        const parsed = parseToken(token);
-                        return parsed ? (
-                          <span key={i} className={`inline-flex rounded-full px-1.5 py-0.5 text-xs font-medium ${getTagColor(parsed.type)}`}>
-                            {parsed.tag.replace(/_/g, ' ')}{TAG_TYPE_DISPLAY[parsed.type]}
-                          </span>
-                        ) : (
-                          <span key={i} className="text-xs text-zinc-700 dark:text-zinc-300">{token}</span>
-                        );
-                      })}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); removeRecentSearch(search); }}
-                      className="ml-auto flex-shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
-                        <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
-                      </svg>
-                    </button>
-                  </button>
-                );
-              })}
+            <div ref={dropdownRef}>
+              <RecentSearchesDropdown
+                searches={recentSearches}
+                onSelect={handleHistoryClick}
+                onRemove={removeRecentSearch}
+                onClear={clearRecentSearches}
+              />
             </div>
           );
         }
 
         if (showDropdown && displayedTags.length > 0) {
           return (
-            <div ref={dropdownRef} className="absolute top-full mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 z-50 max-h-80 overflow-y-auto">
-              {displayedTags.map((suggestion, idx) => (
-                <button
-                  key={`${suggestion.tagType}-${suggestion.tag}-${idx}`}
-                  type="button"
-                  onClick={() => handleSuggestionClick(suggestion.tag, suggestion.tagType)}
-                  onMouseEnter={() => !ignoreMouseRef.current && setSelectedIndex(idx)}
-                  className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
-                    idx === selectedIndex
-                      ? 'bg-zinc-100 dark:bg-zinc-700'
-                      : 'hover:bg-zinc-100 dark:hover:bg-zinc-700'
-                  }`}
-                >
-                  <TagChip tag={suggestion.tag} type={suggestion.tagType} displayName={locale === 'ko' && suggestion.localName ? suggestion.localName : undefined} linked={false} size="sm" />
-                  <span className="text-zinc-500 dark:text-zinc-400 text-xs ml-auto flex-shrink-0">
-                    {suggestion.amount.toLocaleString()}
-                  </span>
-                </button>
-              ))}
+            <div ref={dropdownRef}>
+              <SuggestionDropdown
+                suggestions={displayedTags}
+                selectedIndex={selectedIndex}
+                onSelect={handleSuggestionClick}
+                onHover={setSelectedIndex}
+                ignoreMouseRef={ignoreMouseRef}
+              />
             </div>
           );
         }

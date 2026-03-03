@@ -402,7 +402,7 @@ describe('fetchBrowseIds', () => {
 
     const result = await fetchBrowseIds('japanese', 0);
 
-    expect(fetchGalleryIds).toHaveBeenCalledWith('index', 'japanese', 0, 25);
+    expect(fetchGalleryIds).toHaveBeenCalledWith('index', 'japanese', 0, 25, undefined);
     expect(result).toEqual(mockResult);
   });
 
@@ -412,7 +412,7 @@ describe('fetchBrowseIds', () => {
 
     const result = await fetchBrowseIds('english', 2, 10);
 
-    expect(fetchGalleryIds).toHaveBeenCalledWith('index', 'english', 2, 10);
+    expect(fetchGalleryIds).toHaveBeenCalledWith('index', 'english', 2, 10, undefined);
     expect(result).toEqual(mockResult);
   });
 
@@ -422,7 +422,7 @@ describe('fetchBrowseIds', () => {
 
     await fetchBrowseIds('chinese', 1);
 
-    expect(fetchGalleryIds).toHaveBeenCalledWith('index', 'chinese', 1, 25);
+    expect(fetchGalleryIds).toHaveBeenCalledWith('index', 'chinese', 1, 25, undefined);
   });
 });
 

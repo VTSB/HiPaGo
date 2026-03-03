@@ -15,8 +15,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseGalleryBlockHtml, parseTagListHtml } from '../parser';
+import { parseGalleryBlockHtml, galleryInfoToBlock, parseGalleryJson } from '../parser';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
+import type { GalleryInfo } from '@/lib/utils/types';
 
 // Mock DOMParser for testing without full jsdom environment
 class MockDOMParser {
@@ -216,47 +217,145 @@ describe('parseGalleryBlockHtml', () => {
     expect(result.date).toBeInstanceOf(Date);
     expect(result.tags).toEqual({});
   });
+
+  it('detects ♂ suffix in tag text and categorizes as MALE', () => {
+    const html = `
+      <table>
+        <tr>
+          <td>Tags</td>
+          <td><a>shotacon ♂</a></td>
+        </tr>
+      </table>
+    `;
+    const result = parseGalleryBlockHtml(html, 12345);
+    expect(result.tags[TagType.MALE]).toEqual(['shotacon']);
+    expect(result.tags[TagType.TAG]).toBeUndefined();
+  });
+
+  it('detects ♀ suffix in tag text and categorizes as FEMALE', () => {
+    const html = `
+      <table>
+        <tr>
+          <td>Tags</td>
+          <td><a>loli ♀</a></td>
+        </tr>
+      </table>
+    `;
+    const result = parseGalleryBlockHtml(html, 12345);
+    expect(result.tags[TagType.FEMALE]).toEqual(['loli']);
+    expect(result.tags[TagType.TAG]).toBeUndefined();
+  });
+
+  it('does not strip ♂/♀ from non-TAG rows', () => {
+    // A tag row with artist header should not reclassify based on suffix
+    const html = `
+      <table>
+        <tr>
+          <td>Artist</td>
+          <td><a>artist-name</a></td>
+        </tr>
+      </table>
+    `;
+    const result = parseGalleryBlockHtml(html, 12345);
+    expect(result.tags[TagType.ARTIST]).toEqual(['artist-name']);
+  });
+
+  it('passes through a non-hitomi thumbnail URL unchanged', () => {
+    const html = `
+      <div>
+        <img data-src="https://example.com/images/thumb.jpg" />
+      </div>
+    `;
+    const result = parseGalleryBlockHtml(html, 12345);
+    expect(result.thumbnail).toBe('https://example.com/images/thumb.jpg');
+  });
 });
 
-describe('parseTagListHtml', () => {
-  it('parses tag name and amount', () => {
-    const html = `
-      <ul>
-        <li><a href="/tag/sample-all.html">sample</a> (1234)</li>
-      </ul>
-    `;
-    const result = parseTagListHtml(html);
-    expect(result).toHaveLength(1);
-    expect(result[0].tag).toBe('sample');
-    expect(result[0].amount).toBe(1234);
+describe('galleryInfoToBlock — top-level artist/group/character/parody merging', () => {
+  const makeInfo = (overrides: Partial<GalleryInfo>): GalleryInfo => ({
+    id: 1,
+    title: 'Title',
+    japaneseTitle: '',
+    language: 'english',
+    languageLocalName: 'English',
+    date: '2025-01-01 00:00',
+    type: 'manga',
+    files: [],
+    tags: [],
+    artists: [],
+    groups: [],
+    characters: [],
+    parodys: [],
+    related: [],
+    ...overrides,
   });
 
-  it('parses multiple tags', () => {
-    const html = `
-      <ul>
-        <li><a href="/tag/sample-all.html">sample</a> (1234)</li>
-        <li><a href="/tag/other-all.html">other</a> (567)</li>
-      </ul>
-    `;
-    const result = parseTagListHtml(html);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ tag: 'sample', amount: 1234 });
-    expect(result[1]).toEqual({ tag: 'other', amount: 567 });
+  it('merges top-level artists into ARTIST tag bucket', () => {
+    const info = makeInfo({ artists: ['artist-alpha', 'artist-beta'] });
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.ARTIST]).toEqual(['artist-alpha', 'artist-beta']);
   });
 
-  it('handles tag with no amount as 0', () => {
-    const html = `
-      <ul>
-        <li><a href="/tag/sample-all.html">sample</a></li>
-      </ul>
-    `;
-    const result = parseTagListHtml(html);
-    expect(result[0].amount).toBe(0);
+  it('merges top-level groups into GROUP tag bucket', () => {
+    const info = makeInfo({ groups: ['group-one'] });
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.GROUP]).toEqual(['group-one']);
   });
 
-  it('handles empty HTML as empty array', () => {
-    const html = '';
-    const result = parseTagListHtml(html);
-    expect(result).toEqual([]);
+  it('merges top-level characters into CHARACTER tag bucket', () => {
+    const info = makeInfo({ characters: ['char-x', 'char-y'] });
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.CHARACTER]).toEqual(['char-x', 'char-y']);
+  });
+
+  it('merges top-level parodys into SERIES tag bucket', () => {
+    const info = makeInfo({ parodys: ['parody-one'] });
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.SERIES]).toEqual(['parody-one']);
+  });
+
+  it('deduplicates artists already present in tags', () => {
+    // Tag-derived artist via tags array + top-level artists overlap
+    const info = makeInfo({
+      tags: [{ male: '0', female: '0', url: 'artist/existing-all.html', tag: 'existing-artist' }],
+      artists: ['existing-artist', 'new-artist'],
+    });
+    const block = galleryInfoToBlock(info);
+    // 'existing-artist' must appear only once
+    expect(block.tags[TagType.ARTIST]).toEqual(['existing-artist', 'new-artist']);
+    const artistCount = block.tags[TagType.ARTIST]!.filter(a => a === 'existing-artist').length;
+    expect(artistCount).toBe(1);
+  });
+
+  it('deduplicates groups already present in tags', () => {
+    const info = makeInfo({
+      tags: [{ male: '0', female: '0', url: 'group/shared-all.html', tag: 'shared-group' }],
+      groups: ['shared-group', 'extra-group'],
+    });
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.GROUP]).toEqual(['shared-group', 'extra-group']);
+    const count = block.tags[TagType.GROUP]!.filter(g => g === 'shared-group').length;
+    expect(count).toBe(1);
+  });
+
+  it('deduplicates series (parodys) already present in tags', () => {
+    const info = makeInfo({
+      tags: [{ male: '0', female: '0', url: 'series/same-all.html', tag: 'same-series' }],
+      parodys: ['same-series', 'another-series'],
+    });
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.SERIES]).toEqual(['same-series', 'another-series']);
+    const count = block.tags[TagType.SERIES]!.filter(s => s === 'same-series').length;
+    expect(count).toBe(1);
+  });
+
+  it('leaves tag buckets absent when no top-level fields and no tag entries', () => {
+    const info = makeInfo({});
+    const block = galleryInfoToBlock(info);
+    expect(block.tags[TagType.ARTIST]).toBeUndefined();
+    expect(block.tags[TagType.GROUP]).toBeUndefined();
+    expect(block.tags[TagType.CHARACTER]).toBeUndefined();
+    expect(block.tags[TagType.SERIES]).toBeUndefined();
   });
 });
+

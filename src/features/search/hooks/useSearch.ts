@@ -27,6 +27,7 @@ export function useSearch() {
   const setIsLoadingSuggestions = useSearchStore((s) => s.setIsLoadingSuggestions);
   const dbReady = useDbStatusStore((s) => s.dbReady);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchIdRef = useRef(0);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -39,30 +40,55 @@ export function useSearch() {
       return;
     }
 
+    // For single character: use local DB if available (instant but limited)
+    if (activeTerm.length < 2) {
+      setIsLoadingSuggestions(false);
+      if (dbReady) {
+        const { tagType, tag } = parseQuery(activeTerm);
+        const searchTerm = tagType ? tag : activeTerm;
+        const typeFilter = tagType ? (tagType as TagType) : undefined;
+        const currentId = ++searchIdRef.current;
+        searchLocalTags(searchTerm, typeFilter).then((results) => {
+          if (currentId === searchIdRef.current) setSuggestions(results);
+        }).catch(() => {});
+      } else {
+        clearSuggestions();
+      }
+      return;
+    }
+
+    // For 2+ chars: use local DB if ready (instant, comprehensive after HTML sync),
+    // otherwise fall back to remote tagindex API.
+    const currentId = ++searchIdRef.current;
     if (dbReady) {
-      // DB initialized: use local search only (instant, no debounce)
-      // Parse prefix (e.g., "female:lo" → tagType="female", tag="lo")
-      const { tagType, tag } = parseQuery(activeTerm);
-      const searchTerm = tagType ? tag : activeTerm;
-      const typeFilter = tagType ? (tagType as TagType) : undefined;
-      searchLocalTags(searchTerm, typeFilter).then((results) => {
-        setSuggestions(results);
-      }).catch(() => {});
-    } else if (activeTerm.length >= 2) {
-      // DB not initialized: use remote API (debounced, min 2 chars)
-      setIsLoadingSuggestions(true);
+      // Local DB has all tags from HTML page sync — use it for instant results
       debounceRef.current = setTimeout(async () => {
+        setIsLoadingSuggestions(true);
         try {
-          const remoteResults = await getSuggestionsForQuery(activeTerm);
-          setSuggestions(remoteResults);
+          const { tagType, tag } = parseQuery(activeTerm);
+          const searchTerm = tagType ? tag : activeTerm;
+          const typeFilter = tagType ? (tagType as TagType) : undefined;
+          const results = await searchLocalTags(searchTerm, typeFilter);
+          if (currentId === searchIdRef.current) setSuggestions(results);
         } catch {
-          // Silently fail
+          // Silent failure — suggestions are non-critical
         } finally {
           setIsLoadingSuggestions(false);
         }
-      }, 300);
-    } else if (!dbReady) {
-      clearSuggestions();
+      }, 100);
+    } else {
+      // DB not ready yet — use remote tagindex API
+      debounceRef.current = setTimeout(async () => {
+        setIsLoadingSuggestions(true);
+        try {
+          const remoteResults = await getSuggestionsForQuery(activeTerm);
+          if (currentId === searchIdRef.current) setSuggestions(remoteResults);
+        } catch {
+          // Silent failure — suggestions are non-critical
+        } finally {
+          setIsLoadingSuggestions(false);
+        }
+      }, 200);
     }
 
     return () => {

@@ -94,11 +94,20 @@ export function ScrollReader({ images, initialPage, onScrollPositionChange, onVi
     return () => observer.disconnect();
   }, [urls.length]);
 
+  const scrollWidth = useSettingsStore((s) => s.scrollWidth);
+
   if (!urls.length) return null;
+
+  // 100% base = 56/1.15 ≈ 48.7rem, so that 115% ≈ 56rem (original max-w-4xl).
+  // 0 = Full (no constraint).
+  const BASE_REM = 56 / 1.15;
+  const innerStyle: React.CSSProperties = scrollWidth === 0
+    ? {}
+    : { maxWidth: `${BASE_REM * scrollWidth / 100}rem` };
 
   return (
     <div ref={setRef} className="h-screen overflow-y-auto">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto" style={innerStyle}>
         {images.map((img, i) => (
           <div key={`${img.hash}-${i}`} data-page-index={i}>
             <AbortableImage src={urls[i]} alt={`Page ${i + 1}`} className="w-full select-none" loading="lazy" draggable={false} style={{ aspectRatio: `${img.width} / ${img.height}` }} />

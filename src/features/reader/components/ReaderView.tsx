@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useReader } from '@/features/reader/hooks/useReader';
 import { PageReader } from './PageReader';
 import { ScrollReader } from './ScrollReader';
 import { ReaderControls } from './ReaderControls';
 import { Spinner } from '@/shared/components/Spinner';
+import { useSettingsStore } from '@/lib/store/settings';
 
 export function ReaderView({ galleryId, initialPage }: { galleryId: number; initialPage?: number }) {
   const reader = useReader(galleryId, initialPage);
@@ -28,17 +29,21 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
     }, 600);
   }, []);
 
+  const dualPage = useSettingsStore((s) => s.dualPage);
+
   const handleNextPage = useCallback(() => {
-    const nextIdx = Math.min(reader.currentPage + 1, reader.totalPages - 1);
+    const step = dualPage && reader.mode === 'page' ? 2 : 1;
+    const nextIdx = Math.min(reader.currentPage + step, reader.totalPages - 1);
     reader.setCurrentPage(nextIdx);
     if (reader.mode === 'scroll') scrollToPageElement(nextIdx);
-  }, [reader.currentPage, reader.totalPages, reader.mode, reader.setCurrentPage, scrollToPageElement]);
+  }, [reader.currentPage, reader.totalPages, reader.mode, reader.setCurrentPage, scrollToPageElement, dualPage]);
 
   const handlePrevPage = useCallback(() => {
-    const prevIdx = Math.max(reader.currentPage - 1, 0);
+    const step = dualPage && reader.mode === 'page' ? 2 : 1;
+    const prevIdx = Math.max(reader.currentPage - step, 0);
     reader.setCurrentPage(prevIdx);
     if (reader.mode === 'scroll') scrollToPageElement(prevIdx);
-  }, [reader.currentPage, reader.mode, reader.setCurrentPage, scrollToPageElement]);
+  }, [reader.currentPage, reader.mode, reader.setCurrentPage, scrollToPageElement, dualPage]);
 
   const handleVisiblePageChange = useCallback((page: number) => {
     if (programmaticScrollRef.current) return;
@@ -49,6 +54,21 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
     reader.setCurrentPage(page);
     if (reader.mode === 'scroll') scrollToPageElement(page);
   }, [reader.setCurrentPage, reader.mode, scrollToPageElement]);
+
+  // Arrow key navigation for both page and scroll modes
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        handleNextPage();
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        handlePrevPage();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleNextPage, handlePrevPage]);
 
   if (reader.isLoading) return <div className="flex min-h-screen items-center justify-center bg-black"><Spinner size="md" className="border-zinc-600 border-t-white" /></div>;
   if (reader.error) return <div className="flex min-h-screen items-center justify-center bg-black text-red-400">{reader.error}</div>;

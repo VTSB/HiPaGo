@@ -218,3 +218,99 @@ describe('parseIndexVersion', () => {
     expect(parseIndexVersion('123')).toBe('123');
   });
 });
+
+describe('parseGalleryJson — top-level artist/group/character/parody arrays', () => {
+  const JSON_WITH_ARRAYS = `var galleryinfo = {
+    "id": "99999",
+    "title": "Array Test",
+    "japanese_title": "",
+    "language": "english",
+    "language_localname": "English",
+    "date": "2025-06-01 00:00",
+    "type": "manga",
+    "files": [],
+    "tags": [],
+    "artists": [{"artist": "artist-one"}, {"artist": "artist-two"}],
+    "groups": [{"group": "group-alpha"}],
+    "characters": [{"character": "char-a"}, {"character": "char-b"}],
+    "parodys": [{"parody": "series-x"}]
+  }`;
+
+  it('parses artists array into string list', () => {
+    const info = parseGalleryJson(JSON_WITH_ARRAYS);
+    expect(info.artists).toEqual(['artist-one', 'artist-two']);
+  });
+
+  it('parses groups array into string list', () => {
+    const info = parseGalleryJson(JSON_WITH_ARRAYS);
+    expect(info.groups).toEqual(['group-alpha']);
+  });
+
+  it('parses characters array into string list', () => {
+    const info = parseGalleryJson(JSON_WITH_ARRAYS);
+    expect(info.characters).toEqual(['char-a', 'char-b']);
+  });
+
+  it('parses parodys array into string list', () => {
+    const info = parseGalleryJson(JSON_WITH_ARRAYS);
+    expect(info.parodys).toEqual(['series-x']);
+  });
+
+  it('returns empty arrays when fields are absent', () => {
+    const minimal = 'var galleryinfo = {"id": 1}';
+    const info = parseGalleryJson(minimal);
+    expect(info.artists).toEqual([]);
+    expect(info.groups).toEqual([]);
+    expect(info.characters).toEqual([]);
+    expect(info.parodys).toEqual([]);
+  });
+
+  it('filters out entries with empty artist value', () => {
+    const json = `var galleryinfo = {
+      "id": 1,
+      "artists": [{"artist": "valid"}, {"artist": ""}]
+    }`;
+    const info = parseGalleryJson(json);
+    expect(info.artists).toEqual(['valid']);
+  });
+});
+
+describe('parseGalleryJson — related array numeric entries', () => {
+  it('handles related array with numeric entries (not strings)', () => {
+    const json = JSON.stringify({
+      id: 1, title: 'test', type: 'doujinshi', language: 'english',
+      date: '2024-01-01', files: [], tags: [],
+      related: [100, 200, 0, 300],
+    });
+    const result = parseGalleryJson(json);
+    expect(result.related).toEqual([100, 200, 300]); // 0 filtered out
+  });
+
+  it('handles related array with mixed string and number entries', () => {
+    const json = JSON.stringify({
+      id: 1, title: 'test', type: 'doujinshi', language: 'english',
+      date: '2024-01-01', files: [], tags: [],
+      related: ['100', 200, '0', 0, 300],
+    });
+    const result = parseGalleryJson(json);
+    expect(result.related).toEqual([100, 200, 300]);
+  });
+});
+
+describe('categorizeTags — URL regex non-match fallback', () => {
+  it('falls back to TAG type when url is an empty string', () => {
+    const tags: GalleryTagJson[] = [
+      { male: '0', female: '0', url: '', tag: 'tagWithNoUrl' },
+    ];
+    const result = categorizeTags(tags);
+    expect(result[TagType.TAG]).toEqual(['tagWithNoUrl']);
+  });
+
+  it('falls back to TAG type when url has no slash separator', () => {
+    const tags: GalleryTagJson[] = [
+      { male: '0', female: '0', url: 'noslashhere', tag: 'weirdTag' },
+    ];
+    const result = categorizeTags(tags);
+    expect(result[TagType.TAG]).toEqual(['weirdTag']);
+  });
+});

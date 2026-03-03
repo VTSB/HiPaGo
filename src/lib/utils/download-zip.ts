@@ -1,5 +1,6 @@
 import { zipSync, strToU8 } from 'fflate';
 import { getImageUrl } from './image-url';
+import { apiClient } from '@/lib/api/client';
 import type { GalleryFile, GgConfig } from './types';
 
 function sanitizeFilename(name: string): string {
@@ -32,10 +33,17 @@ export async function downloadGalleryAsZip(
 
     const file = files[i];
     const url = getImageUrl(file, ggConfig, 'webp');
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`Failed to fetch page ${i + 1}: ${res.status}`);
+    const res = await apiClient.fetchUrl(url, { signal });
     const buf = await res.arrayBuffer();
-    const name = `${padIndex(i + 1, total)}.webp`;
+    // Derive extension from actual content type or URL
+    const ct = res.headers.get('content-type') || '';
+    let ext = 'webp';
+    if (ct.includes('avif')) ext = 'avif';
+    else if (ct.includes('png')) ext = 'png';
+    else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
+    else if (ct.includes('gif')) ext = 'gif';
+    else if (!file.haswebp) ext = file.name.split('.').pop() || 'jpg';
+    const name = `${padIndex(i + 1, total)}.${ext}`;
     entries[name] = new Uint8Array(buf);
 
     onProgress?.({ current: i + 1, total });
@@ -44,7 +52,7 @@ export async function downloadGalleryAsZip(
   const zipped = zipSync(entries, { level: 0 }); // no compression, images are already compressed
 
   const safeName = sanitizeFilename(title);
-  const blob = new Blob([zipped], { type: 'application/zip' });
+  const blob = new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${galleryId} ${safeName}.zip`;

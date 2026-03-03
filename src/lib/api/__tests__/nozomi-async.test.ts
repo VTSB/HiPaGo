@@ -63,6 +63,36 @@ describe('fetchGalleryIds', () => {
     const result = await fetchGalleryIds('index', 'all', 0);
     expect(result.length).toBe(3);
   });
+
+  it('uses popular path when sort is popular_year', async () => {
+    const data = buildNozomiBuffer([10, 20]);
+    vi.mocked(apiClient.fetchLtnBinaryWithTotal).mockResolvedValue({
+      data,
+      total: 80,
+    });
+
+    await fetchGalleryIds('index', 'all', 0, 25, 'popular_year');
+
+    expect(apiClient.fetchLtnBinaryWithTotal).toHaveBeenCalledWith(
+      'popular/year-all.nozomi',
+      expect.any(String),
+    );
+  });
+
+  it('uses normal path when sort is date_added', async () => {
+    const data = buildNozomiBuffer([10, 20]);
+    vi.mocked(apiClient.fetchLtnBinaryWithTotal).mockResolvedValue({
+      data,
+      total: 80,
+    });
+
+    await fetchGalleryIds('index', 'all', 0, 25, 'date_added');
+
+    expect(apiClient.fetchLtnBinaryWithTotal).toHaveBeenCalledWith(
+      'index-all.nozomi',
+      expect.any(String),
+    );
+  });
 });
 
 describe('fetchGalleryIdsByTag', () => {
@@ -82,6 +112,13 @@ describe('fetchGalleryIdsByTag', () => {
       'bytes=0-99',
     );
     expect(result.idList).toEqual([10, 20]);
+  });
+
+  it('uses idList.length when total is null', async () => {
+    const data = buildNozomiBuffer([10, 20]);
+    vi.mocked(apiClient.fetchLtnBinaryWithTotal).mockResolvedValue({ data, total: null });
+    const result = await fetchGalleryIdsByTag('artist', 'test', 'all', 0);
+    expect(result.length).toBe(2); // 2 IDs in buffer = idList.length
   });
 });
 
@@ -110,5 +147,29 @@ describe('fetchNozomiSearch', () => {
       'n/index-korean.nozomi',
     );
     expect(result).toEqual([1, 2, 3]);
+  });
+
+  it('builds popular path with area when sort is provided', async () => {
+    const data = buildNozomiBuffer([70, 80]);
+    vi.mocked(apiClient.fetchLtnBinary).mockResolvedValue(data);
+
+    const result = await fetchNozomiSearch('tag', 'female:test', 'all', 'popular_month');
+
+    expect(apiClient.fetchLtnBinary).toHaveBeenCalledWith(
+      'n/tag/popular/month/female%3Atest-all.nozomi',
+    );
+    expect(result).toEqual([70, 80]);
+  });
+
+  it('builds popular path without area for language search with sort', async () => {
+    const data = buildNozomiBuffer([11, 22]);
+    vi.mocked(apiClient.fetchLtnBinary).mockResolvedValue(data);
+
+    const result = await fetchNozomiSearch('', 'index', 'japanese', 'popular_week');
+
+    expect(apiClient.fetchLtnBinary).toHaveBeenCalledWith(
+      'popular/week-japanese.nozomi',
+    );
+    expect(result).toEqual([11, 22]);
   });
 });

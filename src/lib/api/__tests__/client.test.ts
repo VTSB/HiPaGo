@@ -40,7 +40,7 @@ describe('apiClient.fetchUrl', () => {
     const response = await apiClient.fetchUrl('https://example.com/test');
 
     expect(response).toBe(mockResponse);
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/test', { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/test', expect.objectContaining({ headers: {} }));
   });
 
   it('should throw ApiError on non-ok response', async () => {
@@ -70,10 +70,10 @@ describe('apiClient.fetchUrl', () => {
 
     await apiClient.fetchUrl('https://example.com/file', { range: 'bytes=0-1023' });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/file', {
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/file', expect.objectContaining({
       headers: { Range: 'bytes=0-1023' },
       range: 'bytes=0-1023',
-    });
+    }));
   });
 
   it('should forward custom headers', async () => {
@@ -84,9 +84,9 @@ describe('apiClient.fetchUrl', () => {
       headers: { 'X-Custom-Header': 'value', 'Authorization': 'Bearer token' },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/api', {
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/api', expect.objectContaining({
       headers: { 'X-Custom-Header': 'value', 'Authorization': 'Bearer token' },
-    });
+    }));
   });
 
   it('should merge custom headers with Range header', async () => {
@@ -99,10 +99,10 @@ describe('apiClient.fetchUrl', () => {
       range: 'bytes=0-499',
     });
 
-    expect(fetchMock).toHaveBeenCalledWith('https://example.com/file', {
+    expect(fetchMock).toHaveBeenCalledWith('https://example.com/file', expect.objectContaining({
       headers: { 'X-Custom': 'test', Range: 'bytes=0-499' },
       range: 'bytes=0-499',
-    });
+    }));
   });
 });
 
@@ -125,7 +125,7 @@ describe('apiClient.fetchLtn', () => {
     const response = await apiClient.fetchLtn('galleries/123.json');
 
     expect(response).toBe(mockResponse);
-    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/galleries/123.json', { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/galleries/123.json', expect.objectContaining({ headers: {} }));
   });
 
   it('should correctly append path', async () => {
@@ -134,7 +134,7 @@ describe('apiClient.fetchLtn', () => {
 
     await apiClient.fetchLtn('gg.js');
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/gg.js', { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/gg.js', expect.objectContaining({ headers: {} }));
   });
 
   it('should pass options to fetchUrl', async () => {
@@ -144,10 +144,10 @@ describe('apiClient.fetchLtn', () => {
 
     await apiClient.fetchLtn('data.bin', { range: 'bytes=100-199' });
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/data.bin', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/data.bin', expect.objectContaining({
       headers: { Range: 'bytes=100-199' },
       range: 'bytes=100-199',
-    });
+    }));
   });
 });
 
@@ -170,7 +170,7 @@ describe('apiClient.fetchLtnText', () => {
     const text = await apiClient.fetchLtnText('file.txt');
 
     expect(text).toBe('text content');
-    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/file.txt', { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/file.txt', expect.objectContaining({ headers: {} }));
   });
 });
 
@@ -205,10 +205,10 @@ describe('apiClient.fetchLtnBinary', () => {
 
     await apiClient.fetchLtnBinary('data.bin', 'bytes=0-15');
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/data.bin', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/data.bin', expect.objectContaining({
       headers: { Range: 'bytes=0-15' },
       range: 'bytes=0-15',
-    });
+    }));
   });
 
   it('should work without range parameter', async () => {
@@ -219,7 +219,7 @@ describe('apiClient.fetchLtnBinary', () => {
     const result = await apiClient.fetchLtnBinary('full.bin');
 
     expect(result.byteLength).toBe(32);
-    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/full.bin', { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/full.bin', expect.objectContaining({ headers: {} }));
   });
 });
 
@@ -468,5 +468,77 @@ describe('clearGgConfigCache', () => {
 
     expect(config.pathCode).toBe('cache2');
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('apiClient.fetchPrimary', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should call fetchUrl with MI_URL prefix', async () => {
+    const mockResponse = new Response('ok', { status: 200 });
+    fetchMock.mockResolvedValue(mockResponse);
+    const response = await apiClient.fetchPrimary('test/path');
+    expect(response).toBe(mockResponse);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('test/path'),
+      expect.anything()
+    );
+    // Verify the URL starts with the MI base (not the LTN proxy prefix)
+    const calledUrl: string = fetchMock.mock.calls[0][0];
+    expect(calledUrl).not.toContain('/api/hitomi/');
+    expect(calledUrl).toMatch(/test\/path$/);
+  });
+});
+
+describe('apiClient concurrency', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('should queue requests when exceeding maxConcurrent (6)', async () => {
+    // Create deferred promises so we can control when each fetch resolves
+    const deferreds: Array<{ resolve: (r: Response) => void }> = [];
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => {
+      deferreds.push({ resolve });
+    }));
+
+    // Fire 7 concurrent requests
+    const promises = Array.from({ length: 7 }, (_, i) =>
+      apiClient.fetchUrl(`https://example.com/${i}`)
+    );
+
+    // Wait a tick for all to be initiated
+    await new Promise(r => setTimeout(r, 10));
+
+    // Only 6 should have called fetch (7th is queued)
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+
+    // Resolve one request — this should release the queue and start the 7th
+    deferreds[0].resolve(new Response('ok', { status: 200 }));
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+
+    // Resolve remaining to cleanup
+    for (let i = 1; i < deferreds.length; i++) {
+      deferreds[i].resolve(new Response('ok', { status: 200 }));
+    }
+    await Promise.all(promises);
   });
 });

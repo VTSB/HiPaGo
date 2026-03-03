@@ -1,0 +1,4 @@
+namespace bypass {
+    [Throws=BypassError]
+    BypassResponse bypass_fetch(string url, record<DOMString, string>? headers);
+};

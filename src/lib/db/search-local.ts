@@ -1,5 +1,4 @@
-import { getDb } from './adapter';
-import { parseQuery } from '@/lib/api/search';
+import { ensureDb } from './adapter';
 import { TAG_TYPE_TO_BYTE, BYTE_TO_TAG_TYPE } from '@/lib/utils/types';
 import type { TagType, Suggestion } from '@/lib/utils/types';
 
@@ -15,8 +14,37 @@ export async function searchLocalTags(
   tagTypeFilter?: TagType,
   limit: number = 20,
 ): Promise<Suggestion[]> {
-  const db = getDb();
-  const prefix = query.toLowerCase() + '%';
+  const db = await ensureDb();
+  const trimmed = query.trim().toLowerCase();
+
+  // Empty query: return top tags by count directly from DB
+  if (!trimmed) {
+    const topTags = tagTypeFilter !== undefined
+      ? await db.query<TagRow>(
+          'SELECT tagId, type, name, count FROM tag WHERE type = ? ORDER BY count DESC LIMIT ?',
+          [TAG_TYPE_TO_BYTE[tagTypeFilter], limit],
+        )
+      : await db.query<TagRow>(
+          'SELECT tagId, type, name, count FROM tag ORDER BY count DESC LIMIT ?',
+          [limit],
+        );
+    const filtered = topTags.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
+    if (filtered.length === 0) return [];
+    const placeholders = filtered.map(() => '?').join(',');
+    const i18nRows = await db.query<{ tagId: number; local: string }>(
+      `SELECT i.tagId, i.local FROM tag_i18n i WHERE i.tagId IN (${placeholders})`,
+      filtered.map((t) => t.tagId),
+    );
+    const i18nMap = new Map(i18nRows.map((r) => [r.tagId, r.local]));
+    return filtered.map((t) => ({
+      tag: t.name,
+      tagType: BYTE_TO_TAG_TYPE[t.type],
+      amount: t.count,
+      localName: i18nMap.get(t.tagId),
+    }));
+  }
+
+  const prefix = trimmed + '%';
 
   // Primary path: name prefix
   let primaryResults: TagRow[];
@@ -67,9 +95,11 @@ export async function searchLocalTags(
   const filtered = sliced.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
 
   // Batch fetch Korean names
+  if (filtered.length === 0) return [];
+  const placeholders = filtered.map(() => '?').join(',');
   const i18nRows = await db.query<{ tagId: number; local: string }>(
-    `SELECT i.tagId, i.local FROM tag_i18n i WHERE i.tagId IN (${filtered.map((t) => t.tagId).join(',') || '0'})`,
-    [],
+    `SELECT i.tagId, i.local FROM tag_i18n i WHERE i.tagId IN (${placeholders})`,
+    filtered.map((t) => t.tagId),
   );
   const i18nMap = new Map(i18nRows.map((r) => [r.tagId, r.local]));
 
@@ -85,7 +115,7 @@ export async function searchLocalGalleryIdsByTag(
   tagType: TagType,
   tagName: string,
 ): Promise<number[]> {
-  const db = getDb();
+  const db = await ensureDb();
   const typeByte = TAG_TYPE_TO_BYTE[tagType];
   const tags = await db.query<{ tagId: number }>(
     'SELECT tagId FROM tag WHERE type = ? AND name = ?',
@@ -103,47 +133,162 @@ export async function searchLocalGalleryIdsByTag(
 export async function searchLocalGalleryIdsByTitle(
   titleQuery: string,
 ): Promise<number[]> {
+  const db = await ensureDb();
   const q = '%' + titleQuery.toLowerCase() + '%';
-  const rows = await getDb().query<{ id: number }>(
+  const rows = await db.query<{ id: number }>(
     'SELECT id FROM gallery WHERE LOWER(title) LIKE ?',
     [q],
   );
   return rows.map((r) => r.id).sort((a, b) => b - a);
 }
 
-export async function searchLocalGalleryIds(
-  query: string,
-): Promise<number[]> {
-  const { tagType, tag } = parseQuery(query);
 
-  if (tagType) {
-    return searchLocalGalleryIdsByTag(tagType as TagType, tag);
+export async function filterHistoryByTags(
+  tags: Array<{ type: TagType; name: string }>,
+  titleQuery?: string,
+): Promise<number[]> {
+  const db = await ensureDb();
+
+  if (tags.length === 0 && !titleQuery) {
+    const rows = await db.query<{ galleryId: number }>(
+      'SELECT galleryId FROM history ORDER BY viewedAt DESC',
+      [],
+    );
+    return rows.map((r) => r.galleryId);
   }
 
-  // General query: merge tag-prefix matches + title matches
-  const db = getDb();
-  const prefix = query.toLowerCase() + '%';
-  const matchingTags = await db.query<{ tagId: number }>(
-    'SELECT tagId FROM tag WHERE name LIKE ? LIMIT 5',
-    [prefix],
+  // Resolve tag names to tagIds
+  const tagIds: number[] = [];
+  for (const tag of tags) {
+    const typeByte = TAG_TYPE_TO_BYTE[tag.type];
+    const found = await db.query<{ tagId: number }>(
+      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
+      [typeByte, tag.name],
+    );
+    if (found.length === 0) return [];
+    tagIds.push(found[0].tagId);
+  }
+
+  const titleLike = titleQuery ? '%' + titleQuery.toLowerCase() + '%' : null;
+
+  if (tagIds.length > 0 && titleLike) {
+    const placeholders = tagIds.map(() => '?').join(',');
+    const rows = await db.query<{ galleryId: number }>(
+      `SELECT h.galleryId
+       FROM history h
+       JOIN gallery_tag gt ON gt.id = h.galleryId
+       JOIN gallery g ON g.id = h.galleryId
+       WHERE gt.tagId IN (${placeholders})
+         AND LOWER(g.title) LIKE ?
+       GROUP BY h.galleryId
+       HAVING COUNT(DISTINCT gt.tagId) = ?
+       ORDER BY h.viewedAt DESC`,
+      [...tagIds, titleLike, tagIds.length],
+    );
+    return rows.map((r) => r.galleryId);
+  }
+
+  if (tagIds.length > 0) {
+    const placeholders = tagIds.map(() => '?').join(',');
+    const rows = await db.query<{ galleryId: number }>(
+      `SELECT h.galleryId
+       FROM history h
+       JOIN gallery_tag gt ON gt.id = h.galleryId
+       WHERE gt.tagId IN (${placeholders})
+       GROUP BY h.galleryId
+       HAVING COUNT(DISTINCT gt.tagId) = ?
+       ORDER BY h.viewedAt DESC`,
+      [...tagIds, tagIds.length],
+    );
+    return rows.map((r) => r.galleryId);
+  }
+
+  // titleQuery only (tags empty but titleQuery provided)
+  const rows = await db.query<{ galleryId: number }>(
+    `SELECT h.galleryId
+     FROM history h
+     JOIN gallery g ON g.id = h.galleryId
+     WHERE LOWER(g.title) LIKE ?
+     ORDER BY h.viewedAt DESC`,
+    [titleLike],
   );
+  return rows.map((r) => r.galleryId);
+}
 
-  const [tagGalleryIds, titleIds] = await Promise.all([
-    Promise.all(
-      matchingTags.map((t) =>
-        db.query<{ id: number }>('SELECT id FROM gallery_tag WHERE tagId = ?', [t.tagId])
-          .then((rows) => rows.map((r) => r.id)),
-      ),
-    ).then((nested) => nested.flat()),
-    searchLocalGalleryIdsByTitle(query),
-  ]);
+export async function filterFavoritesByTags(
+  tags: Array<{ type: TagType; name: string }>,
+  titleQuery?: string,
+): Promise<number[]> {
+  const db = await ensureDb();
 
-  const allIds = [...tagGalleryIds, ...titleIds];
-  const unique = [...new Set(allIds)];
-  return unique.sort((a, b) => b - a);
+  if (tags.length === 0 && !titleQuery) {
+    const rows = await db.query<{ galleryId: number }>(
+      'SELECT galleryId FROM favorites ORDER BY addedAt DESC',
+      [],
+    );
+    return rows.map((r) => r.galleryId);
+  }
+
+  // Resolve tag names to tagIds
+  const tagIds: number[] = [];
+  for (const tag of tags) {
+    const typeByte = TAG_TYPE_TO_BYTE[tag.type];
+    const found = await db.query<{ tagId: number }>(
+      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
+      [typeByte, tag.name],
+    );
+    if (found.length === 0) return [];
+    tagIds.push(found[0].tagId);
+  }
+
+  const titleLike = titleQuery ? '%' + titleQuery.toLowerCase() + '%' : null;
+
+  if (tagIds.length > 0 && titleLike) {
+    const placeholders = tagIds.map(() => '?').join(',');
+    const rows = await db.query<{ galleryId: number }>(
+      `SELECT f.galleryId
+       FROM favorites f
+       JOIN gallery_tag gt ON gt.id = f.galleryId
+       JOIN gallery g ON g.id = f.galleryId
+       WHERE gt.tagId IN (${placeholders})
+         AND LOWER(g.title) LIKE ?
+       GROUP BY f.galleryId
+       HAVING COUNT(DISTINCT gt.tagId) = ?
+       ORDER BY f.addedAt DESC`,
+      [...tagIds, titleLike, tagIds.length],
+    );
+    return rows.map((r) => r.galleryId);
+  }
+
+  if (tagIds.length > 0) {
+    const placeholders = tagIds.map(() => '?').join(',');
+    const rows = await db.query<{ galleryId: number }>(
+      `SELECT f.galleryId
+       FROM favorites f
+       JOIN gallery_tag gt ON gt.id = f.galleryId
+       WHERE gt.tagId IN (${placeholders})
+       GROUP BY f.galleryId
+       HAVING COUNT(DISTINCT gt.tagId) = ?
+       ORDER BY f.addedAt DESC`,
+      [...tagIds, tagIds.length],
+    );
+    return rows.map((r) => r.galleryId);
+  }
+
+  // titleQuery only (tags empty but titleQuery provided)
+  const rows = await db.query<{ galleryId: number }>(
+    `SELECT f.galleryId
+     FROM favorites f
+     JOIN gallery g ON g.id = f.galleryId
+     WHERE LOWER(g.title) LIKE ?
+     ORDER BY f.addedAt DESC`,
+    [titleLike],
+  );
+  return rows.map((r) => r.galleryId);
 }
 
 export async function hasLocalSearchData(): Promise<boolean> {
-  const rows = await getDb().query<{ c: number }>('SELECT COUNT(*) as c FROM tag');
+  const db = await ensureDb();
+  const rows = await db.query<{ c: number }>('SELECT COUNT(*) as c FROM tag');
   return rows[0].c > 0;
 }

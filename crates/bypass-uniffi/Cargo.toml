@@ -1,0 +1,16 @@
+[package]
+name = "bypass-uniffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+bypass-core = { path = "../bypass-core" }
+uniffi = { version = "0.29", features = ["cli"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+thiserror = "2"
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }

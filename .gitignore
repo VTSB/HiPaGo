@@ -46,6 +46,12 @@ next-env.d.ts
 # tauri
 /src-tauri/target/
 
+# rust workspace + crate build artifacts
+/target/
+/crates/*/target/
+/crates/*/node_modules/
+/crates/*/*.node
+
 # capacitor native build artifacts
 /android/app/build/
 /ios/App/build/

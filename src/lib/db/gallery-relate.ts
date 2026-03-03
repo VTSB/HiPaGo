@@ -1,18 +1,22 @@
-import { getDb } from './adapter';
+import { ensureDb } from './adapter';
 
 export async function saveGalleryRelated(galleryId: number, relatedIds: number[]): Promise<void> {
-  const db = getDb();
+  const db = await ensureDb();
   await db.execute('DELETE FROM gallery_relate WHERE id = ?', [galleryId]);
-  for (const related of relatedIds) {
-    await db.execute(
-      'INSERT INTO gallery_relate (id, related) VALUES (?, ?)',
-      [galleryId, related],
-    );
+  if (relatedIds.length === 0) return;
+  // Batch insert in chunks of 50
+  const CHUNK = 50;
+  for (let i = 0; i < relatedIds.length; i += CHUNK) {
+    const chunk = relatedIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '(?, ?)').join(', ');
+    const params = chunk.flatMap((r) => [galleryId, r]);
+    await db.execute(`INSERT INTO gallery_relate (id, related) VALUES ${placeholders}`, params);
   }
 }
 
 export async function getGalleryRelated(galleryId: number): Promise<number[]> {
-  const rows = await getDb().query<{ related: number }>(
+  const db = await ensureDb();
+  const rows = await db.query<{ related: number }>(
     'SELECT related FROM gallery_relate WHERE id = ?',
     [galleryId],
   );
@@ -20,5 +24,6 @@ export async function getGalleryRelated(galleryId: number): Promise<number[]> {
 }
 
 export async function deleteGalleryRelated(galleryId: number): Promise<void> {
-  await getDb().execute('DELETE FROM gallery_relate WHERE id = ?', [galleryId]);
+  const db = await ensureDb();
+  await db.execute('DELETE FROM gallery_relate WHERE id = ?', [galleryId]);
 }

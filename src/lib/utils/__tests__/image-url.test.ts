@@ -3,13 +3,14 @@ import { describe, it, expect } from 'vitest';
 import {
   parseGgJs,
   imageHashCode,
-  subdomainSuffix,
   getImageUrl,
   getThumbnailUrl,
   getBestImageUrl,
   ggM,
+  galleryImageToFile,
 } from '../image-url';
-import type { GalleryFile, GgConfig } from '../types';
+import type { GalleryFile, GalleryImage, GgConfig } from '../types';
+import { ImageType } from '../types';
 
 function makeFile(overrides: Partial<GalleryFile> = {}): GalleryFile {
   return {
@@ -112,18 +113,6 @@ describe('imageHashCode', () => {
   it('handles short hashes', () => {
     // 'abc' → slice(-1)='c', slice(-3,-1)='ab' → parseInt('cab', 16) = 3243
     expect(imageHashCode('abc')).toBe(parseInt('cab', 16));
-  });
-});
-
-describe('subdomainSuffix (deprecated, backward compat)', () => {
-  it('returns "1" when m returns 0 (hashCode in mCases, default=1, caseValue=0)', () => {
-    const config = makeConfig({ mDefault: 1, mCaseValue: 0, mCases: new Set([42]) });
-    expect(subdomainSuffix(42, config)).toBe('1'); // 1 + 0 = 1
-  });
-
-  it('returns "2" when m returns 1 (hashCode NOT in mCases, default=1)', () => {
-    const config = makeConfig({ mDefault: 1, mCaseValue: 0, mCases: new Set([99]) });
-    expect(subdomainSuffix(42, config)).toBe('2'); // 1 + 1 = 2
   });
 });
 
@@ -305,5 +294,86 @@ describe('getImageUrl preferredFormat', () => {
 
     const fileOrig = makeFile({ hasavif: 0, haswebp: 0, name: 'x.png', hash: 'abcdef1234' });
     expect(getImageUrl(fileOrig, makeConfig(), undefined)).toContain('.png');
+  });
+});
+
+describe('getImageUrl edge cases', () => {
+  it("'original' falls back to 'jpg' when name ends with a dot (empty ext)", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'file.', hash: 'abcdef1234' });
+    const url = getImageUrl(file, makeConfig(), 'original');
+    expect(url).toContain('.jpg');
+  });
+
+  it("'webp' falls back to 'jpg' ext when no haswebp and name ends with a dot", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'file.', hash: 'abcdef1234' });
+    const url = getImageUrl(file, makeConfig(), 'webp');
+    expect(url).toContain('.jpg');
+    expect(url).toContain('/images/');
+  });
+
+  it("'avif' falls back to 'jpg' ext when no avif/webp and name ends with a dot", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'file.', hash: 'abcdef1234' });
+    const url = getImageUrl(file, makeConfig(), 'avif');
+    expect(url).toContain('.jpg');
+    expect(url).toContain('/images/');
+  });
+
+  it("auto/undefined falls back to 'jpg' ext when no avif/webp and name ends with a dot", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'file.', hash: 'abcdef1234' });
+    const url = getImageUrl(file, makeConfig());
+    expect(url).toContain('.jpg');
+    expect(url).toContain('/images/');
+  });
+});
+
+describe('getThumbnailUrl edge cases', () => {
+  it("falls back to 'jpg' when name ends with a dot (empty ext)", () => {
+    const file = makeFile({ hasavifsmalltn: 0, hasavif: 0, haswebp: 0, name: 'file.', hash: 'abcdef1234' });
+    const url = getThumbnailUrl(file);
+    expect(url).toContain('.jpg');
+  });
+});
+
+describe('galleryImageToFile', () => {
+  function makeImage(overrides: Partial<GalleryImage> = {}): GalleryImage {
+    return {
+      name: 'img.jpg',
+      hash: 'abc123',
+      width: 1280,
+      height: 720,
+      types: new Set(),
+      ...overrides,
+    };
+  }
+
+  it('converts GalleryImage with WEBP+AVIF types to haswebp=1, hasavif=1', () => {
+    const image = makeImage({ types: new Set([ImageType.WEBP, ImageType.AVIF]) });
+    const file = galleryImageToFile(image);
+    expect(file.haswebp).toBe(1);
+    expect(file.hasavif).toBe(1);
+  });
+
+  it('converts GalleryImage with only ORIGINAL to haswebp=0, hasavif=0', () => {
+    const image = makeImage({ types: new Set([ImageType.ORIGINAL]) });
+    const file = galleryImageToFile(image);
+    expect(file.haswebp).toBe(0);
+    expect(file.hasavif).toBe(0);
+  });
+
+  it('always sets hasavifsmalltn=0', () => {
+    const image = makeImage({ types: new Set([ImageType.WEBP, ImageType.AVIF]) });
+    expect(galleryImageToFile(image).hasavifsmalltn).toBe(0);
+
+    const image2 = makeImage({ types: new Set() });
+    expect(galleryImageToFile(image2).hasavifsmalltn).toBe(0);
+  });
+
+  it('preserves name, hash, width, height from source image', () => {
+    const image = makeImage({ name: 'photo.png', hash: 'deadbeef', width: 800, height: 600, types: new Set() });
+    const file = galleryImageToFile(image);
+    expect(file.name).toBe('photo.png');
+    expect(file.hash).toBe('deadbeef');
+    expect(file.width).toBe(800);
+    expect(file.height).toBe(600);
   });
 });

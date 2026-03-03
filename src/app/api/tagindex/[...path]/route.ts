@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { bypassFetch } from '@/lib/server/bypass-fetch';
 
 const TAG_INDEX_BASE = 'https://tagindex.hitomi.la';
 
@@ -8,6 +9,12 @@ export async function GET(
 ) {
   const { path } = await params;
   const targetPath = path.join('/');
+
+  // Validate path to prevent traversal and unexpected requests
+  if (/\.\.|\/\/|\x00/.test(targetPath) || !/^[\w.\-/]+$/.test(targetPath)) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  }
+
   const targetUrl = `${TAG_INDEX_BASE}/${targetPath}`;
 
   const headers: Record<string, string> = {
@@ -17,7 +24,7 @@ export async function GET(
   };
 
   try {
-    const response = await fetch(targetUrl, { headers });
+    const response = await bypassFetch(targetUrl, { headers, signal: AbortSignal.timeout(15000) });
     const body = await response.arrayBuffer();
 
     const responseHeaders = new Headers();

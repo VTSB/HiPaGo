@@ -1,0 +1,279 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - release
+
+env:
+  NODE_VERSION: '22'
+  IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm lint
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install native deps for boring-sys2
+        uses: ./.github/actions/setup-rust-deps
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          save-if: ${{ github.ref == 'refs/heads/release' }}
+
+      - name: Run Rust tests
+        run: cargo test -p bypass-core
+
+  build-desktop:
+    name: Desktop (${{ matrix.platform }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            target: linux
+          - platform: windows-latest
+            target: windows
+          - platform: macos-latest
+            target: macos
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install native deps for boring-sys2
+        uses: ./.github/actions/setup-rust-deps
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/release' }}
+
+      - name: Install Linux dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - run: pnpm install --frozen-lockfile
+
+      # Tag push → build + upload to GitHub Release
+      - name: Build and release with Tauri
+        if: env.IS_RELEASE == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'HiPaGo ${{ github.ref_name }}'
+          releaseBody: 'See the assets below for platform-specific downloads.'
+          releaseDraft: true
+          prerelease: false
+          tauriScript: pnpm tauri
+          args: --verbose
+
+      # Branch push → build only (no release)
+      - name: Build with Tauri (test)
+        if: env.IS_RELEASE != 'true'
+        uses: tauri-apps/tauri-action@v0
+        with:
+          tauriScript: pnpm tauri
+          args: --verbose
+
+      - name: Upload desktop build as artifact (test)
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          path: |
+            src-tauri/target/release/bundle/**/*
+
+  build-android:
+    name: Android
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install native deps for boring-sys2
+        uses: ./.github/actions/setup-rust-deps
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          save-if: ${{ github.ref == 'refs/heads/release' }}
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Build bypass-uniffi for Android
+        run: node scripts/build-android.mjs
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build static export
+        run: node scripts/build-static.mjs
+
+      - name: Sync Capacitor
+        run: node node_modules/@capacitor/cli/bin/capacitor sync android
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK to release
+        if: env.IS_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          files: android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK as artifact (test)
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/release/*.apk
+
+  build-ios:
+    name: iOS
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Install native deps for boring-sys2
+        uses: ./.github/actions/setup-rust-deps
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: '. -> target'
+          save-if: ${{ github.ref == 'refs/heads/release' }}
+
+      - name: Build bypass-uniffi for iOS
+        run: node scripts/build-ios.mjs
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build static export
+        run: node scripts/build-static.mjs
+
+      - name: Install CocoaPods
+        run: command -v pod || sudo gem install cocoapods
+
+      - name: Sync Capacitor
+        run: node node_modules/@capacitor/cli/bin/capacitor sync ios
+
+      - name: Build iOS archive
+        working-directory: ios/App
+        run: |
+          xcodebuild archive \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -archivePath build/App.xcarchive \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO \
+            -quiet
+
+      - name: Zip xcarchive for upload
+        run: |
+          cd ios/App/build
+          zip -r -y App.xcarchive.zip App.xcarchive
+
+      - name: Upload archive to release
+        if: env.IS_RELEASE == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          files: ios/App/build/App.xcarchive.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload archive as artifact (test)
+        if: env.IS_RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-archive
+          path: ios/App/build/App.xcarchive.zip

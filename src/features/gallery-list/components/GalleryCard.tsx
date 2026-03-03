@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { GalleryBlockType, type TagType } from '@/lib/utils/types';
 import { TagChip } from '@/shared/components/TagChip';
@@ -47,7 +47,7 @@ function CardSkeleton() {
   );
 }
 
-function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: () => void }) {
+function CardContent({ block, onPrefetch, itemIndex }: { block: GalleryBlock; onPrefetch?: () => void; itemIndex?: number }) {
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
   const blurred = useMemo(() => shouldBlur(block, blurTags), [block, blurTags]);
@@ -55,6 +55,21 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     ? (Object.entries(block.tags) as [TagType, string[]][])
     : [];
   const tagI18n = useTagI18n(tagEntries);
+  const displayTags = useMemo(() => {
+    if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED) return [];
+    const all: { tag: string; type: TagType; priority: number }[] = [];
+    for (const [type, tags] of Object.entries(block.tags)) {
+      for (const tag of tags || []) {
+        let priority: number;
+        if (tag === 'uncensored') priority = 0;
+        else if (type === 'artist' || type === 'group') priority = 1;
+        else priority = 2;
+        all.push({ tag, type: type as TagType, priority });
+      }
+    }
+    all.sort((a, b) => a.priority - b.priority);
+    return all.slice(0, 5);
+  }, [block.tags, block.type]);
 
   if (block.type === GalleryBlockType.LOADING) {
     return <CardSkeleton />;
@@ -66,16 +81,9 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       </div>
     );
   }
-  const displayTags: { tag: string; type: TagType }[] = [];
-  for (const [type, tags] of Object.entries(block.tags)) {
-    for (const tag of tags || []) {
-      if (displayTags.length >= 5) break;
-      displayTags.push({ tag, type: type as TagType });
-    }
-  }
 
   return (
-    <Link href={`/gallery/${block.id}`} className="group block" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }} onPointerEnter={onPrefetch}>
+    <Link href={`/gallery/${block.id}`} className="group block" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }} onPointerEnter={onPrefetch} data-item-index={itemIndex}>
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900">
         <div className={`relative aspect-[3/4] overflow-hidden bg-zinc-100 dark:bg-zinc-800${blurred ? ' blur-lg' : ''}`}>
           {block.thumbnail ? (
@@ -112,14 +120,14 @@ function usePrefetchGalleryInfo(id: number) {
 }
 
 /** Render a gallery card by passing a pre-loaded block. */
-export function GalleryCard({ block }: { block: GalleryBlock }) {
+export const GalleryCard = memo(function GalleryCard({ block }: { block: GalleryBlock }) {
   const prefetch = usePrefetchGalleryInfo(block.id);
   return <CardContent block={block} onPrefetch={prefetch} />;
-}
+});
 
 /** Render a gallery card by ID — fetches its own data progressively. */
-export function GalleryCardById({ id }: { id: number }) {
+export const GalleryCardById = memo(function GalleryCardById({ id, itemIndex }: { id: number; itemIndex?: number }) {
   const block = useGalleryBlock(id);
   const prefetch = usePrefetchGalleryInfo(id);
-  return <CardContent block={block} onPrefetch={prefetch} />;
-}
+  return <CardContent block={block} onPrefetch={prefetch} itemIndex={itemIndex} />;
+});

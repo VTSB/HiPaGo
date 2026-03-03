@@ -7,10 +7,11 @@ import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard'
 import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { SortSelector } from '@/shared/components/SortSelector';
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { getGalleryIdsForQuery } from '@/lib/api/search';
 import { parseCompoundQuery } from '@/lib/api/search';
 import { useSettingsStore } from '@/lib/store/settings';
+import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { useT } from '@/lib/i18n/useT';
 import type { SortOrder } from '@/lib/utils/types';
 
@@ -55,23 +56,11 @@ export function SearchResults() {
   }, [allIds, numericId]);
 
   // Paginate the IDs for infinite scroll
-  const paginatedQuery = useInfiniteQuery({
-    queryKey: ['search-id-pages', query, filteredIds?.length, sort],
-    queryFn: ({ pageParam }): number[] => {
-      if (!filteredIds) return [];
-      const start = (pageParam as number) * RESULTS_PER_PAGE;
-      return filteredIds.slice(start, start + RESULTS_PER_PAGE);
-    },
-    initialPageParam: 0,
-    getNextPageParam: (_lastPage, allPages) => {
-      if (!filteredIds) return undefined;
-      const loaded = allPages.length * RESULTS_PER_PAGE;
-      return loaded < filteredIds.length ? allPages.length : undefined;
-    },
-    enabled: !!filteredIds?.length,
-  });
-
-  const visibleIds = paginatedQuery.data?.pages.flat() ?? [];
+  const { visibleIds, hasNextPage, isFetchingNextPage, fetchNextPage } = usePaginatedIds(
+    filteredIds,
+    RESULTS_PER_PAGE,
+    ['search-id-pages', query, sort],
+  );
   const totalCount = (allIds?.length ?? 0);
 
   return (
@@ -85,7 +74,13 @@ export function SearchResults() {
               : isLoadingIds ? t('search.searching') : t('search.noResults')}
           </p>
         </div>
-        {isSingleTerm && <SortSelector value={sort} onChange={setSort} />}
+        <div className="shrink-0">
+          {isSingleTerm ? (
+            <SortSelector value={sort} onChange={setSort} />
+          ) : query.trim().includes(' ') ? (
+            <p className="text-xs text-zinc-400" title={t('search.sortUnavailable')}>{t('search.sortUnavailable')}</p>
+          ) : null}
+        </div>
       </div>
 
       {isFallback && (
@@ -119,20 +114,18 @@ export function SearchResults() {
       )}
 
       <InfiniteScrollTrigger
-        hasMore={paginatedQuery.hasNextPage ?? false}
-        isFetching={paginatedQuery.isFetchingNextPage}
+        hasMore={hasNextPage}
+        isFetching={isFetchingNextPage}
         onLoadMore={() => {
-          if (paginatedQuery.hasNextPage && !paginatedQuery.isFetchingNextPage) {
-            paginatedQuery.fetchNextPage();
-          }
+          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
         }}
       />
       <FloatingPageNav
         totalItems={totalCount}
         loadedItems={visibleIds.length}
         pageSize={RESULTS_PER_PAGE}
-        hasMore={paginatedQuery.hasNextPage ?? false}
-        onLoadMore={() => paginatedQuery.fetchNextPage()}
+        hasMore={hasNextPage}
+        onLoadMore={fetchNextPage}
       />
     </div>
   );

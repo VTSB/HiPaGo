@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useClickOutside } from '@/shared/hooks/useClickOutside';
 import { useSettingsStore, type Locale } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { searchLocalTags } from '@/lib/db/search-local';
@@ -8,6 +9,7 @@ import { getSuggestionsForQuery } from '@/lib/api/search';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import type { Suggestion } from '@/lib/utils/types';
 import { TagChip } from '@/shared/components/TagChip';
+import { Select } from '@/shared/components/Select';
 
 function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   const [input, setInput] = useState('');
@@ -24,28 +26,22 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = input.trim();
     if (!trimmed) { setSuggestions([]); return; }
-    if (dbReady) {
-      searchLocalTags(trimmed).then((r) => { setSuggestions(r); setShowDropdown(r.length > 0); });
-    } else if (trimmed.length >= 2) {
-      debounceRef.current = setTimeout(async () => {
-        try {
+    debounceRef.current = setTimeout(async () => {
+      try {
+        if (dbReady) {
+          const r = await searchLocalTags(trimmed);
+          setSuggestions(r); setShowDropdown(r.length > 0);
+        } else if (trimmed.length >= 2) {
           const r = await getSuggestionsForQuery(trimmed);
           setSuggestions(r); setShowDropdown(r.length > 0);
-        } catch {}
-      }, 300);
-    }
+        }
+      } catch { /* network/db failure — keep existing suggestions */ }
+    }, dbReady ? 120 : 300);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [input, dbReady]);
 
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node) && !inputRef.current?.contains(e.target as Node)) {
-        setShowDropdown(false);
-      }
-    }
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, []);
+  const closeDropdown = useCallback(() => setShowDropdown(false), []);
+  useClickOutside([dropdownRef, inputRef], closeDropdown);
 
   const handleSelect = useCallback((s: Suggestion) => {
     const tag = `${s.tagType}:${s.tag.replace(/ /g, '_')}`;
@@ -84,165 +80,122 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
 export default function SettingsPage() {
   const locale = useSettingsStore((s) => s.locale);
   const language = useSettingsStore((s) => s.language);
-  const theme = useSettingsStore((s) => s.theme);
   const readerMode = useSettingsStore((s) => s.readerMode);
   const imageFormat = useSettingsStore((s) => s.imageFormat);
   const blurTags = useSettingsStore((s) => s.blurTags);
   const setLocale = useSettingsStore((s) => s.setLocale);
   const setLanguage = useSettingsStore((s) => s.setLanguage);
-  const setTheme = useSettingsStore((s) => s.setTheme);
   const setReaderMode = useSettingsStore((s) => s.setReaderMode);
   const setImageFormat = useSettingsStore((s) => s.setImageFormat);
   const addBlurTag = useSettingsStore((s) => s.addBlurTag);
   const removeBlurTag = useSettingsStore((s) => s.removeBlurTag);
   const t = useT();
 
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else if (theme === 'light') {
-      root.classList.remove('dark');
-    } else {
-      // system theme
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      root.classList.toggle('dark', prefersDark);
-    }
-  }, [theme]);
-
-  const btnClass = (active: boolean) =>
-    `flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+  const segmentClass = (active: boolean) =>
+    `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
       active
-        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-        : 'bg-zinc-100 text-zinc-900 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700'
+        ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
+        : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
     }`;
 
   return (
-    <>
-      <h1 className="mb-6 text-2xl font-bold text-zinc-900 dark:text-zinc-100">{t('settings.title')}</h1>
+    <div className="mx-auto max-w-2xl">
+      <h1 className="mb-8 text-2xl font-bold text-zinc-900 dark:text-zinc-100">{t('settings.title')}</h1>
 
-      <div className="space-y-6">
+      <div className="divide-y divide-zinc-200 rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
         {/* System Language */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="mb-2 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {t('settings.locale')}
-          </label>
-          <div className="flex gap-2">
-            <button onClick={() => setLocale('en')} className={btnClass(locale === 'en')}>
+        <div className="flex items-center justify-between px-5 py-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.locale')}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.locale.desc')}</p>
+          </div>
+          <div className="flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+            <button onClick={() => setLocale('en')} className={segmentClass(locale === 'en')}>
               {t('settings.locale.en')}
             </button>
-            <button onClick={() => setLocale('ko')} className={btnClass(locale === 'ko')}>
+            <button onClick={() => setLocale('ko')} className={segmentClass(locale === 'ko')}>
               {t('settings.locale.ko')}
             </button>
           </div>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('settings.locale.desc')}
-          </p>
         </div>
 
         {/* Language Filter */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="mb-2 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {t('settings.langFilter')}
-          </label>
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-          >
-            <option value="all">{t('settings.langFilter.all')}</option>
-            <option value="japanese">{t('settings.langFilter.japanese')}</option>
-            <option value="english">{t('settings.langFilter.english')}</option>
-            <option value="chinese">{t('settings.langFilter.chinese')}</option>
-            <option value="korean">{t('settings.langFilter.korean')}</option>
-          </select>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('settings.langFilter.desc')}
-          </p>
-        </div>
-
-        {/* Theme Toggle */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="mb-2 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {t('settings.theme')}
-          </label>
-          <div className="flex gap-2">
-            <button onClick={() => setTheme('light')} className={btnClass(theme === 'light')}>
-              {t('settings.theme.light')}
-            </button>
-            <button onClick={() => setTheme('dark')} className={btnClass(theme === 'dark')}>
-              {t('settings.theme.dark')}
-            </button>
-            <button onClick={() => setTheme('system')} className={btnClass(theme === 'system')}>
-              {t('settings.theme.system')}
-            </button>
+        <div className="flex items-center justify-between px-5 py-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.langFilter')}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.langFilter.desc')}</p>
           </div>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('settings.theme.desc')}
-          </p>
+          <Select
+            value={language}
+            onChange={setLanguage}
+            className="w-36"
+            options={[
+              { value: 'all', label: t('settings.langFilter.all') },
+              { value: 'japanese', label: t('settings.langFilter.japanese') },
+              { value: 'english', label: t('settings.langFilter.english') },
+              { value: 'chinese', label: t('settings.langFilter.chinese') },
+              { value: 'korean', label: t('settings.langFilter.korean') },
+            ]}
+          />
         </div>
 
         {/* Reader Mode */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="mb-2 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {t('settings.reader')}
-          </label>
-          <div className="flex gap-2">
-            <button onClick={() => setReaderMode('page')} className={btnClass(readerMode === 'page')}>
+        <div className="flex items-center justify-between px-5 py-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.reader')}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.reader.desc')}</p>
+          </div>
+          <div className="flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+            <button onClick={() => setReaderMode('page')} className={segmentClass(readerMode === 'page')}>
               {t('settings.reader.page')}
             </button>
-            <button onClick={() => setReaderMode('scroll')} className={btnClass(readerMode === 'scroll')}>
+            <button onClick={() => setReaderMode('scroll')} className={segmentClass(readerMode === 'scroll')}>
               {t('settings.reader.scroll')}
             </button>
           </div>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('settings.reader.desc')}
-          </p>
         </div>
 
         {/* Image Format */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="mb-2 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {t('settings.imageFormat')}
-          </label>
-          <select
+        <div className="flex items-center justify-between px-5 py-4">
+          <div>
+            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.imageFormat')}</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.imageFormat.desc')}</p>
+          </div>
+          <Select
             value={imageFormat}
-            onChange={(e) => setImageFormat(e.target.value as 'auto' | 'avif' | 'webp' | 'original')}
-            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-          >
-            <option value="auto">Auto</option>
-            <option value="avif">AVIF</option>
-            <option value="webp">WebP</option>
-            <option value="original">Original</option>
-          </select>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('settings.imageFormat.desc')}
-          </p>
+            onChange={(v) => { const valid = ['auto', 'avif', 'webp', 'original'] as const; if ((valid as readonly string[]).includes(v)) setImageFormat(v as typeof valid[number]); }}
+            className="w-32"
+            options={[
+              { value: 'auto', label: 'Auto' },
+              { value: 'avif', label: 'AVIF' },
+              { value: 'webp', label: 'WebP' },
+              { value: 'original', label: 'Original' },
+            ]}
+          />
         </div>
 
-        {/* Blur Tags */}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="mb-2 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {t('settings.blurTags')}
-          </label>
+      </div>
+
+      {/* Blur Tags — separate section */}
+      <div className="mt-6 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="px-5 py-4">
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.blurTags')}</p>
+          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">{t('settings.blurTags.desc')}</p>
           <BlurTagInput onAdd={addBlurTag} />
           {blurTags.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-1.5">
               {blurTags.map((tag) => (
-                <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
                   {tag}
-                  <button onClick={() => removeBlurTag(tag)} className="ml-1 text-zinc-400 hover:text-red-500">&times;</button>
+                  <button onClick={() => removeBlurTag(tag)} className="text-zinc-400 hover:text-red-500">&times;</button>
                 </span>
               ))}
             </div>
           ) : (
-            <p className="mt-2 text-xs text-zinc-400">{t('settings.blurTags.empty')}</p>
+            <p className="mt-3 text-xs text-zinc-400">{t('settings.blurTags.empty')}</p>
           )}
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {t('settings.blurTags.desc')}
-          </p>
         </div>
       </div>
-    </>
+    </div>
   );
 }

@@ -18,7 +18,7 @@ export function parseNozomiData(buffer: ArrayBuffer): number[] {
   const view = new DataView(buffer);
   const ids: number[] = [];
   for (let i = 0; i + BYTES_PER_ID <= buffer.byteLength; i += BYTES_PER_ID) {
-    ids.push(view.getInt32(i, false));
+    ids.push(view.getUint32(i, false));
   }
   return ids;
 }

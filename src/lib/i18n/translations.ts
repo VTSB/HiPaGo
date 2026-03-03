@@ -17,6 +17,7 @@ const translations = {
   'search.otherResults': { en: 'Other results', ko: '다른 결과' },
   'search.recentSearches': { en: 'Recent Searches', ko: '최근 검색' },
   'search.clearHistory': { en: 'Clear all', ko: '전체 삭제' },
+  'search.sortUnavailable': { en: 'Sorting is only available for single-tag searches', ko: '정렬은 단일 태그 검색에서만 사용 가능합니다' },
 
   // Gallery detail
   'detail.back': { en: 'Back', ko: '뒤로' },
@@ -29,6 +30,8 @@ const translations = {
   'detail.loadFailed': { en: 'Failed to load gallery', ko: '갤러리 로딩 실패' },
   'detail.invalidId': { en: 'Invalid gallery ID', ko: '잘못된 갤러리 ID' },
   'detail.download': { en: 'Download', ko: '다운로드' },
+  'detail.copyId': { en: 'Copy ID', ko: 'ID 복사' },
+  'detail.copied': { en: 'ID copied!', ko: 'ID 복사됨!' },
 
   // Gallery card
   'card.failed': { en: 'Failed', ko: '실패' },
@@ -38,6 +41,12 @@ const translations = {
   'favorites.empty': { en: 'No favorites yet. Browse galleries and add some!', ko: '즐겨찾기가 없습니다. 갤러리를 둘러보고 추가해보세요!' },
   'history.title': { en: 'History', ko: '기록' },
   'history.empty': { en: 'No recently viewed galleries.', ko: '최근 본 갤러리가 없습니다.' },
+  'history.today': { en: 'Today', ko: '오늘' },
+  'history.yesterday': { en: 'Yesterday', ko: '어제' },
+  'history.thisWeek': { en: 'This Week', ko: '이번 주' },
+  'history.lastWeek': { en: 'Last Week', ko: '지난주' },
+  'history.thisMonth': { en: 'This Month', ko: '이번 달' },
+  'history.older': { en: 'Older', ko: '더 이전' },
 
   // Pagination
   'page.shown': { en: 'shown', ko: '표시' },
@@ -73,7 +82,6 @@ const translations = {
   'settings.theme.desc': { en: 'Choose your preferred color scheme', ko: '색상 테마 선택' },
   'settings.theme.light': { en: 'Light', ko: '라이트' },
   'settings.theme.dark': { en: 'Dark', ko: '다크' },
-  'settings.theme.system': { en: 'System', ko: '시스템' },
   'settings.reader': { en: 'Reader Mode', ko: '뷰어 모드' },
   'settings.reader.desc': { en: 'Choose how to view gallery pages', ko: '갤러리 페이지 보기 방식' },
   'settings.reader.page': { en: 'Page', ko: '페이지' },
@@ -90,6 +98,13 @@ const translations = {
 
   // Language filter (header)
   'langFilter.label': { en: 'Language filter', ko: '언어 필터' },
+
+  // Error pages
+  'error.title': { en: 'Something went wrong', ko: '문제가 발생했습니다' },
+  'error.tryAgain': { en: 'Try again', ko: '다시 시도' },
+  'error.galleryFailed': { en: 'Failed to load gallery', ko: '갤러리 로딩 실패' },
+  'error.backHome': { en: 'Back to home', ko: '홈으로' },
+  'error.unexpected': { en: 'An unexpected error occurred. Please try again.', ko: '예기치 않은 오류가 발생했습니다. 다시 시도해주세요.' },
 } as const;
 
 export type TranslationKey = keyof typeof translations;
