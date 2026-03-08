@@ -10,36 +10,21 @@ import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { useT } from '@/lib/i18n/useT';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
-import { RecentSearchesDropdown, parseToken } from './RecentSearchesDropdown';
+import { buildQueryString } from '@/shared/utils/build-query';
+import { useChipInputState } from '@/shared/hooks/useChipInputState';
+import { RecentSearchesDropdown } from './RecentSearchesDropdown';
 import { SuggestionDropdown } from './SuggestionDropdown';
-
-/** Build query string from chips + active input. */
-function buildQuery(chips: string[], activeInput: string): string {
-  const parts = [...chips];
-  const trimmed = activeInput.trim();
-  if (trimmed) parts.push(trimmed);
-  return parts.join(' ');
-}
-
-interface Snapshot {
-  chips: string[];
-  activeInput: string;
-}
 
 export function SearchBar() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const ignoreMouseRef = useRef(false);
-  const query = useSearchStore((s) => s.query);
   const setQuery = useSearchStore((s) => s.setQuery);
   const suggestions = useSearchStore((s) => s.suggestions);
   const clearSuggestions = useSearchStore((s) => s.clearSuggestions);
-  const [chips, setChips] = useState<string[]>([]);
-  const [activeInput, setActiveInput] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addRecentSearch = useSearchStore((s) => s.addRecentSearch);
   const removeRecentSearch = useSearchStore((s) => s.removeRecentSearch);
@@ -48,32 +33,24 @@ export function SearchBar() {
   const t = useT();
   const [popularTags, setPopularTags] = useState<Suggestion[]>([]);
 
-  // Undo/redo stacks
-  const undoStack = useRef<Snapshot[]>([]);
-  const redoStack = useRef<Snapshot[]>([]);
+  const {
+    chips,
+    activeInput,
+    inputPosition,
+    gapTexts,
+    moveInputPosition,
+    undo, redo,
+    handleRemoveChip, handleRemoveChips,
+    handleClearAll,
+    handlePaste,
+    insertChip,
+    syncFromQuery,
+    handleInputChange: handleInputChangeBase,
+  } = useChipInputState();
 
-  const pushUndo = useCallback(() => {
-    undoStack.current.push({ chips: [...chips], activeInput });
-    redoStack.current = [];
-  }, [chips, activeInput]);
+  const historyVisible = showDropdown && activeInput === '' && chips.length === 0 && recentSearches.length > 0 && suggestions.length === 0;
 
   const searchParams = useSearchParams();
-
-  // Parse query string: tags → chips, plain text → activeInput
-  const syncFromQuery = useCallback((q: string) => {
-    const tokens = q.trim().split(/\s+/).filter(Boolean);
-    const tagChips: string[] = [];
-    const textParts: string[] = [];
-    for (const token of tokens) {
-      if (parseToken(token)) {
-        tagChips.push(token);
-      } else {
-        textParts.push(token);
-      }
-    }
-    setChips(tagChips);
-    setActiveInput(textParts.join(' '));
-  }, []);
 
   // Sync from URL when navigating via tag links
   useEffect(() => {
@@ -105,26 +82,15 @@ export function SearchBar() {
 
   const appendTag = useCallback(
     (tag: string, tagType: string) => {
-      pushUndo();
       const newTag = `${tagType}:${tag.replace(/ /g, '_')}`;
-      if (editingIndex !== null) {
-        setChips((prev) => {
-          const next = [...prev];
-          next[editingIndex] = newTag;
-          return next;
-        });
-        setEditingIndex(null);
-      } else {
-        setChips((prev) => [...prev, newTag]);
-      }
-      setActiveInput('');
+      insertChip(newTag);
       clearSuggestions();
       setSelectedIndex(-1);
       ignoreMouseRef.current = true;
       setTimeout(() => { ignoreMouseRef.current = false; }, 300);
       inputRef.current?.focus();
     },
-    [editingIndex, clearSuggestions, pushUndo],
+    [insertChip, clearSuggestions],
   );
 
   const handleSuggestionClick = useCallback(
@@ -135,14 +101,13 @@ export function SearchBar() {
   );
 
   const doSubmit = useCallback(() => {
-    const fullQuery = buildQuery(chips, activeInput);
+    const fullQuery = buildQueryString(chips, activeInput, inputPosition, gapTexts);
     if (!fullQuery) return;
     setShowDropdown(false);
     clearSuggestions();
-    setEditingIndex(null);
     addRecentSearch(fullQuery);
     router.push(`/search?q=${encodeURIComponent(fullQuery)}`);
-  }, [activeInput, chips, router, clearSuggestions, addRecentSearch]);
+  }, [activeInput, chips, inputPosition, gapTexts, router, clearSuggestions, addRecentSearch]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -151,14 +116,6 @@ export function SearchBar() {
     },
     [doSubmit],
   );
-
-  const editChip = useCallback((index: number) => {
-    pushUndo();
-    const chip = chips[index];
-    setActiveInput(chip);
-    setEditingIndex(index);
-    inputRef.current?.focus();
-  }, [chips, pushUndo]);
 
   const handleHistoryClick = useCallback((search: string) => {
     syncFromQuery(search);
@@ -169,36 +126,9 @@ export function SearchBar() {
   }, [syncFromQuery, clearSuggestions, addRecentSearch, router]);
 
   const handleInputChange = useCallback((text: string) => {
-    setActiveInput(text);
+    handleInputChangeBase(text);
     setSelectedIndex(-1);
-  }, []);
-
-  const handleRemoveChip = useCallback((index: number) => {
-    pushUndo();
-    setChips((prev) => prev.filter((_, i) => i !== index));
-  }, [pushUndo]);
-
-  // Paste handler: parse tags from pasted text
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
-    const text = e.clipboardData.getData('text/plain');
-    if (!text) return;
-    const tokens = text.trim().split(/[\s\n]+/).filter(Boolean);
-    const hasTag = tokens.some((t) => parseToken(t));
-    if (!hasTag) return; // let input handle plain text paste
-    e.preventDefault();
-    pushUndo();
-    const newChips: string[] = [];
-    const textParts: string[] = [];
-    for (const token of tokens) {
-      if (parseToken(token)) {
-        newChips.push(token);
-      } else {
-        textParts.push(token);
-      }
-    }
-    if (newChips.length > 0) setChips((prev) => [...prev, ...newChips]);
-    if (textParts.length > 0) setActiveInput((prev) => prev + textParts.join(' '));
-  }, [pushUndo]);
+  }, [handleInputChangeBase]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -208,32 +138,25 @@ export function SearchBar() {
       // Ctrl+Z: undo
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        if (undoStack.current.length > 0) {
-          redoStack.current.push({ chips: [...chips], activeInput });
-          const prev = undoStack.current.pop()!;
-          setChips(prev.chips);
-          setActiveInput(prev.activeInput);
-          setEditingIndex(null);
-        }
+        undo();
         return;
       }
 
       // Ctrl+Shift+Z or Ctrl+Y: redo
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
         e.preventDefault();
-        if (redoStack.current.length > 0) {
-          undoStack.current.push({ chips: [...chips], activeInput });
-          const next = redoStack.current.pop()!;
-          setChips(next.chips);
-          setActiveInput(next.activeInput);
-          setEditingIndex(null);
-        }
+        redo();
         return;
       }
 
-      // Enter: submit or accept suggestion
+      // Enter: submit or accept suggestion / recent search
       if (e.key === 'Enter') {
         e.preventDefault();
+        if (historyVisible && selectedIndex >= 0 && selectedIndex < recentSearches.length) {
+          handleHistoryClick(recentSearches[selectedIndex]);
+          setSelectedIndex(-1);
+          return;
+        }
         const currentList = suggestions.length > 0 ? suggestions
           : (activeInput === '' && chips.length > 0 && popularTags.length > 0) ? popularTags : [];
         if (selectedIndex >= 0 && selectedIndex < currentList.length) {
@@ -251,15 +174,25 @@ export function SearchBar() {
         if (showDropdown) {
           setShowDropdown(false);
           clearSuggestions();
-        }
-        if (editingIndex !== null) {
-          setEditingIndex(null);
-          setActiveInput('');
+          // Re-focus to keep caret active; some browsers blur contenteditable on Escape
+          setTimeout(() => inputRef.current?.focus(), 0);
         }
         return;
       }
 
-      // ArrowDown/Up: navigate dropdown
+      // ArrowDown/Up: navigate dropdown (recent searches or suggestions)
+      if (historyVisible) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSelectedIndex((prev) => prev < recentSearches.length - 1 ? prev + 1 : 0);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSelectedIndex((prev) => prev > 0 ? prev - 1 : recentSearches.length - 1);
+          return;
+        }
+      }
       const currentList = suggestions.length > 0 ? suggestions
         : (activeInput === '' && chips.length > 0 && popularTags.length > 0) ? popularTags : [];
       if (showDropdown && currentList.length > 0) {
@@ -275,7 +208,7 @@ export function SearchBar() {
         }
       }
     },
-    [showDropdown, suggestions, popularTags, selectedIndex, appendTag, activeInput, chips, editingIndex, doSubmit, clearSuggestions],
+    [showDropdown, suggestions, popularTags, selectedIndex, appendTag, activeInput, chips, doSubmit, clearSuggestions, undo, redo, historyVisible, recentSearches, handleHistoryClick],
   );
 
   // Show dropdown when we have suggestions and input is focused
@@ -288,11 +221,7 @@ export function SearchBar() {
   // Handle click outside
   const handleClickOutside = useCallback(() => {
     setShowDropdown(false);
-    if (editingIndex !== null) {
-      setEditingIndex(null);
-      setActiveInput('');
-    }
-  }, [editingIndex]);
+  }, []);
   useClickOutside([inputRef, dropdownRef], handleClickOutside);
 
   // Handle keyboard shortcuts
@@ -321,13 +250,20 @@ export function SearchBar() {
         <ChipInput
           chips={chips}
           activeInput={activeInput}
+          inputPosition={inputPosition}
           onInputChange={handleInputChange}
+          onInputPositionChange={moveInputPosition}
+          gapTexts={gapTexts}
+          onGapTextClick={(pos) => { moveInputPosition(pos); }}
           onRemoveChip={handleRemoveChip}
+          onRemoveChips={handleRemoveChips}
           onKeyDown={handleKeyDown}
           onFocus={() => setShowDropdown(true)}
-          onEditChip={editChip}
+          onBlur={() => {
+            setShowDropdown(false);
+          }}
           onPaste={handlePaste}
-          editingIndex={editingIndex}
+          onClearAll={handleClearAll}
           placeholder={chips.length === 0 ? t('search.placeholder') : ''}
           inputRef={inputRef}
         />
@@ -346,6 +282,7 @@ export function SearchBar() {
                 onSelect={handleHistoryClick}
                 onRemove={removeRecentSearch}
                 onClear={clearRecentSearches}
+                selectedIndex={selectedIndex}
               />
             </div>
           );

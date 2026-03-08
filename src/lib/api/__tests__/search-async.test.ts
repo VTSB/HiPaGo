@@ -382,6 +382,31 @@ describe('getGalleryIdsForQuery — multi-term intersection', () => {
     expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'japanese', undefined);
     expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'yam', 'japanese', undefined);
   });
+
+  it('ignores plain text terms when mixed with tag terms — text does not narrow results to zero', async () => {
+    // Query: "artist:yam 검색어 female:loli" — "검색어" is plain text, should be ignored in remote search
+    // Only artist:yam and female:loli are intersected
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([500, 300, 100])  // artist:yam
+      .mockResolvedValueOnce([400, 300, 100]); // female:loli
+
+    const result = await getGalleryIdsForQuery('artist:yam 검색어 female:loli', 'all');
+
+    // Only 2 nozomi fetches (not 3), text term skipped
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(2);
+    // Result is intersection of the two tag terms
+    expect(result).toEqual([300, 100]);
+  });
+
+  it('uses only tag terms when query has one tag and one text term', async () => {
+    // Query: "artist:yam hello" — "hello" is plain text, should be ignored
+    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([500, 300, 100]);
+
+    const result = await getGalleryIdsForQuery('artist:yam hello', 'all');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([500, 300, 100]);
+  });
 });
 
 describe('getSuggestionsForQuery — encodeTagIndexChar special characters', () => {

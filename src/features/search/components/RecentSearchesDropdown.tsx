@@ -21,9 +21,10 @@ interface RecentSearchesDropdownProps {
   onSelect: (search: string) => void;
   onRemove: (search: string) => void;
   onClear: () => void;
+  selectedIndex?: number;
 }
 
-export function RecentSearchesDropdown({ searches, onSelect, onRemove, onClear }: RecentSearchesDropdownProps) {
+export function RecentSearchesDropdown({ searches, onSelect, onRemove, onClear, selectedIndex = -1 }: RecentSearchesDropdownProps) {
   const t = useT();
 
   return (
@@ -32,7 +33,7 @@ export function RecentSearchesDropdown({ searches, onSelect, onRemove, onClear }
         <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{t('search.recentSearches')}</span>
         <button
           type="button"
-          onClick={onClear}
+          onMouseDown={(e) => { e.preventDefault(); onClear(); }}
           className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
         >
           {t('search.clearHistory')}
@@ -45,9 +46,9 @@ export function RecentSearchesDropdown({ searches, onSelect, onRemove, onClear }
             key={search}
             role="button"
             tabIndex={0}
-            onClick={() => onSelect(search)}
+            onMouseDown={(e) => { e.preventDefault(); onSelect(search); }}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(search); } }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer"
+            className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer ${searches.indexOf(search) === selectedIndex ? 'bg-zinc-100 dark:bg-zinc-700' : ''}`}
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-zinc-400">
               <path fillRule="evenodd" d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z" clipRule="evenodd" />
@@ -66,7 +67,7 @@ export function RecentSearchesDropdown({ searches, onSelect, onRemove, onClear }
             </div>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onRemove(search); }}
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(search); }}
               className="ml-auto flex-shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">

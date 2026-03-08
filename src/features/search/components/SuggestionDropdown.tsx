@@ -28,7 +28,7 @@ export function SuggestionDropdown({ suggestions, selectedIndex, onSelect, onHov
           type="button"
           role="option"
           aria-selected={idx === selectedIndex}
-          onClick={() => onSelect(suggestion.tag, suggestion.tagType)}
+          onMouseDown={(e) => { e.preventDefault(); onSelect(suggestion.tag, suggestion.tagType); }}
           onMouseEnter={() => !ignoreMouseRef.current && onHover(idx)}
           className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
             idx === selectedIndex

@@ -302,6 +302,12 @@ async function getGalleryIdsForSingleTerm(
  * Get gallery IDs for a (potentially compound) search query.
  * Supports multiple space-separated terms with AND logic:
  *   "female:loli artist:yam" → intersection of both result sets
+ *
+ * Plain text terms (no valid tag type prefix) are excluded from the remote
+ * B-tree intersection because gallery title keyword lookups are hash-exact
+ * and would eliminate most results when mixed with tag terms. Tag-typed terms
+ * are intersected with AND; plain text terms are ignored in remote search
+ * (title filtering is handled locally or client-side).
  */
 export async function getGalleryIdsForQuery(
   query: string,
@@ -311,14 +317,33 @@ export async function getGalleryIdsForQuery(
   const terms = parseCompoundQuery(query);
   if (terms.length === 0) return [];
 
-  if (terms.length === 1) {
+  // Separate typed tag terms from plain text terms
+  const tagTerms = terms.filter((term) => {
+    const colonIndex = term.indexOf(':');
+    if (colonIndex <= 0) return false;
+    const possibleType = term.slice(0, colonIndex).toLowerCase();
+    return (Object.values(TagType) as string[]).includes(possibleType);
+  });
+
+  // If the entire query is plain text (no tag terms), fall back to single-term B-tree search
+  if (tagTerms.length === 0) {
+    if (terms.length === 1) {
+      return getGalleryIdsForSingleTerm(terms[0], language, sort);
+    }
+    // Multiple plain text terms: search first term only (B-tree doesn't support multi-word AND)
     return getGalleryIdsForSingleTerm(terms[0], language, sort);
   }
 
-  // Fetch results for all terms in parallel, then intersect
-  // Sort only applies to single-term queries (nozomi). Multi-term uses intersection.
+  // If only one tag term (and possibly text terms that are ignored), apply sort
+  if (tagTerms.length === 1) {
+    return getGalleryIdsForSingleTerm(tagTerms[0], language, tagTerms.length === terms.length ? sort : undefined);
+  }
+
+  // Multiple tag terms: fetch in parallel and intersect (AND logic).
+  // Plain text terms are intentionally excluded — they would produce near-zero
+  // intersections because the galleries B-tree index rarely overlaps nozomi tag results.
   const results = await Promise.all(
-    terms.map((term) => getGalleryIdsForSingleTerm(term, language)),
+    tagTerms.map((term) => getGalleryIdsForSingleTerm(term, language)),
   );
 
   return intersectIdSets(results);

@@ -6,6 +6,7 @@ import { SuggestionDropdown } from '@/features/search/components/SuggestionDropd
 import { parseToken } from '@/features/search/components/RecentSearchesDropdown';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
+import { useChipInputState } from '@/shared/hooks/useChipInputState';
 import type { TagType, Suggestion } from '@/lib/utils/types';
 
 export interface FilterBarProps {
@@ -13,37 +14,32 @@ export interface FilterBarProps {
   placeholder?: string;
 }
 
-interface Snapshot {
-  chips: string[];
-  activeInput: string;
-}
-
 export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
-  const [chips, setChips] = useState<string[]>([]);
-  const [activeInput, setActiveInput] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const ignoreMouseRef = useRef(false);
-  const undoStack = useRef<Snapshot[]>([]);
-  const redoStack = useRef<Snapshot[]>([]);
 
-  const pushUndo = useCallback(() => {
-    undoStack.current.push({ chips: [...chips], activeInput });
-    redoStack.current = [];
-  }, [chips, activeInput]);
+  const {
+    chips,
+    activeInput,
+    inputPosition,
+    gapTexts,
+    moveInputPosition,
+    undo, redo,
+    handleRemoveChip, handleRemoveChips,
+    handleClearAll,
+    handlePaste,
+    insertChip,
+    handleInputChange: handleInputChangeBase,
+  } = useChipInputState();
 
   const handleClickOutside = useCallback(() => {
     setShowDropdown(false);
-    if (editingIndex !== null) {
-      setEditingIndex(null);
-      setActiveInput('');
-    }
-  }, [editingIndex]);
+  }, []);
   useClickOutside([inputRef, dropdownRef], handleClickOutside);
 
   // Debounced autocomplete
@@ -75,10 +71,18 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
         tags.push({ type: parsed.type, name: parsed.tag });
       }
     }
-    const titleQuery = activeInput.trim();
+    // Combine all text: activeInput + all gapTexts values
+    const allTexts = [activeInput.trim()];
+    if (gapTexts) {
+      for (const text of Object.values(gapTexts)) {
+        const t = text.trim();
+        if (t) allTexts.push(t);
+      }
+    }
+    const titleQuery = allTexts.filter(Boolean).join(' ');
     onFilterChange({ tags, titleQuery });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chips, activeInput]);
+  }, [chips, activeInput, gapTexts]);
 
   // Only commits tag-formatted values (type:name) as chips
   const commitTag = useCallback((value: string) => {
@@ -86,67 +90,21 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
     if (!trimmed) return;
     if (!parseToken(trimmed)) return;
 
-    pushUndo();
-    if (editingIndex !== null) {
-      setChips((prev) => {
-        const next = [...prev];
-        next[editingIndex] = trimmed;
-        return next;
-      });
-      setEditingIndex(null);
-    } else {
-      setChips((prev) => [...prev, trimmed]);
-    }
-
-    setActiveInput('');
+    insertChip(trimmed);
     setSuggestions([]);
     setShowDropdown(false);
     setSelectedIndex(-1);
-  }, [editingIndex, pushUndo]);
+  }, [insertChip]);
 
   const handleSuggestionClick = useCallback((tag: string, tagType: string) => {
     commitTag(`${tagType}:${tag}`);
     inputRef.current?.focus();
   }, [commitTag]);
 
-  const editChip = useCallback((index: number) => {
-    pushUndo();
-    setEditingIndex(index);
-    setActiveInput(chips[index]);
-    setShowDropdown(false);
-    setTimeout(() => inputRef.current?.focus(), 0);
-  }, [chips, pushUndo]);
-
   const handleInputChange = useCallback((text: string) => {
-    setActiveInput(text);
+    handleInputChangeBase(text);
     setSelectedIndex(-1);
-  }, []);
-
-  const handleRemoveChip = useCallback((index: number) => {
-    pushUndo();
-    setChips((prev) => prev.filter((_, i) => i !== index));
-  }, [pushUndo]);
-
-  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>) => {
-    const text = e.clipboardData.getData('text/plain');
-    if (!text) return;
-    const tokens = text.trim().split(/[\s\n]+/).filter(Boolean);
-    const hasTag = tokens.some((t) => parseToken(t));
-    if (!hasTag) return;
-    e.preventDefault();
-    pushUndo();
-    const newChips: string[] = [];
-    const textParts: string[] = [];
-    for (const token of tokens) {
-      if (parseToken(token)) {
-        newChips.push(token);
-      } else {
-        textParts.push(token);
-      }
-    }
-    if (newChips.length > 0) setChips((prev) => [...prev, ...newChips]);
-    if (textParts.length > 0) setActiveInput((prev) => prev + textParts.join(' '));
-  }, [pushUndo]);
+  }, [handleInputChangeBase]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return;
@@ -154,26 +112,14 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
     // Ctrl+Z: undo
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
-      if (undoStack.current.length > 0) {
-        redoStack.current.push({ chips: [...chips], activeInput });
-        const prev = undoStack.current.pop()!;
-        setChips(prev.chips);
-        setActiveInput(prev.activeInput);
-        setEditingIndex(null);
-      }
+      undo();
       return;
     }
 
     // Ctrl+Shift+Z / Ctrl+Y: redo
     if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
       e.preventDefault();
-      if (redoStack.current.length > 0) {
-        undoStack.current.push({ chips: [...chips], activeInput });
-        const next = redoStack.current.pop()!;
-        setChips(next.chips);
-        setActiveInput(next.activeInput);
-        setEditingIndex(null);
-      }
+      redo();
       return;
     }
 
@@ -189,45 +135,48 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
       return;
     }
 
-    // Escape: close dropdown / cancel editing
+    // Escape: close dropdown
     if (e.key === 'Escape') {
       setShowDropdown(false);
       setSuggestions([]);
       setSelectedIndex(-1);
-      if (editingIndex !== null) {
-        setEditingIndex(null);
-        setActiveInput('');
-      }
       return;
     }
 
-    // ArrowDown/Up: navigate suggestions
+    // ArrowDown/Up: navigate suggestions (wrap-around)
     if (showDropdown && suggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, suggestions.length - 1));
+        setSelectedIndex((prev) => prev < suggestions.length - 1 ? prev + 1 : 0);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedIndex((prev) => Math.max(prev - 1, -1));
+        setSelectedIndex((prev) => prev > 0 ? prev - 1 : suggestions.length - 1);
         return;
       }
     }
-  }, [activeInput, chips, editingIndex, handleSuggestionClick, showDropdown, selectedIndex, suggestions, commitTag, pushUndo]);
+  }, [activeInput, handleSuggestionClick, showDropdown, selectedIndex, suggestions, commitTag, undo, redo]);
 
   return (
     <div className="relative w-full">
       <ChipInput
         chips={chips}
         activeInput={activeInput}
+        inputPosition={inputPosition}
         onInputChange={handleInputChange}
+        onInputPositionChange={moveInputPosition}
+        gapTexts={gapTexts}
+        onGapTextClick={(pos) => { moveInputPosition(pos); }}
         onRemoveChip={handleRemoveChip}
+        onRemoveChips={handleRemoveChips}
         onKeyDown={handleKeyDown}
         onFocus={() => { if (suggestions.length > 0) setShowDropdown(true); }}
-        onEditChip={editChip}
+        onBlur={() => {
+          setShowDropdown(false);
+        }}
         onPaste={handlePaste}
-        editingIndex={editingIndex}
+        onClearAll={handleClearAll}
         placeholder={placeholder}
         inputRef={inputRef}
       />
