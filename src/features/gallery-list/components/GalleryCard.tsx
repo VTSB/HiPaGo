@@ -38,16 +38,20 @@ function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
 
 function CardSkeleton() {
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <div className="aspect-[3/4] animate-pulse bg-zinc-200 dark:bg-zinc-800" />
-      <div className="space-y-2 p-2">
-        <div className="h-4 w-3/4 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
+    <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-200 dark:bg-zinc-800 animate-pulse">
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 pt-8 pb-2">
+        <div className="h-4 w-3/4 rounded bg-zinc-400/50 dark:bg-zinc-600/50" />
+        <div className="mt-1.5 flex gap-1">
+          <div className="h-5 w-12 rounded-full bg-zinc-400/50 dark:bg-zinc-600/50" />
+          <div className="h-5 w-10 rounded-full bg-zinc-400/50 dark:bg-zinc-600/50" />
+          <div className="h-5 w-14 rounded-full bg-zinc-400/50 dark:bg-zinc-600/50" />
+        </div>
       </div>
     </div>
   );
 }
 
-function CardContent({ block, onPrefetch, itemIndex }: { block: GalleryBlock; onPrefetch?: () => void; itemIndex?: number }) {
+function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: () => void }) {
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
   const blurred = useMemo(() => shouldBlur(block, blurTags), [block, blurTags]);
@@ -68,7 +72,7 @@ function CardContent({ block, onPrefetch, itemIndex }: { block: GalleryBlock; on
       }
     }
     all.sort((a, b) => a.priority - b.priority);
-    return all.slice(0, 5);
+    return all;
   }, [block.tags, block.type]);
 
   if (block.type === GalleryBlockType.LOADING) {
@@ -76,31 +80,31 @@ function CardContent({ block, onPrefetch, itemIndex }: { block: GalleryBlock; on
   }
   if (block.type === GalleryBlockType.FAILED) {
     return (
-      <div className="flex aspect-[3/4] items-center justify-center rounded-lg border border-red-200 bg-red-50 text-sm text-red-500 dark:border-red-900 dark:bg-red-950">
+      <div className="flex aspect-[2/3] items-center justify-center rounded-lg border border-red-200 bg-red-50 text-sm text-red-500 dark:border-red-900 dark:bg-red-950">
         {t('card.failed')} #{block.id}
       </div>
     );
   }
 
   return (
-    <Link href={`/gallery/${block.id}`} className="group block" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }} onPointerEnter={onPrefetch} data-item-index={itemIndex}>
-      <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900">
-        <div className={`relative aspect-[3/4] overflow-hidden bg-zinc-100 dark:bg-zinc-800${blurred ? ' blur-lg' : ''}`}>
-          {block.thumbnail ? (
-            <AbortableImage src={block.thumbnail} alt={block.title} className="h-full w-full object-cover transition-transform group-hover:scale-105" loading="lazy" />
-          ) : (
-            <div className="flex h-full items-center justify-center text-zinc-400">{t('detail.noImage')}</div>
-          )}
-        </div>
-        <div className="p-2">
-          <h3 className="line-clamp-2 text-sm font-medium leading-tight text-zinc-900 dark:text-zinc-100">{block.title || `#${block.id}`}</h3>
-          {displayTags.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {displayTags.map(({ tag, type }) => (
-                <TagChip key={`${type}-${tag}`} tag={tag} type={type} displayName={tagI18n.get(`${type}:${tag}`)} linked={false} size="sm" />
-              ))}
-            </div>
-          )}
+    <Link href={`/gallery/${block.id}`} className="group block" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }} onPointerEnter={onPrefetch}>
+      <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 transition-shadow hover:shadow-lg">
+        {block.thumbnail ? (
+          <AbortableImage src={block.thumbnail} alt={block.title} className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`} loading="lazy" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-zinc-400">{t('detail.noImage')}</div>
+        )}
+        <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/95 via-black/70'} to-transparent pt-10`}>
+          <div className="px-2 pt-1.5 pb-2 backdrop-blur-sm">
+            <h3 className="line-clamp-2 text-sm font-semibold leading-tight text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)]">{block.title || `#${block.id}`}</h3>
+            {displayTags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1 overflow-hidden" style={{ maxHeight: '44px' }}>
+                {displayTags.map(({ tag, type }) => (
+                  <TagChip key={`${type}-${tag}`} tag={tag} type={type} displayName={tagI18n.get(`${type}:${tag}`)} linked={false} size="sm" />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </Link>
@@ -126,8 +130,8 @@ export const GalleryCard = memo(function GalleryCard({ block }: { block: Gallery
 });
 
 /** Render a gallery card by ID — fetches its own data progressively. */
-export const GalleryCardById = memo(function GalleryCardById({ id, itemIndex }: { id: number; itemIndex?: number }) {
+export const GalleryCardById = memo(function GalleryCardById({ id }: { id: number }) {
   const block = useGalleryBlock(id);
   const prefetch = usePrefetchGalleryInfo(id);
-  return <CardContent block={block} onPrefetch={prefetch} itemIndex={itemIndex} />;
+  return <CardContent block={block} onPrefetch={prefetch} />;
 });

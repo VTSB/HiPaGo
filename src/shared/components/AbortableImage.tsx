@@ -27,17 +27,20 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const loadedRef = useRef(false);
   const retryCountRef = useRef(0);
   const [visible, setVisible] = useState(loading === 'eager');
+  const [loaded, setLoaded] = useState(false);
 
   // Reset loaded/retry state when src changes
   useEffect(() => {
     loadedRef.current = false;
     retryCountRef.current = 0;
+    setLoaded(false);
   }, [src]);
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
     loadedRef.current = true;
     retryCountRef.current = 0;
+    setLoaded(true);
   }, []);
 
   // Retry on error (up to 10 times with exponential backoff)
@@ -70,7 +73,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
           setVisible(false);
         }
       },
-      { rootMargin: '200px' }, // start loading slightly before entering viewport
+      { rootMargin: '400px' }, // start loading slightly before entering viewport
     );
 
     observer.observe(img);
@@ -100,7 +103,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       alt={alt}
       className={className}
       loading={loading === 'eager' ? 'eager' : undefined}
-      style={style}
+      style={{ ...style, opacity: loaded ? undefined : 0 }}
       draggable={draggable}
       onLoad={handleLoad}
       onError={handleError}

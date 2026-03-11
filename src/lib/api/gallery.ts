@@ -25,11 +25,13 @@ export async function fetchGalleryInfo(id: number): Promise<GalleryInfo> {
 
 export async function fetchGalleryBlockHtmlById(
   id: number,
+  signal?: AbortSignal,
 ): Promise<GalleryBlock> {
   try {
-    const text = await apiClient.fetchLtnText(`galleryblock/${id}.html`);
+    const text = await apiClient.fetchLtnText(`galleryblock/${id}.html`, { signal });
     return parseGalleryBlockHtml(text, id);
-  } catch {
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw e;
     // Recoverable: HTML fetch/parse failed — return placeholder so UI still renders
     return createFailedBlock(id);
   }

@@ -23,25 +23,29 @@ async function fetchIdPage(language: string, pageParam: number, sort?: SortOrder
 
 /**
  * Manages gallery ID pagination with infinite scroll.
- * Individual block fetching is handled by useGalleryBlock per card.
+ * startPage sets the initial fetch target for fast page jumps.
+ * Bidirectional scroll (fetchPreviousPage) enables scrolling above the jump target.
  */
-export function useGalleryList(viewingPage = 1, sort: SortOrder = 'date_added') {
+export function useGalleryList(startPage = 0, viewingPage = 1, sort: SortOrder = 'date_added') {
   const language = useSettingsStore((s) => s.language);
 
   const query = useInfiniteQuery({
-    queryKey: ['gallery-ids', language, sort],
+    queryKey: ['gallery-ids', language, sort, startPage],
     queryFn: ({ pageParam }) => fetchIdPage(language, pageParam as number, sort),
-    initialPageParam: 0,
+    initialPageParam: startPage,
     getNextPageParam: (lastPage, _allPages, lastPageParam) =>
       lastPage.hasMore ? (lastPageParam as number) + 1 : undefined,
+    getPreviousPageParam: (_firstPage, _allPages, firstPageParam) =>
+      (firstPageParam as number) > 0 ? (firstPageParam as number) - 1 : undefined,
+    staleTime: 60_000,
   });
 
   // Prefetch ahead of current viewing page
   useEffect(() => {
     if (!query.data || query.isFetchingNextPage || !query.hasNextPage) return;
     const loadedPages = query.data.pages.length;
-    const targetPages = viewingPage + PREFETCH_AHEAD;
-    if (loadedPages < targetPages) {
+    if (loadedPages < 1) return;
+    if (loadedPages < viewingPage - startPage + PREFETCH_AHEAD) {
       query.fetchNextPage();
     }
   }, [query.data?.pages.length, query.isFetchingNextPage, query.hasNextPage, query.fetchNextPage, viewingPage]);
@@ -50,16 +54,25 @@ export function useGalleryList(viewingPage = 1, sort: SortOrder = 'date_added') 
   const totalLength = query.data?.pages[0]?.totalLength ?? 0;
   const loadedPages = query.data?.pages.length ?? 0;
   const totalPages = totalLength > 0 ? Math.ceil(totalLength / PAGE_SIZE) : 0;
+  const isJumping = query.isFetching && ids.length === 0;
+  const earliestLoadedPage = (query.data?.pageParams[0] as number) ?? startPage;
 
   return {
     ids,
     loading: query.isLoading,
+    isJumping,
     error: query.error?.message ?? null,
     hasMore: query.hasNextPage ?? false,
     loadMore: () => {
       if (query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage();
     },
     isFetchingMore: query.isFetchingNextPage,
+    hasPrevious: query.hasPreviousPage ?? false,
+    loadPrevious: () => {
+      if (query.hasPreviousPage && !query.isFetchingPreviousPage) query.fetchPreviousPage();
+    },
+    isFetchingPrevious: query.isFetchingPreviousPage,
+    earliestLoadedPage,
     loadedPages,
     totalPages,
     totalLength,

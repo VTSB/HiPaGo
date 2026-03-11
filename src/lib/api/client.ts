@@ -16,33 +16,52 @@ class ApiError extends Error {
 
 interface FetchOptions extends RequestInit {
   range?: string;
+  queuePriority?: number;  // lower = higher priority; default 1
 }
 
 class ApiClient {
-  private queue: (() => void)[] = [];
+  private queue: { priority: number; fn: () => void }[] = [];
   private activeRequests = 0;
   private readonly maxConcurrent = 6;
-  private async acquire(): Promise<void> {
+  private async acquire(priority = 1, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     if (this.activeRequests < this.maxConcurrent) {
       this.activeRequests++;
       return;
     }
-    return new Promise<void>((resolve) => {
-      this.queue.push(() => {
-        this.activeRequests++;
-        resolve();
-      });
+    return new Promise<void>((resolve, reject) => {
+      const entry = {
+        priority,
+        fn: () => {
+          this.activeRequests++;
+          resolve();
+        },
+      };
+      // Insert in sorted order (stable: lower priority number = earlier in queue)
+      const insertAt = this.queue.findIndex((q) => q.priority > entry.priority);
+      if (insertAt === -1) {
+        this.queue.push(entry);
+      } else {
+        this.queue.splice(insertAt, 0, entry);
+      }
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          const i = this.queue.indexOf(entry);
+          if (i !== -1) this.queue.splice(i, 1);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      }
     });
   }
 
   private release(): void {
     this.activeRequests--;
     const next = this.queue.shift();
-    if (next) next();
+    if (next) next.fn();
   }
 
   async fetchUrl(url: string, options: FetchOptions = {}): Promise<Response> {
-    await this.acquire();
+    await this.acquire(options.queuePriority ?? 1, options.signal as AbortSignal | undefined);
     try {
       const headers: Record<string, string> = {
         ...getNativeHeaders(),
@@ -77,8 +96,10 @@ class ApiClient {
         });
       } else {
         // Browser: normal fetch (goes through /api/ proxy routes with napi bypass)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { range: _range, queuePriority: _qp, ...fetchInit } = options;
         response = await fetch(url, {
-          ...options,
+          ...fetchInit,
           headers,
           signal: options.signal ?? AbortSignal.timeout(30000),
         });
@@ -107,8 +128,8 @@ class ApiClient {
     return this.fetchUrl(`${MI_URL}${path}`, options);
   }
 
-  async fetchLtnText(path: string): Promise<string> {
-    const response = await this.fetchLtn(path);
+  async fetchLtnText(path: string, options: FetchOptions = {}): Promise<string> {
+    const response = await this.fetchLtn(path, options);
     return response.text();
   }
 
@@ -121,7 +142,7 @@ class ApiClient {
     path: string,
     range: string,
   ): Promise<{ data: ArrayBuffer; total: number | null }> {
-    const response = await this.fetchLtn(path, { range });
+    const response = await this.fetchLtn(path, { range, queuePriority: 0 });
     const contentRange = response.headers.get('Content-Range');
     let total: number | null = null;
     if (contentRange) {

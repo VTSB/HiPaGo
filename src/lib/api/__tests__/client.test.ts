@@ -72,7 +72,6 @@ describe('apiClient.fetchUrl', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://example.com/file', expect.objectContaining({
       headers: { Range: 'bytes=0-1023' },
-      range: 'bytes=0-1023',
     }));
   });
 
@@ -101,7 +100,6 @@ describe('apiClient.fetchUrl', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('https://example.com/file', expect.objectContaining({
       headers: { 'X-Custom': 'test', Range: 'bytes=0-499' },
-      range: 'bytes=0-499',
     }));
   });
 });
@@ -146,7 +144,6 @@ describe('apiClient.fetchLtn', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/data.bin', expect.objectContaining({
       headers: { Range: 'bytes=100-199' },
-      range: 'bytes=100-199',
     }));
   });
 });
@@ -207,7 +204,6 @@ describe('apiClient.fetchLtnBinary', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/api/hitomi/data.bin', expect.objectContaining({
       headers: { Range: 'bytes=0-15' },
-      range: 'bytes=0-15',
     }));
   });
 

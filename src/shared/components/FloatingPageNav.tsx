@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useSettingsStore } from '@/lib/store/settings';
 
 /** Poll for an element to appear, then call callback. */
@@ -35,6 +35,11 @@ export function getNextPageAction(
   return { action: 'noop', targetPage: viewingPage };
 }
 
+export interface FloatingPageNavHandle {
+  /** Suppress scroll-based page tracking for ~400ms (call before programmatic scroll). */
+  suppress: () => void;
+}
+
 interface FloatingPageNavProps {
   /** Total number of items across all pages */
   totalItems: number;
@@ -46,22 +51,56 @@ interface FloatingPageNavProps {
   hasMore?: boolean;
   /** Called when user navigates past loaded content */
   onLoadMore?: () => void;
+  /** Controlled viewing page — when passed, parent drives the display */
+  viewingPage?: number;
+  /** Called whenever scroll tracking updates the viewing page */
+  onViewingPageChange?: (page: number) => void;
+  /** Called when user requests a non-adjacent or unloaded-page jump */
+  onJumpToPage?: (page: number) => void;
+  /** When true, disables prev/next navigation buttons */
+  isJumping?: boolean;
+  /** First page available in the current loaded window (disable prev when viewingPage <= this) */
+  firstLoadedPage?: number;
 }
 
-export function FloatingPageNav({
+export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNavProps>(function FloatingPageNav({
   totalItems,
   loadedItems,
   pageSize,
   hasMore,
   onLoadMore,
-}: FloatingPageNavProps) {
-  const [viewingPage, setViewingPage] = useState(1);
+  viewingPage: viewingPageProp,
+  onViewingPageChange,
+  onJumpToPage,
+  isJumping,
+  firstLoadedPage,
+}: FloatingPageNavProps, ref) {
+  const [localViewingPage, setLocalViewingPage] = useState(viewingPageProp ?? 1);
+  const viewingPage = viewingPageProp ?? localViewingPage;
+  const setViewingPage = useCallback((p: number) => {
+    setLocalViewingPage(p);
+    onViewingPageChange?.(p);
+  }, [onViewingPageChange]);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const loadedPages = Math.ceil(loadedItems / pageSize);
+
+  // Suppress scroll-based page tracking briefly after a button click
+  // so the immediate page update isn't overwritten by scroll animation events.
+  const suppressScrollRef = useRef(false);
+  const suppressTimerRef = useRef(0);
+  const suppressScrollTracking = useCallback(() => {
+    clearTimeout(suppressTimerRef.current);
+    suppressScrollRef.current = true;
+    suppressTimerRef.current = window.setTimeout(() => {
+      suppressScrollRef.current = false;
+    }, 400);
+  }, []);
+
+  useImperativeHandle(ref, () => ({ suppress: suppressScrollTracking }), [suppressScrollTracking]);
 
   // Track scroll position by finding the first visible item in the viewport
   useEffect(() => {
@@ -71,18 +110,19 @@ export function FloatingPageNav({
     const onScroll = () => {
       if (!ticking) {
         requestAnimationFrame(() => {
-          // Find the first item whose top is at or below the header offset
-          const items = document.querySelectorAll('[data-item-index]');
-          let foundPage = 1;
-          for (let i = items.length - 1; i >= 0; i--) {
-            const rect = items[i].getBoundingClientRect();
-            if (rect.top <= headerOffset + 20) {
-              const idx = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
-              foundPage = Math.floor(idx / pageSize) + 1;
-              break;
+          if (!suppressScrollRef.current) {
+            const items = document.querySelectorAll('[data-item-index]');
+            let foundPage = 1;
+            for (let i = items.length - 1; i >= 0; i--) {
+              const rect = items[i].getBoundingClientRect();
+              if (rect.top <= headerOffset + 20) {
+                const idx = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
+                foundPage = Math.floor(idx / pageSize) + 1;
+                break;
+              }
             }
+            setViewingPage(foundPage);
           }
-          setViewingPage(foundPage);
           ticking = false;
         });
         ticking = true;
@@ -124,19 +164,31 @@ export function FloatingPageNav({
   }, [pageSize]);
 
   const goPrev = useCallback(() => {
-    if (viewingPage <= 1) return;
-    scrollToPage(viewingPage - 1);
-  }, [viewingPage, scrollToPage]);
+    const firstPage = firstLoadedPage ?? 1;
+    if (viewingPage <= firstPage) return;
+    const target = viewingPage - 1;
+    setViewingPage(target);
+    suppressScrollTracking();
+    const el = document.querySelector(`[data-item-index="${(target - 1) * pageSize}"]`);
+    if (el) scrollToPage(target);
+    else onJumpToPage?.(target);
+  }, [viewingPage, firstLoadedPage, pageSize, scrollToPage, onJumpToPage, setViewingPage, suppressScrollTracking]);
 
   const goNext = useCallback(() => {
     const result = getNextPageAction(viewingPage, loadedPages, totalPages, !!hasMore);
     switch (result.action) {
-      case 'scroll':
-        scrollToPage(result.targetPage);
+      case 'scroll': {
+        setViewingPage(result.targetPage);
+        suppressScrollTracking();
+        const el = document.querySelector(`[data-item-index="${(result.targetPage - 1) * pageSize}"]`);
+        if (el) scrollToPage(result.targetPage);
+        else onJumpToPage?.(result.targetPage);
         break;
+      }
       case 'loadAndScroll': {
+        setViewingPage(result.targetPage);
+        suppressScrollTracking();
         onLoadMore?.();
-        // Poll for the target element to appear after data loads, then scroll
         const targetIndex = (result.targetPage - 1) * pageSize;
         pollForElement(
           () => document.querySelector(`[data-item-index="${targetIndex}"]`),
@@ -147,7 +199,7 @@ export function FloatingPageNav({
       case 'noop':
         break;
     }
-  }, [viewingPage, loadedPages, totalPages, hasMore, onLoadMore, scrollToPage, pageSize]);
+  }, [viewingPage, loadedPages, totalPages, hasMore, onLoadMore, scrollToPage, pageSize, onJumpToPage, setViewingPage, suppressScrollTracking]);
 
   const startEditing = useCallback(() => {
     setEditValue(String(viewingPage));
@@ -158,11 +210,18 @@ export function FloatingPageNav({
     setEditing(false);
     const num = parseInt(editValue, 10);
     if (isNaN(num) || num < 1) return;
-    const target = Math.min(num, loadedPages);
-    if (target !== viewingPage) {
+    const target = Math.max(1, Math.min(num, totalPages));
+    if (target === viewingPage) return;
+    const targetIndex = (target - 1) * pageSize;
+    const el = document.querySelector(`[data-item-index="${targetIndex}"]`);
+    if (el) {
       scrollToPage(target);
+    } else if (target === viewingPage + 1) {
+      goNext();
+    } else {
+      onJumpToPage?.(target);
     }
-  }, [editValue, loadedPages, viewingPage, scrollToPage]);
+  }, [editValue, totalPages, viewingPage, pageSize, scrollToPage, goNext, onJumpToPage]);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -222,7 +281,7 @@ export function FloatingPageNav({
       <div className="mx-0.5 h-4 w-px bg-white/20 dark:bg-black/20" />
       <button
         onClick={goPrev}
-        disabled={viewingPage <= 1}
+        disabled={viewingPage <= (firstLoadedPage ?? 1) || !!isJumping}
         className="rounded-full px-2 py-0.5 hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
         aria-label="Previous page"
       >
@@ -255,7 +314,7 @@ export function FloatingPageNav({
       )}
       <button
         onClick={goNext}
-        disabled={viewingPage >= totalPages}
+        disabled={viewingPage >= totalPages || !!isJumping}
         className="rounded-full px-2 py-0.5 hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
         aria-label="Next page"
       >
@@ -263,4 +322,4 @@ export function FloatingPageNav({
       </button>
     </div>
   );
-}
+});

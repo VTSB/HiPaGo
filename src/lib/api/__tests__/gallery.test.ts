@@ -209,7 +209,7 @@ describe('fetchGalleryBlockHtmlById', () => {
 
     const result = await fetchGalleryBlockHtmlById(999);
 
-    expect(apiClient.fetchLtnText).toHaveBeenCalledWith('galleryblock/999.html');
+    expect(apiClient.fetchLtnText).toHaveBeenCalledWith('galleryblock/999.html', { signal: undefined });
     expect(parseGalleryBlockHtml).toHaveBeenCalledWith(mockHtml, 999);
     expect(result).toEqual(mockBlock);
     expect(result.type).toBe(GalleryBlockType.NOT_DETAILED);
@@ -548,6 +548,55 @@ describe('fetchIndexVersion', () => {
 
     expect(apiClient.fetchLtnText).toHaveBeenCalledWith(
       expect.stringMatching(/^nozomiurlindex\/version\?_=\d+$/),
+    );
+  });
+});
+
+describe('fetchGalleryBlockHtmlById signal handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('AbortError propagates — does NOT return createFailedBlock', async () => {
+    vi.mocked(apiClient.fetchLtnText).mockRejectedValue(
+      new DOMException('Aborted', 'AbortError'),
+    );
+
+    await expect(fetchGalleryBlockHtmlById(111)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    // Confirm parse was never reached either
+    expect(parseGalleryBlockHtml).not.toHaveBeenCalled();
+  });
+
+  it('network errors are swallowed and return a FAILED block', async () => {
+    vi.mocked(apiClient.fetchLtnText).mockRejectedValue(new Error('Network error'));
+
+    const result = await fetchGalleryBlockHtmlById(222);
+
+    expect(result.id).toBe(222);
+    expect(result.type).toBe(GalleryBlockType.FAILED);
+  });
+
+  it('signal option is forwarded to apiClient.fetchLtnText', async () => {
+    const mockBlock = {
+      id: 333,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'Test',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+    };
+    vi.mocked(apiClient.fetchLtnText).mockResolvedValue('<div>html</div>');
+    vi.mocked(parseGalleryBlockHtml).mockReturnValue(mockBlock);
+
+    const controller = new AbortController();
+    await fetchGalleryBlockHtmlById(333, controller.signal);
+
+    expect(apiClient.fetchLtnText).toHaveBeenCalledWith(
+      'galleryblock/333.html',
+      expect.objectContaining({ signal: controller.signal }),
     );
   });
 });
