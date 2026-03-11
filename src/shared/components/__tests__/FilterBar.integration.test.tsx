@@ -3,7 +3,75 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import { FilterBar } from '../FilterBar';
 
-// Mock dependencies
+// ---------------------------------------------------------------------------
+// Mock ChipInput as a simple controlled input so FilterBar logic is testable
+// without a full contenteditable setup.
+// ---------------------------------------------------------------------------
+vi.mock('@/shared/components/ChipInput', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+
+  function MockChipInput({
+    chips = [],
+    activeInput = '',
+    onInputChange,
+    onRemoveChip,
+    onClearAll,
+    onKeyDown,
+    inputRef,
+    placeholder,
+  }: {
+    chips?: string[];
+    activeInput?: string;
+    onInputChange?: (v: string) => void;
+    onRemoveChip?: (i: number) => void;
+    onClearAll?: () => void;
+    onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+    inputRef?: React.Ref<HTMLInputElement>;
+    placeholder?: string;
+    [key: string]: unknown;
+  }) {
+    const [allSelected, setAllSelected] = React.useState(false);
+
+    const chipEls = chips.map((chip: string, i: number) =>
+      React.createElement('span', { key: i, className: 'inline-flex' }, chip),
+    );
+
+    const inputEl = React.createElement('input', {
+      key: 'main-input',
+      autoComplete: 'off',
+      value: activeInput,
+      placeholder,
+      ref: inputRef,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onInputChange?.(e.target.value),
+      onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+        // Backspace with empty input: remove last chip
+        if (e.key === 'Backspace' && !activeInput) {
+          onRemoveChip?.(chips.length - 1);
+          return;
+        }
+        // Ctrl+A: select all
+        if (e.ctrlKey && e.key === 'a') {
+          setAllSelected(true);
+          return;
+        }
+        // Delete when all selected: clear all
+        if (e.key === 'Delete' && allSelected) {
+          setAllSelected(false);
+          onClearAll?.();
+          return;
+        }
+        setAllSelected(false);
+        onKeyDown?.(e);
+      },
+    });
+
+    return React.createElement('div', null, ...chipEls, inputEl);
+  }
+
+  return { ChipInput: MockChipInput };
+});
+
 vi.mock('@/features/search/components/RecentSearchesDropdown', () => ({
   parseToken: (token: string) => {
     const m = token.match(/^(\w+):(.+)$/);
@@ -41,11 +109,7 @@ function getChipTexts(container: HTMLElement): string[] {
 describe('FilterBar integration', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.restoreAllMocks();
-    // Re-apply the searchLocalTags mock since restoreAllMocks clears it
-    vi.mock('@/lib/db/search-local', () => ({
-      searchLocalTags: vi.fn().mockResolvedValue([]),
-    }));
+    vi.clearAllMocks();
   });
 
   afterEach(() => {

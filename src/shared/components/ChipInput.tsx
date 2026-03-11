@@ -13,6 +13,16 @@ import {
 import { parseToken } from '@/features/search/components/RecentSearchesDropdown';
 import { getTagColor, TAG_TYPE_DISPLAY } from '@/lib/utils/types';
 import { buildQueryString } from '@/shared/utils/build-query';
+import { getTokenAtOffset, normalizeTextWithCaret } from '@/shared/utils/caret-token';
+
+export interface CaretTokenContext {
+  gap: number;
+  gapText: string;
+  caretOffset: number;
+  token: string;
+  tokenStart: number;
+  tokenEnd: number;
+}
 
 // ---------------------------------------------------------------------------
 // ChipInputProps — identical to V1
@@ -27,6 +37,7 @@ export interface ChipInputProps {
   onRemoveChip: (index: number) => void;
   onRemoveChips?: (indices: number[]) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onCaretTokenChange?: (context: CaretTokenContext | null) => void;
   onFocus?: () => void;
   onPaste?: (e: React.ClipboardEvent<HTMLInputElement>, removeIndices?: number[], caretOffset?: number) => void;
   onClearAll?: () => void;
@@ -46,12 +57,6 @@ export interface ChipInputProps {
   required?: boolean;
   autoFocus?: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// Zero-width space used for empty gap text nodes so the caret can land there
-// ---------------------------------------------------------------------------
-
-const ZWS = '\u200B';
 
 // ---------------------------------------------------------------------------
 // Chip span builder (imperative — creates DOM nodes, not React elements)
@@ -77,27 +82,33 @@ function createChipSpan(
   span.setAttribute('role', 'option');
   span.setAttribute('aria-label', `${label}, press Delete to remove`);
   span.title = label;
-  span.className = `relative inline-flex h-5 max-w-[200px] items-center gap-0.5 rounded-full text-xs font-medium pl-2 pr-1 whitespace-nowrap cursor-pointer transition-transform duration-150 hover:scale-105 ${color}`;
+  span.className = 'max-w-[220px]';
+
+  const visual = document.createElement('span');
+  visual.setAttribute('data-chip-visual', 'true');
+  visual.className = `relative inline-flex h-5 items-center gap-0.5 rounded-full text-xs leading-none font-medium pl-1.5 pr-1 whitespace-nowrap cursor-pointer ${color}`;
   // Spacing and vertical alignment within the contenteditable line
-  span.style.verticalAlign = 'middle';
-  span.style.margin = '2px 3px';
+  visual.style.verticalAlign = 'middle';
+  visual.style.margin = '0 3px';
 
   const labelSpan = document.createElement('span');
-  labelSpan.className = 'truncate';
+  labelSpan.className = 'truncate leading-none';
   labelSpan.textContent = label;
-  span.appendChild(labelSpan);
+  visual.appendChild(labelSpan);
 
   if (!disabled && !readOnly) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.tabIndex = -1;
     btn.setAttribute('aria-label', `Remove ${label}`);
-    btn.className =
-      'ml-0.5 flex-shrink-0 rounded-full p-0.5 hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer border-none bg-transparent text-current';
+      btn.className =
+      'ml-0.5 flex-shrink-0 rounded-full p-0 hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer border-none bg-transparent text-current';
     btn.innerHTML =
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="h-3 w-3"><path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z"/></svg>';
-    span.appendChild(btn);
+    visual.appendChild(btn);
   }
+
+  span.appendChild(visual);
 
   return span;
 }
@@ -175,6 +186,32 @@ function setCaretPosition(editor: HTMLDivElement, gap: number, offset: number) {
 }
 
 /** Get the text content at a gap position, stripping ZWS. */
+function emitCaretTokenContext(editor: HTMLDivElement, caret: { gap: number; offset: number } | null, onCaretTokenChange?: (context: CaretTokenContext | null) => void) {
+  if (!onCaretTokenChange) return;
+  if (!caret) {
+    onCaretTokenChange(null);
+    return;
+  }
+
+  const rawGapText = getGapText(editor, caret.gap);
+  const { text, offset } = normalizeTextWithCaret(rawGapText, caret.offset);
+  const token = getTokenAtOffset(text, offset);
+
+  if (!token.token) {
+    onCaretTokenChange(null);
+    return;
+  }
+
+  onCaretTokenChange({
+    gap: caret.gap,
+    gapText: text,
+    caretOffset: offset,
+    token: token.token,
+    tokenStart: token.start,
+    tokenEnd: token.end,
+  });
+}
+
 function getGapText(editor: HTMLDivElement, gap: number): string {
   let currentGap = 0;
   for (let i = 0; i < editor.childNodes.length; i++) {
@@ -190,6 +227,62 @@ function getGapText(editor: HTMLDivElement, gap: number): string {
   return '';
 }
 
+function normalizeEditorText(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function hasUnexpectedEditorChildren(editor: HTMLDivElement): boolean {
+  return Array.from(editor.childNodes).some((child) => (
+    child.nodeType === Node.ELEMENT_NODE && !(child as HTMLElement).hasAttribute('data-chip-index')
+  ));
+}
+
+function getAdjustedRemovalCaret(
+  editor: HTMLDivElement,
+  removedChipIndices: number[],
+  fallbackGap: number,
+): { gap: number; offset: number } {
+  const start = readCaretPosition(editor) ?? { gap: fallbackGap, offset: 0 };
+  const removedBefore = removedChipIndices.filter((index) => index < start.gap).length;
+  return {
+    gap: Math.max(0, start.gap - removedBefore),
+    offset: start.offset,
+  };
+}
+
+function getSelectedChipIndices(
+  editor: HTMLDivElement,
+  range: Range,
+  chipsLength: number,
+): number[] {
+  const selectedChipIndices: number[] = [];
+
+  for (let i = 0; i < editor.childNodes.length; i++) {
+    const child = editor.childNodes[i];
+    if (
+      child.nodeType !== Node.ELEMENT_NODE ||
+      !(child as HTMLElement).hasAttribute('data-chip-index') ||
+      !range.intersectsNode(child)
+    ) {
+      continue;
+    }
+
+    const chipElement = child as HTMLElement;
+    const selectionInsideSingleChip =
+      chipElement.contains(range.startContainer) && chipElement.contains(range.endContainer);
+    if (selectionInsideSingleChip) {
+      continue;
+    }
+
+    const idx = parseInt(chipElement.getAttribute('data-chip-index') || '', 10);
+    if (!isNaN(idx) && idx < chipsLength) {
+      selectedChipIndices.push(idx);
+    }
+  }
+
+  return selectedChipIndices;
+}
+
 // ---------------------------------------------------------------------------
 // ChipInput — contenteditable-based chip input
 // ---------------------------------------------------------------------------
@@ -201,6 +294,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
     inputPosition: inputPositionProp,
     onInputChange,
     onInputPositionChange,
+    onCaretTokenChange,
     onRemoveChip,
     onRemoveChips,
     onKeyDown,
@@ -229,9 +323,11 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
   const isSyncingRef = useRef(false);
   const userInputRef = useRef(false);
   const pendingCaretRef = useRef<{ gap: number; offset: number } | null>(null);
+  const enterKeydownHandledRef = useRef(false);
   const ariaLiveRef = useRef<HTMLSpanElement>(null);
   const selectionAnchorRef = useRef<{ node: Node; offset: number } | null>(null);
   const prevChipsLengthRef = useRef(chips.length);
+  const prevRenderStateRef = useRef({ chipsLength: chips.length, inputPos, activeInput });
   // Always-fresh snapshot for cut/copy DOM event handlers (avoid stale closure)
   const clipboardStateRef = useRef({ chips, activeInput, inputPos, gapTexts, allSelected: false, onClearAll, onRemoveChips });
   const [allSelected, setAllSelected] = useState(false);
@@ -239,6 +335,12 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
 
   const rawId = useId();
   const containerId = `chipinput-v2-${rawId.replace(/:/g, '')}`;
+
+  const emitCurrentCaretTokenContext = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    emitCaretTokenContext(editor, readCaretPosition(editor), onCaretTokenChange);
+  }, [onCaretTokenChange]);
 
   // Expose container ref
   useImperativeHandle(ref, () => containerRef.current!, []);
@@ -257,6 +359,10 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
       ariaLiveRef.current.textContent = `Tag removed. ${chips.length} tags.`;
     }
   }, [chips]);
+
+  useEffect(() => {
+    prevRenderStateRef.current = { chipsLength: chips.length, inputPos, activeInput };
+  }, [chips.length, inputPos, activeInput]);
 
   // Cut/copy DOM event listeners — mirrors Ctrl+C/X keyboard logic for right-click menu
   useEffect(() => {
@@ -308,6 +414,11 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
       if (data.isAll) {
         clipboardStateRef.current.onClearAll?.();
       } else if (data.chipIndices.length > 0) {
+        pendingCaretRef.current = getAdjustedRemovalCaret(
+          editor,
+          data.chipIndices,
+          clipboardStateRef.current.inputPos,
+        );
         clipboardStateRef.current.onRemoveChips?.(data.chipIndices);
       }
     };
@@ -352,7 +463,8 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
     isSyncingRef.current = true;
 
     // Save caret
-    const savedCaret = editor.ownerDocument.hasFocus() && editor.contains(editor.ownerDocument.activeElement)
+    const isEditorFocused = hasFocus || (editor.ownerDocument.hasFocus() && editor.contains(editor.ownerDocument.activeElement));
+    const savedCaret = isEditorFocused
       ? readCaretPosition(editor)
       : null;
 
@@ -372,7 +484,22 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
     }
 
     // Restore caret — prefer pendingCaret (set by chip removal) over savedCaret
-    const targetCaret = pendingCaretRef.current || savedCaret;
+    const prevRenderState = prevRenderStateRef.current;
+    const insertionCaret =
+      !pendingCaretRef.current &&
+      isEditorFocused &&
+      chips.length > prevRenderState.chipsLength &&
+      inputPos > prevRenderState.inputPos
+        ? {
+            gap: inputPos,
+            offset:
+              activeInput === prevRenderState.activeInput &&
+              savedCaret?.gap === prevRenderState.inputPos
+                ? Math.min(savedCaret.offset, activeInput.length)
+                : 0,
+          }
+        : null;
+    const targetCaret = pendingCaretRef.current || insertionCaret || savedCaret;
     pendingCaretRef.current = null;
     if (targetCaret) {
       requestAnimationFrame(() => {
@@ -383,7 +510,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
     }
 
     isSyncingRef.current = false;
-  }, [chips, activeInput, inputPos, gapTexts, disabled, readOnly]);
+  }, [chips, activeInput, inputPos, gapTexts, disabled, readOnly, hasFocus]);
 
   // Run sync on state changes (skip when state change came from user input)
   useLayoutEffect(() => {
@@ -403,22 +530,29 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
     if (!editor) return;
 
     const caret = readCaretPosition(editor);
+    if (hasUnexpectedEditorChildren(editor)) {
+      pendingCaretRef.current = caret ?? { gap: inputPos, offset: activeInput.length };
+      syncStateToDom();
+      return;
+    }
     if (!caret) return;
 
-    const caretGap = caret.gap;
-    const textAtCaret = getGapText(editor, caretGap);
+    const rawTextAtCaret = getGapText(editor, caret.gap);
+    const { text: textAtCaret } = normalizeTextWithCaret(rawTextAtCaret, caret.offset);
 
     // Mark as user-driven so useLayoutEffect skips DOM rebuild
     userInputRef.current = true;
 
     // Notify parent of position change if needed
-    if (caretGap !== inputPos) {
-      onInputPositionChange?.(caretGap);
+    if (caret.gap !== inputPos) {
+      onInputPositionChange?.(caret.gap);
     }
+
+    emitCaretTokenContext(editor, caret, onCaretTokenChange);
 
     // Notify parent of text change
     onInputChange(textAtCaret);
-  }, [inputPos, onInputChange, onInputPositionChange]);
+  }, [inputPos, activeInput.length, onCaretTokenChange, onInputChange, onInputPositionChange, syncStateToDom]);
 
   // ---------------------------------------------------------------------------
   // Auto-focus
@@ -460,16 +594,40 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
     const onBeforeInput = (e: InputEvent) => {
       if (e.inputType === 'historyUndo' || e.inputType === 'historyRedo') {
         e.preventDefault();
+        return;
+      }
+
+      if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+        e.preventDefault();
+
+        if (enterKeydownHandledRef.current) {
+          enterKeydownHandledRef.current = false;
+          return;
+        }
+
+        if (composingRef.current) return;
+
+        onKeyDown?.({
+          key: 'Enter',
+          ctrlKey: false,
+          metaKey: false,
+          shiftKey: false,
+          preventDefault: () => {},
+          nativeEvent: { isComposing: false },
+        } as unknown as React.KeyboardEvent<HTMLInputElement>);
       }
     };
     editor.addEventListener('beforeinput', onBeforeInput);
     return () => editor.removeEventListener('beforeinput', onBeforeInput);
-  }, []);
+  }, [onKeyDown]);
 
   const handleFocus = useCallback(() => {
     setHasFocus(true);
+    requestAnimationFrame(() => {
+      emitCurrentCaretTokenContext();
+    });
     onFocus?.();
-  }, [onFocus]);
+  }, [emitCurrentCaretTokenContext, onFocus]);
 
   const handleBlur = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
     // If focus is moving within the container, ignore
@@ -549,7 +707,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
           const sel = window.getSelection();
           if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
             const range = sel.getRangeAt(0);
-            const selectedChipIndices: number[] = [];
+            const selectedChipIndices = getSelectedChipIndices(editor, range, chips.length);
             const textParts: string[] = [];
 
             for (let i = 0; i < editor.childNodes.length; i++) {
@@ -567,8 +725,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
                 const el = child as HTMLElement;
                 if (el.hasAttribute('data-chip-index')) {
                   const idx = parseInt(el.getAttribute('data-chip-index') || '', 10);
-                  if (!isNaN(idx) && idx < chips.length) {
-                    selectedChipIndices.push(idx);
+                  if (!isNaN(idx) && selectedChipIndices.includes(idx)) {
                     textParts.push(chips[idx]);
                   }
                 }
@@ -580,6 +737,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
               const clipText = textParts.join(' ');
               navigator.clipboard.writeText(clipText).catch(() => {});
               if (key === 'x' && onRemoveChips) {
+                pendingCaretRef.current = getAdjustedRemovalCaret(editor, selectedChipIndices, inputPos);
                 onRemoveChips(selectedChipIndices);
               }
               setAllSelected(false);
@@ -654,31 +812,32 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
         if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
           const range = sel.getRangeAt(0);
           if (typeof range.intersectsNode === 'function') {
-            const selectedChipIndices: number[] = [];
-            for (let i = 0; i < editor.childNodes.length; i++) {
-              const child = editor.childNodes[i];
-              if (
-                child.nodeType === Node.ELEMENT_NODE &&
-                (child as HTMLElement).hasAttribute('data-chip-index') &&
-                range.intersectsNode(child)
-              ) {
-                const idx = parseInt((child as HTMLElement).getAttribute('data-chip-index') || '', 10);
-                if (!isNaN(idx)) selectedChipIndices.push(idx);
-              }
-            }
+            const selectedChipIndices = getSelectedChipIndices(editor, range, chips.length);
             if (selectedChipIndices.length > 0) {
               if (key === 'Backspace' || key === 'Delete') {
                 e.preventDefault();
-                if (onRemoveChips) onRemoveChips(selectedChipIndices);
+                if (onRemoveChips) {
+                  pendingCaretRef.current = getAdjustedRemovalCaret(editor, selectedChipIndices, inputPos);
+                  onRemoveChips(selectedChipIndices);
+                }
                 return;
               }
               if (key.length === 1) {
                 e.preventDefault();
-                if (onRemoveChips) onRemoveChips(selectedChipIndices);
+                if (onRemoveChips) {
+                  const replacementCaret = getAdjustedRemovalCaret(editor, selectedChipIndices, inputPos);
+                  pendingCaretRef.current = {
+                    gap: replacementCaret.gap,
+                    offset: replacementCaret.offset + 1,
+                  };
+                  onRemoveChips(selectedChipIndices);
+                }
                 onInputChange(key);
                 return;
               }
             }
+
+            return;
           }
         }
       }
@@ -729,6 +888,12 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
       // ---------------------------------------------------------------
       if (key === 'Enter' || key === 'Escape') {
         e.preventDefault();
+        if (key === 'Enter') {
+          enterKeydownHandledRef.current = true;
+          requestAnimationFrame(() => {
+            enterKeydownHandledRef.current = false;
+          });
+        }
         onKeyDown?.(e as unknown as React.KeyboardEvent<HTMLInputElement>);
         return;
       }
@@ -765,6 +930,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
               if (key === 'ArrowRight' && afterCaret.gap < chips.length) {
                 setCaretPosition(editorRef.current, afterCaret.gap + 1, 0);
                 const jumped = readCaretPosition(editorRef.current);
+                emitCaretTokenContext(editorRef.current, jumped, onCaretTokenChange);
                 if (jumped && jumped.gap !== inputPos) {
                   onInputPositionChange?.(jumped.gap);
                 }
@@ -774,6 +940,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
                 // Jump to end of previous gap text
                 setCaretPosition(editorRef.current, afterCaret.gap - 1, Infinity);
                 const jumped = readCaretPosition(editorRef.current);
+                emitCaretTokenContext(editorRef.current, jumped, onCaretTokenChange);
                 if (jumped && jumped.gap !== inputPos) {
                   onInputPositionChange?.(jumped.gap);
                 }
@@ -785,6 +952,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
               // Only update position — moveInputPosition handles the text swap
               onInputPositionChange?.(afterCaret.gap);
             }
+            emitCaretTokenContext(editorRef.current, afterCaret, onCaretTokenChange);
           });
         }
         // For ArrowDown/ArrowUp, also propagate to consumer (for dropdown navigation)
@@ -817,6 +985,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
       gapTexts,
       allSelected,
       onKeyDown,
+      onCaretTokenChange,
       onInputChange,
       onInputPositionChange,
       onRemoveChip,
@@ -850,8 +1019,11 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
         // Delegate to consumer's paste handler (creates chips + text)
         const tagCount = tokens.filter((t) => parseToken(t)).length;
         const pasteGap = caret?.gap ?? inputPos;
+        const normalizedCaretOffset = caret && editor
+          ? normalizeTextWithCaret(getGapText(editor, pasteGap), caret.offset).offset
+          : 0;
         pendingCaretRef.current = { gap: pasteGap + tagCount, offset: 0 };
-        onPaste?.(e as unknown as React.ClipboardEvent<HTMLInputElement>, undefined, caret?.offset ?? 0);
+        onPaste?.(e as unknown as React.ClipboardEvent<HTMLInputElement>, undefined, normalizedCaretOffset);
         return;
       }
 
@@ -859,7 +1031,8 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
       if (!editor || !caret) return;
       const currentText = getGapText(editor, caret.gap);
       const newText = currentText.slice(0, caret.offset) + text + currentText.slice(caret.offset);
-      pendingCaretRef.current = { gap: caret.gap, offset: caret.offset + text.length };
+      const normalizedCaretOffset = normalizeTextWithCaret(newText, caret.offset + text.length).offset;
+      pendingCaretRef.current = { gap: caret.gap, offset: normalizedCaretOffset };
       onInputChange(newText);
     },
     [onPaste, inputPos, onInputChange, onInputPositionChange],
@@ -904,6 +1077,7 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
           sel.removeAllRanges();
           sel.addRange(range);
         }
+        onCaretTokenChange?.(null);
         return;
       }
 
@@ -912,12 +1086,13 @@ export const ChipInput = forwardRef<HTMLDivElement, ChipInputProps>(function Chi
         const editor = editorRef.current;
         if (!editor) return;
         const caret = readCaretPosition(editor);
+        emitCaretTokenContext(editor, caret, onCaretTokenChange);
         if (caret && caret.gap !== inputPos) {
           onInputPositionChange?.(caret.gap);
         }
       });
     },
-    [onRemoveChip, inputPos, onInputPositionChange],
+    [onCaretTokenChange, onRemoveChip, inputPos, onInputPositionChange],
   );
 
   // Prevent chip mousedowns from stealing focus / moving caret inside chip

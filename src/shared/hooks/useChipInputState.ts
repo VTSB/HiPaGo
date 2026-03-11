@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { parseToken } from '@/features/search/components/RecentSearchesDropdown';
+import { normalizeGapText } from '@/shared/utils/caret-token';
 
 interface Snapshot {
   chips: string[];
@@ -17,11 +18,34 @@ interface UseChipInputStateOptions {
   allowDuplicates?: boolean;
 }
 
+interface TokenReplacementSpan {
+  gap: number;
+  tokenStart: number;
+  tokenEnd: number;
+}
+
 const UNDO_LIMIT = 50;
+
+function normalizeStoredText(text: string): string {
+  return normalizeGapText(text);
+}
+
+function normalizeGapTextMap(gapTexts: Record<number, string>): Record<number, string> {
+  const normalized: Record<number, string> = {};
+
+  Object.entries(gapTexts).forEach(([key, value]) => {
+    const normalizedValue = normalizeStoredText(value);
+    if (normalizedValue) {
+      normalized[Number(key)] = normalizedValue;
+    }
+  });
+
+  return normalized;
+}
 
 export function useChipInputState(options: UseChipInputStateOptions = {}) {
   const [chips, setChips] = useState<string[]>(options.initialChips ?? []);
-  const [activeInput, setActiveInput] = useState(options.initialInput ?? '');
+  const [activeInput, setActiveInput] = useState(normalizeStoredText(options.initialInput ?? ''));
   const [inputPosition, setInputPosition] = useState(options.initialPosition ?? 0);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [gapTexts, setGapTexts] = useState<Record<number, string>>({});
@@ -115,8 +139,8 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
       return;
     }
 
-    const currentText = activeInputRef.current;
-    const updated = { ...gapTextsRef.current };
+    const currentText = normalizeStoredText(activeInputRef.current);
+    const updated = normalizeGapTextMap(gapTextsRef.current);
 
     // Save current text to gapTexts (delete if empty)
     if (currentText.trim()) {
@@ -126,7 +150,7 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     }
 
     // Load text from new position
-    const loadedText = updated[newPos] || '';
+    const loadedText = normalizeStoredText(updated[newPos] || '');
     delete updated[newPos];
 
     // Update refs eagerly for synchronous access (e.g., paste after position change)
@@ -144,13 +168,13 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     setChips((prev) => prev.filter((_, i) => i !== index));
 
     const pos = inputPositionRef.current;
-    const gt = { ...gapTextsRef.current };
-    const ai = activeInputRef.current;
+    const gt = normalizeGapTextMap(gapTextsRef.current);
+    const ai = normalizeStoredText(activeInputRef.current);
 
     // Get texts from the two gaps being merged
     const leftText = index === pos ? ai : (gt[index] || '');
     const rightText = (index + 1) === pos ? ai : (gt[index + 1] || '');
-    const merged = [leftText, rightText].filter(Boolean).join(' ');
+    const merged = normalizeStoredText([leftText, rightText].filter(Boolean).join(' '));
 
     // Build new gapTexts with shifted keys
     const newGt: Record<number, string> = {};
@@ -184,8 +208,8 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     setChips((prev) => prev.filter((_, i) => !removeSet.has(i)));
 
     const pos = inputPositionRef.current;
-    const ai = activeInputRef.current;
-    const gt = { ...gapTextsRef.current };
+    const ai = normalizeStoredText(activeInputRef.current);
+    const gt = normalizeGapTextMap(gapTextsRef.current);
 
     // Build a complete texts array: texts[i] = text at gap i
     const totalGaps = chipsRef.current.length + 1;
@@ -207,12 +231,12 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
       // If there's a chip at index g (i.e., gap g is followed by chip g),
       // and that chip is NOT being removed, commit the merge
       if (g < chipsRef.current.length && !removeSet.has(g)) {
-        mergedTexts.push(currentMerge.filter(Boolean).join(' '));
+        mergedTexts.push(normalizeStoredText(currentMerge.filter(Boolean).join(' ')));
         currentMerge = [];
       }
     }
     // Commit the last merge group
-    mergedTexts.push(currentMerge.filter(Boolean).join(' '));
+    mergedTexts.push(normalizeStoredText(currentMerge.filter(Boolean).join(' ')));
 
     // Now mergedTexts has (chips.length - indices.length + 1) entries
     // Find new inputPosition and rebuild gapTexts
@@ -258,7 +282,7 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     textUndoTimerRef.current = setTimeout(() => {
       textUndoTimerRef.current = null;
     }, 500);
-    setActiveInput(text);
+    setActiveInput(normalizeStoredText(text));
   }, [pushUndo]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLInputElement>, removeIndices?: number[], caretOffset?: number) => {
@@ -289,7 +313,7 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
         const beforeCount = removeIndices.filter((i) => i < pos).length;
         if (beforeCount > 0) setInputPosition(pos - beforeCount);
         // Manually append pasted text so it's part of the same undo snapshot.
-        setActiveInput((prev) => prev + text);
+        setActiveInput((prev) => normalizeStoredText(prev + text));
       }
       return;
     }
@@ -340,18 +364,18 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     setInputPosition(adjustedPos + newChips.length);
 
     // Split existing text at caret offset
-    const currentText = activeInputRef.current;
+    const currentText = normalizeStoredText(activeInputRef.current);
     const leftText = caretOffset !== undefined
-      ? currentText.slice(0, caretOffset).trimEnd()
+      ? normalizeStoredText(currentText.slice(0, caretOffset))
       : '';
     const rightText = caretOffset !== undefined
-      ? currentText.slice(caretOffset).trimStart()
+      ? normalizeStoredText(currentText.slice(caretOffset))
       : currentText;
 
     // Active input = text after last pasted chip + existing right text
     const lastGapText = pasteGapTexts[newChips.length] || '';
     const activeInputParts = [lastGapText, rightText].filter(Boolean);
-    setActiveInput(activeInputParts.join(' '));
+    setActiveInput(normalizeStoredText(activeInputParts.join(' ')));
 
     // Build gap texts: shift existing keys, add left text + interleaved paste texts
     setGapTexts((prev) => {
@@ -359,18 +383,22 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
       // Shift existing gap keys for inserted chips
       for (const [k, v] of Object.entries(prev)) {
         const key = Number(k);
-        next[key >= adjustedPos ? key + newChips.length : key] = v;
+        const normalizedValue = normalizeStoredText(v);
+        if (normalizedValue) {
+          next[key >= adjustedPos ? key + newChips.length : key] = normalizedValue;
+        }
       }
       // Text before first pasted chip (merged with left text from caret split)
       const firstGapText = pasteGapTexts[0] || '';
-      const leftMerged = [leftText, firstGapText].filter(Boolean).join(' ');
+      const leftMerged = normalizeStoredText([leftText, firstGapText].filter(Boolean).join(' '));
       if (leftMerged) {
         next[adjustedPos] = leftMerged;
       }
       // Interleaved text between pasted chips
       for (let g = 1; g < newChips.length; g++) {
-        if (pasteGapTexts[g]) {
-          next[adjustedPos + g] = pasteGapTexts[g];
+        const normalizedGapText = normalizeStoredText(pasteGapTexts[g] || '');
+        if (normalizedGapText) {
+          next[adjustedPos + g] = normalizedGapText;
         }
       }
       return next;
@@ -417,12 +445,65 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     setActiveInput('');
   }, [pushUndo, editingIndex]);
 
+  const replaceActiveTokenWithChip = useCallback((chip: string, span: TokenReplacementSpan) => {
+    if (editingIndex === null && maxChipsRef.current !== undefined && chipsRef.current.length >= maxChipsRef.current) {
+      return false;
+    }
+
+    if (!allowDuplicatesRef.current) {
+      const isDuplicate = editingIndex !== null
+        ? chipsRef.current.some((c, idx) => idx !== editingIndex && c === chip)
+        : chipsRef.current.includes(chip);
+      if (isDuplicate) return false;
+    }
+
+    const pos = inputPositionRef.current;
+    if (span.gap !== pos) {
+      return false;
+    }
+
+    const currentText = normalizeStoredText(activeInputRef.current);
+    const safeStart = Math.max(0, Math.min(span.tokenStart, currentText.length));
+    const safeEnd = Math.max(safeStart, Math.min(span.tokenEnd, currentText.length));
+    const leftText = normalizeStoredText(currentText.slice(0, safeStart));
+    const rightText = normalizeStoredText(currentText.slice(safeEnd));
+
+    pushUndo();
+
+    setChips((prev) => {
+      const next = [...prev];
+      next.splice(pos, 0, chip);
+      return next;
+    });
+
+    setGapTexts((prev) => {
+      const next: Record<number, string> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const key = Number(k);
+        const normalizedValue = normalizeStoredText(v);
+        if (normalizedValue) {
+          next[key > pos ? key + 1 : key] = normalizedValue;
+        }
+      }
+      if (leftText) {
+        next[pos] = leftText;
+      }
+      return next;
+    });
+
+    setActiveInput(rightText);
+    setInputPosition(pos + 1);
+    setEditingIndex(null);
+
+    return true;
+  }, [pushUndo, editingIndex]);
+
   const editChip = useCallback((index: number) => {
     pushUndo();
     // Stash current activeInput to gapTexts before overwriting
-    const currentText = activeInputRef.current;
-    if (currentText.trim()) {
-      setGapTexts((prev) => ({ ...prev, [inputPositionRef.current]: currentText }));
+    const currentText = normalizeStoredText(activeInputRef.current);
+    if (currentText) {
+      setGapTexts((prev) => ({ ...normalizeGapTextMap(prev), [inputPositionRef.current]: currentText }));
     }
     setActiveInput(chipsRef.current[index]);
     setEditingIndex(index);
@@ -456,10 +537,11 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     // Clean empty entries
     const cleanGap: Record<number, string> = {};
     for (const [k, v] of Object.entries(gapMap)) {
-      if (v) cleanGap[Number(k)] = v;
+      const normalizedValue = normalizeStoredText(v);
+      if (normalizedValue) cleanGap[Number(k)] = normalizedValue;
     }
     setGapTexts(cleanGap);
-    setActiveInput(activeText);
+    setActiveInput(normalizeStoredText(activeText));
     setInputPosition(lastGap);
   }, []);
 
@@ -476,7 +558,7 @@ export function useChipInputState(options: UseChipInputStateOptions = {}) {
     handleRemoveChip, handleRemoveChips,
     handleClearAll, handleAbandonEdit,
     handleInputChange, handlePaste,
-    insertChip, editChip,
+    insertChip, replaceActiveTokenWithChip, editChip,
     syncFromQuery,
   };
 }

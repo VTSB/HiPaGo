@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSearchStore } from '@/features/search/store/search.store';
 import { useSearch } from '@/features/search/hooks/useSearch';
-import { ChipInput } from '@/shared/components/ChipInput';
+import { ChipInput, type CaretTokenContext } from '@/shared/components/ChipInput';
 import type { Suggestion } from '@/lib/utils/types';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { useT } from '@/lib/i18n/useT';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
 import { buildQueryString } from '@/shared/utils/build-query';
+import { normalizeGapText } from '@/shared/utils/caret-token';
 import { useChipInputState } from '@/shared/hooks/useChipInputState';
 import { RecentSearchesDropdown } from './RecentSearchesDropdown';
 import { SuggestionDropdown } from './SuggestionDropdown';
@@ -21,10 +22,12 @@ export function SearchBar() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const ignoreMouseRef = useRef(false);
   const setQuery = useSearchStore((s) => s.setQuery);
+  const setAutocompleteQuery = useSearchStore((s) => s.setAutocompleteQuery);
   const suggestions = useSearchStore((s) => s.suggestions);
   const clearSuggestions = useSearchStore((s) => s.clearSuggestions);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [caretTokenContext, setCaretTokenContext] = useState<CaretTokenContext | null>(null);
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addRecentSearch = useSearchStore((s) => s.addRecentSearch);
   const removeRecentSearch = useSearchStore((s) => s.removeRecentSearch);
@@ -44,9 +47,18 @@ export function SearchBar() {
     handleClearAll,
     handlePaste,
     insertChip,
+    replaceActiveTokenWithChip,
     syncFromQuery,
     handleInputChange: handleInputChangeBase,
   } = useChipInputState();
+
+  const normalizedActiveInput = normalizeGapText(activeInput);
+
+  const activeCaretTokenContext = caretTokenContext
+    && caretTokenContext.gap === inputPosition
+    && caretTokenContext.gapText === normalizedActiveInput
+    ? caretTokenContext
+    : null;
 
   const historyVisible = showDropdown && activeInput === '' && chips.length === 0 && recentSearches.length > 0 && suggestions.length === 0;
 
@@ -77,20 +89,29 @@ export function SearchBar() {
 
   // Sync active input to store for autocomplete
   useEffect(() => {
-    setQuery(activeInput);
-  }, [activeInput, setQuery]);
+    setQuery(buildQueryString(chips, activeInput, inputPosition, gapTexts));
+    setAutocompleteQuery(activeCaretTokenContext?.token || null);
+  }, [chips, activeInput, inputPosition, gapTexts, activeCaretTokenContext?.token, setQuery, setAutocompleteQuery]);
 
   const appendTag = useCallback(
     (tag: string, tagType: string) => {
       const newTag = `${tagType}:${tag.replace(/ /g, '_')}`;
-      insertChip(newTag);
+      const replaced = activeCaretTokenContext
+        ? replaceActiveTokenWithChip(newTag, activeCaretTokenContext)
+        : false;
+
+      if (!replaced) {
+        insertChip(newTag);
+      }
+
+      setCaretTokenContext(null);
       clearSuggestions();
       setSelectedIndex(-1);
       ignoreMouseRef.current = true;
       setTimeout(() => { ignoreMouseRef.current = false; }, 300);
       inputRef.current?.focus();
     },
-    [insertChip, clearSuggestions],
+    [activeCaretTokenContext, insertChip, replaceActiveTokenWithChip, clearSuggestions],
   );
 
   const handleSuggestionClick = useCallback(
@@ -253,6 +274,7 @@ export function SearchBar() {
           inputPosition={inputPosition}
           onInputChange={handleInputChange}
           onInputPositionChange={moveInputPosition}
+          onCaretTokenChange={setCaretTokenContext}
           gapTexts={gapTexts}
           onGapTextClick={(pos) => { moveInputPosition(pos); }}
           onRemoveChip={handleRemoveChip}

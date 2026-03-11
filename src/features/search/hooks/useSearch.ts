@@ -7,19 +7,11 @@ import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import type { TagType } from '@/lib/utils/types';
 
-/**
- * Extract the last term being typed for autocomplete purposes.
- * "female:loli artist:y" → "artist:y"
- */
-function getActiveTerm(query: string): string {
-  const lastSpaceIdx = query.lastIndexOf(' ');
-  if (lastSpaceIdx === -1) return query;
-  return query.slice(lastSpaceIdx + 1);
-}
-
 export function useSearch() {
   const query = useSearchStore((s) => s.query);
+  const autocompleteQuery = useSearchStore((s) => s.autocompleteQuery);
   const setQuery = useSearchStore((s) => s.setQuery);
+  const setAutocompleteQuery = useSearchStore((s) => s.setAutocompleteQuery);
   const addRecentSearch = useSearchStore((s) => s.addRecentSearch);
   const setIsSearching = useSearchStore((s) => s.setIsSearching);
   const setSuggestions = useSearchStore((s) => s.setSuggestions);
@@ -32,8 +24,7 @@ export function useSearch() {
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    // Only autocomplete the last term being typed
-    const activeTerm = getActiveTerm(query).trim();
+    const activeTerm = autocompleteQuery?.trim() ?? '';
 
     if (!activeTerm) {
       clearSuggestions();
@@ -94,16 +85,17 @@ export function useSearch() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, dbReady, clearSuggestions, setIsLoadingSuggestions, setSuggestions]);
+  }, [autocompleteQuery, dbReady, clearSuggestions, setIsLoadingSuggestions, setSuggestions]);
 
   const search = useCallback(
     (searchQuery: string) => {
       setQuery(searchQuery);
+      setAutocompleteQuery(null);
       addRecentSearch(searchQuery);
       setIsSearching(true);
     },
-    [setQuery, addRecentSearch, setIsSearching],
+    [setQuery, setAutocompleteQuery, addRecentSearch, setIsSearching],
   );
 
-  return { query, setQuery, addRecentSearch, setIsSearching, setSuggestions, clearSuggestions, setIsLoadingSuggestions, search };
+  return { query, autocompleteQuery, setQuery, setAutocompleteQuery, addRecentSearch, setIsSearching, setSuggestions, clearSuggestions, setIsLoadingSuggestions, search };
 }

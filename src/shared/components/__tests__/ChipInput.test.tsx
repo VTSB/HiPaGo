@@ -40,6 +40,15 @@ function setup(overrides: Partial<ChipInputProps> = {}) {
   return { ...result, props, inputRef, editor };
 }
 
+function createBeforeInputEvent(inputType: string) {
+  const event = new Event('beforeinput', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'inputType', {
+    value: inputType,
+    configurable: true,
+  });
+  return event;
+}
+
 describe('ChipInput', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -54,20 +63,33 @@ describe('ChipInput', () => {
   // ─── Rendering ───
 
   describe('rendering', () => {
-    it('renders chips as non-editable spans with data-chip-index attributes', () => {
+    it('chip hosts keep anchor contract attributes', () => {
       const { container } = setup();
       const chipSpans = container.querySelectorAll('[data-chip-index]');
       expect(chipSpans).toHaveLength(2);
+      chipSpans.forEach((span) => {
+        const host = span as HTMLElement;
+        expect(host.getAttribute('data-chip-index')).not.toBeNull();
+        expect(host.getAttribute('role')).toBe('option');
+        expect(host.contentEditable).toBe('false');
+        expect(host.tagName.toLowerCase()).toBe('span');
+      });
+
       expect(chipSpans[0].getAttribute('data-chip-index')).toBe('0');
       expect(chipSpans[1].getAttribute('data-chip-index')).toBe('1');
     });
 
-    it('chip spans have contentEditable=false', () => {
+    it('renders the requested 20px-tall chip styling at chip visual wrapper when present, otherwise chip host', () => {
       const { container } = setup();
-      const chipSpans = container.querySelectorAll('[data-chip-index]');
-      chipSpans.forEach((span) => {
-        expect((span as HTMLElement).contentEditable).toBe('false');
-      });
+      const chip = container.querySelector('[data-chip-index="0"]') as HTMLElement;
+      const visualWrapper = chip.querySelector('[data-chip-visual="true"]') as HTMLElement | null;
+      const sizedNode = visualWrapper ?? chip;
+
+      expect(sizedNode.className).toContain('text-[14px]');
+      expect(sizedNode.className).toContain('h-5');
+      if (visualWrapper) {
+        expect(visualWrapper.getAttribute('data-chip-visual')).toBe('true');
+      }
     });
 
     it('renders correct number of chips', () => {
@@ -141,10 +163,21 @@ describe('ChipInput', () => {
       expect(attr === 'false' || attr === null).toBe(true);
     });
 
-    it('non-disabled non-readOnly sets contentEditable to true', () => {
+    it('renders chips with a 20px total height beside the 16px editor baseline', () => {
       const { container } = setup();
-      const editor = container.querySelector('[role="textbox"]') as HTMLDivElement;
-      expect(editor.getAttribute('contenteditable')).toBe('true');
+      const chip = container.querySelector('[data-chip-index="0"]') as HTMLElement;
+      const visualWrapper = chip.querySelector('[data-chip-visual="true"]') as HTMLElement | null;
+      const sizedNode = visualWrapper ?? chip;
+
+      expect(sizedNode.className).toContain('text-[14px]');
+      expect(sizedNode.className).toContain('h-5');
+    });
+
+    it('editor text remains at 16px for caret baseline', () => {
+      const { editor, container } = setup();
+      expect(editor.className).toContain('text-[16px]');
+      const chip = container.querySelector('[data-chip-index="0"]') as HTMLElement;
+      expect(chip.className).not.toContain('text-[16px]');
     });
 
     it('hidden input present when name prop is provided', () => {
@@ -454,6 +487,50 @@ describe('ChipInput', () => {
       fireEvent(editor, event);
       expect(preventDefaultSpy).toHaveBeenCalled();
     });
+
+    it('beforeinput insertParagraph prevents default and triggers Enter fallback', () => {
+      const onKeyDown = vi.fn();
+      const { editor } = setup({ onKeyDown });
+
+      const event = createBeforeInputEvent('insertParagraph');
+      act(() => {
+        editor.dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onKeyDown).toHaveBeenCalledTimes(1);
+      expect(onKeyDown.mock.calls[0][0].key).toBe('Enter');
+    });
+
+    it('beforeinput insertLineBreak prevents default', () => {
+      const onKeyDown = vi.fn();
+      const { editor } = setup({ onKeyDown });
+
+      const event = createBeforeInputEvent('insertLineBreak');
+      act(() => {
+        editor.dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onKeyDown).toHaveBeenCalledTimes(1);
+      expect(onKeyDown.mock.calls[0][0].key).toBe('Enter');
+    });
+
+    it('keydown Enter plus beforeinput does not double-trigger onKeyDown', () => {
+      const onKeyDown = vi.fn();
+      const { editor } = setup({ onKeyDown });
+
+      fireEvent.keyDown(editor, { key: 'Enter' });
+
+      const event = createBeforeInputEvent('insertParagraph');
+      act(() => {
+        editor.dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onKeyDown).toHaveBeenCalledTimes(1);
+      expect(onKeyDown.mock.calls[0][0].key).toBe('Enter');
+    });
   });
 
   // ─── IME Composition ───
@@ -517,6 +594,35 @@ describe('ChipInput', () => {
       });
 
       expect(onPaste).toHaveBeenCalled();
+    });
+
+    it('paste with tag tokens passes a normalized caret offset to onPaste', () => {
+      const onPaste = vi.fn();
+      const { editor } = setup({ chips: [], activeInput: 'left  female:lo   right', onPaste });
+
+      const textNode = editor.firstChild as Text;
+      const mockRange = {
+        startContainer: textNode,
+        startOffset: 6,
+      };
+      const mockSel = {
+        rangeCount: 1,
+        getRangeAt: vi.fn(() => mockRange),
+      };
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => mockSel),
+        writable: true,
+        configurable: true,
+      });
+
+      fireEvent.paste(editor, {
+        clipboardData: {
+          getData: (type: string) => (type === 'text/plain' ? 'female:cute' : ''),
+        },
+      });
+
+      expect(onPaste).toHaveBeenCalled();
+      expect(onPaste.mock.calls[0][2]).toBe(5);
     });
 
     it('paste with plain text calls onInputChange', () => {
@@ -716,7 +822,6 @@ describe('ChipInput', () => {
       Object.assign(navigator, { clipboard: { writeText } });
 
       const { editor, props } = setupCtrlA();
-      const chips = ['female:loli', 'female:anal'];
 
       fireEvent(editor, createKeyboardEvent('keydown', { key: 'a', ctrlKey: true }));
       fireEvent(editor, createKeyboardEvent('keydown', { key: 'x', ctrlKey: true }));
@@ -1122,6 +1227,257 @@ describe('ChipInput', () => {
 
   });
 
+  describe('text selection inside chip labels', () => {
+    it('Delete with text-only selection inside a chip does not remove the chip', () => {
+      const onRemoveChips = vi.fn();
+      const { editor } = setup({ onRemoveChips });
+
+      const chipLabelTextNode = editor.querySelector('[data-chip-index="0"] span')?.firstChild as Text;
+      const range = {
+        startContainer: chipLabelTextNode,
+        endContainer: chipLabelTextNode,
+        startOffset: 0,
+        endOffset: 4,
+        intersectsNode: vi.fn((node: Node) => node === chipLabelTextNode.parentElement?.parentElement),
+      };
+      const selection = {
+        isCollapsed: false,
+        rangeCount: 1,
+        getRangeAt: vi.fn(() => range),
+      };
+
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => selection),
+        writable: true,
+        configurable: true,
+      });
+
+      fireEvent(editor, createKeyboardEvent('keydown', { key: 'Delete' }));
+
+      expect(onRemoveChips).not.toHaveBeenCalled();
+    });
+
+    it('Backspace with text-only selection inside a chip does not remove the chip', () => {
+      const onRemoveChips = vi.fn();
+      const { editor } = setup({ onRemoveChips });
+
+      const chipLabelTextNode = editor.querySelector('[data-chip-index="0"] span')?.firstChild as Text;
+      const range = {
+        startContainer: chipLabelTextNode,
+        endContainer: chipLabelTextNode,
+        startOffset: 0,
+        endOffset: 4,
+        intersectsNode: vi.fn((node: Node) => node === chipLabelTextNode.parentElement?.parentElement),
+      };
+      const selection = {
+        isCollapsed: false,
+        rangeCount: 1,
+        getRangeAt: vi.fn(() => range),
+      };
+
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => selection),
+        writable: true,
+        configurable: true,
+      });
+
+      fireEvent(editor, createKeyboardEvent('keydown', { key: 'Backspace' }));
+
+      expect(onRemoveChips).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('caret restoration after chip insertion', () => {
+    it('restores caret to the new active gap after chips length increases', () => {
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+
+      const removeAllRanges = vi.fn();
+      const addRange = vi.fn();
+      const setStart = vi.fn();
+      const collapse = vi.fn();
+
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => ({
+          rangeCount: 0,
+          removeAllRanges,
+          addRange,
+        })),
+        writable: true,
+        configurable: true,
+      });
+
+      vi.spyOn(document, 'createRange').mockReturnValue({
+        setStart,
+        collapse,
+      } as unknown as Range);
+
+      const initialProps: ChipInputProps = {
+        chips: ['female:loli'],
+        activeInput: '',
+        inputPosition: 1,
+        onInputChange: vi.fn(),
+        onRemoveChip: vi.fn(),
+        onKeyDown: vi.fn(),
+        onFocus: vi.fn(),
+        onPaste: vi.fn(),
+        onClearAll: vi.fn(),
+        inputRef: createRef<HTMLInputElement>() as React.RefObject<HTMLInputElement | null>,
+      };
+
+      const { rerender, container } = render(<ChipInput {...initialProps} />);
+      const editor = container.querySelector('[role="textbox"]') as HTMLDivElement;
+
+      fireEvent.focus(editor);
+
+      rerender(
+        <ChipInput
+          {...initialProps}
+          chips={['female:loli', 'female:anal']}
+          inputPosition={2}
+        />,
+      );
+
+      const newGapTextNode = editor.childNodes[4];
+      expect(setStart).toHaveBeenCalledWith(newGapTextNode, 0);
+      expect(removeAllRanges).toHaveBeenCalled();
+      expect(addRange).toHaveBeenCalled();
+    });
+
+    it('keeps replacement caret at the start of the remaining active text instead of forcing the end', () => {
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+
+      const removeAllRanges = vi.fn();
+      const addRange = vi.fn();
+      const setStart = vi.fn();
+      const collapse = vi.fn();
+
+      const selectionRange = {
+        startContainer: null as Node | null,
+        startOffset: 11,
+      };
+
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => ({
+          rangeCount: 1,
+          getRangeAt: () => selectionRange,
+          removeAllRanges,
+          addRange,
+        })),
+        writable: true,
+        configurable: true,
+      });
+
+      vi.spyOn(document, 'createRange').mockReturnValue({
+        setStart,
+        collapse,
+      } as unknown as Range);
+
+      const initialProps: ChipInputProps = {
+        chips: ['female:loli', 'artist:foo'],
+        activeInput: 'left female:lo right',
+        inputPosition: 1,
+        gapTexts: { 0: 'start', 2: 'tail' },
+        onInputChange: vi.fn(),
+        onRemoveChip: vi.fn(),
+        onKeyDown: vi.fn(),
+        onFocus: vi.fn(),
+        onPaste: vi.fn(),
+        onClearAll: vi.fn(),
+        inputRef: createRef<HTMLInputElement>() as React.RefObject<HTMLInputElement | null>,
+      };
+
+      const { rerender, container } = render(<ChipInput {...initialProps} />);
+      const editor = container.querySelector('[role="textbox"]') as HTMLDivElement;
+      selectionRange.startContainer = editor.childNodes[2];
+
+      fireEvent.focus(editor);
+
+      rerender(
+        <ChipInput
+          {...initialProps}
+          chips={['female:loli', 'female:lion', 'artist:foo']}
+          activeInput="right"
+          inputPosition={2}
+          gapTexts={{ 0: 'start', 1: 'left', 3: 'tail' }}
+        />,
+      );
+
+      const newGapTextNode = editor.childNodes[4];
+      expect(setStart).toHaveBeenCalledWith(newGapTextNode, 0);
+      expect(setStart).not.toHaveBeenCalledWith(newGapTextNode, 'right'.length);
+    });
+
+    it('restores caret after rerender when selection is on a chip child node (host-based anchor)', () => {
+      const removeAllRanges = vi.fn();
+      const addRange = vi.fn();
+      const setStart = vi.fn();
+      const collapse = vi.fn();
+
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+
+      const initialProps: ChipInputProps = {
+        chips: ['female:loli', 'female:anal'],
+        activeInput: 'left',
+        inputPosition: 1,
+        onInputChange: vi.fn(),
+        onRemoveChip: vi.fn(),
+        onKeyDown: vi.fn(),
+        onFocus: vi.fn(),
+        onPaste: vi.fn(),
+        onClearAll: vi.fn(),
+        inputRef: createRef<HTMLInputElement>() as React.RefObject<HTMLInputElement | null>,
+      };
+
+      const { rerender, container } = render(<ChipInput {...initialProps} />);
+      const editor = container.querySelector('[role="textbox"]') as HTMLDivElement;
+      const chipLabel = editor.querySelector('[data-chip-index="0"] span') as HTMLSpanElement;
+
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => ({
+          rangeCount: 1,
+          getRangeAt: () => ({ startContainer: chipLabel, startOffset: 0 }),
+          removeAllRanges,
+          addRange,
+        })),
+        writable: true,
+        configurable: true,
+      });
+
+      vi.spyOn(document, 'createRange').mockReturnValue({
+        setStart,
+        collapse,
+      } as unknown as Range);
+
+      fireEvent.focus(editor);
+
+      rerender(
+        <ChipInput
+          {...initialProps}
+          activeInput="middle"
+          gapTexts={{ 0: 'left-gap', 1: 'middle', 2: 'right-gap' }}
+          inputPosition={2}
+        />,
+      );
+
+      const hostMappedGapNode = setStart.mock.calls[0]?.[0] as Node | undefined;
+      expect(hostMappedGapNode).toBeDefined();
+      expect(hostMappedGapNode?.nodeType).toBe(Node.TEXT_NODE);
+      expect((hostMappedGapNode as Text).textContent).toBe('left');
+      expect(setStart).toHaveBeenCalledWith(hostMappedGapNode, 0);
+      expect(removeAllRanges).toHaveBeenCalled();
+      expect(addRange).toHaveBeenCalled();
+    });
+  });
+
   // ─── syncDomToState (input position sync) ───
 
   describe('syncDomToState (input position sync)', () => {
@@ -1156,6 +1512,38 @@ describe('ChipInput', () => {
       expect(onInputChange).toHaveBeenCalled();
     });
 
+    it('maps chip-host caret anchors to the host gap for movement/replacement state sync', () => {
+      const onInputPositionChange = vi.fn();
+      const onInputChange = vi.fn();
+      const { editor } = setup({
+        chips: ['female:loli', 'female:anal'],
+        inputPosition: 2,
+        gapTexts: { 0: 'start', 1: 'middle' },
+        activeInput: '',
+        onInputPositionChange,
+        onInputChange,
+      });
+
+      const chipHost = editor.querySelector('[data-chip-index="0"]') as HTMLElement;
+      const chipNode = chipHost.querySelector('span') as HTMLElement;
+
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => ({
+          rangeCount: 1,
+          getRangeAt: vi.fn(() => ({ startContainer: chipNode, startOffset: 0 })),
+        })),
+        writable: true,
+        configurable: true,
+      });
+
+      act(() => {
+        fireEvent.input(editor);
+      });
+
+      expect(onInputPositionChange).toHaveBeenCalledWith(1);
+      expect(onInputChange).toHaveBeenCalledWith('middle');
+    });
+
     it('input event calls onInputChange with gap text content', () => {
       const onInputChange = vi.fn();
       const { editor } = setup({
@@ -1175,6 +1563,131 @@ describe('ChipInput', () => {
       });
 
       expect(onInputChange).toHaveBeenCalledWith('newtext');
+    });
+  });
+
+  // ─── Caret token callback emission ───
+
+  describe('onCaretTokenChange callback emission', () => {
+    function mockCaretAtGap(editor: HTMLDivElement, gapIndex: number, offset: number) {
+      // Find the text node at gapIndex (every other childNode starting at 0)
+      let gap = 0;
+      let targetNode: Node = editor.firstChild as Node;
+      for (let i = 0; i < editor.childNodes.length; i++) {
+        const child = editor.childNodes[i];
+        if (child.nodeType === Node.TEXT_NODE) {
+          if (gap === gapIndex) {
+            targetNode = child;
+            break;
+          }
+        } else if (child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).hasAttribute('data-chip-index')) {
+          gap += 1;
+        }
+      }
+
+      const mockRange = { startContainer: targetNode, startOffset: offset };
+      const mockSel = {
+        rangeCount: 1,
+        getRangeAt: vi.fn(() => mockRange),
+        removeAllRanges: vi.fn(),
+        addRange: vi.fn(),
+      };
+      Object.defineProperty(window, 'getSelection', {
+        value: vi.fn(() => mockSel),
+        writable: true,
+        configurable: true,
+      });
+    }
+
+    it('emits non-zero gap token context with explicit token metadata', () => {
+      const onCaretTokenChange = vi.fn();
+      const { editor } = setup({
+        chips: ['female:loli', 'female:anal'],
+        inputPosition: 1,
+        activeInput: 'female:lo',
+        onCaretTokenChange,
+      });
+
+      mockCaretAtGap(editor, 1, 4);
+
+      fireEvent.input(editor);
+
+      expect(onCaretTokenChange).toHaveBeenCalledOnce();
+      expect(onCaretTokenChange).toHaveBeenCalledWith({
+        gap: 1,
+        gapText: 'female:lo',
+        caretOffset: 4,
+        token: 'female:lo',
+        tokenStart: 0,
+        tokenEnd: 9,
+      });
+    });
+
+    it('emits null when caret is on a whitespace boundary in active gap', () => {
+      const onCaretTokenChange = vi.fn();
+      const { editor } = setup({
+        chips: ['female:loli', 'female:anal'],
+        inputPosition: 1,
+        activeInput: '   ',
+        onCaretTokenChange,
+      });
+
+      // Empty token after normalization should map to null
+      mockCaretAtGap(editor, 1, 1);
+
+      fireEvent.input(editor);
+
+      expect(onCaretTokenChange).toHaveBeenCalledWith(null);
+    });
+
+    it('updates token context across gap transitions', () => {
+      const onCaretTokenChange = vi.fn();
+      const { editor } = setup({
+        chips: ['female:loli', 'female:anal'],
+        inputPosition: 0,
+        activeInput: 'left',
+        gapTexts: {
+          1: 'middle',
+          2: 'right',
+        },
+        onCaretTokenChange,
+      });
+
+      // Transition across gaps by emitting from different gap positions.
+      mockCaretAtGap(editor, 0, 1);
+      fireEvent.input(editor);
+
+      mockCaretAtGap(editor, 1, 0);
+      fireEvent.input(editor);
+
+      mockCaretAtGap(editor, 2, 0);
+      fireEvent.input(editor);
+
+      expect(onCaretTokenChange).toHaveBeenCalledTimes(3);
+      expect(onCaretTokenChange).toHaveBeenNthCalledWith(1, {
+        gap: 0,
+        gapText: 'left',
+        caretOffset: 1,
+        token: 'left',
+        tokenStart: 0,
+        tokenEnd: 4,
+      });
+      expect(onCaretTokenChange).toHaveBeenNthCalledWith(2, {
+        gap: 1,
+        gapText: 'middle',
+        caretOffset: 0,
+        token: 'middle',
+        tokenStart: 0,
+        tokenEnd: 6,
+      });
+      expect(onCaretTokenChange).toHaveBeenNthCalledWith(3, {
+        gap: 2,
+        gapText: 'right',
+        caretOffset: 0,
+        token: 'right',
+        tokenStart: 0,
+        tokenEnd: 5,
+      });
     });
   });
 

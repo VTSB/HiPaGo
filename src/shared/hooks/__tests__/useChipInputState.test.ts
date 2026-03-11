@@ -96,4 +96,89 @@ describe('useChipInputState', () => {
       expect(result.current.inputPosition).toBe(2);
     });
   });
+
+  describe('replaceActiveTokenWithChip', () => {
+    it('replaces token in the active gap preserving left/right text and moves cursor', () => {
+      const { result } = renderHook(() =>
+        useChipInputState({
+          initialChips: ['female:old-left', 'female:old-right'],
+          initialInput: 'left token right',
+          initialPosition: 1,
+        }),
+      );
+
+      let replaced = false;
+      act(() => {
+        replaced = result.current.replaceActiveTokenWithChip('female:new', {
+          gap: 1,
+          tokenStart: 5,
+          tokenEnd: 10,
+        });
+      });
+
+      expect(replaced).toBe(true);
+      expect(result.current.chips).toEqual([
+        'female:old-left',
+        'female:new',
+        'female:old-right',
+      ]);
+      expect(result.current.gapTexts).toEqual({ 1: 'left' });
+      expect(result.current.activeInput).toBe('right');
+      expect(result.current.inputPosition).toBe(2);
+    });
+
+    it('replaces a normalized token span even when stored active input still has repeated spaces', () => {
+      const { result } = renderHook(() =>
+        useChipInputState({
+          initialChips: ['female:old-left', 'female:old-right'],
+          initialInput: 'left  female:lo   right',
+          initialPosition: 1,
+        }),
+      );
+
+      let replaced = false;
+      act(() => {
+        replaced = result.current.replaceActiveTokenWithChip('female:new', {
+          gap: 1,
+          tokenStart: 5,
+          tokenEnd: 14,
+        });
+      });
+
+      expect(replaced).toBe(true);
+      expect(result.current.chips).toEqual([
+        'female:old-left',
+        'female:new',
+        'female:old-right',
+      ]);
+      expect(result.current.gapTexts).toEqual({ 1: 'left' });
+      expect(result.current.activeInput).toBe('right');
+      expect(result.current.inputPosition).toBe(2);
+    });
+
+    it('returns false and leaves state unchanged when span gap mismatches active input position', () => {
+      const { result } = renderHook(() =>
+        useChipInputState({
+          initialChips: ['female:one'],
+          initialInput: 'hello token world',
+          initialPosition: 0,
+        }),
+      );
+
+      let replaced = false;
+      act(() => {
+        replaced = result.current.replaceActiveTokenWithChip('female:new', {
+          gap: 1,
+          tokenStart: 6,
+          tokenEnd: 11,
+        });
+      });
+
+      expect(replaced).toBe(false);
+      expect(result.current.chips).toEqual(['female:one']);
+      expect(result.current.activeInput).toBe('hello token world');
+      expect(result.current.gapTexts).toEqual({});
+      expect(result.current.inputPosition).toBe(0);
+    });
+  });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ChipInput } from '@/shared/components/ChipInput';
+import { ChipInput, type CaretTokenContext } from '@/shared/components/ChipInput';
 import { SuggestionDropdown } from '@/features/search/components/SuggestionDropdown';
 import { parseToken } from '@/features/search/components/RecentSearchesDropdown';
 import { searchLocalTags } from '@/lib/db/search-local';
@@ -18,6 +18,7 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [caretTokenContext, setCaretTokenContext] = useState<CaretTokenContext | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -34,8 +35,15 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
     handleClearAll,
     handlePaste,
     insertChip,
+    replaceActiveTokenWithChip,
     handleInputChange: handleInputChangeBase,
   } = useChipInputState();
+
+  const activeCaretTokenContext = caretTokenContext
+    && caretTokenContext.gap === inputPosition
+    && caretTokenContext.gapText === activeInput
+    ? caretTokenContext
+    : null;
 
   const handleClickOutside = useCallback(() => {
     setShowDropdown(false);
@@ -44,23 +52,25 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
 
   // Debounced autocomplete
   useEffect(() => {
-    const colonIdx = activeInput.indexOf(':');
-    const searchTerm = colonIdx > 0 ? activeInput.slice(colonIdx + 1) : activeInput;
+    const activeToken = activeCaretTokenContext?.token ?? '';
+    const colonIdx = activeToken.indexOf(':');
+    const searchTerm = colonIdx > 0 ? activeToken.slice(colonIdx + 1) : activeToken;
 
     if (searchTerm.length < 2) {
       setSuggestions([]);
+      setShowDropdown(false);
       return;
     }
 
     const timer = setTimeout(async () => {
-      const typeFilter = colonIdx > 0 ? (activeInput.slice(0, colonIdx) as TagType) : undefined;
+      const typeFilter = colonIdx > 0 ? (activeToken.slice(0, colonIdx) as TagType) : undefined;
       const results = await searchLocalTags(searchTerm, typeFilter, 10);
       setSuggestions(results);
       setShowDropdown(results.length > 0);
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [activeInput]);
+  }, [activeCaretTokenContext?.token]);
 
   // Notify parent when chips or active input change
   useEffect(() => {
@@ -71,30 +81,36 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
         tags.push({ type: parsed.type, name: parsed.tag });
       }
     }
-    // Combine all text: activeInput + all gapTexts values
-    const allTexts = [activeInput.trim()];
-    if (gapTexts) {
-      for (const text of Object.values(gapTexts)) {
-        const t = text.trim();
-        if (t) allTexts.push(t);
+    const titleParts: string[] = [];
+    for (let gap = 0; gap <= chips.length; gap += 1) {
+      const text = gap === inputPosition ? activeInput.trim() : (gapTexts[gap] || '').trim();
+      if (text) {
+        titleParts.push(text);
       }
     }
-    const titleQuery = allTexts.filter(Boolean).join(' ');
+    const titleQuery = titleParts.join(' ');
     onFilterChange({ tags, titleQuery });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chips, activeInput, gapTexts]);
+  }, [chips, activeInput, inputPosition, gapTexts]);
 
   // Only commits tag-formatted values (type:name) as chips
   const commitTag = useCallback((value: string) => {
     const trimmed = value.trim();
-    if (!trimmed) return;
-    if (!parseToken(trimmed)) return;
+    if (!trimmed || !parseToken(trimmed)) return;
 
-    insertChip(trimmed);
+    const replaced = activeCaretTokenContext
+      ? replaceActiveTokenWithChip(trimmed, activeCaretTokenContext)
+      : false;
+
+    if (!replaced) {
+      insertChip(trimmed);
+    }
+
     setSuggestions([]);
     setShowDropdown(false);
     setSelectedIndex(-1);
-  }, [insertChip]);
+    setCaretTokenContext(null);
+  }, [activeCaretTokenContext, insertChip, replaceActiveTokenWithChip]);
 
   const handleSuggestionClick = useCallback((tag: string, tagType: string) => {
     commitTag(`${tagType}:${tag}`);
@@ -166,6 +182,7 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
         inputPosition={inputPosition}
         onInputChange={handleInputChange}
         onInputPositionChange={moveInputPosition}
+        onCaretTokenChange={setCaretTokenContext}
         gapTexts={gapTexts}
         onGapTextClick={(pos) => { moveInputPosition(pos); }}
         onRemoveChip={handleRemoveChip}
