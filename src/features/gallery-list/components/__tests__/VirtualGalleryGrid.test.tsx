@@ -258,7 +258,7 @@ describe('VirtualGalleryGrid — sliding window', () => {
 
   afterEach(() => { vi.useRealTimers(); });
 
-  it('window is centered near viewingPage on initial render', () => {
+  it('window is centered near viewingPage on initial render (sliding window)', () => {
     // viewingPage=150 → windowStartPage = max(1, 150-100) = 50
     // windowStartItem = (50-1)*25 = 1225
     const requestPage = vi.fn();
@@ -280,5 +280,50 @@ describe('VirtualGalleryGrid — sliding window', () => {
     // requestPage should be called with page indices in the window (page 49+)
     const calledPages = requestPage.mock.calls.map((c) => c[0]);
     expect(calledPages.some((p) => p >= 49)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scrollToItem ref
+// ---------------------------------------------------------------------------
+
+describe('VirtualGalleryGrid — scrollToItem handle', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('exposes scrollToItem via ref', () => {
+    const ref = createRef<VirtualGalleryGridHandle>();
+    render(
+      <VirtualGalleryGrid
+        ref={ref}
+        totalLength={PAGE_SIZE * 10}
+        totalPages={10}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    expect(ref.current).not.toBeNull();
+    expect(typeof ref.current?.scrollToItem).toBe('function');
+  });
+
+  it('scrollToItem calls virtualizer.scrollToIndex', () => {
+    vi.useFakeTimers();
+    const ref = createRef<VirtualGalleryGridHandle>();
+    render(
+      <VirtualGalleryGrid
+        ref={ref}
+        totalLength={PAGE_SIZE * 10}
+        totalPages={10}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    act(() => {
+      ref.current?.scrollToItem(100);
+    });
+    vi.runAllTimers();
+    vi.useRealTimers();
+    expect(mockScrollToIndex).toHaveBeenCalled();
   });
 });

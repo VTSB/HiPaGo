@@ -21,9 +21,12 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
   const scrollToPageElement = useCallback((targetIdx: number) => {
     const node = scrollNodeRef.current;
     if (!node) return;
+    const targetEl = node.querySelector(`[data-page-index="${targetIdx}"]`) as HTMLElement | null;
+    if (!targetEl) return;
     programmaticScrollRef.current = true;
     clearTimeout(scrollTimerRef.current);
-    node.querySelector(`[data-page-index="${targetIdx}"]`)?.scrollIntoView({ behavior: 'smooth' });
+    const offset = targetEl.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop;
+    node.scrollTo({ top: offset, behavior: 'smooth' });
     scrollTimerRef.current = setTimeout(() => {
       programmaticScrollRef.current = false;
     }, 600);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useVirtualGallery } from '../hooks/useVirtualGallery';
 import { VirtualGalleryGrid, type VirtualGalleryGridHandle } from './VirtualGalleryGrid';
 import { FloatingPageNav, type FloatingPageNavHandle } from '@/shared/components/FloatingPageNav';
@@ -10,9 +11,30 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 import { useT } from '@/lib/i18n/useT';
 import type { SortOrder } from '@/lib/utils/types';
 
+const VALID_SORTS: SortOrder[] = ['date_added', 'popular_year', 'popular_month', 'popular_week', 'popular_day'];
+
 export function GalleryListView() {
-  const [sort, setSort] = useState<SortOrder>('date_added');
-  const [viewingPage, setViewingPage] = useState(1);
+  const searchParams = useSearchParams();
+
+  // Read sort from URL with validation
+  const [sort, setSort] = useState<SortOrder>(() => {
+    const s = searchParams.get('sort');
+    return s && VALID_SORTS.includes(s as SortOrder) ? (s as SortOrder) : 'date_added';
+  });
+
+  // Read at/page from URL — migrate ?page= to ?at=
+  const initialAt = (() => {
+    const at = searchParams.get('at');
+    if (at) return Math.max(0, parseInt(at, 10) || 0);
+    const page = searchParams.get('page');
+    if (page) return Math.max(0, (parseInt(page, 10) || 1) - 1) * PAGE_SIZE;
+    return 0;
+  })();
+
+  const [viewingPage, setViewingPage] = useState(() =>
+    initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1
+  );
+
   const [cachedTotalPages, setCachedTotalPages] = useState(0);
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
@@ -24,7 +46,6 @@ export function GalleryListView() {
 
   const totalPages = totalLength > 0 ? Math.ceil(totalLength / PAGE_SIZE) : 0;
 
-  // Preserve totalPages across sort resets to avoid nav flicker
   useEffect(() => {
     if (totalPages > 0) setCachedTotalPages(totalPages);
   }, [totalPages]);
@@ -35,12 +56,52 @@ export function GalleryListView() {
     gridRef.current?.scrollToPage(page);
   }, []);
 
-  // Prevent browser from restoring scroll position on refresh — virtual grid
-  // always starts at the top and the restored position would be wrong.
   useEffect(() => {
     history.scrollRestoration = 'manual';
     return () => { history.scrollRestoration = 'auto'; };
   }, []);
+
+  // Debounced URL sync on scroll (200ms)
+  const urlTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const sortRef = useRef(sort);
+  sortRef.current = sort;
+  useEffect(() => {
+    const syncUrl = () => {
+      clearTimeout(urlTimerRef.current);
+      urlTimerRef.current = setTimeout(() => {
+        const url = new URL(window.location.href);
+        let at = 0;
+        const items = document.querySelectorAll('[data-item-index]');
+        for (let i = items.length - 1; i >= 0; i--) {
+          const rect = items[i].getBoundingClientRect();
+          if (rect.top <= 100) {
+            at = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
+            break;
+          }
+        }
+        if (at > 0) url.searchParams.set('at', String(at));
+        else url.searchParams.delete('at');
+        if (sortRef.current !== 'date_added') url.searchParams.set('sort', sortRef.current);
+        else url.searchParams.delete('sort');
+        url.searchParams.delete('page');
+        window.history.replaceState(history.state, '', url.pathname + url.search);
+      }, 200);
+    };
+    window.addEventListener('scroll', syncUrl, { passive: true });
+    syncUrl(); // initial sync for sort changes
+    return () => {
+      window.removeEventListener('scroll', syncUrl);
+      clearTimeout(urlTimerRef.current);
+    };
+  }, [sort]);
+
+  // Scroll restoration
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || totalLength === 0 || initialAt <= 0) return;
+    restoredRef.current = true;
+    gridRef.current?.scrollToItem(initialAt);
+  }, [totalLength, initialAt]);
 
   const handleSortChange = useCallback((newSort: SortOrder) => {
     setSort(newSort);

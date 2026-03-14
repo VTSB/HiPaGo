@@ -18,6 +18,8 @@ const translations = {
   'search.recentSearches': { en: 'Recent Searches', ko: '최근 검색' },
   'search.clearHistory': { en: 'Clear all', ko: '전체 삭제' },
   'search.sortUnavailable': { en: 'Sorting is only available for single-tag searches', ko: '정렬은 단일 태그 검색에서만 사용 가능합니다' },
+  'search.tagSuggestions': { en: 'Tag Suggestions', ko: '태그 제안' },
+  'search.popularTags': { en: 'Popular Tags', ko: '인기 태그' },
 
   // Gallery detail
   'detail.back': { en: 'Back', ko: '뒤로' },

@@ -84,6 +84,8 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const gridColumns = useSettingsStore((s) => s.gridColumns);
+  const setGridColumns = useSettingsStore((s) => s.setGridColumns);
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const loadedPages = Math.ceil(loadedItems / pageSize);
@@ -99,6 +101,15 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
       suppressScrollRef.current = false;
     }, 400);
   }, []);
+
+  // Suppress scroll tracking when grid columns change to prevent page jumps
+  const prevGridColumnsRef = useRef(gridColumns);
+  useEffect(() => {
+    if (prevGridColumnsRef.current !== gridColumns) {
+      prevGridColumnsRef.current = gridColumns;
+      suppressScrollTracking();
+    }
+  }, [gridColumns, suppressScrollTracking]);
 
   useImperativeHandle(ref, () => ({ suppress: suppressScrollTracking }), [suppressScrollTracking]);
 
@@ -242,9 +253,6 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [goPrev, goNext]);
-
-  const gridColumns = useSettingsStore((s) => s.gridColumns);
-  const setGridColumns = useSettingsStore((s) => s.setGridColumns);
 
   const shrinkGrid = useCallback(() => {
     const current = gridColumns || 5;

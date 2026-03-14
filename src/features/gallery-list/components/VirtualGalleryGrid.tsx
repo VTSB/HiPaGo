@@ -25,6 +25,7 @@ const SLIDE_BY = 100;
 
 export interface VirtualGalleryGridHandle {
   scrollToPage: (page: number) => void;
+  scrollToItem: (itemIndex: number) => void;
 }
 
 interface Props {
@@ -172,6 +173,34 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       prevWindowStartPageRef.current = windowStartPage;
     }, [windowStartPage, actualCols, viewingPage, totalRows, virtualizer]);
 
+    // Anchor scroll position when column count changes so the same content stays visible.
+    const prevActualColsRef = useRef(actualCols);
+    useLayoutEffect(() => {
+      if (prevActualColsRef.current === actualCols) return;
+      prevActualColsRef.current = actualCols;
+
+      // Scroll to the row corresponding to viewingPage in the new column layout
+      const anchorRow = Math.max(
+        0,
+        Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
+      );
+      virtualizer.scrollToIndex(Math.min(anchorRow, totalRows - 1), { align: 'start' });
+    }, [actualCols, viewingPage, windowStartPage, totalRows, virtualizer]);
+
+    // On first render with data, scroll to the initial viewingPage if it's not page 1.
+    // This handles scroll restoration after navigating back from detail.
+    const initialScrollDoneRef = useRef(false);
+    useLayoutEffect(() => {
+      if (initialScrollDoneRef.current || totalRows === 0 || viewingPage <= 1) return;
+      initialScrollDoneRef.current = true;
+
+      const targetRow = Math.max(
+        0,
+        Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
+      );
+      virtualizer.scrollToIndex(Math.min(targetRow, totalRows - 1), { align: 'start' });
+    }, [totalRows, viewingPage, windowStartPage, actualCols, virtualizer]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -191,6 +220,24 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
             virtualizer.scrollToIndex(Math.min(targetRow, Math.ceil((WINDOW_PAGES * PAGE_SIZE) / actualCols) - 1), {
               align: 'start',
             });
+          }, 0);
+        },
+        scrollToItem: (itemIndex: number) => {
+          const targetPage = Math.floor(itemIndex / PAGE_SIZE) + 1;
+          const clampedPage = Math.max(1, Math.min(targetPage, effectiveTotalPages));
+          const newWindowStart = Math.max(
+            1,
+            Math.min(clampedPage - Math.floor(WINDOW_PAGES / 2), effectiveTotalPages - WINDOW_PAGES + 1),
+          );
+          prevWindowStartPageRef.current = newWindowStart;
+          setWindowStartPage(newWindowStart);
+          const newWindowStartItem = (newWindowStart - 1) * PAGE_SIZE;
+          const targetRow = Math.floor((itemIndex - newWindowStartItem) / actualCols);
+          setTimeout(() => {
+            virtualizer.scrollToIndex(
+              Math.min(targetRow, Math.ceil((WINDOW_PAGES * PAGE_SIZE) / actualCols) - 1),
+              { align: 'start' },
+            );
           }, 0);
         },
       }),

@@ -3,76 +3,66 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import { FilterBar } from '../FilterBar';
 
+const { mockSearchLocalTags } = vi.hoisted(() => ({
+  mockSearchLocalTags: vi.fn().mockResolvedValue([]),
+}));
+
+let onSuggestionSelect: ((tag: string, tagType: string) => void) | null = null;
+
 // ---------------------------------------------------------------------------
-// Mock ChipInput as a simple controlled input so FilterBar logic is testable
-// without a full contenteditable setup.
+// Mock SearchInput as a simple controlled input so FilterBar logic is testable
 // ---------------------------------------------------------------------------
-vi.mock('@/shared/components/ChipInput', () => {
+vi.mock('@/shared/components/SearchInput', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
 
-  function MockChipInput({
-    chips = [],
-    activeInput = '',
-    onInputChange,
-    onRemoveChip,
-    onClearAll,
+  function MockSearchInput({
+    value = '',
+    onChange,
+    onClear,
     onKeyDown,
+    onFocus,
+    onBlur,
     inputRef,
     placeholder,
   }: {
-    chips?: string[];
-    activeInput?: string;
-    onInputChange?: (v: string) => void;
-    onRemoveChip?: (i: number) => void;
-    onClearAll?: () => void;
+    value?: string;
+    onChange?: (v: string) => void;
+    onClear?: () => void;
     onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+    onFocus?: () => void;
+    onBlur?: () => void;
     inputRef?: React.Ref<HTMLInputElement>;
     placeholder?: string;
     [key: string]: unknown;
   }) {
-    const [allSelected, setAllSelected] = React.useState(false);
-
-    const chipEls = chips.map((chip: string, i: number) =>
-      React.createElement('span', { key: i, className: 'inline-flex' }, chip),
-    );
-
     const inputEl = React.createElement('input', {
       key: 'main-input',
       autoComplete: 'off',
-      value: activeInput,
+      value,
       placeholder,
       ref: inputRef,
-      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onInputChange?.(e.target.value),
-      onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
-        // Backspace with empty input: remove last chip
-        if (e.key === 'Backspace' && !activeInput) {
-          onRemoveChip?.(chips.length - 1);
-          return;
-        }
-        // Ctrl+A: select all
-        if (e.ctrlKey && e.key === 'a') {
-          setAllSelected(true);
-          return;
-        }
-        // Delete when all selected: clear all
-        if (e.key === 'Delete' && allSelected) {
-          setAllSelected(false);
-          onClearAll?.();
-          return;
-        }
-        setAllSelected(false);
-        onKeyDown?.(e);
-      },
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange?.(e.target.value),
+      onFocus: () => onFocus?.(),
+      onBlur: () => onBlur?.(),
+      onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => onKeyDown?.(e),
     });
 
-    return React.createElement('div', null, ...chipEls, inputEl);
+    const clearBtn = onClear
+      ? React.createElement('button', {
+          key: 'clear',
+          'data-testid': 'clear-all',
+          onClick: () => onClear(),
+        }, '×')
+      : null;
+
+    return React.createElement('div', null, inputEl, clearBtn);
   }
 
-  return { ChipInput: MockChipInput };
+  return { SearchInput: MockSearchInput };
 });
 
-vi.mock('@/features/search/components/RecentSearchesDropdown', () => ({
+vi.mock('@/shared/utils/parse-token', () => ({
   parseToken: (token: string) => {
     const m = token.match(/^(\w+):(.+)$/);
     if (!m) return null;
@@ -86,7 +76,7 @@ vi.mock('@/lib/utils/types', () => ({
 }));
 
 vi.mock('@/lib/db/search-local', () => ({
-  searchLocalTags: vi.fn().mockResolvedValue([]),
+  searchLocalTags: mockSearchLocalTags,
 }));
 
 vi.mock('@/shared/hooks/useClickOutside', () => ({
@@ -94,51 +84,57 @@ vi.mock('@/shared/hooks/useClickOutside', () => ({
 }));
 
 vi.mock('@/features/search/components/SuggestionDropdown', () => ({
-  SuggestionDropdown: () => null,
+  SuggestionDropdown: (props: { onSelect: (tag: string, tagType: string) => void }) => {
+    onSuggestionSelect = props.onSelect;
+    return <div data-testid="suggestion-dropdown" />;
+  },
 }));
 
 function getMainInput(container: HTMLElement) {
   return container.querySelector('input[autocomplete="off"]') as HTMLInputElement;
 }
 
-function getChipTexts(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll('span.inline-flex'))
-    .map(el => el.textContent?.trim() || '');
-}
-
 describe('FilterBar integration', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    onSuggestionSelect = null;
+    mockSearchLocalTags.mockResolvedValue([]);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('adding a tag chip calls onFilterChange with the tag', async () => {
+  it('selecting a suggestion inserts tag into value and calls onFilterChange', async () => {
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
     const onFilterChange = vi.fn();
-    const { container } = render(
+    const { container, getByTestId } = render(
       <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
     );
     const mainInput = getMainInput(container);
 
-    // Type a tag token
+    // Type a tag prefix to trigger autocomplete
     act(() => {
-      fireEvent.change(mainInput, { target: { value: 'female:loli' } });
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
     });
 
-    // Press Enter to commit
-    act(() => {
-      fireEvent.keyDown(mainInput, { key: 'Enter', code: 'Enter' });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
     });
 
-    // Advance timers for any debounced effects
+    expect(mockSearchLocalTags).toHaveBeenCalledWith('lo', 'female', 10);
+    expect(getByTestId('suggestion-dropdown')).toBeTruthy();
+
+    // Click a suggestion
+    act(() => {
+      onSuggestionSelect?.('loli', 'female');
+    });
     act(() => {
       vi.runAllTimers();
     });
 
-    // onFilterChange should have been called at some point with the tag
     const calls = onFilterChange.mock.calls;
     const lastCall = calls[calls.length - 1][0];
     expect(lastCall.tags).toEqual([{ type: 'female', name: 'loli' }]);
@@ -166,62 +162,52 @@ describe('FilterBar integration', () => {
     expect(lastCall.titleQuery).toBe('hello');
   });
 
-  it('removing a chip updates onFilterChange', () => {
+  it('typing mixed tag and plain text produces correct tags and titleQuery', () => {
     const onFilterChange = vi.fn();
     const { container } = render(
       <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
     );
     const mainInput = getMainInput(container);
 
-    // Add a chip
     act(() => {
-      fireEvent.change(mainInput, { target: { value: 'female:loli' } });
+      fireEvent.change(mainInput, { target: { value: 'female:loli hello' } });
     });
-    act(() => {
-      fireEvent.keyDown(mainInput, { key: 'Enter', code: 'Enter' });
-    });
+
     act(() => {
       vi.runAllTimers();
     });
 
-    // Verify chip is in DOM
-    expect(getChipTexts(container).length).toBe(1);
-
-    // Remove chip via Backspace (inputPosition is 1 after adding chip)
-    act(() => {
-      fireEvent.keyDown(mainInput, { key: 'Backspace', code: 'Backspace' });
-    });
-    act(() => {
-      vi.runAllTimers();
-    });
-
-    // Last call should have empty tags
     const calls = onFilterChange.mock.calls;
     const lastCall = calls[calls.length - 1][0];
-    expect(lastCall.tags).toEqual([]);
+    expect(lastCall.tags).toEqual([{ type: 'female', name: 'loli' }]);
+    expect(lastCall.titleQuery).toBe('hello');
   });
 
-  it('undo restores the previous filter state', () => {
+  it('undo restores the previous filter state', async () => {
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
     const onFilterChange = vi.fn();
     const { container } = render(
       <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
     );
     const mainInput = getMainInput(container);
 
-    // Add chip
+    // Type a tag prefix and select suggestion
     act(() => {
-      fireEvent.change(mainInput, { target: { value: 'female:loli' } });
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
     });
     act(() => {
-      fireEvent.keyDown(mainInput, { key: 'Enter', code: 'Enter' });
+      onSuggestionSelect?.('loli', 'female');
     });
     act(() => {
       vi.runAllTimers();
     });
 
-    // Verify chip added
-    const afterAdd = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
-    expect(afterAdd.tags).toHaveLength(1);
+    const afterInsert = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
+    expect(afterInsert.tags).toHaveLength(1);
 
     // Ctrl+Z to undo
     act(() => {
@@ -231,57 +217,72 @@ describe('FilterBar integration', () => {
       vi.runAllTimers();
     });
 
-    // After undo, onFilterChange should be called with no tags.
-    // Note: undo restores the snapshot taken before insertChip, which had
-    // activeInput='female:loli' and chips=[]. So titleQuery is 'female:loli'.
+    // After undo, value is restored to what it was before insertSuggestion
     const afterUndo = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
     expect(afterUndo.tags).toEqual([]);
-    // The input text is restored to what it was before pressing Enter
-    expect(afterUndo.titleQuery).toBe('female:loli');
   });
 
-  it('Ctrl+A then Delete clears all and calls onFilterChange', () => {
+  it('clear button clears value and notifies onFilterChange', async () => {
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
     const onFilterChange = vi.fn();
-    const { container } = render(
+    const { container, getByTestId } = render(
       <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
     );
     const mainInput = getMainInput(container);
 
-    // Add 2 chips
-    const tags = ['female:loli', 'male:yaoi'];
-    for (const tag of tags) {
-      act(() => {
-        fireEvent.change(mainInput, { target: { value: tag } });
-      });
-      act(() => {
-        fireEvent.keyDown(mainInput, { key: 'Enter', code: 'Enter' });
-      });
-    }
+    // Type some text
     act(() => {
-      vi.runAllTimers();
-    });
-
-    expect(getChipTexts(container).length).toBe(2);
-
-    // Ctrl+A to select all
-    act(() => {
-      fireEvent.keyDown(mainInput, { key: 'a', ctrlKey: true, code: 'KeyA' });
-    });
-
-    // Delete to clear all
-    act(() => {
-      fireEvent.keyDown(mainInput, { key: 'Delete', code: 'Delete' });
+      fireEvent.change(mainInput, { target: { value: 'female:loli hello' } });
     });
     act(() => {
       vi.runAllTimers();
     });
 
-    expect(getChipTexts(container).length).toBe(0);
+    // Click clear
+    act(() => {
+      fireEvent.click(getByTestId('clear-all'));
+    });
+    act(() => {
+      vi.runAllTimers();
+    });
 
-    // onFilterChange should have been called with empty tags
     const calls = onFilterChange.mock.calls;
     const lastCall = calls[calls.length - 1][0];
     expect(lastCall.tags).toEqual([]);
+    expect(lastCall.titleQuery).toBe('');
+  });
+
+  it('shows suggestion dropdown when token has 2+ chars after colon', async () => {
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'lion', amount: 10 }]);
+
+    const onFilterChange = vi.fn();
+    const { container, getByTestId } = render(
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+    );
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:li' } });
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
+    });
+
+    expect(mockSearchLocalTags).toHaveBeenCalledWith('li', 'female', 10);
+    expect(getByTestId('suggestion-dropdown')).toBeTruthy();
+
+    // Selecting the suggestion inserts it into value
+    act(() => {
+      onSuggestionSelect?.('lion', 'female');
+    });
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    const lastCall = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
+    expect(lastCall.tags).toEqual([{ type: 'female', name: 'lion' }]);
     expect(lastCall.titleQuery).toBe('');
   });
 });

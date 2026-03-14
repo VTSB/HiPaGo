@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { memo, useCallback, useMemo } from 'react';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { GalleryBlockType, type TagType } from '@/lib/utils/types';
+import { tagFromGalleryEntry, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { useGalleryBlock } from '../hooks/useGalleryBlock';
@@ -19,15 +20,15 @@ function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
   if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED) return false;
   for (const [type, tags] of Object.entries(block.tags)) {
     for (const tag of tags || []) {
-      const key = `${type}:${tag.replace(/ /g, '_')}`;
+      const key = toSearchString(tagFromGalleryEntry(type as TagType, tag));
       if (blurTags.includes(key)) return true;
       // Handle legacy cached blocks where ♂/♀ tags are stored under generic 'tag' type
       if (type === 'tag') {
         if (tag.endsWith(' ♂')) {
-          const legacyKey = `male:${tag.slice(0, -2).replace(/ /g, '_')}`;
+          const legacyKey = toSearchString(tagFromGalleryEntry('male' as TagType, tag.slice(0, -2)));
           if (blurTags.includes(legacyKey)) return true;
         } else if (tag.endsWith(' ♀')) {
-          const legacyKey = `female:${tag.slice(0, -2).replace(/ /g, '_')}`;
+          const legacyKey = toSearchString(tagFromGalleryEntry('female' as TagType, tag.slice(0, -2)));
           if (blurTags.includes(legacyKey)) return true;
         }
       }

@@ -9,6 +9,7 @@ import {
 } from '@/lib/utils/constants';
 import type { IndexData, IndexNode, Suggestion, SortOrder } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
+import { tagFromSearch } from '@/lib/utils/hitomi-tag';
 import { fetchIndexVersion } from './gallery';
 import { fetchNozomiSearch } from './nozomi';
 import { resolveTagIndexUrl } from './url-resolver';
@@ -180,10 +181,10 @@ export function parseQuery(query: string): { tagType: string | null; tag: string
     ) {
       // Convert underscores back to spaces — tag links encode spaces as underscores
       // but hitomi's API uses actual spaces in tag names
-      return { tagType: possibleType, tag: query.slice(colonIndex + 1).trim().replace(/_/g, ' ') };
+      return { tagType: possibleType, tag: tagFromSearch(query.slice(colonIndex + 1).trim(), possibleType as TagType).displayForm };
     }
   }
-  return { tagType: null, tag: query.replace(/_/g, ' ') };
+  return { tagType: null, tag: tagFromSearch(query, TagType.TAG).displayForm };
 }
 
 /**

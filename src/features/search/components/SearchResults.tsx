@@ -1,33 +1,44 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { GalleryGridById } from '@/features/gallery-list/components/GalleryGrid';
+import { VirtualGalleryGrid, type VirtualGalleryGridHandle } from '@/features/gallery-list/components/VirtualGalleryGrid';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
-import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
-import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
+import { FloatingPageNav, type FloatingPageNavHandle } from '@/shared/components/FloatingPageNav';
 import { SortSelector } from '@/shared/components/SortSelector';
 import { useQuery } from '@tanstack/react-query';
-import { getGalleryIdsForQuery } from '@/lib/api/search';
-import { parseCompoundQuery } from '@/lib/api/search';
+import { getGalleryIdsForQuery, parseCompoundQuery } from '@/lib/api/search';
 import { useSettingsStore } from '@/lib/store/settings';
-import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { useT } from '@/lib/i18n/useT';
+import { PAGE_SIZE } from '@/lib/utils/constants';
 import type { SortOrder } from '@/lib/utils/types';
 
-const RESULTS_PER_PAGE = 25;
+const VALID_SORTS: SortOrder[] = ['date_added', 'popular_year', 'popular_month', 'popular_week', 'popular_day'];
 
 export function SearchResults() {
   const searchParams = useSearchParams();
   const query = searchParams.get('q') || '';
   const language = useSettingsStore((s) => s.language);
   const t = useT();
-  const [sort, setSort] = useState<SortOrder>('date_added');
 
-  // Sort only works for single-term typed queries (nozomi-based)
+  const [sort, setSort] = useState<SortOrder>(() => {
+    const s = searchParams.get('sort');
+    return s && VALID_SORTS.includes(s as SortOrder) ? (s as SortOrder) : 'date_added';
+  });
+
+  const initialAt = (() => {
+    const at = searchParams.get('at');
+    return at ? Math.max(0, parseInt(at, 10) || 0) : 0;
+  })();
+
+  const [viewingPage, setViewingPage] = useState(() =>
+    initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1
+  );
+
+  const gridRef = useRef<VirtualGalleryGridHandle>(null);
+  const floatingNavRef = useRef<FloatingPageNavHandle>(null);
+
   const isSingleTerm = parseCompoundQuery(query).length === 1;
-
-  // Detect numeric query (gallery ID)
   const numericId = /^\d+$/.test(query) ? Number(query) : null;
 
   const idsQuery = useQuery({
@@ -36,7 +47,6 @@ export function SearchResults() {
     enabled: query.length > 0,
   });
 
-  // Fallback: when a specific language returns 0 results or errors, retry with 'all'
   const langQueryDone = !idsQuery.isLoading && language !== 'all' && query.length > 0;
   const langQueryEmpty = langQueryDone && (idsQuery.isError || (idsQuery.data !== undefined && idsQuery.data.length === 0));
   const fallbackQuery = useQuery({
@@ -49,19 +59,72 @@ export function SearchResults() {
   const allIds = isFallback ? fallbackQuery.data : idsQuery.data;
   const isLoadingIds = idsQuery.isLoading || (langQueryEmpty && fallbackQuery.isLoading);
 
-  // Filter out the featured numeric ID from regular results to avoid duplication
   const filteredIds = useMemo(() => {
-    if (!allIds || numericId === null) return allIds;
+    if (!allIds || numericId === null) return allIds ?? [];
     return allIds.filter((id) => id !== numericId);
   }, [allIds, numericId]);
 
-  // Paginate the IDs for infinite scroll
-  const { visibleIds, hasNextPage, isFetchingNextPage, fetchNextPage } = usePaginatedIds(
-    filteredIds,
-    RESULTS_PER_PAGE,
-    ['search-id-pages', query, sort],
-  );
-  const totalCount = (allIds?.length ?? 0);
+  const totalCount = allIds?.length ?? 0;
+
+  const getItemId = useCallback((index: number): number | null => {
+    return filteredIds[index] ?? null;
+  }, [filteredIds]);
+
+  const requestPage = useCallback((_pageIndex: number) => {}, []);
+
+  const totalPages = filteredIds.length > 0 ? Math.ceil(filteredIds.length / PAGE_SIZE) : 0;
+
+  const handleJumpToPage = useCallback((page: number) => {
+    setViewingPage(page);
+    gridRef.current?.scrollToPage(page);
+  }, []);
+
+  // Debounced URL sync on scroll (200ms)
+  const urlTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const sortRef = useRef(sort);
+  sortRef.current = sort;
+  useEffect(() => {
+    const syncUrl = () => {
+      clearTimeout(urlTimerRef.current);
+      urlTimerRef.current = setTimeout(() => {
+        const url = new URL(window.location.href);
+        let at = 0;
+        const items = document.querySelectorAll('[data-item-index]');
+        for (let i = items.length - 1; i >= 0; i--) {
+          const rect = items[i].getBoundingClientRect();
+          if (rect.top <= 100) {
+            at = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
+            break;
+          }
+        }
+        if (at > 0) url.searchParams.set('at', String(at));
+        else url.searchParams.delete('at');
+        if (sortRef.current !== 'date_added') url.searchParams.set('sort', sortRef.current);
+        else url.searchParams.delete('sort');
+        window.history.replaceState(history.state, '', url.pathname + url.search);
+      }, 200);
+    };
+    window.addEventListener('scroll', syncUrl, { passive: true });
+    syncUrl();
+    return () => {
+      window.removeEventListener('scroll', syncUrl);
+      clearTimeout(urlTimerRef.current);
+    };
+  }, [sort]);
+
+  // Scroll restoration
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || filteredIds.length === 0 || initialAt <= 0) return;
+    restoredRef.current = true;
+    gridRef.current?.scrollToItem(initialAt);
+  }, [filteredIds.length, initialAt]);
+
+  const handleSortChange = useCallback((newSort: SortOrder) => {
+    setSort(newSort);
+    setViewingPage(1);
+    window.scrollTo({ top: 0 });
+  }, []);
 
   return (
     <div>
@@ -76,7 +139,7 @@ export function SearchResults() {
         </div>
         <div className="shrink-0">
           {isSingleTerm ? (
-            <SortSelector value={sort} onChange={setSort} />
+            <SortSelector value={sort} onChange={handleSortChange} />
           ) : query.trim().includes(' ') ? (
             <p className="text-xs text-zinc-400" title={t('search.sortUnavailable')}>{t('search.sortUnavailable')}</p>
           ) : null}
@@ -89,7 +152,6 @@ export function SearchResults() {
         </p>
       )}
 
-      {/* Featured gallery card for numeric queries */}
       {numericId !== null && (
         <div className="mb-6">
           <h2 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
@@ -101,31 +163,34 @@ export function SearchResults() {
         </div>
       )}
 
-      {/* Regular search results */}
-      {(visibleIds.length > 0 || isLoadingIds) && (
+      {(filteredIds.length > 0 || isLoadingIds) && (
         <>
-          {numericId !== null && filteredIds && filteredIds.length > 0 && (
+          {numericId !== null && filteredIds.length > 0 && (
             <h2 className="mb-2 text-sm font-medium text-zinc-500 dark:text-zinc-400">
               {t('search.otherResults')}
             </h2>
           )}
-          <GalleryGridById ids={visibleIds} isLoading={isLoadingIds} />
+          <VirtualGalleryGrid
+            ref={gridRef}
+            totalLength={filteredIds.length}
+            totalPages={totalPages}
+            viewingPage={viewingPage}
+            getItemId={getItemId}
+            requestPage={requestPage}
+            onWindowSlide={() => floatingNavRef.current?.suppress()}
+          />
         </>
       )}
 
-      <InfiniteScrollTrigger
-        hasMore={hasNextPage}
-        isFetching={isFetchingNextPage}
-        onLoadMore={() => {
-          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-        }}
-      />
       <FloatingPageNav
-        totalItems={totalCount}
-        loadedItems={visibleIds.length}
-        pageSize={RESULTS_PER_PAGE}
-        hasMore={hasNextPage}
-        onLoadMore={fetchNextPage}
+        ref={floatingNavRef}
+        totalItems={filteredIds.length}
+        loadedItems={filteredIds.length}
+        pageSize={PAGE_SIZE}
+        hasMore={false}
+        viewingPage={viewingPage}
+        onViewingPageChange={setViewingPage}
+        onJumpToPage={handleJumpToPage}
       />
     </div>
   );

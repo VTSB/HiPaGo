@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { TAG_TYPE_DISPLAY, getTagColor } from '@/lib/utils/types';
 import type { TagType } from '@/lib/utils/types';
+import { tagFromDisplay, toSearchString } from '@/lib/utils/hitomi-tag';
 
 interface TagChipProps {
   tag: string;
@@ -26,7 +27,7 @@ export function TagChip({ tag, type, displayName, linked = true, size = 'sm' }: 
 
   return (
     <Link
-      href={`/search?q=${encodeURIComponent(`${type}:${tag.replace(/ /g, '_')}`)}`}
+      href={`/search?q=${encodeURIComponent(toSearchString(tagFromDisplay(tag, type)))}`}
       className={cls}
     >
       {label}

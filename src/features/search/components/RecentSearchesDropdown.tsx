@@ -1,20 +1,11 @@
 'use client';
 
 import { getTagColor, TAG_TYPE_DISPLAY } from '@/lib/utils/types';
-import type { TagType } from '@/lib/utils/types';
 import { useT } from '@/lib/i18n/useT';
+import { parseToken } from '@/shared/utils/parse-token';
+import { tagFromSearch } from '@/lib/utils/hitomi-tag';
 
-/** Parse a single token like "female:loli" into { type, tag } or null for free text. */
-export function parseToken(token: string): { type: TagType; tag: string } | null {
-  const colonIdx = token.indexOf(':');
-  if (colonIdx <= 0) return null;
-  const type = token.slice(0, colonIdx);
-  const tag = token.slice(colonIdx + 1);
-  if (!tag) return null;
-  const validTypes = ['artist', 'group', 'series', 'character', 'tag', 'male', 'female', 'type', 'language'];
-  if (!validTypes.includes(type)) return null;
-  return { type: type as TagType, tag };
-}
+export { parseToken } from '@/shared/utils/parse-token';
 
 interface RecentSearchesDropdownProps {
   searches: string[];
@@ -58,7 +49,7 @@ export function RecentSearchesDropdown({ searches, onSelect, onRemove, onClear, 
                 const parsed = parseToken(token);
                 return parsed ? (
                   <span key={i} className={`inline-flex rounded-full px-1.5 py-0.5 text-xs font-medium ${getTagColor(parsed.type)}`}>
-                    {parsed.type}:{parsed.tag.replace(/_/g, ' ')}{TAG_TYPE_DISPLAY[parsed.type]}
+                    {parsed.type}:{tagFromSearch(parsed.tag, parsed.type).displayForm}{TAG_TYPE_DISPLAY[parsed.type]}
                   </span>
                 ) : (
                   <span key={i} className="text-xs text-zinc-700 dark:text-zinc-300">{token}</span>

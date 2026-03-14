@@ -62,4 +62,5 @@ next-env.d.ts
 /.api-backup/
 
 .omc
+.omx
 .sisyphus

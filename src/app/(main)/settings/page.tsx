@@ -8,6 +8,7 @@ import { searchLocalTags } from '@/lib/db/search-local';
 import { getSuggestionsForQuery } from '@/lib/api/search';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import type { Suggestion } from '@/lib/utils/types';
+import { tagFromSuggestion, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { Select } from '@/shared/components/Select';
 
@@ -44,7 +45,7 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   useClickOutside([dropdownRef, inputRef], closeDropdown);
 
   const handleSelect = useCallback((s: Suggestion) => {
-    const tag = `${s.tagType}:${s.tag.replace(/ /g, '_')}`;
+    const tag = toSearchString(tagFromSuggestion(s));
     onAdd(tag);
     setInput('');
     setSuggestions([]);

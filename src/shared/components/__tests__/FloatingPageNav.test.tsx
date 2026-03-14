@@ -4,9 +4,11 @@ import { render, fireEvent, screen, act } from '@testing-library/react';
 import React from 'react';
 import { FloatingPageNav, getNextPageAction } from '../FloatingPageNav';
 
+let mockGridColumns = 5;
+const mockSetGridColumns = vi.fn();
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { gridColumns: number; setGridColumns: () => void }) => unknown) =>
-    sel({ gridColumns: 5, setGridColumns: vi.fn() }),
+  useSettingsStore: (sel: (s: { gridColumns: number; setGridColumns: (n: number) => void }) => unknown) =>
+    sel({ gridColumns: mockGridColumns, setGridColumns: mockSetGridColumns }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -48,6 +50,7 @@ describe('FloatingPageNav — immediate page update', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    mockGridColumns = 5;
   });
 
   afterEach(() => {
@@ -185,6 +188,115 @@ describe('FloatingPageNav — immediate page update', () => {
     });
 
     expect(onViewingPageChange.mock.calls.length).toBeGreaterThan(callCountAfterClick);
+
+    document.body.removeChild(div);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Grid column change suppression
+// ---------------------------------------------------------------------------
+
+describe('FloatingPageNav — grid column change suppression', () => {
+  const onViewingPageChange = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockGridColumns = 5;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('suppresses scroll tracking when gridColumns changes', () => {
+    // Add a data-item-index element so scroll handler can find a page
+    const div = document.createElement('div');
+    div.setAttribute('data-item-index', '100');
+    div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
+    document.body.appendChild(div);
+
+    const { rerender } = render(
+      <FloatingPageNav
+        totalItems={200 * 25}
+        loadedItems={200 * 25}
+        pageSize={25}
+        hasMore={false}
+        viewingPage={5}
+        onViewingPageChange={onViewingPageChange}
+      />,
+    );
+    vi.clearAllMocks(); // clear initial scroll calls
+
+    // Change gridColumns (simulating +/- button click)
+    mockGridColumns = 6;
+    rerender(
+      <FloatingPageNav
+        totalItems={200 * 25}
+        loadedItems={200 * 25}
+        pageSize={25}
+        hasMore={false}
+        viewingPage={5}
+        onViewingPageChange={onViewingPageChange}
+      />,
+    );
+
+    // Fire scroll event during suppression window
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+      vi.runAllTimers();
+    });
+
+    // Scroll tracking should be suppressed — onViewingPageChange should NOT be called
+    expect(onViewingPageChange).not.toHaveBeenCalled();
+
+    document.body.removeChild(div);
+  });
+
+  it('scroll tracking resumes after suppression from column change', () => {
+    const div = document.createElement('div');
+    div.setAttribute('data-item-index', '0');
+    div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
+    document.body.appendChild(div);
+
+    const { rerender } = render(
+      <FloatingPageNav
+        totalItems={200 * 25}
+        loadedItems={200 * 25}
+        pageSize={25}
+        hasMore={false}
+        viewingPage={5}
+        onViewingPageChange={onViewingPageChange}
+      />,
+    );
+    vi.clearAllMocks();
+
+    // Change gridColumns
+    mockGridColumns = 4;
+    rerender(
+      <FloatingPageNav
+        totalItems={200 * 25}
+        loadedItems={200 * 25}
+        pageSize={25}
+        hasMore={false}
+        viewingPage={5}
+        onViewingPageChange={onViewingPageChange}
+      />,
+    );
+
+    // Advance past 400ms suppression window
+    act(() => {
+      vi.advanceTimersByTime(450);
+    });
+
+    // Now scroll should be tracked again
+    act(() => {
+      window.dispatchEvent(new Event('scroll'));
+      vi.runAllTimers();
+    });
+
+    expect(onViewingPageChange).toHaveBeenCalled();
 
     document.body.removeChild(div);
   });
