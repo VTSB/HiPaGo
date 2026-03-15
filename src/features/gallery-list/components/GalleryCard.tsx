@@ -88,7 +88,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   }
 
   return (
-    <Link href={`/gallery/${block.id}`} className="group block" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }} onPointerEnter={onPrefetch}>
+    <Link href={`/gallery/${block.id}`} className="group block" onPointerEnter={onPrefetch}>
       <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 transition-shadow hover:shadow-lg">
         {block.thumbnail ? (
           <AbortableImage src={block.thumbnail} alt={block.title} className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`} loading="lazy" />

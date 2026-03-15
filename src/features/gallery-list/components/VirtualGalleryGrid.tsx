@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   useCallback,
+  useMemo,
 } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { GalleryCardById } from './GalleryCard';
@@ -112,23 +113,30 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
 
     // scrollMargin = distance from window top to container top
     const [scrollMargin, setScrollMargin] = useState(0);
+    // Track container width for virtualizer size invalidation on resize
+    const [containerWidth, setContainerWidth] = useState(0);
     useLayoutEffect(() => {
-      const update = () => setScrollMargin(containerRef.current?.offsetTop ?? 0);
+      const el = containerRef.current;
+      if (!el) return;
+      const update = () => {
+        setScrollMargin(el.offsetTop ?? 0);
+        setContainerWidth(Math.round(el.clientWidth));
+      };
       update();
-      window.addEventListener('resize', update);
-      return () => window.removeEventListener('resize', update);
+      const ro = new ResizeObserver(() => update());
+      ro.observe(el);
+      return () => ro.disconnect();
     }, []);
 
-    const estimateSize = useCallback(() => {
-      const containerWidth = containerRef.current?.clientWidth ?? window.innerWidth - 32;
+    // Deterministic row height — computed directly from current state, no caching
+    const rowHeight = useMemo(() => {
+      const width = containerWidth || containerRef.current?.clientWidth || window.innerWidth - 32;
       const gap = 12;
-      const cardWidth = (containerWidth - gap * (actualCols - 1)) / actualCols;
-      // image: aspect 2:3 + border(2px) + row gap(12px)
-      return Math.round(cardWidth * (3 / 2)) + 14;
-    }, [actualCols]);
-    // Ref so compensation effect can use latest estimateSize without re-running
-    const estimateSizeRef = useRef(estimateSize);
-    estimateSizeRef.current = estimateSize;
+      const cardWidth = (width - gap * (actualCols - 1)) / actualCols;
+      return Math.ceil(cardWidth * (3 / 2)) + gap;
+    }, [actualCols, containerWidth]);
+
+    const estimateSize = useCallback(() => rowHeight, [rowHeight]);
 
     const virtualizer = useWindowVirtualizer({
       count: totalRows,
@@ -173,19 +181,26 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       prevWindowStartPageRef.current = windowStartPage;
     }, [windowStartPage, actualCols, viewingPage, totalRows, virtualizer]);
 
-    // Anchor scroll position when column count changes so the same content stays visible.
+    // Invalidate virtualizer sizes and anchor scroll when container width or column count changes.
     const prevActualColsRef = useRef(actualCols);
+    const prevContainerWidthRef = useRef(containerWidth);
     useLayoutEffect(() => {
-      if (prevActualColsRef.current === actualCols) return;
+      const colsChanged = prevActualColsRef.current !== actualCols;
+      const widthChanged = prevContainerWidthRef.current !== containerWidth && prevContainerWidthRef.current > 0 && containerWidth > 0;
+      if (!colsChanged && !widthChanged) return;
       prevActualColsRef.current = actualCols;
+      prevContainerWidthRef.current = containerWidth;
 
-      // Scroll to the row corresponding to viewingPage in the new column layout
+      // Invalidate all cached row sizes so virtualizer uses the new estimateSize
+      virtualizer.measure();
+
+      // Anchor scroll to the same content position
       const anchorRow = Math.max(
         0,
         Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
       );
       virtualizer.scrollToIndex(Math.min(anchorRow, totalRows - 1), { align: 'start' });
-    }, [actualCols, viewingPage, windowStartPage, totalRows, virtualizer]);
+    }, [actualCols, containerWidth, viewingPage, windowStartPage, totalRows, virtualizer]);
 
     // On first render with data, scroll to the initial viewingPage if it's not page 1.
     // This handles scroll restoration after navigating back from detail.
@@ -270,7 +285,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       <div ref={containerRef} style={{ overflowAnchor: 'none' }}>
         <div
           style={{
-            height: `${virtualizer.getTotalSize()}px`,
+            height: `${totalRows * rowHeight}px`,
             width: '100%',
             position: 'relative',
           }}
@@ -285,8 +300,8 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
                   top: 0,
                   left: 0,
                   width: '100%',
-                  height: `${vRow.size}px`,
-                  transform: `translateY(${vRow.start - scrollMargin}px)`,
+                  height: `${rowHeight}px`,
+                  transform: `translateY(${vRow.index * rowHeight}px)`,
                   paddingBottom: '12px',
                   overflow: 'hidden',
                 }}
