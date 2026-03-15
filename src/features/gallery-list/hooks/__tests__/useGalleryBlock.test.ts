@@ -28,10 +28,12 @@ vi.mock('@/lib/db/gallery', () => ({
 }));
 
 import { fetchGalleryBlockHtmlById as _fetchBlock } from '@/lib/api/gallery';
-import { getGalleryBlock as _getGalleryBlock } from '@/lib/db/gallery';
+import { getGalleryBlock as _getGalleryBlock, saveGalleryBlock as _saveGalleryBlock } from '@/lib/db/gallery';
+import { resolveBlock } from '../useGalleryBlock';
 
 const fetchGalleryBlockHtmlById = _fetchBlock as ReturnType<typeof vi.fn>;
 const getGalleryBlock = _getGalleryBlock as ReturnType<typeof vi.fn>;
+const saveGalleryBlock = _saveGalleryBlock as ReturnType<typeof vi.fn>;
 
 function makeWrapper() {
   const client = new QueryClient({
@@ -41,6 +43,165 @@ function makeWrapper() {
     return React.createElement(QueryClientProvider, { client }, children);
   };
 }
+
+describe('resolveBlock SWR revalidation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns cached block immediately without fetching when fresh', async () => {
+    const freshBlock = {
+      id: 200,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'Fresh',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+      updatedAt: new Date(), // just now — not stale
+    };
+    getGalleryBlock.mockResolvedValue(freshBlock);
+
+    const result = await resolveBlock(200);
+
+    expect(result).toBe(freshBlock);
+    expect(fetchGalleryBlockHtmlById).not.toHaveBeenCalled();
+  });
+
+  it('returns cached block immediately AND triggers background revalidation when stale (NOT_DETAILED, >7 days)', async () => {
+    const staleDate = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000); // 8 days ago
+    const staleBlock = {
+      id: 201,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'Stale',
+      date: new Date('2024-01-01'),
+      tags: {},
+      thumbnail: '',
+      related: [],
+      updatedAt: staleDate,
+    };
+    const freshBlock = { ...staleBlock, title: 'Updated', updatedAt: new Date() };
+    getGalleryBlock.mockResolvedValue(staleBlock);
+    fetchGalleryBlockHtmlById.mockResolvedValue(freshBlock);
+
+    const result = await resolveBlock(201);
+
+    // Returns cached immediately
+    expect(result).toBe(staleBlock);
+
+    // Background revalidation triggered (no signal)
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(201);
+    expect(saveGalleryBlock).toHaveBeenCalledWith(freshBlock);
+  });
+
+  it('returns cached block immediately AND triggers background revalidation when stale (DETAILED, >3 days)', async () => {
+    const staleDate = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000); // 4 days ago
+    const staleBlock = {
+      id: 202,
+      type: GalleryBlockType.DETAILED,
+      title: 'Stale Detailed',
+      date: new Date('2024-01-01'),
+      tags: {},
+      thumbnail: '',
+      related: [],
+      updatedAt: staleDate,
+    };
+    const freshBlock = { ...staleBlock, title: 'Updated Detailed', updatedAt: new Date() };
+    getGalleryBlock.mockResolvedValue(staleBlock);
+    fetchGalleryBlockHtmlById.mockResolvedValue(freshBlock);
+
+    const result = await resolveBlock(202);
+
+    expect(result).toBe(staleBlock);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(202);
+    expect(saveGalleryBlock).toHaveBeenCalledWith(freshBlock);
+  });
+
+  it('does NOT revalidate when NOT_DETAILED is only 6 days old (within threshold)', async () => {
+    const freshEnough = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000); // 6 days
+    const block = {
+      id: 203,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'OK',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+      updatedAt: freshEnough,
+    };
+    getGalleryBlock.mockResolvedValue(block);
+
+    const result = await resolveBlock(203);
+
+    expect(result).toBe(block);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchGalleryBlockHtmlById).not.toHaveBeenCalled();
+  });
+
+  it('does NOT revalidate when block has no updatedAt', async () => {
+    const block = {
+      id: 204,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'No updatedAt',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+      // no updatedAt
+    };
+    getGalleryBlock.mockResolvedValue(block);
+
+    const result = await resolveBlock(204);
+
+    expect(result).toBe(block);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchGalleryBlockHtmlById).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveBlock FAILED block handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getGalleryBlock.mockResolvedValue(null);
+  });
+
+  it('should NOT save FAILED blocks to DB', async () => {
+    const failedBlock = {
+      id: 100,
+      type: GalleryBlockType.FAILED,
+      title: '',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+    };
+    fetchGalleryBlockHtmlById.mockResolvedValue(failedBlock);
+
+    await resolveBlock(100);
+
+    expect(saveGalleryBlock).not.toHaveBeenCalled();
+  });
+
+  it('should save NOT_DETAILED blocks to DB', async () => {
+    const notDetailedBlock = {
+      id: 101,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'Test',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+    };
+    fetchGalleryBlockHtmlById.mockResolvedValue(notDetailedBlock);
+
+    await resolveBlock(101);
+
+    expect(saveGalleryBlock).toHaveBeenCalledWith(notDetailedBlock);
+  });
+});
 
 describe('useGalleryBlock signal threading', () => {
   beforeEach(() => {

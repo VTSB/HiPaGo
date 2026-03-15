@@ -1,16 +1,18 @@
 import { ensureDb, isDbInitialized, persistDb, withTransaction } from './adapter';
 import type { GalleryBlock, GalleryFile } from '@/lib/utils/types';
 import { GalleryBlockType } from '@/lib/utils/types';
+import type { TagType } from '@/lib/utils/types';
 import { saveGalleryRelated, getGalleryRelated } from './gallery-relate';
 import { saveGalleryTags, getGalleryTags } from './gallery-tag';
+import { patchNewTagCounts } from './patch-tag-counts';
 
 export async function saveGalleryBlock(block: GalleryBlock): Promise<void> {
   const db = await ensureDb();
 
   await withTransaction(async () => {
     await db.execute(
-      `INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, language, mediaType, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         block.id,
         block.type,
@@ -18,6 +20,8 @@ export async function saveGalleryBlock(block: GalleryBlock): Promise<void> {
         block.date.toISOString(),
         block.thumbnail,
         '',
+        block.language || '',
+        block.mediaType || '',
         new Date().toISOString(),
       ],
     );
@@ -25,6 +29,21 @@ export async function saveGalleryBlock(block: GalleryBlock): Promise<void> {
     await saveGalleryRelated(block.id, block.related);
     await saveGalleryTags(block.id, block.tags);
   });
+
+  // Fire-and-forget: patch count=0 tags with real counts from tagindex API.
+  // Runs after the transaction so it doesn't block or affect the save.
+  const flatTags: Array<{ type: TagType; name: string }> = [];
+  for (const [typeStr, names] of Object.entries(block.tags)) {
+    if (!names) continue;
+    for (const name of names) {
+      flatTags.push({ type: typeStr as TagType, name });
+    }
+  }
+  if (flatTags.length > 0) {
+    patchNewTagCounts(flatTags).catch(() => {
+      // Swallow errors — tag count patching is best-effort
+    });
+  }
 }
 
 export async function getGalleryBlock(id: number): Promise<GalleryBlock | null> {
@@ -35,7 +54,10 @@ export async function getGalleryBlock(id: number): Promise<GalleryBlock | null> 
     title: string;
     date: string;
     thumbnail: string;
-  }>('SELECT id, type, title, date, thumbnail FROM gallery WHERE id = ?', [id]);
+    language: string;
+    mediaType: string;
+    updatedAt: string;
+  }>('SELECT id, type, title, date, thumbnail, language, mediaType, updatedAt FROM gallery WHERE id = ? AND type > 0', [id]);
 
   if (rows.length === 0) return null;
   const row = rows[0];
@@ -50,7 +72,10 @@ export async function getGalleryBlock(id: number): Promise<GalleryBlock | null> 
     tags,
     thumbnail: row.thumbnail,
     related,
+    language: row.language || '',
+    mediaType: row.mediaType || '',
     type: Object.values(GalleryBlockType).includes(row.type) ? (row.type as GalleryBlockType) : GalleryBlockType.FAILED,
+    updatedAt: new Date(row.updatedAt),
   };
 }
 
@@ -199,6 +224,13 @@ export async function deleteGalleryImages(galleryId: number): Promise<void> {
 export async function cleanupStaleCache(days = 30): Promise<number> {
   if (!isDbInitialized()) return 0;
   const db = await ensureDb();
+
+  // Remove invalid FAILED blocks unconditionally
+  await db.execute('DELETE FROM gallery WHERE type = -1');
+  // Clean orphaned junction rows
+  await db.execute('DELETE FROM gallery_tag WHERE id NOT IN (SELECT id FROM gallery)');
+  await db.execute('DELETE FROM gallery_relate WHERE id NOT IN (SELECT id FROM gallery)');
+
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
   // Get stale gallery IDs (exclude favorites)

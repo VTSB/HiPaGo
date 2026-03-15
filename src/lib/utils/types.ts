@@ -90,6 +90,9 @@ export interface GalleryBlock {
   tags: Partial<Record<TagType, string[]>>;
   thumbnail: string;
   related: number[];
+  language?: string;
+  mediaType?: string;
+  updatedAt?: Date;
 }
 
 export interface GalleryImage {

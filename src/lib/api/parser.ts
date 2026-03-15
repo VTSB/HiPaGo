@@ -191,6 +191,8 @@ export function galleryInfoToBlock(info: GalleryInfo): GalleryBlock {
     tags,
     thumbnail,
     related: info.related,
+    language: info.language || '',
+    mediaType: info.type || '',
   };
 }
 

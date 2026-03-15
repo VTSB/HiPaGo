@@ -15,6 +15,7 @@ import {
   getGalleryImages,
   hasGalleryImages,
   deleteGalleryImages,
+  cleanupStaleCache,
 } from '../gallery';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile } from '@/lib/utils/types';
@@ -84,6 +85,30 @@ describe('saveGalleryBlock + getGalleryBlock', () => {
   it('should return null for non-existent ID', async () => {
     const retrieved = await getGalleryBlock(99999);
     expect(retrieved).toBeNull();
+  });
+
+  it('should persist language and mediaType when saving and retrieving', async () => {
+    const blockWithMeta: GalleryBlock = {
+      ...sampleBlock,
+      id: 55555,
+      language: 'japanese',
+      mediaType: 'doujinshi',
+    };
+    await saveGalleryBlock(blockWithMeta);
+    const retrieved = await getGalleryBlock(55555);
+
+    expect(retrieved).not.toBeNull();
+    expect(retrieved!.language).toBe('japanese');
+    expect(retrieved!.mediaType).toBe('doujinshi');
+  });
+
+  it('should return empty strings for language and mediaType when not set', async () => {
+    await saveGalleryBlock(sampleBlock);
+    const retrieved = await getGalleryBlock(sampleBlock.id);
+
+    expect(retrieved).not.toBeNull();
+    expect(retrieved!.language).toBe('');
+    expect(retrieved!.mediaType).toBe('');
   });
 
   it('should update when saving twice with same ID (upsert behavior)', async () => {
@@ -246,6 +271,64 @@ describe('recordHistory + getRecentlyViewedIds + getReadingProgress', () => {
     expect(progress!.lastPage).toBe(15);
     expect(progress!.totalPages).toBe(30);
     expect(progress!.readerMode).toBe('webtoon');
+  });
+});
+
+describe('FAILED block DB behavior', () => {
+  it('getGalleryBlock should return null for FAILED rows in DB', async () => {
+    const db = getDb();
+    // Insert a FAILED block directly via SQL
+    await db.execute(
+      `INSERT INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [999, GalleryBlockType.FAILED, 'Failed Block', new Date().toISOString(), '', '', new Date().toISOString()],
+    );
+
+    const result = await getGalleryBlock(999);
+    expect(result).toBeNull();
+  });
+
+  it('cleanupStaleCache should delete FAILED rows', async () => {
+    const db = getDb();
+    // Insert a FAILED block directly
+    await db.execute(
+      `INSERT INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [888, GalleryBlockType.FAILED, 'Failed Block', new Date().toISOString(), '', '', new Date().toISOString()],
+    );
+    // Insert related junction rows
+    await db.execute('INSERT INTO gallery_tag (id, tagId) VALUES (?, ?)', [888, 1]);
+    await db.execute('INSERT INTO gallery_relate (id, related) VALUES (?, ?)', [888, 1]);
+
+    await cleanupStaleCache();
+
+    // FAILED block should be deleted
+    const rows = await queryAll<{ id: number }>('SELECT id FROM gallery WHERE id = ?', [888]);
+    expect(rows).toHaveLength(0);
+
+    // Orphaned junction rows should also be deleted
+    const tagRows = await queryAll<{ id: number }>('SELECT id FROM gallery_tag WHERE id = ?', [888]);
+    expect(tagRows).toHaveLength(0);
+    const relateRows = await queryAll<{ id: number }>('SELECT id FROM gallery_relate WHERE id = ?', [888]);
+    expect(relateRows).toHaveLength(0);
+  });
+});
+
+describe('getGalleryBlock updatedAt field', () => {
+  it('should return updatedAt as a Date instance', async () => {
+    await saveGalleryBlock(sampleBlock);
+    const retrieved = await getGalleryBlock(sampleBlock.id);
+
+    expect(retrieved).not.toBeNull();
+    expect(retrieved!.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it('should return updatedAt close to now after saving', async () => {
+    const before = Date.now();
+    await saveGalleryBlock(sampleBlock);
+    const after = Date.now();
+    const retrieved = await getGalleryBlock(sampleBlock.id);
+
+    expect(retrieved!.updatedAt!.getTime()).toBeGreaterThanOrEqual(before);
+    expect(retrieved!.updatedAt!.getTime()).toBeLessThanOrEqual(after + 100);
   });
 });
 

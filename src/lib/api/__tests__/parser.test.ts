@@ -166,6 +166,24 @@ describe('galleryInfoToBlock', () => {
     const block = galleryInfoToBlock(info);
     expect(block.title).toBe('テスト');
   });
+
+  it('sets language and mediaType from GalleryInfo', () => {
+    const json = `var galleryinfo = {
+      "id": 42,
+      "title": "Test",
+      "japanese_title": "",
+      "language": "japanese",
+      "language_localname": "日本語",
+      "date": "2024-01-01 00:00",
+      "type": "doujinshi",
+      "files": [],
+      "tags": []
+    }`;
+    const info = parseGalleryJson(json);
+    const block = galleryInfoToBlock(info);
+    expect(block.language).toBe('japanese');
+    expect(block.mediaType).toBe('doujinshi');
+  });
 });
 
 describe('parseDate', () => {

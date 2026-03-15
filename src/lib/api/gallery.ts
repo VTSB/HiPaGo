@@ -10,6 +10,7 @@ import {
 import { fetchGalleryIds, fetchGalleryIdsByTag } from './nozomi';
 import type {
   GalleryBlock,
+  GalleryFile,
   GalleryIds,
   GalleryImages,
   GalleryInfo,
@@ -54,19 +55,23 @@ export async function fetchGalleryImages(id: number): Promise<GalleryImages> {
   return galleryInfoToImages(info);
 }
 
+export function filesToGalleryImages(id: number, files: GalleryFile[]): GalleryImages {
+  return {
+    id,
+    images: files.map(file => {
+      const types = new Set<ImageType>([ImageType.ORIGINAL]);
+      if (file.haswebp) types.add(ImageType.WEBP);
+      if (file.hasavif) types.add(ImageType.AVIF);
+      return { name: file.name, hash: file.hash, width: file.width, height: file.height, types };
+    }),
+  };
+}
+
 export async function fetchGalleryImagesCached(id: number): Promise<GalleryImages> {
   // Try DB cache first
   const cached = await getGalleryImagesFromDb(id);
   if (cached) {
-    return {
-      id,
-      images: cached.map(file => {
-        const types = new Set<ImageType>([ImageType.ORIGINAL]);
-        if (file.haswebp) types.add(ImageType.WEBP);
-        if (file.hasavif) types.add(ImageType.AVIF);
-        return { name: file.name, hash: file.hash, width: file.width, height: file.height, types };
-      }),
-    };
+    return filesToGalleryImages(id, cached);
   }
 
   // Fetch from API and cache

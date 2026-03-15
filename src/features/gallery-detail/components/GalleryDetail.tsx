@@ -30,7 +30,7 @@ const TAG_ORDER: Record<string, number> = {
 };
 
 export function GalleryDetail({ id }: { id: number }) {
-  const { block, images, info, isLoading, error } = useGalleryDetail(id);
+  const { block, images, files, isLoading, error } = useGalleryDetail(id);
   // Use cached block from list page as instant preview while full info loads
   const cachedBlock = useGalleryBlock(id);
   const router = useRouter();
@@ -57,7 +57,7 @@ export function GalleryDetail({ id }: { id: number }) {
   const { progress: dlProgress, start: handleDownload, cancel: handleCancelDownload } = useDownloadGallery(
     id,
     displayBlock?.title || `Gallery ${id}`,
-    info?.files || [],
+    files,
   );
 
   const handleShare = useCallback(async () => {
@@ -82,7 +82,6 @@ export function GalleryDetail({ id }: { id: number }) {
   if (error && !displayBlock) return <div className="py-12 text-center text-red-500">{t('detail.loadFailed')} #{id}</div>;
   if (!displayBlock) return <div className="flex justify-center py-12"><Spinner size="md" /></div>;
 
-  const files = info?.files || [];
   const bigThumbnail = files.length > 0 ? getThumbnailUrl(files[0], 'big') : null;
 
   return (
@@ -112,11 +111,11 @@ export function GalleryDetail({ id }: { id: number }) {
             </button>
             <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">{displayBlock.title || `Gallery #${id}`}</h1>
           </div>
-          {info && (
+          {block?.type === GalleryBlockType.DETAILED && (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              <Link href={`/search?q=${encodeURIComponent(`type:${info.type}`)}`} className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300">{info.type}</Link>
+              <Link href={`/search?q=${encodeURIComponent(`type:${block.mediaType}`)}`} className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300">{block.mediaType}</Link>
               {' \u00b7 '}
-              <Link href={`/search?q=${encodeURIComponent(`language:${info.language}`)}`} className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300">{info.language}</Link>
+              <Link href={`/search?q=${encodeURIComponent(`language:${block.language}`)}`} className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300">{block.language}</Link>
               {' \u00b7 '}
               {displayBlock.date.toLocaleDateString()}
             </p>

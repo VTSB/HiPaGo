@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS gallery (
   date TEXT NOT NULL,
   thumbnail TEXT NOT NULL,
   url TEXT NOT NULL DEFAULT '',
+  language TEXT NOT NULL DEFAULT '',
+  mediaType TEXT NOT NULL DEFAULT '',
   updatedAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gallery_type ON gallery(type);

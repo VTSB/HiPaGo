@@ -166,3 +166,170 @@ describe('hasLocalSearchData', () => {
     expect(await hasLocalSearchData()).toBe(false);
   });
 });
+
+describe('searchLocalTags search query hybrid ranking (JS sort)', () => {
+  it('search results rank count=0 tags by local gallery_tag frequency', async () => {
+    const db = getDb();
+    // bear: count=50, no gallery_tag links needed
+    const rBear = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'bear', 50]);
+    // beauty: count=0, 10 gallery_tag links
+    const rBeauty = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'beauty', 0]);
+    const beautyId = rBeauty.lastInsertRowId;
+    // beast: count=0, 3 gallery_tag links
+    const rBeast = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'beast', 0]);
+    const beastId = rBeast.lastInsertRowId;
+
+    for (let i = 1; i <= 10; i++) {
+      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [7000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [7000 + i, beautyId]);
+    }
+    for (let i = 1; i <= 3; i++) {
+      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [8000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [8000 + i, beastId]);
+    }
+
+    const results = await searchLocalTags('bea');
+    const names = results.map((r) => r.tag);
+    const idxBear = names.indexOf('bear');
+    const idxBeauty = names.indexOf('beauty');
+    const idxBeast = names.indexOf('beast');
+
+    expect(idxBear).toBeGreaterThanOrEqual(0);
+    expect(idxBeauty).toBeGreaterThanOrEqual(0);
+    expect(idxBeast).toBeGreaterThanOrEqual(0);
+    // bear (50) before beauty (10 local) before beast (3 local)
+    expect(idxBear).toBeLessThan(idxBeauty);
+    expect(idxBeauty).toBeLessThan(idxBeast);
+  });
+
+  it('count=0 tags without gallery_tag links rank last in search', async () => {
+    const db = getDb();
+    // abc: count=0, no gallery_tag
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'abc', 0]);
+    // abd: count=0, 5 gallery_tag links
+    const rAbd = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'abd', 0]);
+    const abdId = rAbd.lastInsertRowId;
+
+    for (let i = 1; i <= 5; i++) {
+      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [9000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [9000 + i, abdId]);
+    }
+
+    const results = await searchLocalTags('ab');
+    const names = results.map((r) => r.tag);
+    const idxAbc = names.indexOf('abc');
+    const idxAbd = names.indexOf('abd');
+
+    expect(idxAbc).toBeGreaterThanOrEqual(0);
+    expect(idxAbd).toBeGreaterThanOrEqual(0);
+    // abd (5 local refs) before abc (0 refs)
+    expect(idxAbd).toBeLessThan(idxAbc);
+  });
+});
+
+describe('searchLocalTags empty query hybrid ranking', () => {
+  it('ranks count>0 tags above count=0 tags', async () => {
+    const db = getDb();
+    // Tag A: count=100
+    const rA = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_a', 100]);
+    const tagAId = rA.lastInsertRowId;
+    // Tag B: count=0, linked to 5 galleries
+    const rB = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_b', 0]);
+    const tagBId = rB.lastInsertRowId;
+    // Tag C: count=0, linked to 2 galleries
+    const rC = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_c', 0]);
+    const tagCId = rC.lastInsertRowId;
+
+    // Insert galleries and gallery_tag links for B (5 links)
+    for (let i = 1; i <= 5; i++) {
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [1000 + i, 1, `Gallery ${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [1000 + i, tagBId]);
+    }
+    // Insert galleries and gallery_tag links for C (2 links)
+    for (let i = 1; i <= 2; i++) {
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [2000 + i, 1, `Gallery C${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [2000 + i, tagCId]);
+    }
+    // Tag A has no gallery_tag links but count=100
+
+    const results = await searchLocalTags('');
+    const names = results.map((r) => r.tag);
+    const idxA = names.indexOf('tag_a');
+    const idxB = names.indexOf('tag_b');
+    const idxC = names.indexOf('tag_c');
+
+    expect(idxA).toBeGreaterThanOrEqual(0);
+    expect(idxB).toBeGreaterThanOrEqual(0);
+    expect(idxC).toBeGreaterThanOrEqual(0);
+    // A (count=100) should come before B (count=0, 5 refs) and C (count=0, 2 refs)
+    expect(idxA).toBeLessThan(idxB);
+    expect(idxA).toBeLessThan(idxC);
+    // B (5 refs) should come before C (2 refs)
+    expect(idxB).toBeLessThan(idxC);
+  });
+
+  it('count=0 tags with gallery_tag references rank by local frequency', async () => {
+    const db = getDb();
+    const rX = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'zero_x', 0]);
+    const rY = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'zero_y', 0]);
+    const rZ = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'zero_z', 0]);
+    const tagXId = rX.lastInsertRowId;
+    const tagYId = rY.lastInsertRowId;
+    const tagZId = rZ.lastInsertRowId;
+
+    // X: 4 gallery_tag refs, Y: 7 refs, Z: 1 ref
+    for (let i = 1; i <= 4; i++) {
+      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [3000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [3000 + i, tagXId]);
+    }
+    for (let i = 1; i <= 7; i++) {
+      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [4000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [4000 + i, tagYId]);
+    }
+    await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [5001, 1, 'GZ1', '2024-01-01', '', '', '']);
+    await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [5001, tagZId]);
+
+    const results = await searchLocalTags('');
+    const names = results.map((r) => r.tag);
+    const idxX = names.indexOf('zero_x');
+    const idxY = names.indexOf('zero_y');
+    const idxZ = names.indexOf('zero_z');
+
+    expect(idxX).toBeGreaterThanOrEqual(0);
+    expect(idxY).toBeGreaterThanOrEqual(0);
+    expect(idxZ).toBeGreaterThanOrEqual(0);
+    // Y (7 refs) > X (4 refs) > Z (1 ref)
+    expect(idxY).toBeLessThan(idxX);
+    expect(idxX).toBeLessThan(idxZ);
+  });
+
+  it('count=0 tags with no gallery_tag references rank after those with references', async () => {
+    const db = getDb();
+    const rNoRef = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'no_ref', 0]);
+    const rWithRef = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'with_ref', 0]);
+    const tagWithRefId = rWithRef.lastInsertRowId;
+
+    // with_ref linked to 3 galleries
+    for (let i = 1; i <= 3; i++) {
+      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [6000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [6000 + i, tagWithRefId]);
+    }
+    // no_ref has no gallery_tag links
+
+    const results = await searchLocalTags('');
+    const names = results.map((r) => r.tag);
+    const idxNoRef = names.indexOf('no_ref');
+    const idxWithRef = names.indexOf('with_ref');
+
+    expect(idxNoRef).toBeGreaterThanOrEqual(0);
+    expect(idxWithRef).toBeGreaterThanOrEqual(0);
+    // with_ref (3 gallery refs) should rank before no_ref (0 refs)
+    expect(idxWithRef).toBeLessThan(idxNoRef);
+  });
+});

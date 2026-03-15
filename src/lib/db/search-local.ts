@@ -21,11 +21,11 @@ export async function searchLocalTags(
   if (!trimmed) {
     const topTags = tagTypeFilter !== undefined
       ? await db.query<TagRow>(
-          'SELECT tagId, type, name, count FROM tag WHERE type = ? ORDER BY count DESC LIMIT ?',
+          'SELECT tagId, type, name, count FROM tag WHERE type = ? ORDER BY CASE WHEN count > 0 THEN count ELSE (SELECT COUNT(*) FROM gallery_tag WHERE tagId = tag.tagId) END DESC LIMIT ?',
           [TAG_TYPE_TO_BYTE[tagTypeFilter], limit],
         )
       : await db.query<TagRow>(
-          'SELECT tagId, type, name, count FROM tag ORDER BY count DESC LIMIT ?',
+          'SELECT tagId, type, name, count FROM tag ORDER BY CASE WHEN count > 0 THEN count ELSE (SELECT COUNT(*) FROM gallery_tag WHERE tagId = tag.tagId) END DESC LIMIT ?',
           [limit],
         );
     const filtered = topTags.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
@@ -88,8 +88,28 @@ export async function searchLocalTags(
     return true;
   });
 
-  // Sort by count descending, slice to limit
-  merged.sort((a, b) => b.count - a.count);
+  // Build effective count map for zero-count tags using local gallery_tag frequency
+  const localCountMap = new Map<number, number>();
+  const zeroCountIds = merged.filter((t) => t.count === 0).map((t) => t.tagId);
+  if (zeroCountIds.length > 0) {
+    const CHUNK = 50;
+    for (let i = 0; i < zeroCountIds.length; i += CHUNK) {
+      const chunk = zeroCountIds.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = await db.query<{ tagId: number; cnt: number }>(
+        `SELECT tagId, COUNT(*) as cnt FROM gallery_tag WHERE tagId IN (${placeholders}) GROUP BY tagId`,
+        chunk,
+      );
+      for (const r of rows) localCountMap.set(r.tagId, r.cnt);
+    }
+  }
+
+  // Sort by effective count descending, slice to limit
+  merged.sort((a, b) => {
+    const aEff = a.count > 0 ? a.count : (localCountMap.get(a.tagId) || 0);
+    const bEff = b.count > 0 ? b.count : (localCountMap.get(b.tagId) || 0);
+    return bEff - aEff;
+  });
   const sliced = merged.slice(0, limit);
 
   const filtered = sliced.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
@@ -103,12 +123,15 @@ export async function searchLocalTags(
   );
   const i18nMap = new Map(i18nRows.map((r) => [r.tagId, r.local]));
 
-  return filtered.map((t) => ({
-    tag: t.name,
-    tagType: BYTE_TO_TAG_TYPE[t.type],
-    amount: t.count,
-    localName: i18nMap.get(t.tagId),
-  }));
+  return filtered.map((t) => {
+    const effectiveCount = t.count > 0 ? t.count : (localCountMap.get(t.tagId) || 0);
+    return {
+      tag: t.name,
+      tagType: BYTE_TO_TAG_TYPE[t.type],
+      amount: effectiveCount,
+      localName: i18nMap.get(t.tagId),
+    };
+  });
 }
 
 export async function searchLocalGalleryIdsByTag(

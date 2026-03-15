@@ -11,6 +11,8 @@ export interface DBGallery {
   date: string;         // ISO string
   thumbnail: string;
   url: string;          // gallery URL
+  language: string;
+  mediaType: string;
   updatedAt: string;    // cache timestamp
 }
 
@@ -90,6 +92,15 @@ export async function initializeDatabase(): Promise<void> {
   _initPromise = (async () => {
     const adapter = await detectPlatformAdapter();
     await adapter.exec(SCHEMA_SQL);
+    // Migration: add language and mediaType columns if missing (existing DBs)
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(gallery)');
+    const colNames = new Set(cols.map(c => c.name));
+    if (!colNames.has('language')) {
+      await adapter.exec("ALTER TABLE gallery ADD COLUMN language TEXT NOT NULL DEFAULT ''");
+    }
+    if (!colNames.has('mediaType')) {
+      await adapter.exec("ALTER TABLE gallery ADD COLUMN mediaType TEXT NOT NULL DEFAULT ''");
+    }
     setDb(adapter);
   })();
 

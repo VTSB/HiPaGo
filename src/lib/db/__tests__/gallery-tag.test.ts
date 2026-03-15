@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb, queryAll } from './test-db';
 import { getDb } from '../adapter';
 import {
@@ -8,6 +8,16 @@ import {
   getGalleryIdsByTag,
 } from '../gallery-tag';
 import { TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
+
+// Mock patchNewTagCounts so saveGalleryBlock tests don't hit the real API
+vi.mock('../patch-tag-counts', () => ({
+  patchNewTagCounts: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { saveGalleryBlock } from '../gallery';
+import { patchNewTagCounts } from '../patch-tag-counts';
+import { GalleryBlockType } from '@/lib/utils/types';
+import type { GalleryBlock } from '@/lib/utils/types';
 
 beforeAll(async () => {
   await setupTestDb();
@@ -19,6 +29,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearAllTables();
+  vi.mocked(patchNewTagCounts).mockReset();
+  vi.mocked(patchNewTagCounts).mockResolvedValue(undefined);
 });
 
 describe('saveGalleryTags + getGalleryTags', () => {
@@ -111,5 +123,62 @@ describe('getGalleryIdsByTag', () => {
   it('returns empty array for non-existent tag', async () => {
     const ids = await getGalleryIdsByTag(99999);
     expect(ids).toEqual([]);
+  });
+});
+
+describe('saveGalleryBlock wires patchNewTagCounts fire-and-forget', () => {
+  const sampleBlock: GalleryBlock = {
+    id: 55001,
+    type: GalleryBlockType.DETAILED,
+    title: 'Test Wiring Gallery',
+    date: new Date('2024-01-15T12:00:00Z'),
+    tags: { [TagType.ARTIST]: ['wire-artist'], [TagType.TAG]: ['wire-tag'] },
+    thumbnail: '/api/img/tn/avifsmalltn/a/bc/hash.avif',
+    related: [],
+  };
+
+  it('calls patchNewTagCounts with all tags from block after transaction', async () => {
+    await saveGalleryBlock(sampleBlock);
+
+    // Allow the fire-and-forget promise to settle
+    await Promise.resolve();
+
+    expect(vi.mocked(patchNewTagCounts)).toHaveBeenCalledOnce();
+    const calledWith = vi.mocked(patchNewTagCounts).mock.calls[0][0];
+    const names = calledWith.map((t) => t.name).sort();
+    expect(names).toEqual(['wire-artist', 'wire-tag']);
+  });
+
+  it('patchNewTagCounts is called fire-and-forget (non-blocking)', async () => {
+    // Make patchNewTagCounts take a long time
+    let resolveDelay!: () => void;
+    vi.mocked(patchNewTagCounts).mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveDelay = resolve;
+      }),
+    );
+
+    const start = Date.now();
+    await saveGalleryBlock(sampleBlock);
+    const elapsed = Date.now() - start;
+
+    // saveGalleryBlock should return without waiting for patchNewTagCounts
+    expect(elapsed).toBeLessThan(500);
+
+    // Resolve the delayed promise to avoid unhandled rejections
+    resolveDelay();
+  });
+
+  it('does not call patchNewTagCounts when block has no tags', async () => {
+    const emptyTagsBlock: GalleryBlock = {
+      ...sampleBlock,
+      id: 55002,
+      tags: {},
+    };
+
+    await saveGalleryBlock(emptyTagsBlock);
+    await Promise.resolve();
+
+    expect(vi.mocked(patchNewTagCounts)).not.toHaveBeenCalled();
   });
 });

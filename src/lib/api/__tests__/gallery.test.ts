@@ -10,6 +10,7 @@ import {
   fetchLanguages,
   fetchIndexVersion,
   createLoadingBlock,
+  filesToGalleryImages,
 } from '../gallery';
 import { GalleryBlockType, ImageType } from '@/lib/utils/types';
 
@@ -311,6 +312,46 @@ describe('fetchGalleryBlockDetailed', () => {
 
     expect(galleryInfoToBlock).not.toHaveBeenCalled();
   });
+
+  it('on success: returned block has language and mediaType from GalleryInfo', async () => {
+    const mockGalleryInfo = {
+      languageLocalName: '日本語',
+      language: 'japanese',
+      date: '2024-01-15 12:30',
+      files: [],
+      tags: [],
+      japaneseTitle: '',
+      title: 'Lang Test',
+      id: 777,
+      type: 'doujinshi',
+      related: [],
+      artists: [],
+      groups: [],
+      characters: [],
+      parodys: [],
+    };
+
+    const mockBlock = {
+      id: 777,
+      type: GalleryBlockType.DETAILED,
+      title: 'Lang Test',
+      date: new Date('2024-01-15'),
+      tags: {},
+      thumbnail: '',
+      related: [],
+      language: 'japanese',
+      mediaType: 'doujinshi',
+    };
+
+    vi.mocked(apiClient.fetchLtnText).mockResolvedValue('var galleryinfo = {}');
+    vi.mocked(parseGalleryJson).mockReturnValue(mockGalleryInfo);
+    vi.mocked(galleryInfoToBlock).mockReturnValue(mockBlock);
+
+    const result = await fetchGalleryBlockDetailed(777);
+
+    expect(result.language).toBe('japanese');
+    expect(result.mediaType).toBe('doujinshi');
+  });
 });
 
 describe('fetchGalleryImages', () => {
@@ -598,5 +639,55 @@ describe('fetchGalleryBlockHtmlById signal handling', () => {
       'galleryblock/333.html',
       expect.objectContaining({ signal: controller.signal }),
     );
+  });
+});
+
+describe('filesToGalleryImages', () => {
+  it('converts GalleryFile[] to GalleryImages with correct id and image count', () => {
+    const files = [
+      { width: 1280, height: 1800, haswebp: 1, hasavif: 1, hasavifsmalltn: 1, name: '001.jpg', hash: 'hash1' },
+      { width: 800, height: 600, haswebp: 0, hasavif: 0, hasavifsmalltn: 0, name: '002.png', hash: 'hash2' },
+    ];
+    const result = filesToGalleryImages(12345, files);
+
+    expect(result.id).toBe(12345);
+    expect(result.images).toHaveLength(2);
+  });
+
+  it('always includes ImageType.ORIGINAL in types set', () => {
+    const files = [
+      { width: 100, height: 100, haswebp: 0, hasavif: 0, hasavifsmalltn: 0, name: 'a.jpg', hash: 'h1' },
+    ];
+    const result = filesToGalleryImages(1, files);
+    expect(result.images[0].types.has(ImageType.ORIGINAL)).toBe(true);
+  });
+
+  it('adds ImageType.WEBP when haswebp=1', () => {
+    const files = [
+      { width: 100, height: 100, haswebp: 1, hasavif: 0, hasavifsmalltn: 0, name: 'a.jpg', hash: 'h1' },
+    ];
+    const result = filesToGalleryImages(1, files);
+    expect(result.images[0].types.has(ImageType.WEBP)).toBe(true);
+    expect(result.images[0].types.has(ImageType.AVIF)).toBe(false);
+  });
+
+  it('adds ImageType.AVIF when hasavif=1', () => {
+    const files = [
+      { width: 100, height: 100, haswebp: 0, hasavif: 1, hasavifsmalltn: 0, name: 'a.jpg', hash: 'h1' },
+    ];
+    const result = filesToGalleryImages(1, files);
+    expect(result.images[0].types.has(ImageType.AVIF)).toBe(true);
+    expect(result.images[0].types.has(ImageType.WEBP)).toBe(false);
+  });
+
+  it('preserves name, hash, width, height on each image', () => {
+    const files = [
+      { width: 1920, height: 1080, haswebp: 1, hasavif: 1, hasavifsmalltn: 0, name: 'img.jpg', hash: 'abc' },
+    ];
+    const result = filesToGalleryImages(99, files);
+    expect(result.images[0].name).toBe('img.jpg');
+    expect(result.images[0].hash).toBe('abc');
+    expect(result.images[0].width).toBe(1920);
+    expect(result.images[0].height).toBe(1080);
   });
 });
