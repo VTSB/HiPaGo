@@ -6,6 +6,7 @@ import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import type { DbAdapter, QueryResult } from '../adapter';
 import { setDb, closeDb, getDb } from '../adapter';
 import { SCHEMA_SQL } from '../schema-sql';
+import { runMigrations } from '../migrations';
 
 class TestAdapter implements DbAdapter {
   private db: SqlJsDatabase;
@@ -53,6 +54,7 @@ export async function setupTestDb(): Promise<void> {
   const sqlDb = new SQL.Database();
   const adapter = new TestAdapter(sqlDb);
   await adapter.exec(SCHEMA_SQL);
+  await runMigrations(adapter);
   setDb(adapter);
 }
 
