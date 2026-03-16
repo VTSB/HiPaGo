@@ -104,11 +104,34 @@ export async function fetchLanguages(): Promise<string[]> {
   return parseLanguageSupport(text);
 }
 
+const versionCache = new Map<string, { value: string; at: number; promise?: Promise<string> }>();
+const VERSION_TTL = 60_000; // 1 minute
+
 export async function fetchIndexVersion(name: string): Promise<string> {
-  const text = await apiClient.fetchLtnText(
-    `${name}/version?_=${Date.now()}`,
-  );
-  return parseIndexVersion(text);
+  const cached = versionCache.get(name);
+
+  // TTL cache hit
+  if (cached && Date.now() - cached.at < VERSION_TTL) {
+    return cached.promise ?? cached.value;
+  }
+
+  // Promise dedup: reuse in-flight request
+  if (cached?.promise) return cached.promise;
+
+  const promise = apiClient
+    .fetchLtnText(`${name}/version?_=${Date.now()}`)
+    .then(parseIndexVersion)
+    .then((version) => {
+      versionCache.set(name, { value: version, at: Date.now() });
+      return version;
+    })
+    .catch((err) => {
+      versionCache.delete(name);
+      throw err;
+    });
+
+  versionCache.set(name, { value: '', at: 0, promise });
+  return promise;
 }
 
 export function createLoadingBlock(id: number): GalleryBlock {

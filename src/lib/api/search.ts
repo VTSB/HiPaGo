@@ -353,23 +353,19 @@ export async function getGalleryIdsForQuery(
     return 0;
   });
 
-  // Fetch all positive terms in parallel and intersect (AND logic)
-  let results: number[];
-  if (positiveTerms.length > 0) {
-    const sets = await Promise.all(
-      positiveTerms.map((term) => getGalleryIdsForSingleTerm(term, language)),
-    );
-    results = intersectIdSets(sets);
-  } else {
-    // Only negative terms, no positive terms: no base results to filter
-    return [];
-  }
+  if (positiveTerms.length === 0) return [];
 
-  // Exclude negative terms
-  if (negativeTerms.length > 0 && results.length > 0) {
-    const negativeSets = await Promise.all(
-      negativeTerms.map((term) => getGalleryIdsForSingleTerm(term, language)),
-    );
+  // Fetch positive and negative terms in parallel
+  const [positiveSets, negativeSets] = await Promise.all([
+    Promise.all(positiveTerms.map((term) => getGalleryIdsForSingleTerm(term, language))),
+    negativeTerms.length > 0
+      ? Promise.all(negativeTerms.map((term) => getGalleryIdsForSingleTerm(term, language)))
+      : Promise.resolve([]),
+  ]);
+
+  let results = intersectIdSets(positiveSets);
+
+  if (negativeSets.length > 0 && results.length > 0) {
     const excludeSet = new Set(negativeSets.flat());
     results = results.filter((id) => !excludeSet.has(id));
   }
