@@ -301,14 +301,15 @@ async function getGalleryIdsForSingleTerm(
 
 /**
  * Get gallery IDs for a (potentially compound) search query.
- * Supports multiple space-separated terms with AND logic:
- *   "female:loli artist:yam" → intersection of both result sets
  *
- * Plain text terms (no valid tag type prefix) are excluded from the remote
- * B-tree intersection because gallery title keyword lookups are hash-exact
- * and would eliminate most results when mixed with tag terms. Tag-typed terms
- * are intersected with AND; plain text terms are ignored in remote search
- * (title filtering is handled locally or client-side).
+ * Matches hitomi.la's do_search() algorithm (results.js):
+ *   1. Split query into terms, categorize as positive or negative (- prefix)
+ *   2. Sort positive terms: typed (field:value) terms first (optimization)
+ *   3. Fetch ALL positive terms via getGalleryIdsForSingleTerm and intersect (AND)
+ *   4. Fetch negative terms and exclude from results
+ *
+ * Sort order is only meaningful for single-term queries (nozomi files support
+ * sort; B-tree galleriesindex does not). Multi-term queries ignore sort.
  */
 export async function getGalleryIdsForQuery(
   query: string,
@@ -318,36 +319,62 @@ export async function getGalleryIdsForQuery(
   const terms = parseCompoundQuery(query);
   if (terms.length === 0) return [];
 
-  // Separate typed tag terms from plain text terms
-  const tagTerms = terms.filter((term) => {
-    const colonIndex = term.indexOf(':');
-    if (colonIndex <= 0) return false;
-    const possibleType = term.slice(0, colonIndex).toLowerCase();
-    return (Object.values(TagType) as string[]).includes(possibleType);
+  // Single term: pass sort through
+  if (terms.length === 1) {
+    const term = terms[0];
+    if (term.startsWith('-') && term.length > 1) {
+      // Single negative term with no positive terms: no results
+      return [];
+    }
+    return getGalleryIdsForSingleTerm(term, language, sort);
+  }
+
+  // Separate positive and negative terms
+  const positiveTerms: string[] = [];
+  const negativeTerms: string[] = [];
+
+  for (const term of terms) {
+    if (term.startsWith('-') && term.length > 1) {
+      // Strip '-' prefix before storing — getGalleryIdsForSingleTerm needs the clean term
+      negativeTerms.push(term.slice(1));
+    } else {
+      positiveTerms.push(term);
+    }
+  }
+
+  // Sort positive terms: typed terms (containing ':') first
+  // This matches hitomi.la's optimization — typed terms via nozomi are typically
+  // smaller result sets, so fetching them first is more efficient
+  positiveTerms.sort((a, b) => {
+    const aTyped = a.includes(':');
+    const bTyped = b.includes(':');
+    if (aTyped && !bTyped) return -1;
+    if (!aTyped && bTyped) return 1;
+    return 0;
   });
 
-  // If the entire query is plain text (no tag terms), fall back to single-term B-tree search
-  if (tagTerms.length === 0) {
-    if (terms.length === 1) {
-      return getGalleryIdsForSingleTerm(terms[0], language, sort);
-    }
-    // Multiple plain text terms: search first term only (B-tree doesn't support multi-word AND)
-    return getGalleryIdsForSingleTerm(terms[0], language, sort);
+  // Fetch all positive terms in parallel and intersect (AND logic)
+  let results: number[];
+  if (positiveTerms.length > 0) {
+    const sets = await Promise.all(
+      positiveTerms.map((term) => getGalleryIdsForSingleTerm(term, language)),
+    );
+    results = intersectIdSets(sets);
+  } else {
+    // Only negative terms, no positive terms: no base results to filter
+    return [];
   }
 
-  // If only one tag term (and possibly text terms that are ignored), apply sort
-  if (tagTerms.length === 1) {
-    return getGalleryIdsForSingleTerm(tagTerms[0], language, tagTerms.length === terms.length ? sort : undefined);
+  // Exclude negative terms
+  if (negativeTerms.length > 0 && results.length > 0) {
+    const negativeSets = await Promise.all(
+      negativeTerms.map((term) => getGalleryIdsForSingleTerm(term, language)),
+    );
+    const excludeSet = new Set(negativeSets.flat());
+    results = results.filter((id) => !excludeSet.has(id));
   }
 
-  // Multiple tag terms: fetch in parallel and intersect (AND logic).
-  // Plain text terms are intentionally excluded — they would produce near-zero
-  // intersections because the galleries B-tree index rarely overlaps nozomi tag results.
-  const results = await Promise.all(
-    tagTerms.map((term) => getGalleryIdsForSingleTerm(term, language)),
-  );
-
-  return intersectIdSets(results);
+  return results;
 }
 
 /**

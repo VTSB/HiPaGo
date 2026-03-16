@@ -383,29 +383,112 @@ describe('getGalleryIdsForQuery — multi-term intersection', () => {
     expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'yam', 'japanese', undefined);
   });
 
-  it('ignores plain text terms when mixed with tag terms — text does not narrow results to zero', async () => {
-    // Query: "artist:yam 검색어 female:loli" — "검색어" is plain text, should be ignored in remote search
-    // Only artist:yam and female:loli are intersected
+  it('includes plain text terms in intersection when mixed with tag terms', async () => {
+    // Query: "artist:yam 검색어 female:loli" — all three terms are searched and intersected.
+    // Typed terms sort first: artist:yam, female:loli fetched via nozomi.
+    // "검색어" fetched via B-tree; non-matching key → returns [].
+    // Intersection with [] = [].
     vi.mocked(fetchNozomiSearch)
       .mockResolvedValueOnce([500, 300, 100])  // artist:yam
       .mockResolvedValueOnce([400, 300, 100]); // female:loli
 
+    // B-tree lookup for "검색어": version + node with non-matching key
+    vi.mocked(fetchIndexVersion).mockResolvedValueOnce('v1');
+    vi.mocked(apiClient.fetchLtnBinary).mockResolvedValueOnce(
+      buildNodeWithKeyAndData(new Uint8Array([0xff, 0xff, 0xff, 0xff]), { offset: 0, length: 4 }),
+    );
+
     const result = await getGalleryIdsForQuery('artist:yam 검색어 female:loli', 'all');
 
-    // Only 2 nozomi fetches (not 3), text term skipped
+    // 2 nozomi fetches (typed terms) + 1 B-tree fetch (plain text term)
     expect(fetchNozomiSearch).toHaveBeenCalledTimes(2);
-    // Result is intersection of the two tag terms
-    expect(result).toEqual([300, 100]);
+    // B-tree returned empty for "검색어" → intersection with [] = []
+    expect(result).toEqual([]);
   });
 
-  it('uses only tag terms when query has one tag and one text term', async () => {
-    // Query: "artist:yam hello" — "hello" is plain text, should be ignored
+  it('intersects tag and text term results when query has both', async () => {
+    // Query: "artist:yam hello" — both terms are searched and intersected.
+    // Typed term sorts first: artist:yam via nozomi → [500, 300, 100].
+    // "hello" via B-tree: non-matching key → [].
+    // Intersection = [].
     vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([500, 300, 100]);
+
+    vi.mocked(fetchIndexVersion).mockResolvedValueOnce('v1');
+    vi.mocked(apiClient.fetchLtnBinary).mockResolvedValueOnce(
+      buildNodeWithKeyAndData(new Uint8Array([0xff, 0xff, 0xff, 0xff]), { offset: 0, length: 4 }),
+    );
 
     const result = await getGalleryIdsForQuery('artist:yam hello', 'all');
 
     expect(fetchNozomiSearch).toHaveBeenCalledTimes(1);
+    // B-tree returned empty for "hello" → intersection = []
+    expect(result).toEqual([]);
+  });
+
+  it('excludes negative term results from positive term results', async () => {
+    // Query: "female:loli -male:yaoi"
+    // female:loli → [500, 400, 300, 200, 100]
+    // male:yaoi (negative, stripped to "male:yaoi") → [400, 200]
+    // Result: [500, 300, 100] (400 and 200 excluded)
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([500, 400, 300, 200, 100])  // female:loli
+      .mockResolvedValueOnce([400, 200]);                 // male:yaoi
+
+    const result = await getGalleryIdsForQuery('female:loli -male:yaoi', 'all');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(2);
     expect(result).toEqual([500, 300, 100]);
+  });
+
+  it('returns empty array for single negative term with no positive terms', async () => {
+    const result = await getGalleryIdsForQuery('-female:loli', 'all');
+
+    expect(fetchNozomiSearch).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+
+  it('sorts typed terms first before plain text in positive terms', async () => {
+    // Query: "hello female:loli" — typed term "female:loli" should sort before "hello"
+    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([500, 300, 100]);
+
+    vi.mocked(fetchIndexVersion).mockResolvedValueOnce('v1');
+    vi.mocked(apiClient.fetchLtnBinary).mockResolvedValueOnce(
+      buildNodeWithKeyAndData(new Uint8Array([0xff, 0xff, 0xff, 0xff]), { offset: 0, length: 4 }),
+    );
+
+    const result = await getGalleryIdsForQuery('hello female:loli', 'all');
+
+    // Both terms searched: nozomi for typed, B-tree for plain
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(1);
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'all', undefined);
+    expect(result).toEqual([]);
+  });
+
+  it('intersects multiple plain text terms via B-tree', async () => {
+    // Query: "hello world" — both terms searched via B-tree and intersected
+    const helloHash = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('hello')),
+    ).slice(0, 4);
+    const worldHash = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('world')),
+    ).slice(0, 4);
+
+    vi.mocked(fetchIndexVersion)
+      .mockResolvedValueOnce('v1')
+      .mockResolvedValueOnce('v1');
+
+    vi.mocked(apiClient.fetchLtnBinary)
+      // "hello" B-tree: matching node + gallery data
+      .mockResolvedValueOnce(buildNodeWithKeyAndData(helloHash, { offset: 0, length: 12 }))
+      .mockResolvedValueOnce(buildGalleryIdBuffer([500, 300, 100]))
+      // "world" B-tree: matching node + gallery data
+      .mockResolvedValueOnce(buildNodeWithKeyAndData(worldHash, { offset: 0, length: 12 }))
+      .mockResolvedValueOnce(buildGalleryIdBuffer([400, 300, 200]));
+
+    const result = await getGalleryIdsForQuery('hello world', 'all');
+
+    // Intersection of [500, 300, 100] and [400, 300, 200] = [300]
+    expect(result).toEqual([300]);
   });
 });
 
