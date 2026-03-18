@@ -13,7 +13,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 
-const SPLIT_POINT: usize = 5; // Split after 5-byte TLS record header
+// Split ClientHello BEFORE the SNI extension (~byte 120).
+// DPI sees fragment 1 without SNI → passes through.
+// 200ms delay defeats DPI reassembly timeout.
+const SPLIT_OFFSET: usize = 120;
+const FRAGMENT_DELAY_MS: u64 = 200;
 
 /// Handle to the running SOCKS5 proxy.
 pub struct ProxyHandle {
@@ -222,12 +226,16 @@ async fn relay_with_fragmentation(
                 }
             };
 
-            if first_write && n > SPLIT_POINT {
+            if first_write && n > SPLIT_OFFSET {
                 first_write = false;
-                // Fragment: split at byte 5 (after TLS record header)
-                target_write.write_all(&buf[..SPLIT_POINT]).await?;
+                // Split ClientHello before SNI extension.
+                // Fragment 1: TLS record header + handshake start (no SNI) → DPI passes through.
+                // 200ms delay → DPI reassembly timeout expires.
+                // Fragment 2: rest including SNI → DPI already gave up.
+                target_write.write_all(&buf[..SPLIT_OFFSET]).await?;
                 target_write.flush().await?;
-                target_write.write_all(&buf[SPLIT_POINT..n]).await?;
+                tokio::time::sleep(std::time::Duration::from_millis(FRAGMENT_DELAY_MS)).await;
+                target_write.write_all(&buf[SPLIT_OFFSET..n]).await?;
                 target_write.flush().await?;
             } else {
                 first_write = false;
