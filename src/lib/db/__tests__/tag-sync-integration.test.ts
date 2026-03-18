@@ -17,6 +17,18 @@ import {
 } from '../init';
 
 // ---------------------------------------------------------------------------
+// Mock useTagI18nStore to capture loadLocale calls
+// ---------------------------------------------------------------------------
+
+const mockLoadLocale = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('@/lib/store/tag-i18n', () => ({
+  useTagI18nStore: {
+    getState: () => ({ loadLocale: mockLoadLocale }),
+  },
+}));
+
+// ---------------------------------------------------------------------------
 // Mock runtime tag fetching (must be before import)
 // ---------------------------------------------------------------------------
 
@@ -89,6 +101,8 @@ beforeEach(async () => {
   resetStore();
   mockParsedTags = [];
   mockFetchPageShouldFail = false;
+  mockLoadLocale.mockReset();
+  mockLoadLocale.mockResolvedValue(undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -443,118 +457,29 @@ describe('runTagSync — catastrophic failure', () => {
 });
 
 // ===========================================================================
-// 8. Korean localization integration
+// 8. Tag sync calls loadLocale (not applyKoreanLocalization)
 // ===========================================================================
 
-describe('Korean localization', () => {
-  it('populates tag_i18n for matching tags after sync', async () => {
+describe('tag sync completes without applyKoreanLocalization', () => {
+  it('calls useTagI18nStore.loadLocale after sync completes, not applyKoreanLocalization', async () => {
+    setMockTags({
+      female: [['blowjob', 10000]],
+    });
+
+    await runTagSync();
+
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(mockLoadLocale).toHaveBeenCalledOnce();
+  });
+
+  it('calls loadLocale after sync completes, not before', async () => {
     setMockTags({
       female: [['blowjob', 10000], ['loli', 8000]],
-      male: [['muscle', 3000]],
     });
 
+    expect(mockLoadLocale).not.toHaveBeenCalled();
     await runTagSync();
-
-    const femaleBlowjob = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'blowjob'],
-    );
-    expect(femaleBlowjob).toBeDefined();
-    const i18n1 = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [femaleBlowjob!.tagId],
-    );
-    expect(i18n1).toBeDefined();
-    expect(i18n1!.local).toBe('펠라');
-
-    const femaleLoli = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'loli'],
-    );
-    expect(femaleLoli).toBeDefined();
-    const i18n2 = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [femaleLoli!.tagId],
-    );
-    expect(i18n2).toBeDefined();
-    expect(i18n2!.local).toBe('로리');
-
-    const maleMuscle = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.MALE], 'muscle'],
-    );
-    expect(maleMuscle).toBeDefined();
-    const i18n3 = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [maleMuscle!.tagId],
-    );
-    expect(i18n3).toBeDefined();
-    expect(i18n3!.local).toBe('근육');
-  });
-
-  it('does not create i18n entry for tags without Korean translation', async () => {
-    setMockTags({
-      female: [['xray', 500]],
-    });
-
-    await runTagSync();
-
-    const tag = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'xray'],
-    );
-    expect(tag).toBeDefined();
-    const i18n = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [tag!.tagId],
-    );
-    expect(i18n).toBeUndefined();
-  });
-
-  it('applies series localization correctly', async () => {
-    setMockTags({
-      series: [['bleach', 2000]],
-    });
-
-    await runTagSync();
-
-    const tag = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.SERIES], 'bleach'],
-    );
-    expect(tag).toBeDefined();
-    const i18n = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [tag!.tagId],
-    );
-    expect(i18n).toBeDefined();
-    expect(i18n!.local).toBe('블리치');
-  });
-
-  it('applies character localization correctly', async () => {
-    setMockTags({
-      character: [['sailor moon', 1500]],
-    });
-
-    await runTagSync();
-
-    const tag = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.CHARACTER], 'sailor moon'],
-    );
-    expect(tag).toBeDefined();
-    const i18n = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [tag!.tagId],
-    );
-    expect(i18n).toBeDefined();
-    expect(i18n!.local).toBe('세일러 문');
-  });
-
-  it('skips fields not in KOREAN_FIELD_MAP', async () => {
-    setMockTags({});
-    await runTagSync();
-    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(mockLoadLocale).toHaveBeenCalledOnce();
   });
 });
 
@@ -717,19 +642,6 @@ describe('Local search works after sync', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results.some((r) => r.tag === 'beauty mark')).toBe(true);
     expect(results.find((r) => r.tag === 'beauty mark')!.tagType).toBe(TagType.FEMALE);
-  });
-
-  it('searchLocalTags finds Korean i18n after sync', async () => {
-    const { searchLocalTags } = await import('../search-local');
-
-    setMockTags({
-      female: [['blowjob', 50000]],
-    });
-
-    await runTagSync();
-
-    const results = await searchLocalTags('펠');
-    expect(results.some((r) => r.tag === 'blowjob')).toBe(true);
   });
 
   it('hasLocalSearchData returns true after sync', async () => {

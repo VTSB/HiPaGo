@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
 import { getDb } from '../adapter';
 import {
@@ -8,6 +8,7 @@ import {
   hasLocalSearchData,
 } from '../search-local';
 import { TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
+import { useTagI18nStore } from '@/lib/store/tag-i18n';
 
 beforeAll(async () => {
   await setupTestDb();
@@ -93,25 +94,99 @@ describe('searchLocalTags', () => {
     expect(results.length).toBe(2);
   });
 
-  it('i18n name match returns suggestions via tag join', async () => {
-    const tagIds = await seedTags();
-    await getDb().execute('INSERT INTO tag_i18n (tagId, local) VALUES (?, ?)', [tagIds.artistTag1, 'アーティスト']);
-    const results = await searchLocalTags('アーティ');
+  it('returns localName from TagI18nStore when i18n is loaded', async () => {
+    await seedTags();
+    // Populate TagI18nStore with a Korean name for artist_alpha
+    useTagI18nStore.setState({
+      nameToLocal: new Map([['artist:artist_alpha', '아티스트알파']]),
+      localToNames: new Map([['아티스트알파', ['artist:artist_alpha']]]),
+      isLoaded: true,
+    });
+
+    const results = await searchLocalTags('art');
+    const match = results.find((r) => r.tag === 'artist_alpha');
+    expect(match).toBeDefined();
+    expect(match?.localName).toBe('아티스트알파');
+
+    // Cleanup store
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+  });
+
+  it('Korean query uses TagI18nStore.searchByLocal', async () => {
+    await seedTags();
+    // Populate TagI18nStore with Korean names
+    useTagI18nStore.setState({
+      nameToLocal: new Map([
+        ['artist:artist_alpha', '아티스트알파'],
+        ['series:art_series', '아트시리즈'],
+      ]),
+      localToNames: new Map([
+        ['아티스트알파', ['artist:artist_alpha']],
+        ['아트시리즈', ['series:art_series']],
+      ]),
+      isLoaded: true,
+    });
+
+    const results = await searchLocalTags('아티스트');
     const names = results.map((r) => r.tag);
     expect(names).toContain('artist_alpha');
     expect(results.some((r) => r.tagType === TagType.ARTIST)).toBe(true);
+
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
   });
 
-  it('i18n match respects tagType filter', async () => {
-    const tagIds = await seedTags();
-    await getDb().execute('INSERT INTO tag_i18n (tagId, local) VALUES (?, ?)', [tagIds.artistTag1, 'ローカル名']);
-    await getDb().execute('INSERT INTO tag_i18n (tagId, local) VALUES (?, ?)', [tagIds.seriesTag, 'ローカルシリーズ']);
+  it('Korean query with tagType filter uses TagI18nStore.searchByLocal filtered', async () => {
+    await seedTags();
+    useTagI18nStore.setState({
+      nameToLocal: new Map([
+        ['artist:artist_alpha', '로컬이름'],
+        ['series:art_series', '로컬시리즈'],
+      ]),
+      localToNames: new Map([
+        ['로컬이름', ['artist:artist_alpha']],
+        ['로컬시리즈', ['series:art_series']],
+      ]),
+      isLoaded: true,
+    });
 
-    const results = await searchLocalTags('ローカル', TagType.ARTIST);
+    const results = await searchLocalTags('로컬', TagType.ARTIST);
     const names = results.map((r) => r.tag);
     expect(names).toContain('artist_alpha');
     expect(names).not.toContain('art_series');
     results.forEach((r) => expect(r.tagType).toBe(TagType.ARTIST));
+
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+  });
+
+  it('초성 query returns matching results via TagI18nStore', async () => {
+    await seedTags();
+    // '아티스트알파' choseong is 'ㅇㅌㅅㅌㅇㅍ'
+    useTagI18nStore.setState({
+      nameToLocal: new Map([['artist:artist_alpha', '아티스트알파']]),
+      localToNames: new Map([['아티스트알파', ['artist:artist_alpha']]]),
+      isLoaded: true,
+    });
+
+    // searchByLocal in the store handles 초성 matching with es-hangul getChoseong
+    // We test that a 초성 prefix query works end-to-end
+    const results = await searchLocalTags('ㅇㅌㅅ');
+    const names = results.map((r) => r.tag);
+    expect(names).toContain('artist_alpha');
+
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+  });
+
+  it('without i18n loaded still returns English-only results', async () => {
+    await seedTags();
+    // Ensure store is not loaded
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+
+    const results = await searchLocalTags('art');
+    const names = results.map((r) => r.tag);
+    expect(names).toContain('artist_alpha');
+    expect(names).toContain('art_series');
+    // localName should be undefined when store not loaded
+    results.forEach((r) => expect(r.localName).toBeUndefined());
   });
 });
 

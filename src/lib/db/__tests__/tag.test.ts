@@ -6,8 +6,6 @@ import {
   getTag,
   getTagsByType,
   updateTagCount,
-  setTagI18n,
-  getTagI18n,
   setTagTransform,
   getTagTransform,
 } from '../tag';
@@ -96,30 +94,6 @@ describe('updateTagCount', () => {
 
     const tag = await getTag(tagId);
     expect(tag!.count).toBe(42);
-  });
-});
-
-describe('tag i18n', () => {
-  it('round-trips setTagI18n / getTagI18n', async () => {
-    const tagId = await findOrCreateTag(TagType.TAG, 'english_name');
-    await setTagI18n(tagId, 'localized_name');
-
-    const result = await getTagI18n(tagId);
-    expect(result).toBe('localized_name');
-  });
-
-  it('returns null for non-existent i18n', async () => {
-    const result = await getTagI18n(99999);
-    expect(result).toBeNull();
-  });
-
-  it('overwrites existing i18n', async () => {
-    const tagId = await findOrCreateTag(TagType.TAG, 'test');
-    await setTagI18n(tagId, 'first');
-    await setTagI18n(tagId, 'second');
-
-    const result = await getTagI18n(tagId);
-    expect(result).toBe('second');
   });
 });
 

@@ -26,14 +26,20 @@ vi.mock('@/lib/api/tag-fetcher', () => ({
 const mockGlobalFetch = vi.fn();
 vi.stubGlobal('fetch', mockGlobalFetch);
 
+// ---------------------------------------------------------------------------
+// Mock useTagI18nStore to capture loadLocale calls
+// ---------------------------------------------------------------------------
+
+const mockLoadLocale = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('@/lib/store/tag-i18n', () => ({
+  useTagI18nStore: {
+    getState: () => ({ loadLocale: mockLoadLocale }),
+  },
+}));
+
 // Import runTagSync AFTER all vi.mock calls
 import { runTagSync } from '../tag-sync';
-
-// Pre-warm the korean-tags.json dynamic import so it is cached before fake
-// timers are activated. Without this the first test that exercises
-// applyKoreanLocalization hangs because the cold module-loader path can
-// interact badly with vi.useFakeTimers().
-import '@/lib/data/korean-tags.json';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,6 +105,8 @@ beforeEach(async () => {
   mockFetchPage.mockReset();
   mockDispose.mockReset();
   mockGlobalFetch.mockReset();
+  mockLoadLocale.mockReset();
+  mockLoadLocale.mockResolvedValue(undefined);
   mockGlobalFetch.mockRejectedValue(new Error('global fetch should not be called in runtime path tests'));
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -531,34 +539,14 @@ describe('runTagSync — runtime path', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 11. Korean localization applied after runtime sync
+  // 11. loadLocale called after runtime sync (not applyKoreanLocalization)
   // -------------------------------------------------------------------------
-  it('Korean localization applied after runtime sync: tag_i18n populated for known tags', async () => {
-    // Insert a female 'blowjob' tag via the runtime path.
-    mockFetchPage.mockImplementation((url: string) => {
-      if (url === 'alltags-a.html') {
-        return Promise.resolve(
-          makeTagPageHtml([
-            { name: 'blowjob ♀', count: 10000, href: '/tag/female:blowjob-all.html' },
-          ]),
-        );
-      }
-      return Promise.resolve(EMPTY_PAGE);
-    });
+  it('calls useTagI18nStore.loadLocale after sync completes', async () => {
+    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
 
-    const femaleBlowjob = await queryOne<{ tagId: number }>(
-      'SELECT tagId FROM tag WHERE type = ? AND name = ?',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'blowjob'],
-    );
-    expect(femaleBlowjob).toBeDefined();
-
-    const i18n = await queryOne<{ local: string }>(
-      'SELECT local FROM tag_i18n WHERE tagId = ?',
-      [femaleBlowjob!.tagId],
-    );
-    expect(i18n).toBeDefined();
-    expect(i18n!.local).toBe('펠라');
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(mockLoadLocale).toHaveBeenCalledOnce();
   });
 });

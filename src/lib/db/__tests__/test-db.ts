@@ -65,7 +65,6 @@ export async function clearAllTables(): Promise<void> {
     DELETE FROM gallery_tag;
     DELETE FROM gallery_relate;
     DELETE FROM gallery_image;
-    DELETE FROM tag_i18n;
     DELETE FROM tag_transform;
     DELETE FROM tag;
     DELETE FROM gallery;

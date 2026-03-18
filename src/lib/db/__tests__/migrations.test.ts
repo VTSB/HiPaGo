@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import type { DbAdapter, QueryResult } from '../adapter';
 import { setDb, closeDb } from '../adapter';
-import { runMigrations } from '../migrations';
+import { runMigrations, LATEST_VERSION } from '../migrations';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory adapter — mirrors test-db.ts TestAdapter but standalone
@@ -147,7 +147,7 @@ describe('runMigrations: pre-migration DB upgrade', () => {
     await adapter.close();
   });
 
-  it('sets user_version to 1 after running migrations on a pre-migration DB', async () => {
+  it('sets user_version to LATEST_VERSION after running migrations on a pre-migration DB', async () => {
     // Simulate pre-migration state: old schema without language/mediaType columns
     await adapter.exec(OLD_SCHEMA_SQL);
 
@@ -156,7 +156,7 @@ describe('runMigrations: pre-migration DB upgrade', () => {
 
     await runMigrations(adapter);
 
-    expect(await getUserVersion(adapter)).toBe(1);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
   });
 
   it('adds language and mediaType columns to gallery after migration', async () => {
@@ -174,7 +174,7 @@ describe('runMigrations: pre-migration DB upgrade', () => {
     await runMigrations(adapter);
     await runMigrations(adapter);
 
-    expect(await getUserVersion(adapter)).toBe(1);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
   });
 
   it('does not alter user_version when columns already exist (fresh schema)', async () => {
@@ -196,7 +196,81 @@ describe('runMigrations: pre-migration DB upgrade', () => {
     // user_version is 0 on a fresh install before runMigrations
     expect(await getUserVersion(adapter)).toBe(0);
     await runMigrations(adapter);
-    // After running migrations user_version should be 1 (migration still runs to set version)
-    expect(await getUserVersion(adapter)).toBe(1);
+    // After running migrations user_version should be at LATEST_VERSION
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Schema with tag_i18n table — simulates pre-v2 DB that has the table
+// ---------------------------------------------------------------------------
+const SCHEMA_WITH_TAG_I18N = `
+CREATE TABLE IF NOT EXISTS tag_i18n (
+  tagId INTEGER PRIMARY KEY,
+  local TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tag_i18n_local ON tag_i18n(local);
+`;
+
+describe('runMigrations: migration v2 drops tag_i18n', () => {
+  let adapter: PragmaTestAdapter;
+
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('migration v2 executes DROP TABLE IF EXISTS tag_i18n without error', async () => {
+    await adapter.exec(SCHEMA_WITH_TAG_I18N);
+    // Manually set user_version to 1 (migration v1 already applied)
+    await adapter.exec('PRAGMA user_version = 1');
+
+    // Should run migration v2 without throwing
+    await expect(runMigrations(adapter)).resolves.toBeUndefined();
+  });
+
+  it('migration v2 executes DROP INDEX IF EXISTS idx_tag_i18n_local without error', async () => {
+    await adapter.exec(SCHEMA_WITH_TAG_I18N);
+    await adapter.exec('PRAGMA user_version = 1');
+
+    await runMigrations(adapter);
+
+    // Index should no longer exist: querying sqlite_master for it returns nothing
+    const indexes = await adapter.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tag_i18n_local'",
+    );
+    expect(indexes).toHaveLength(0);
+  });
+
+  it('after migration v2, tag_i18n table no longer exists', async () => {
+    await adapter.exec(SCHEMA_WITH_TAG_I18N);
+    await adapter.exec('PRAGMA user_version = 1');
+
+    await runMigrations(adapter);
+
+    const tables = await adapter.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='tag_i18n'",
+    );
+    expect(tables).toHaveLength(0);
+  });
+
+  it('sets user_version to 2 after migration v2', async () => {
+    await adapter.exec(SCHEMA_WITH_TAG_I18N);
+    await adapter.exec('PRAGMA user_version = 1');
+
+    await runMigrations(adapter);
+
+    expect(await getUserVersion(adapter)).toBe(2);
+  });
+
+  it('migration v2 is idempotent: no error if tag_i18n does not exist', async () => {
+    // user_version=1, no tag_i18n table present
+    await adapter.exec('PRAGMA user_version = 1');
+
+    await expect(runMigrations(adapter)).resolves.toBeUndefined();
+    expect(await getUserVersion(adapter)).toBe(2);
   });
 });

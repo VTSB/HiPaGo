@@ -1,6 +1,7 @@
 import { ensureDb } from './adapter';
 import { TAG_TYPE_TO_BYTE, BYTE_TO_TAG_TYPE } from '@/lib/utils/types';
 import type { TagType, Suggestion } from '@/lib/utils/types';
+import { useTagI18nStore } from '@/lib/store/tag-i18n';
 
 interface TagRow {
   tagId: number;
@@ -16,6 +17,7 @@ export async function searchLocalTags(
 ): Promise<Suggestion[]> {
   const db = await ensureDb();
   const trimmed = query.trim().toLowerCase();
+  const i18nStore = useTagI18nStore.getState();
 
   // Empty query: return top tags by count directly from DB
   if (!trimmed) {
@@ -29,19 +31,15 @@ export async function searchLocalTags(
           [limit],
         );
     const filtered = topTags.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
-    if (filtered.length === 0) return [];
-    const placeholders = filtered.map(() => '?').join(',');
-    const i18nRows = await db.query<{ tagId: number; local: string }>(
-      `SELECT i.tagId, i.local FROM tag_i18n i WHERE i.tagId IN (${placeholders})`,
-      filtered.map((t) => t.tagId),
-    );
-    const i18nMap = new Map(i18nRows.map((r) => [r.tagId, r.local]));
-    return filtered.map((t) => ({
-      tag: t.name,
-      tagType: BYTE_TO_TAG_TYPE[t.type],
-      amount: t.count,
-      localName: i18nMap.get(t.tagId),
-    }));
+    return filtered.map((t) => {
+      const tagType = BYTE_TO_TAG_TYPE[t.type];
+      return {
+        tag: t.name,
+        tagType,
+        amount: t.count,
+        localName: i18nStore.isLoaded ? i18nStore.getLocal(tagType as string, t.name) : undefined,
+      };
+    });
   }
 
   const prefix = trimmed + '%';
@@ -61,23 +59,37 @@ export async function searchLocalTags(
     );
   }
 
-  // Secondary path: i18n name prefix
-  let secondaryResults: TagRow[];
-  if (tagTypeFilter !== undefined) {
-    const typeByte = TAG_TYPE_TO_BYTE[tagTypeFilter];
-    secondaryResults = await db.query<TagRow>(
-      `SELECT t.tagId, t.type, t.name, t.count
-       FROM tag_i18n i JOIN tag t ON i.tagId = t.tagId
-       WHERE i.local LIKE ? AND t.type = ?`,
-      [prefix, typeByte],
-    );
-  } else {
-    secondaryResults = await db.query<TagRow>(
-      `SELECT t.tagId, t.type, t.name, t.count
-       FROM tag_i18n i JOIN tag t ON i.tagId = t.tagId
-       WHERE i.local LIKE ?`,
-      [prefix],
-    );
+  // Secondary path: i18n name search via TagI18nStore
+  const secondaryResults: TagRow[] = [];
+  if (i18nStore.isLoaded) {
+    const typeFilter = tagTypeFilter !== undefined ? (tagTypeFilter as string) : undefined;
+    const i18nMatches = i18nStore.searchByLocal(trimmed, typeFilter ? { type: typeFilter } : undefined);
+
+    if (i18nMatches.length > 0) {
+      // Collect all names per type to batch-fetch from DB
+      const byType = new Map<number, string[]>();
+      for (const match of i18nMatches) {
+        // Convert type string to byte for DB query
+        const tagTypeEnum = match.type as TagType;
+        const typeByte = TAG_TYPE_TO_BYTE[tagTypeEnum];
+        if (typeByte === undefined) continue;
+        if (!byType.has(typeByte)) byType.set(typeByte, []);
+        byType.get(typeByte)!.push(match.name);
+      }
+
+      for (const [typeByte, names] of byType) {
+        const CHUNK = 50;
+        for (let i = 0; i < names.length; i += CHUNK) {
+          const chunk = names.slice(i, i + CHUNK);
+          const placeholders = chunk.map(() => '?').join(',');
+          const rows = await db.query<TagRow>(
+            `SELECT tagId, type, name, count FROM tag WHERE type = ? AND name IN (${placeholders})`,
+            [typeByte, ...chunk],
+          );
+          secondaryResults.push(...rows);
+        }
+      }
+    }
   }
 
   // Deduplicate by tagId
@@ -113,23 +125,16 @@ export async function searchLocalTags(
   const sliced = merged.slice(0, limit);
 
   const filtered = sliced.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
-
-  // Batch fetch Korean names
   if (filtered.length === 0) return [];
-  const placeholders = filtered.map(() => '?').join(',');
-  const i18nRows = await db.query<{ tagId: number; local: string }>(
-    `SELECT i.tagId, i.local FROM tag_i18n i WHERE i.tagId IN (${placeholders})`,
-    filtered.map((t) => t.tagId),
-  );
-  const i18nMap = new Map(i18nRows.map((r) => [r.tagId, r.local]));
 
   return filtered.map((t) => {
+    const tagType = BYTE_TO_TAG_TYPE[t.type];
     const effectiveCount = t.count > 0 ? t.count : (localCountMap.get(t.tagId) || 0);
     return {
       tag: t.name,
-      tagType: BYTE_TO_TAG_TYPE[t.type],
+      tagType,
       amount: effectiveCount,
-      localName: i18nMap.get(t.tagId),
+      localName: i18nStore.isLoaded ? i18nStore.getLocal(tagType as string, t.name) : undefined,
     };
   });
 }

@@ -20,8 +20,6 @@ import {
   findOrCreateTag,
   getTag,
   getTagsByType,
-  setTagI18n,
-  getTagI18n,
   setTagTransform,
   getTagTransform,
 } from '../tag';
@@ -465,19 +463,6 @@ describe('sync_status integration', () => {
 // ---------------------------------------------------------------------------
 
 describe('Tag i18n + transform with gallery flow', () => {
-  it('setTagI18n / getTagI18n work after gallery save', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['some-artist'] },
-    }));
-
-    const artistTags = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.ARTIST]);
-    const artistTag = artistTags.find((t) => t.name === 'some-artist')!;
-    expect(artistTag).toBeDefined();
-
-    await setTagI18n(artistTag.tagId!, 'アーティスト');
-    expect(await getTagI18n(artistTag.tagId!)).toBe('アーティスト');
-  });
-
   it('setTagTransform / getTagTransform work independently of gallery flow', async () => {
     await saveGalleryBlock(makeBlock(100, {
       tags: { [TagType.TAG]: ['english-tag'] },
@@ -487,7 +472,7 @@ describe('Tag i18n + transform with gallery flow', () => {
     expect(await getTagTransform('english-tag')).toBe('transformed-tag');
   });
 
-  it('gallery tags still reconstruct correctly after i18n/transform set', async () => {
+  it('gallery tags reconstruct correctly after transform set', async () => {
     await saveGalleryBlock(makeBlock(100, {
       tags: {
         [TagType.ARTIST]: ['artist-i18n'],
@@ -495,25 +480,11 @@ describe('Tag i18n + transform with gallery flow', () => {
       },
     }));
 
-    const artists = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.ARTIST]);
-    const artist = artists.find((t) => t.name === 'artist-i18n')!;
-    await setTagI18n(artist.tagId!, 'ローカル名');
     await setTagTransform('tag-transform', 'renamed-tag');
 
     const block = await getGalleryBlock(100);
     expect(block!.tags[TagType.ARTIST]).toEqual(['artist-i18n']);
     expect(block!.tags[TagType.TAG]).toEqual(['tag-transform']);
-  });
-
-  it('i18n is per-tag-id — different tags have independent i18n', async () => {
-    const id1 = await findOrCreateTag(TagType.TAG, 'tag-one');
-    const id2 = await findOrCreateTag(TagType.TAG, 'tag-two');
-
-    await setTagI18n(id1, 'local-one');
-    await setTagI18n(id2, 'local-two');
-
-    expect(await getTagI18n(id1)).toBe('local-one');
-    expect(await getTagI18n(id2)).toBe('local-two');
   });
 
   it('getTag by ID returns correct type byte after gallery save', async () => {

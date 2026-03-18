@@ -6,6 +6,7 @@ import { TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
 import { createTagFetcher, TagFetcher } from '@/lib/api/tag-fetcher';
 import { parseTagsFromHtml, parseNavUrls, TAG_TYPES, ParsedTag } from '@/lib/api/tag-parser';
+import { useTagI18nStore } from '@/lib/store/tag-i18n';
 
 /**
  * Map JSON type strings to TagType enum values.
@@ -18,18 +19,6 @@ const TYPE_STRING_MAP: Record<string, TagType> = {
   tag: TagType.TAG,
   female: TagType.FEMALE,
   male: TagType.MALE,
-};
-
-/**
- * Korean localization field mapping.
- */
-const KOREAN_FIELD_MAP: Record<string, TagType> = {
-  female: TagType.FEMALE,
-  male: TagType.MALE,
-  series: TagType.SERIES,
-  character: TagType.CHARACTER,
-  tag: TagType.TAG,
-  type: TagType.TYPE,
 };
 
 /** Delay between page fetches to avoid rate limiting */
@@ -58,48 +47,6 @@ async function buildExistingTagMap(typeByte: number): Promise<Map<string, { tagI
     map.set(tag.name, { tagId: tag.tagId, count: tag.count });
   }
   return map;
-}
-
-/**
- * Apply Korean localization data to existing tags in DB.
- */
-async function applyKoreanLocalization(): Promise<number> {
-  const { default: koreanTags } = await import('@/lib/data/korean-tags.json');
-  const db = await ensureDb();
-  let count = 0;
-  const typedKoreanTags = koreanTags as Record<string, Record<string, string>>;
-
-  for (const [field, translations] of Object.entries(typedKoreanTags)) {
-    const tagType = KOREAN_FIELD_MAP[field];
-    if (tagType === undefined) continue;
-    const typeByte = TAG_TYPE_TO_BYTE[tagType];
-
-    const existingTags = await db.query<{ tagId: number; name: string }>(
-      'SELECT tagId, name FROM tag WHERE type = ?',
-      [typeByte],
-    );
-    const nameToId = new Map<string, number>();
-    for (const tag of existingTags) {
-      nameToId.set(tag.name, tag.tagId);
-    }
-
-    await withTransaction(async () => {
-      for (const [englishName, koreanName] of Object.entries(translations)) {
-        const tagId = nameToId.get(englishName);
-        if (tagId !== undefined) {
-          await db.execute(
-            'INSERT OR REPLACE INTO tag_i18n (tagId, local) VALUES (?, ?)',
-            [tagId, koreanName],
-          );
-          count++;
-        }
-      }
-    });
-
-    await yieldToMain();
-  }
-
-  return count;
 }
 
 /**
@@ -275,11 +222,11 @@ async function runRuntimeTagSync(): Promise<void> {
       }
     }
 
-    // Apply Korean localization
-    store.setSyncDetail('한국어 태그 적용 중...');
-    await applyKoreanLocalization();
-
     await markTagSyncCompleted(totalTagCount);
+
+    // Load locale translations into the store
+    const currentLocale = 'ko';
+    await useTagI18nStore.getState().loadLocale(currentLocale);
   } finally {
     await fetcher.dispose();
   }

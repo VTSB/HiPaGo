@@ -1,5 +1,5 @@
 [tools]
 node = "22"
-rust = "1.93.1"
+rust = "latest"
 java = "corretto-21"
 pnpm = "10.30.3"

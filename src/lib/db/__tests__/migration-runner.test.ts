@@ -167,18 +167,18 @@ describe('runMigrations', () => {
     });
 
     it('only runs pending migrations (skips already-applied)', async () => {
-      // Create adapter with v1 already applied but schema with new cols
+      // Create adapter with all migrations already applied
       adapter = await createAdapter(true, true);
-      await adapter.exec(`PRAGMA user_version = 1`);
+      await adapter.exec(`PRAGMA user_version = ${LATEST_VERSION}`);
 
       const versionBefore = await getUserVersion(adapter);
-      expect(versionBefore).toBe(1);
+      expect(versionBefore).toBe(LATEST_VERSION);
 
       await runMigrations(adapter);
 
-      // Version should remain 1 since that's already the latest
+      // Version should remain at LATEST_VERSION since all migrations are already applied
       const versionAfter = await getUserVersion(adapter);
-      expect(versionAfter).toBe(1);
+      expect(versionAfter).toBe(LATEST_VERSION);
     });
   });
 

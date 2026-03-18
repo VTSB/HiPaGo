@@ -25,6 +25,14 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 2,
+    description: 'Drop tag_i18n table and index (Korean localization moved to in-memory store)',
+    up: async (adapter) => {
+      await adapter.exec('DROP INDEX IF EXISTS idx_tag_i18n_local');
+      await adapter.exec('DROP TABLE IF EXISTS tag_i18n');
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

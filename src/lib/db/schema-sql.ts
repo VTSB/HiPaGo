@@ -34,12 +34,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tag_type_name ON tag(type, name);
 CREATE INDEX IF NOT EXISTS idx_tag_type ON tag(type);
 CREATE INDEX IF NOT EXISTS idx_tag_name ON tag(name);
 
-CREATE TABLE IF NOT EXISTS tag_i18n (
-  tagId INTEGER PRIMARY KEY,
-  local TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_tag_i18n_local ON tag_i18n(local);
-
 CREATE TABLE IF NOT EXISTS tag_transform (
   original TEXT PRIMARY KEY,
   transformed TEXT NOT NULL

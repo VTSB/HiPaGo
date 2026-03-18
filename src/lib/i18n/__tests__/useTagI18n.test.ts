@@ -2,98 +2,95 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useSettingsStore } from '@/lib/store/settings';
-import { useDbStatusStore } from '@/lib/store/db-status';
 import { TagType } from '@/lib/utils/types';
 
-// Mock batchGetTagI18n before importing the hook
-vi.mock('@/lib/db/tag', () => ({
-  batchGetTagI18n: vi.fn(),
+// ---------------------------------------------------------------------------
+// Mock useTagI18nStore before importing the hook
+// The hook uses: useTagI18nStore.getState() to get { isLoaded, getLocal }
+// ---------------------------------------------------------------------------
+
+const mockState = {
+  isLoaded: false,
+  getLocal: vi.fn<[string, string], string | undefined>(),
+};
+
+vi.mock('@/lib/store/tag-i18n', () => ({
+  useTagI18nStore: {
+    getState: () => mockState,
+  },
 }));
 
-import { batchGetTagI18n } from '@/lib/db/tag';
 import { useTagI18n } from '../useTagI18n';
-
-const mockBatchGetTagI18n = vi.mocked(batchGetTagI18n);
-
-const EMPTY_MAP = new Map<string, string>();
 
 describe('useTagI18n', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' });
-    useDbStatusStore.setState({ dbReady: false });
-    mockBatchGetTagI18n.mockReset();
+    mockState.isLoaded = false;
+    mockState.getLocal.mockReset();
+    mockState.getLocal.mockReturnValue(undefined);
   });
 
   describe('returns EMPTY_MAP when prerequisites are not met', () => {
-    it('returns empty map when locale is en (not ko)', async () => {
+    it('returns empty map when locale is en (not ko)', () => {
       useSettingsStore.setState({ locale: 'en' });
-      useDbStatusStore.setState({ dbReady: true });
+      mockState.isLoaded = true;
+      mockState.getLocal.mockReturnValue('나츠키 나루');
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        expect(result.current.size).toBe(0);
-      });
-      expect(mockBatchGetTagI18n).not.toHaveBeenCalled();
+      expect(result.current.size).toBe(0);
+      expect(mockState.getLocal).not.toHaveBeenCalled();
     });
 
-    it('returns empty map when dbReady is false', async () => {
+    it('returns empty map when isLoaded is false', () => {
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: false });
+      mockState.isLoaded = false;
+      mockState.getLocal.mockReturnValue('나츠키 나루');
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        expect(result.current.size).toBe(0);
-      });
-      expect(mockBatchGetTagI18n).not.toHaveBeenCalled();
+      expect(result.current.size).toBe(0);
+      expect(mockState.getLocal).not.toHaveBeenCalled();
     });
 
-    it('returns empty map when tagEntries is empty array', async () => {
+    it('returns empty map when tagEntries is empty array', () => {
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: true });
+      mockState.isLoaded = true;
 
       const { result } = renderHook(() => useTagI18n([]));
 
-      await waitFor(() => {
-        expect(result.current.size).toBe(0);
-      });
-      expect(mockBatchGetTagI18n).not.toHaveBeenCalled();
+      expect(result.current.size).toBe(0);
+      expect(mockState.getLocal).not.toHaveBeenCalled();
     });
   });
 
-  describe('calls batchGetTagI18n and returns results when all conditions met', () => {
-    it('calls batchGetTagI18n with flattened tag list when locale is ko and dbReady is true', async () => {
-      const resultMap = new Map([['artist:natsuki-naru', '나츠키 나루']]);
-      mockBatchGetTagI18n.mockResolvedValue(resultMap);
-
+  describe('reads from TagI18nStore.getLocal when all conditions met', () => {
+    it('calls getLocal and returns translations when locale is ko and isLoaded is true', () => {
+      mockState.isLoaded = true;
+      mockState.getLocal.mockImplementation((type, name) => {
+        if (type === 'artist' && name === 'natsuki-naru') return '나츠키 나루';
+        return undefined;
+      });
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: true });
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        expect(result.current.size).toBeGreaterThan(0);
-      });
-
-      expect(mockBatchGetTagI18n).toHaveBeenCalledWith([
-        { type: TagType.ARTIST, name: 'natsuki-naru' },
-      ]);
+      expect(result.current.size).toBe(1);
       expect(result.current.get('artist:natsuki-naru')).toBe('나츠키 나루');
+      expect(mockState.getLocal).toHaveBeenCalledWith('artist', 'natsuki-naru');
     });
 
-    it('flattens multiple tag types and names into a single array for batchGetTagI18n', async () => {
-      const resultMap = new Map([
-        ['tag:schoolgirl', '여고생'],
-        ['female:glasses', '안경'],
-      ]);
-      mockBatchGetTagI18n.mockResolvedValue(resultMap);
-
+    it('flattens multiple tag types and names and builds map from getLocal results', () => {
+      mockState.isLoaded = true;
+      mockState.getLocal.mockImplementation((type, name) => {
+        if (type === 'tag' && name === 'schoolgirl') return '여고생';
+        if (type === 'female' && name === 'glasses') return '안경';
+        return undefined;
+      });
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: true });
 
       const tagEntries: [TagType, string[]][] = [
         [TagType.TAG, ['schoolgirl', 'uniform']],
@@ -101,26 +98,18 @@ describe('useTagI18n', () => {
       ];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        expect(result.current.size).toBeGreaterThan(0);
-      });
-
-      expect(mockBatchGetTagI18n).toHaveBeenCalledWith([
-        { type: TagType.TAG, name: 'schoolgirl' },
-        { type: TagType.TAG, name: 'uniform' },
-        { type: TagType.FEMALE, name: 'glasses' },
-      ]);
+      expect(result.current.get('tag:schoolgirl')).toBe('여고생');
+      expect(result.current.get('female:glasses')).toBe('안경');
+      expect(result.current.has('tag:uniform')).toBe(false);
     });
 
-    it('returns the map resolved by batchGetTagI18n', async () => {
-      const resultMap = new Map([
-        ['male:yaoi', '야오이'],
-        ['tag:full-color', '풀컬러'],
-      ]);
-      mockBatchGetTagI18n.mockResolvedValue(resultMap);
-
+    it('omits entries where getLocal returns undefined', () => {
+      mockState.isLoaded = true;
+      mockState.getLocal.mockImplementation((type, name) => {
+        if (type === 'male' && name === 'yaoi') return '야오이';
+        return undefined;
+      });
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: true });
 
       const tagEntries: [TagType, string[]][] = [
         [TagType.MALE, ['yaoi']],
@@ -128,49 +117,35 @@ describe('useTagI18n', () => {
       ];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        expect(result.current.size).toBe(2);
-      });
-
+      expect(result.current.size).toBe(1);
       expect(result.current.get('male:yaoi')).toBe('야오이');
-      expect(result.current.get('tag:full-color')).toBe('풀컬러');
+      expect(result.current.has('tag:full-color')).toBe(false);
     });
   });
 
-  describe('returns EMPTY_MAP on batchGetTagI18n error', () => {
-    it('returns empty map when batchGetTagI18n rejects', async () => {
-      mockBatchGetTagI18n.mockRejectedValue(new Error('DB error'));
-
+  describe('isLoaded guard behavior', () => {
+    it('returns empty map when isLoaded is false even with ko locale', () => {
+      mockState.isLoaded = false;
+      mockState.getLocal.mockReturnValue('동인지');
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: true });
 
-      const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['some-artist']]];
+      const tagEntries: [TagType, string[]][] = [[TagType.TAG, ['doujinshi']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        // After rejection, hook should settle — batchGetTagI18n was called
-        expect(mockBatchGetTagI18n).toHaveBeenCalled();
-      });
-
-      // Map should be empty after error
       expect(result.current.size).toBe(0);
     });
   });
 
   describe('reactivity to store changes', () => {
     it('switches to empty map when locale changes from ko to en', async () => {
-      const resultMap = new Map([['artist:abc', '에이비씨']]);
-      mockBatchGetTagI18n.mockResolvedValue(resultMap);
-
+      mockState.isLoaded = true;
+      mockState.getLocal.mockReturnValue('에이비씨');
       useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: true });
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['abc']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
-      await waitFor(() => {
-        expect(result.current.size).toBeGreaterThan(0);
-      });
+      expect(result.current.size).toBeGreaterThan(0);
 
       act(() => {
         useSettingsStore.setState({ locale: 'en' });
@@ -179,34 +154,6 @@ describe('useTagI18n', () => {
       await waitFor(() => {
         expect(result.current.size).toBe(0);
       });
-    });
-
-    it('fetches translations when dbReady transitions from false to true with ko locale', async () => {
-      const resultMap = new Map([['tag:doujinshi', '동인지']]);
-      mockBatchGetTagI18n.mockResolvedValue(resultMap);
-
-      useSettingsStore.setState({ locale: 'ko' });
-      useDbStatusStore.setState({ dbReady: false });
-
-      const tagEntries: [TagType, string[]][] = [[TagType.TAG, ['doujinshi']]];
-      const { result } = renderHook(() => useTagI18n(tagEntries));
-
-      // Initially empty because dbReady is false
-      expect(result.current.size).toBe(0);
-      expect(mockBatchGetTagI18n).not.toHaveBeenCalled();
-
-      act(() => {
-        useDbStatusStore.setState({ dbReady: true });
-      });
-
-      await waitFor(() => {
-        expect(result.current.size).toBeGreaterThan(0);
-      });
-
-      expect(mockBatchGetTagI18n).toHaveBeenCalledWith([
-        { type: TagType.TAG, name: 'doujinshi' },
-      ]);
-      expect(result.current.get('tag:doujinshi')).toBe('동인지');
     });
   });
 });
