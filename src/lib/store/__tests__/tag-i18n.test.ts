@@ -2,17 +2,23 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
-// We import the store module fresh for each test suite by re-importing.
-// The store uses file-system reads which are mocked via vitest's module mock.
 import { vi } from 'vitest';
 
-// Mock the fs/promises module so we can control what JSON files are returned
-// without needing real files on disk (except ko.json which does exist).
-const mockFsReadFile = vi.hoisted(() => vi.fn());
+// Mock the JSON modules that the store dynamically imports via JSON_LOADERS.
+// The store uses: import('@/lib/data/tags-i18n/ko.json') etc.
+// We control what each returns so tests are independent of real data files.
 
-vi.mock('node:fs/promises', () => ({
-  readFile: mockFsReadFile,
-}));
+const mockKoJson = vi.hoisted(() => ({ default: {} as Record<string, Record<string, string>> }));
+const mockKoAiJson = vi.hoisted(() => ({ default: {} as Record<string, Record<string, string>> }));
+
+vi.mock('@/lib/data/tags-i18n/ko.json', () => mockKoJson);
+vi.mock('@/lib/data/tags-i18n/ko.ai.json', () => mockKoAiJson);
+vi.mock('@/lib/data/tags-i18n/ja.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/ja.ai.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hans.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hans.ai.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hant.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hant.ai.json', () => ({ default: {} }));
 
 import { createTagI18nStore } from '../tag-i18n';
 
@@ -48,6 +54,9 @@ describe('TagI18nStore', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset mock data to empty before each test
+    mockKoJson.default = {};
+    mockKoAiJson.default = {};
     store = createTagI18nStore();
   });
 
@@ -67,12 +76,7 @@ describe('TagI18nStore', () => {
 
   describe('loadLocale', () => {
     it('loadLocale("ko") loads ko.json into Map', async () => {
-      mockFsReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('ko.json') && !path.includes('ko.ai.json')) {
-          return JSON.stringify(SAMPLE_KO_JSON);
-        }
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      });
+      mockKoJson.default = SAMPLE_KO_JSON;
 
       await store.getState().loadLocale('ko');
 
@@ -82,12 +86,7 @@ describe('TagI18nStore', () => {
     });
 
     it('loadLocale("ko") sets isLoaded to true after loading', async () => {
-      mockFsReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('ko.json') && !path.includes('ko.ai.json')) {
-          return JSON.stringify(SAMPLE_KO_JSON);
-        }
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      });
+      mockKoJson.default = SAMPLE_KO_JSON;
 
       expect(store.getState().isLoaded).toBe(false);
       await store.getState().loadLocale('ko');
@@ -95,15 +94,8 @@ describe('TagI18nStore', () => {
     });
 
     it('loadLocale("ko") loads ko.ai.json if it exists, AI translations fill gaps only', async () => {
-      mockFsReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('ko.ai.json')) {
-          return JSON.stringify(SAMPLE_KO_AI_JSON);
-        }
-        if (path.includes('ko.json')) {
-          return JSON.stringify(SAMPLE_KO_JSON);
-        }
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      });
+      mockKoJson.default = SAMPLE_KO_JSON;
+      mockKoAiJson.default = SAMPLE_KO_AI_JSON;
 
       await store.getState().loadLocale('ko');
 
@@ -117,15 +109,8 @@ describe('TagI18nStore', () => {
     });
 
     it('manual translations take priority over AI translations for the same key', async () => {
-      mockFsReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('ko.ai.json')) {
-          return JSON.stringify(SAMPLE_KO_AI_JSON);
-        }
-        if (path.includes('ko.json')) {
-          return JSON.stringify(SAMPLE_KO_JSON);
-        }
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      });
+      mockKoJson.default = SAMPLE_KO_JSON;
+      mockKoAiJson.default = SAMPLE_KO_AI_JSON;
 
       await store.getState().loadLocale('ko');
 
@@ -134,10 +119,7 @@ describe('TagI18nStore', () => {
     });
 
     it('loadLocale with nonexistent file gracefully returns empty Map', async () => {
-      mockFsReadFile.mockRejectedValue(
-        Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
-      );
-
+      // mockKoJson.default stays {} (empty), simulating no data
       await store.getState().loadLocale('nonexistent');
 
       const state = store.getState();
@@ -148,12 +130,7 @@ describe('TagI18nStore', () => {
 
   describe('getLocal', () => {
     beforeEach(async () => {
-      mockFsReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('ko.json') && !path.includes('ko.ai.json')) {
-          return JSON.stringify(SAMPLE_KO_JSON);
-        }
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      });
+      mockKoJson.default = SAMPLE_KO_JSON;
       await store.getState().loadLocale('ko');
     });
 
@@ -181,12 +158,7 @@ describe('TagI18nStore', () => {
 
   describe('searchByLocal', () => {
     beforeEach(async () => {
-      mockFsReadFile.mockImplementation(async (path: string) => {
-        if (path.includes('ko.json') && !path.includes('ko.ai.json')) {
-          return JSON.stringify(SAMPLE_KO_JSON);
-        }
-        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-      });
+      mockKoJson.default = SAMPLE_KO_JSON;
       await store.getState().loadLocale('ko');
     });
 

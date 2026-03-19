@@ -27,11 +27,6 @@ export function DbInitializer() {
       .then(() => checkDbReady())
       .then((ready) => {
         cleanupStaleCache().catch((e) => console.warn('[db] Cache cleanup failed:', e));
-        // Always load i18n translations (even if DB is already ready)
-        const locale = useSettingsStore.getState().locale;
-        useTagI18nStore.getState().loadLocale(locale).catch((e) =>
-          console.warn('[i18n] Failed to load locale:', e)
-        );
         if (!ready) {
           runTagSync();
         }
@@ -40,6 +35,26 @@ export function DbInitializer() {
         console.warn('[db] Database initialization skipped:', err.message);
         // dbReady stays false — app uses remote API
       });
+  }, []);
+
+  // Reactively load i18n translations whenever locale changes.
+  // This avoids the race between initLocaleOnce (hydration) and the old
+  // one-shot read that could see 'en' before hydration finished.
+  useEffect(() => {
+    let prevLocale: string | null = null;
+    const loadForLocale = (locale: string) => {
+      if (locale === prevLocale) return;
+      prevLocale = locale;
+      useTagI18nStore.getState().loadLocale(locale).catch((e) =>
+        console.warn('[i18n] Failed to load locale:', e)
+      );
+    };
+    // Fire immediately with current value
+    loadForLocale(useSettingsStore.getState().locale);
+    // Subscribe to future changes
+    return useSettingsStore.subscribe((state) => {
+      loadForLocale(state.locale);
+    });
   }, []);
 
   // Background re-sync when tags are stale

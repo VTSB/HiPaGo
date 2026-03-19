@@ -1,14 +1,26 @@
 import { create } from 'zustand';
-import { getChoseong } from 'es-hangul';
+import { getChoseong, disassemble } from 'es-hangul';
 
 // JSON file format: { [type: string]: { [name: string]: localizedString } }
 type I18nJson = Record<string, Record<string, string>>;
+
+/** Pre-computed search index entry */
+interface SearchEntry {
+  key: string;        // "type:name"
+  type: string;
+  name: string;
+  local: string;      // original localized string
+  disassembled: string; // pre-computed disassemble(local) for jamo matching
+  choseong: string;   // pre-computed getChoseong(local) with spaces stripped
+}
 
 interface TagI18nState {
   /** Map from "type:name" → localized string */
   nameToLocal: Map<string, string>;
   /** Map from localized string → array of "type:name" keys */
   localToNames: Map<string, string[]>;
+  /** Pre-computed search index for fast Korean matching */
+  searchIndex: SearchEntry[];
   /** True once loadLocale has completed (even if no translations were found) */
   isLoaded: boolean;
   loadLocale: (lang: string) => Promise<void>;
@@ -20,7 +32,6 @@ interface TagI18nState {
 }
 
 // Static import map — Next.js needs deterministic paths at build time.
-// Each supported lang+suffix must be listed explicitly.
 const JSON_LOADERS: Record<string, () => Promise<{ default: I18nJson }>> = {
   'ko': () => import('@/lib/data/tags-i18n/ko.json'),
   'ko.ai': () => import('@/lib/data/tags-i18n/ko.ai.json'),
@@ -47,9 +58,11 @@ async function importJson(lang: string, suffix: string): Promise<I18nJson | null
 function buildMaps(data: I18nJson): {
   nameToLocal: Map<string, string>;
   localToNames: Map<string, string[]>;
+  searchIndex: SearchEntry[];
 } {
   const nameToLocal = new Map<string, string>();
   const localToNames = new Map<string, string[]>();
+  const searchIndex: SearchEntry[] = [];
 
   for (const [type, names] of Object.entries(data)) {
     for (const [name, local] of Object.entries(names)) {
@@ -62,21 +75,29 @@ function buildMaps(data: I18nJson): {
       } else {
         localToNames.set(local, [key]);
       }
+
+      // Pre-compute search data (one-time cost at load)
+      searchIndex.push({
+        key,
+        type,
+        name,
+        local,
+        disassembled: disassemble(local),
+        choseong: getChoseong(local).replace(/ /g, ''),
+      });
     }
   }
 
-  return { nameToLocal, localToNames };
+  return { nameToLocal, localToNames, searchIndex };
 }
 
 function mergeI18nData(manual: I18nJson, ai: I18nJson): I18nJson {
   const merged: I18nJson = {};
 
-  // Start with all manual entries
   for (const [type, names] of Object.entries(manual)) {
     merged[type] = { ...names };
   }
 
-  // Add AI entries only for keys not already in manual
   for (const [type, names] of Object.entries(ai)) {
     if (!merged[type]) {
       merged[type] = {};
@@ -95,6 +116,7 @@ export function createTagI18nStore() {
   return create<TagI18nState>()((set, get) => ({
     nameToLocal: new Map(),
     localToNames: new Map(),
+    searchIndex: [],
     isLoaded: false,
 
     async loadLocale(lang: string) {
@@ -109,9 +131,9 @@ export function createTagI18nStore() {
       }
 
       const merged = mergeI18nData(manualData ?? {}, aiData ?? {});
-      const { nameToLocal, localToNames } = buildMaps(merged);
+      const { nameToLocal, localToNames, searchIndex } = buildMaps(merged);
 
-      set({ nameToLocal, localToNames, isLoaded: true });
+      set({ nameToLocal, localToNames, searchIndex, isLoaded: true });
     },
 
     getLocal(type: string, name: string): string | undefined {
@@ -122,27 +144,27 @@ export function createTagI18nStore() {
       query: string,
       options?: { type?: string },
     ): Array<{ type: string; name: string; local: string }> {
-      const { nameToLocal } = get();
+      const { searchIndex } = get();
       const typeFilter = options?.type;
+
+      // Pre-compute query transformations once (not per entry)
+      const isChosung = query.length > 0 && [...query].every((ch) => /^[ㄱ-ㅎ]$/.test(ch));
+      const queryDisassembled = disassemble(query);
 
       const seen = new Set<string>();
       const results: Array<{ type: string; name: string; local: string }> = [];
 
-      for (const [key, local] of nameToLocal.entries()) {
-        const colonIdx = key.indexOf(':');
-        const entryType = key.slice(0, colonIdx);
-        const entryName = key.slice(colonIdx + 1);
+      for (const entry of searchIndex) {
+        if (typeFilter && entry.type !== typeFilter) continue;
 
-        if (typeFilter && entryType !== typeFilter) continue;
-
-        const isChosung = query.length > 0 && [...query].every((ch) => /^[ㄱ-ㅎ]$/.test(ch));
         const isMatch =
-          local.startsWith(query) ||
-          (isChosung && getChoseong(local).startsWith(query));
+          entry.local.startsWith(query) ||
+          (isChosung && entry.choseong.startsWith(query)) ||
+          entry.disassembled.startsWith(queryDisassembled);
 
-        if (isMatch && !seen.has(key)) {
-          seen.add(key);
-          results.push({ type: entryType, name: entryName, local });
+        if (isMatch && !seen.has(entry.key)) {
+          seen.add(entry.key);
+          results.push({ type: entry.type, name: entry.name, local: entry.local });
         }
       }
 

@@ -5,6 +5,7 @@ import type { GalleryImage, GgConfig } from '@/lib/utils/types';
 import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
+import { AbortableImage } from '@/shared/components/AbortableImage';
 
 const PRELOAD_AHEAD = 10;
 
@@ -43,7 +44,11 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
     };
   }, [urls, currentPage, start, end]);
 
-  if (!urls.length) return null;
+  if (!urls.length) return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white/80" />
+    </div>
+  );
 
   const step = dualPage ? 2 : 1;
   const secondPage = dualPage ? currentPage + 1 : -1;
@@ -79,19 +84,21 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
       )}
       {/* Pages */}
       <div className={dualPage ? 'flex items-center justify-center gap-1' : ''}>
-        <img
+        <AbortableImage
           key={currentPage}
           src={urls[currentPage]}
           alt={`Page ${currentPage + 1}`}
           draggable={false}
+          loading="eager"
           className={`pointer-events-none select-none object-contain ${dualPage ? 'max-h-screen max-w-[50vw]' : 'max-h-screen max-w-full'}`}
         />
         {hasSecond && (
-          <img
+          <AbortableImage
             key={secondPage}
             src={urls[secondPage]}
             alt={`Page ${secondPage + 1}`}
             draggable={false}
+            loading="eager"
             className="pointer-events-none max-h-screen max-w-[50vw] select-none object-contain"
           />
         )}

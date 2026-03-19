@@ -80,6 +80,7 @@ export enum ImageType {
   ORIGINAL = 'original',
   WEBP = 'webp',
   AVIF = 'avif',
+  AVIFSMALLTN = 'avifsmalltn',
 }
 
 export interface GalleryBlock {

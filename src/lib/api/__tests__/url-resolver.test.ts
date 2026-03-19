@@ -11,6 +11,7 @@ import {
   resolveTagIndexUrl,
   resolveImgUrl,
   getNativeHeaders,
+  resolveThumbnailUrl,
 } from '../url-resolver';
 
 describe('url-resolver', () => {
@@ -89,6 +90,41 @@ describe('url-resolver', () => {
       const headers = getNativeHeaders();
       expect(headers.Referer).toBe('https://hitomi.la/');
       expect(headers.Origin).toBe('https://hitomi.la');
+    });
+  });
+
+  describe('resolveThumbnailUrl', () => {
+    it('converts direct CDN thumbnail URL to proxy URL in browser', () => {
+      vi.mocked(isNativePlatform).mockReturnValue(false);
+      const cdnUrl = 'https://tn.gold-usergeneratedcontent.net/avifsmalltn/4/23/abcdef1234.avif';
+      expect(resolveThumbnailUrl(cdnUrl)).toBe(
+        '/api/img/tn/avifsmalltn/4/23/abcdef1234.avif',
+      );
+    });
+
+    it('converts CDN thumbnail URL with different subdomain', () => {
+      vi.mocked(isNativePlatform).mockReturnValue(false);
+      const cdnUrl = 'https://btn.gold-usergeneratedcontent.net/smalltn/4/23/hash123.jpg';
+      expect(resolveThumbnailUrl(cdnUrl)).toBe(
+        '/api/img/btn/smalltn/4/23/hash123.jpg',
+      );
+    });
+
+    it('returns already-proxied URL unchanged', () => {
+      vi.mocked(isNativePlatform).mockReturnValue(false);
+      const proxied = '/api/img/tn/avifsmalltn/4/23/hash.avif';
+      expect(resolveThumbnailUrl(proxied)).toBe(proxied);
+    });
+
+    it('returns empty string unchanged', () => {
+      vi.mocked(isNativePlatform).mockReturnValue(false);
+      expect(resolveThumbnailUrl('')).toBe('');
+    });
+
+    it('passes through to direct CDN on native platform', () => {
+      vi.mocked(isNativePlatform).mockReturnValue(true);
+      const cdnUrl = 'https://tn.gold-usergeneratedcontent.net/avifsmalltn/4/23/hash.avif';
+      expect(resolveThumbnailUrl(cdnUrl)).toBe(cdnUrl);
     });
   });
 });

@@ -5,19 +5,25 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { TagType } from '@/lib/utils/types';
 
 // ---------------------------------------------------------------------------
-// Mock useTagI18nStore before importing the hook
-// The hook uses: useTagI18nStore.getState() to get { isLoaded, getLocal }
+// Mock useTagI18nStore before importing the hook.
+// The hook uses Zustand selector calls: useTagI18nStore((s) => s.isLoaded)
+// and useTagI18nStore((s) => s.nameToLocal), so the mock must be callable.
 // ---------------------------------------------------------------------------
 
-const mockState = {
-  isLoaded: false,
-  getLocal: vi.fn<[string, string], string | undefined>(),
-};
+const { mockStoreState, mockUseTagI18nStore } = vi.hoisted(() => {
+  const state = {
+    isLoaded: false,
+    nameToLocal: new Map<string, string>(),
+  };
+  const store = Object.assign(
+    (selector?: (s: typeof state) => unknown) => selector ? selector(state) : state,
+    { getState: () => state },
+  );
+  return { mockStoreState: state, mockUseTagI18nStore: store };
+});
 
 vi.mock('@/lib/store/tag-i18n', () => ({
-  useTagI18nStore: {
-    getState: () => mockState,
-  },
+  useTagI18nStore: mockUseTagI18nStore,
 }));
 
 import { useTagI18n } from '../useTagI18n';
@@ -25,54 +31,47 @@ import { useTagI18n } from '../useTagI18n';
 describe('useTagI18n', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' });
-    mockState.isLoaded = false;
-    mockState.getLocal.mockReset();
-    mockState.getLocal.mockReturnValue(undefined);
+    mockStoreState.isLoaded = false;
+    mockStoreState.nameToLocal = new Map();
   });
 
   describe('returns EMPTY_MAP when prerequisites are not met', () => {
     it('returns empty map when locale is en (not ko)', () => {
       useSettingsStore.setState({ locale: 'en' });
-      mockState.isLoaded = true;
-      mockState.getLocal.mockReturnValue('나츠키 나루');
+      mockStoreState.isLoaded = true;
+      mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', '나츠키 나루']]);
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
       expect(result.current.size).toBe(0);
-      expect(mockState.getLocal).not.toHaveBeenCalled();
     });
 
     it('returns empty map when isLoaded is false', () => {
       useSettingsStore.setState({ locale: 'ko' });
-      mockState.isLoaded = false;
-      mockState.getLocal.mockReturnValue('나츠키 나루');
+      mockStoreState.isLoaded = false;
+      mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', '나츠키 나루']]);
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
       const { result } = renderHook(() => useTagI18n(tagEntries));
 
       expect(result.current.size).toBe(0);
-      expect(mockState.getLocal).not.toHaveBeenCalled();
     });
 
     it('returns empty map when tagEntries is empty array', () => {
       useSettingsStore.setState({ locale: 'ko' });
-      mockState.isLoaded = true;
+      mockStoreState.isLoaded = true;
 
       const { result } = renderHook(() => useTagI18n([]));
 
       expect(result.current.size).toBe(0);
-      expect(mockState.getLocal).not.toHaveBeenCalled();
     });
   });
 
-  describe('reads from TagI18nStore.getLocal when all conditions met', () => {
-    it('calls getLocal and returns translations when locale is ko and isLoaded is true', () => {
-      mockState.isLoaded = true;
-      mockState.getLocal.mockImplementation((type, name) => {
-        if (type === 'artist' && name === 'natsuki-naru') return '나츠키 나루';
-        return undefined;
-      });
+  describe('reads from TagI18nStore.nameToLocal when all conditions met', () => {
+    it('returns translations when locale is ko and isLoaded is true', () => {
+      mockStoreState.isLoaded = true;
+      mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', '나츠키 나루']]);
       useSettingsStore.setState({ locale: 'ko' });
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
@@ -80,16 +79,14 @@ describe('useTagI18n', () => {
 
       expect(result.current.size).toBe(1);
       expect(result.current.get('artist:natsuki-naru')).toBe('나츠키 나루');
-      expect(mockState.getLocal).toHaveBeenCalledWith('artist', 'natsuki-naru');
     });
 
-    it('flattens multiple tag types and names and builds map from getLocal results', () => {
-      mockState.isLoaded = true;
-      mockState.getLocal.mockImplementation((type, name) => {
-        if (type === 'tag' && name === 'schoolgirl') return '여고생';
-        if (type === 'female' && name === 'glasses') return '안경';
-        return undefined;
-      });
+    it('flattens multiple tag types and names and builds map from nameToLocal', () => {
+      mockStoreState.isLoaded = true;
+      mockStoreState.nameToLocal = new Map([
+        ['tag:schoolgirl', '여고생'],
+        ['female:glasses', '안경'],
+      ]);
       useSettingsStore.setState({ locale: 'ko' });
 
       const tagEntries: [TagType, string[]][] = [
@@ -103,12 +100,9 @@ describe('useTagI18n', () => {
       expect(result.current.has('tag:uniform')).toBe(false);
     });
 
-    it('omits entries where getLocal returns undefined', () => {
-      mockState.isLoaded = true;
-      mockState.getLocal.mockImplementation((type, name) => {
-        if (type === 'male' && name === 'yaoi') return '야오이';
-        return undefined;
-      });
+    it('omits entries where nameToLocal has no mapping', () => {
+      mockStoreState.isLoaded = true;
+      mockStoreState.nameToLocal = new Map([['male:yaoi', '야오이']]);
       useSettingsStore.setState({ locale: 'ko' });
 
       const tagEntries: [TagType, string[]][] = [
@@ -125,8 +119,8 @@ describe('useTagI18n', () => {
 
   describe('isLoaded guard behavior', () => {
     it('returns empty map when isLoaded is false even with ko locale', () => {
-      mockState.isLoaded = false;
-      mockState.getLocal.mockReturnValue('동인지');
+      mockStoreState.isLoaded = false;
+      mockStoreState.nameToLocal = new Map([['tag:doujinshi', '동인지']]);
       useSettingsStore.setState({ locale: 'ko' });
 
       const tagEntries: [TagType, string[]][] = [[TagType.TAG, ['doujinshi']]];
@@ -138,8 +132,8 @@ describe('useTagI18n', () => {
 
   describe('reactivity to store changes', () => {
     it('switches to empty map when locale changes from ko to en', async () => {
-      mockState.isLoaded = true;
-      mockState.getLocal.mockReturnValue('에이비씨');
+      mockStoreState.isLoaded = true;
+      mockStoreState.nameToLocal = new Map([['artist:abc', '에이비씨']]);
       useSettingsStore.setState({ locale: 'ko' });
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['abc']]];

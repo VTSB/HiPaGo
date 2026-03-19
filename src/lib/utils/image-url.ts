@@ -168,7 +168,7 @@ export function galleryImageToFile(image: GalleryImage): GalleryFile {
     hash: image.hash,
     haswebp: image.types.has(ImageType.WEBP) ? 1 : 0,
     hasavif: image.types.has(ImageType.AVIF) ? 1 : 0,
-    hasavifsmalltn: 0,
+    hasavifsmalltn: image.types.has(ImageType.AVIFSMALLTN) ? 1 : 0,
   };
 }
 

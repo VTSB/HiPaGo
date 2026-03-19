@@ -8,6 +8,7 @@ import { GalleryBlockType, type TagType } from '@/lib/utils/types';
 import { tagFromGalleryEntry, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { AbortableImage } from '@/shared/components/AbortableImage';
+import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import { useGalleryBlock } from '../hooks/useGalleryBlock';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
@@ -56,9 +57,11 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
   const blurred = useMemo(() => shouldBlur(block, blurTags), [block, blurTags]);
-  const tagEntries = block.type === GalleryBlockType.DETAILED || block.type === GalleryBlockType.NOT_DETAILED
-    ? (Object.entries(block.tags) as [TagType, string[]][])
-    : [];
+  const tagEntries = useMemo(() =>
+    block.type === GalleryBlockType.DETAILED || block.type === GalleryBlockType.NOT_DETAILED
+      ? (Object.entries(block.tags) as [TagType, string[]][])
+      : [],
+    [block.type, block.tags]);
   const tagI18n = useTagI18n(tagEntries);
   const displayTags = useMemo(() => {
     if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED) return [];
@@ -91,7 +94,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     <Link href={`/gallery/${block.id}`} className="group block" onPointerEnter={onPrefetch}>
       <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 transition-shadow hover:shadow-lg">
         {block.thumbnail ? (
-          <AbortableImage src={block.thumbnail} alt={block.title} className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`} loading="lazy" />
+          <AbortableImage src={resolveThumbnailUrl(block.thumbnail)} alt={block.title} className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`} loading="lazy" />
         ) : (
           <div className="flex h-full items-center justify-center text-zinc-400">{t('detail.noImage')}</div>
         )}

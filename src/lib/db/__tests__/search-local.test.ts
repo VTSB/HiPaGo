@@ -9,6 +9,19 @@ import {
 } from '../search-local';
 import { TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { getChoseong, disassemble } from 'es-hangul';
+
+/** Build a searchIndex entry matching the store's internal format */
+function buildSearchEntry(type: string, name: string, local: string) {
+  return {
+    key: `${type}:${name}`,
+    type,
+    name,
+    local,
+    disassembled: disassemble(local),
+    choseong: getChoseong(local).replace(/ /g, ''),
+  };
+}
 
 beforeAll(async () => {
   await setupTestDb();
@@ -109,12 +122,12 @@ describe('searchLocalTags', () => {
     expect(match?.localName).toBe('아티스트알파');
 
     // Cleanup store
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
   });
 
   it('Korean query uses TagI18nStore.searchByLocal', async () => {
     await seedTags();
-    // Populate TagI18nStore with Korean names
+    // Populate TagI18nStore with Korean names + searchIndex
     useTagI18nStore.setState({
       nameToLocal: new Map([
         ['artist:artist_alpha', '아티스트알파'],
@@ -124,6 +137,10 @@ describe('searchLocalTags', () => {
         ['아티스트알파', ['artist:artist_alpha']],
         ['아트시리즈', ['series:art_series']],
       ]),
+      searchIndex: [
+        buildSearchEntry('artist', 'artist_alpha', '아티스트알파'),
+        buildSearchEntry('series', 'art_series', '아트시리즈'),
+      ],
       isLoaded: true,
     });
 
@@ -132,7 +149,7 @@ describe('searchLocalTags', () => {
     expect(names).toContain('artist_alpha');
     expect(results.some((r) => r.tagType === TagType.ARTIST)).toBe(true);
 
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
   });
 
   it('Korean query with tagType filter uses TagI18nStore.searchByLocal filtered', async () => {
@@ -146,6 +163,10 @@ describe('searchLocalTags', () => {
         ['로컬이름', ['artist:artist_alpha']],
         ['로컬시리즈', ['series:art_series']],
       ]),
+      searchIndex: [
+        buildSearchEntry('artist', 'artist_alpha', '로컬이름'),
+        buildSearchEntry('series', 'art_series', '로컬시리즈'),
+      ],
       isLoaded: true,
     });
 
@@ -155,7 +176,7 @@ describe('searchLocalTags', () => {
     expect(names).not.toContain('art_series');
     results.forEach((r) => expect(r.tagType).toBe(TagType.ARTIST));
 
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
   });
 
   it('초성 query returns matching results via TagI18nStore', async () => {
@@ -164,6 +185,9 @@ describe('searchLocalTags', () => {
     useTagI18nStore.setState({
       nameToLocal: new Map([['artist:artist_alpha', '아티스트알파']]),
       localToNames: new Map([['아티스트알파', ['artist:artist_alpha']]]),
+      searchIndex: [
+        buildSearchEntry('artist', 'artist_alpha', '아티스트알파'),
+      ],
       isLoaded: true,
     });
 
@@ -173,13 +197,13 @@ describe('searchLocalTags', () => {
     const names = results.map((r) => r.tag);
     expect(names).toContain('artist_alpha');
 
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
   });
 
   it('without i18n loaded still returns English-only results', async () => {
     await seedTags();
     // Ensure store is not loaded
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), isLoaded: false });
+    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
 
     const results = await searchLocalTags('art');
     const names = results.map((r) => r.tag);

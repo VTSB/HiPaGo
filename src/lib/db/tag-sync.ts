@@ -7,6 +7,7 @@ import { TagType } from '@/lib/utils/types';
 import { createTagFetcher, TagFetcher } from '@/lib/api/tag-fetcher';
 import { parseTagsFromHtml, parseNavUrls, TAG_TYPES, ParsedTag } from '@/lib/api/tag-parser';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { useSettingsStore } from '@/lib/store/settings';
 
 /**
  * Map JSON type strings to TagType enum values.
@@ -224,8 +225,8 @@ async function runRuntimeTagSync(): Promise<void> {
 
     await markTagSyncCompleted(totalTagCount);
 
-    // Load locale translations into the store
-    const currentLocale = 'ko';
+    // Reload locale translations into the store (respects current user locale)
+    const currentLocale = useSettingsStore.getState().locale;
     await useTagI18nStore.getState().loadLocale(currentLocale);
   } finally {
     await fetcher.dispose();

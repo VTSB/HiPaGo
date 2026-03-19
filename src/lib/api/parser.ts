@@ -63,6 +63,7 @@ export function galleryInfoToImages(info: GalleryInfo): GalleryImages {
       const types = new Set<ImageType>([ImageType.ORIGINAL]);
       if (file.haswebp) types.add(ImageType.WEBP);
       if (file.hasavif) types.add(ImageType.AVIF);
+      if (file.hasavifsmalltn) types.add(ImageType.AVIFSMALLTN);
       return {
         name: file.name,
         hash: file.hash,

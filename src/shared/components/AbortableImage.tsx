@@ -29,12 +29,15 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const [visible, setVisible] = useState(loading === 'eager');
   const [loaded, setLoaded] = useState(false);
 
-  // Reset loaded/retry state when src changes
+  // Reset loaded/retry/visible state when src changes
+  // Resetting visible forces the IntersectionObserver to re-fire,
+  // which fixes stuck-invisible images when virtual scroll reuses a DOM slot.
   useEffect(() => {
     loadedRef.current = false;
     retryCountRef.current = 0;
     setLoaded(false);
-  }, [src]);
+    if (loading !== 'eager') setVisible(false);
+  }, [src, loading]);
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
@@ -78,21 +81,13 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
     observer.observe(img);
     return () => observer.disconnect();
-  }, [loading]);
+  }, [loading, src]);
 
-  // Abort on unmount (same as before)
+  // Track mount state for retry safety
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      const img = imgRef.current;
-      if (img) {
-        setTimeout(() => {
-          if (!mountedRef.current) {
-            img.src = '';
-          }
-        }, 0);
-      }
     };
   }, []);
 

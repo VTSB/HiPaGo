@@ -130,7 +130,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
 
     // Deterministic row height — computed directly from current state, no caching
     const rowHeight = useMemo(() => {
-      const width = containerWidth || containerRef.current?.clientWidth || window.innerWidth - 32;
+      const width = containerWidth || containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth - 32 : 400);
       const gap = 12;
       const cardWidth = (width - gap * (actualCols - 1)) / actualCols;
       return Math.ceil(cardWidth * (3 / 2)) + gap;

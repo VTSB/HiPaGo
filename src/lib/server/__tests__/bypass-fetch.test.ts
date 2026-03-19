@@ -88,6 +88,47 @@ describe('bypassFetch', () => {
 
       await expect(bypassFetch('https://hitomi.la/')).rejects.toThrow('connection refused');
     });
+
+    it('rejects with AbortError when signal is already aborted before call', async () => {
+      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
+      // Make napi hang forever
+      vi.mocked(napiFetch).mockImplementation(() => new Promise(() => {}));
+
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        bypassFetch('https://hitomi.la/', { signal: controller.signal }),
+      ).rejects.toThrow(/abort/i);
+    });
+
+    it('rejects with AbortError when signal is aborted during napi call', async () => {
+      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
+      // Make napi hang forever
+      vi.mocked(napiFetch).mockImplementation(() => new Promise(() => {}));
+
+      const controller = new AbortController();
+      const fetchPromise = bypassFetch('https://hitomi.la/', { signal: controller.signal });
+
+      // Abort after a tick
+      await Promise.resolve();
+      controller.abort();
+
+      await expect(fetchPromise).rejects.toThrow(/abort/i);
+    });
+
+    it('resolves normally when signal is provided but not aborted', async () => {
+      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
+      vi.mocked(napiFetch).mockResolvedValue({
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+        body: new Uint8Array(0),
+      });
+
+      const controller = new AbortController();
+      const resp = await bypassFetch('https://hitomi.la/', { signal: controller.signal });
+      expect(resp.status).toBe(200);
+    });
   });
 
   describe('when napi addon is unavailable', () => {

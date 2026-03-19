@@ -45,11 +45,30 @@ export async function bypassFetch(
 
   const native = await getNativeBypassFetch();
   if (native) {
-    const resp = await native.bypassFetch(urlStr, headers);
-    return new Response(resp.body as unknown as BodyInit, {
-      status: resp.status,
-      headers: new Headers(resp.headers),
+    const signal = init?.signal;
+    const nativePromise = native.bypassFetch(urlStr, headers).then(
+      (resp) =>
+        new Response(resp.body as unknown as BodyInit, {
+          status: resp.status,
+          headers: new Headers(resp.headers),
+        }),
+    );
+
+    if (!signal) {
+      return nativePromise;
+    }
+
+    if (signal.aborted) {
+      return Promise.reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+    }
+
+    const abortPromise = new Promise<never>((_, reject) => {
+      signal.addEventListener('abort', () => {
+        reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+      }, { once: true });
     });
+
+    return Promise.race([nativePromise, abortPromise]);
   }
 
   // Fallback: plain fetch (no bypass)

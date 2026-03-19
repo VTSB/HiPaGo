@@ -360,7 +360,12 @@ describe('galleryImageToFile', () => {
     expect(file.hasavif).toBe(0);
   });
 
-  it('always sets hasavifsmalltn=0', () => {
+  it('sets hasavifsmalltn=1 when AVIFSMALLTN type is present', () => {
+    const image = makeImage({ types: new Set([ImageType.AVIFSMALLTN]) });
+    expect(galleryImageToFile(image).hasavifsmalltn).toBe(1);
+  });
+
+  it('sets hasavifsmalltn=0 when AVIFSMALLTN type is absent', () => {
     const image = makeImage({ types: new Set([ImageType.WEBP, ImageType.AVIF]) });
     expect(galleryImageToFile(image).hasavifsmalltn).toBe(0);
 

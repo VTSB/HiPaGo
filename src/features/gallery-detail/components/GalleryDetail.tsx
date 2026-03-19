@@ -8,6 +8,7 @@ import { TagChip } from '@/shared/components/TagChip';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
 import { AbortableImage } from '@/shared/components/AbortableImage';
+import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import { useState, useEffect, useCallback } from 'react';
 import { recordVisit } from '@/lib/db/gallery';
 import { Spinner } from '@/shared/components/Spinner';
@@ -89,7 +90,7 @@ export function GalleryDetail({ id }: { id: number }) {
       <button onClick={() => router.back()} className="inline-block text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400">&larr; {t('detail.back')}</button>
       <div className="grid gap-6 md:grid-cols-[300px_1fr]">
         <Link href={`/gallery/${id}/reader`} className="group relative self-start overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
-          {bigThumbnail ? <AbortableImage src={bigThumbnail} alt={displayBlock.title} className="w-full object-cover transition-transform group-hover:scale-[1.02]" /> : displayBlock.thumbnail ? <img src={displayBlock.thumbnail} alt={displayBlock.title} className="w-full object-cover transition-transform group-hover:scale-[1.02]" /> : <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">{t('detail.noImage')}</div>}
+          {bigThumbnail ? <AbortableImage src={bigThumbnail} alt={displayBlock.title} className="w-full object-cover transition-transform group-hover:scale-[1.02]" /> : displayBlock.thumbnail ? <AbortableImage src={resolveThumbnailUrl(displayBlock.thumbnail)} alt={displayBlock.title} className="w-full object-cover transition-transform group-hover:scale-[1.02]" /> : <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">{t('detail.noImage')}</div>}
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFav(); }}
             disabled={favPending}
@@ -101,15 +102,15 @@ export function GalleryDetail({ id }: { id: number }) {
             </svg>
           </button>
         </Link>
-        <div className="space-y-4">
-          <div>
+        <div className="min-w-0 space-y-4">
+          <div className="min-w-0">
             <button
               onClick={handleShare}
               className="mb-1 inline-flex items-center gap-1 text-sm tabular-nums text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
             >
               #{id}
             </button>
-            <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">{displayBlock.title || `Gallery #${id}`}</h1>
+            <h1 className="break-words text-3xl font-bold text-zinc-900 dark:text-zinc-100">{displayBlock.title || `Gallery #${id}`}</h1>
           </div>
           {block?.type === GalleryBlockType.DETAILED && (
             <p className="text-sm text-zinc-500 dark:text-zinc-400">

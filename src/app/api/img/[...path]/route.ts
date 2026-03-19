@@ -37,9 +37,10 @@ async function getGgConfig() {
 
 /**
  * Resolve 'tn' subdomain to actual atn/btn based on gg.js config.
+ * Exported for testing.
  */
-function resolveTnSubdomain(targetPath: string, config: NonNullable<typeof ggConfig>): string {
-  const hashMatch = /([0-9a-f]{64})\./.exec(targetPath);
+export function resolveTnSubdomain(targetPath: string, config: NonNullable<typeof ggConfig>): string {
+  const hashMatch = /([0-9a-f]+)\./.exec(targetPath);
   if (!hashMatch) return 'atn'; // fallback
   const hash = hashMatch[1];
   const g = parseInt(hash.slice(-1) + hash.slice(-3, -1), 16);
