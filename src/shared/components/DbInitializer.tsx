@@ -6,6 +6,8 @@ import { checkDbReady } from '@/lib/db/init';
 import { runTagSync } from '@/lib/db/tag-sync';
 import { cleanupStaleCache } from '@/lib/db/gallery';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { useSettingsStore } from '@/lib/store/settings';
 
 /**
  * Invisible component that initializes the SQLite database on mount,
@@ -25,6 +27,11 @@ export function DbInitializer() {
       .then(() => checkDbReady())
       .then((ready) => {
         cleanupStaleCache().catch((e) => console.warn('[db] Cache cleanup failed:', e));
+        // Always load i18n translations (even if DB is already ready)
+        const locale = useSettingsStore.getState().locale;
+        useTagI18nStore.getState().loadLocale(locale).catch((e) =>
+          console.warn('[i18n] Failed to load locale:', e)
+        );
         if (!ready) {
           runTagSync();
         }

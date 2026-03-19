@@ -1,6 +1,4 @@
 import { create } from 'zustand';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { getChoseong } from 'es-hangul';
 
 // JSON file format: { [type: string]: { [name: string]: localizedString } }
@@ -21,14 +19,26 @@ interface TagI18nState {
   ) => Array<{ type: string; name: string; local: string }>;
 }
 
-function dataDir(): string {
-  return path.resolve(process.cwd(), 'src/lib/data/tags-i18n');
-}
+// Static import map — Next.js needs deterministic paths at build time.
+// Each supported lang+suffix must be listed explicitly.
+const JSON_LOADERS: Record<string, () => Promise<{ default: I18nJson }>> = {
+  'ko': () => import('@/lib/data/tags-i18n/ko.json'),
+  'ko.ai': () => import('@/lib/data/tags-i18n/ko.ai.json'),
+  'ja': () => import('@/lib/data/tags-i18n/ja.json'),
+  'ja.ai': () => import('@/lib/data/tags-i18n/ja.ai.json'),
+  'zh-Hans': () => import('@/lib/data/tags-i18n/zh-Hans.json'),
+  'zh-Hans.ai': () => import('@/lib/data/tags-i18n/zh-Hans.ai.json'),
+  'zh-Hant': () => import('@/lib/data/tags-i18n/zh-Hant.json'),
+  'zh-Hant.ai': () => import('@/lib/data/tags-i18n/zh-Hant.ai.json'),
+};
 
-async function readJsonFile(filePath: string): Promise<I18nJson | null> {
+async function importJson(lang: string, suffix: string): Promise<I18nJson | null> {
+  const key = `${lang}${suffix}`;
+  const loader = JSON_LOADERS[key];
+  if (!loader) return null;
   try {
-    const raw = await readFile(filePath, 'utf-8');
-    return JSON.parse(raw) as I18nJson;
+    const mod = await loader();
+    return (mod.default ?? mod) as I18nJson;
   } catch {
     return null;
   }
@@ -88,13 +98,9 @@ export function createTagI18nStore() {
     isLoaded: false,
 
     async loadLocale(lang: string) {
-      const dir = dataDir();
-      const manualPath = path.join(dir, `${lang}.json`);
-      const aiPath = path.join(dir, `${lang}.ai.json`);
-
       const [manualData, aiData] = await Promise.all([
-        readJsonFile(manualPath),
-        readJsonFile(aiPath),
+        importJson(lang, ''),
+        importJson(lang, '.ai'),
       ]);
 
       if (!manualData && !aiData) {
