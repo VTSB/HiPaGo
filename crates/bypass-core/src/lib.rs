@@ -9,6 +9,8 @@ pub mod client;
 pub mod doh;
 pub mod proxy;
 
+pub use client::StreamingResponse;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -70,6 +72,16 @@ impl BypassClient {
         headers: Option<HashMap<String, String>>,
     ) -> Result<BypassResponse, BypassError> {
         self.inner.fetch(url, headers).await
+    }
+
+    /// Fetch with streaming body — headers/status return immediately,
+    /// body chunks arrive via the mpsc receiver. Memory usage = 1 chunk at a time.
+    pub async fn fetch_streaming(
+        &self,
+        url: &str,
+        headers: Option<HashMap<String, String>>,
+    ) -> Result<StreamingResponse, BypassError> {
+        self.inner.fetch_streaming(url, headers).await
     }
 
     /// Shut down the SOCKS5 proxy.

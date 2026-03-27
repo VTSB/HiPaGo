@@ -4,7 +4,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock the napi module
 vi.mock('@hipago/bypass-napi', () => ({
   bypassFetch: vi.fn(),
+  bypassFetchStreaming: vi.fn(),
 }));
+
+function mockStreamResponse(
+  chunks: Uint8Array[],
+  status = 200,
+  headers: Record<string, string> = {},
+) {
+  let index = 0;
+  return {
+    status,
+    headers,
+    read: vi.fn(async () => {
+      if (index < chunks.length) {
+        return chunks[index++];
+      }
+      return null;
+    }),
+  };
+}
 
 describe('bypassFetch', () => {
   let bypassFetch: typeof import('../bypass-fetch').bypassFetch;
@@ -26,74 +45,58 @@ describe('bypassFetch', () => {
     });
 
     it('routes through napi addon and returns Response', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      const mockBody = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-      vi.mocked(napiFetch).mockResolvedValue({
-        status: 200,
-        headers: { 'content-type': 'text/html' },
-        body: mockBody,
-      });
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const chunk = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
+      vi.mocked(napiStreamFetch).mockResolvedValue(
+        mockStreamResponse([chunk], 200, { 'content-type': 'text/html' }),
+      );
 
       const resp = await bypassFetch('https://hitomi.la/');
       expect(resp).toBeInstanceOf(Response);
       expect(resp.status).toBe(200);
       expect(resp.headers.get('content-type')).toBe('text/html');
+      const body = await resp.text();
+      expect(body).toBe('Hello');
     });
 
     it('forwards headers to napi addon', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      vi.mocked(napiFetch).mockResolvedValue({
-        status: 200,
-        headers: {},
-        body: new Uint8Array(0),
-      });
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([], 200));
 
       await bypassFetch('https://hitomi.la/', {
         headers: { Referer: 'https://hitomi.la/', 'User-Agent': 'Mozilla/5.0' },
       });
 
-      expect(napiFetch).toHaveBeenCalledWith('https://hitomi.la/', {
+      expect(napiStreamFetch).toHaveBeenCalledWith('https://hitomi.la/', {
         Referer: 'https://hitomi.la/',
         'User-Agent': 'Mozilla/5.0',
       });
     });
 
     it('converts URL object to string', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      vi.mocked(napiFetch).mockResolvedValue({
-        status: 200,
-        headers: {},
-        body: new Uint8Array(0),
-      });
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([], 200));
 
       await bypassFetch(new URL('https://hitomi.la/path'));
-      expect(napiFetch).toHaveBeenCalledWith('https://hitomi.la/path', undefined);
+      expect(napiStreamFetch).toHaveBeenCalledWith('https://hitomi.la/path', undefined);
     });
 
     it('does not use global fetch when napi is available', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      vi.mocked(napiFetch).mockResolvedValue({
-        status: 200,
-        headers: {},
-        body: new Uint8Array(0),
-      });
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([], 200));
 
       await bypassFetch('https://hitomi.la/');
       expect(fetch).not.toHaveBeenCalled();
     });
 
     it('propagates napi errors', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      vi.mocked(napiFetch).mockRejectedValue(new Error('connection refused'));
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      vi.mocked(napiStreamFetch).mockRejectedValue(new Error('connection refused'));
 
       await expect(bypassFetch('https://hitomi.la/')).rejects.toThrow('connection refused');
     });
 
     it('rejects with AbortError when signal is already aborted before call', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      // Make napi hang forever
-      vi.mocked(napiFetch).mockImplementation(() => new Promise(() => {}));
-
       const controller = new AbortController();
       controller.abort();
 
@@ -103,9 +106,9 @@ describe('bypassFetch', () => {
     });
 
     it('rejects with AbortError when signal is aborted during napi call', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
       // Make napi hang forever
-      vi.mocked(napiFetch).mockImplementation(() => new Promise(() => {}));
+      vi.mocked(napiStreamFetch).mockImplementation(() => new Promise(() => {}));
 
       const controller = new AbortController();
       const fetchPromise = bypassFetch('https://hitomi.la/', { signal: controller.signal });
@@ -118,16 +121,25 @@ describe('bypassFetch', () => {
     });
 
     it('resolves normally when signal is provided but not aborted', async () => {
-      const { bypassFetch: napiFetch } = await import('@hipago/bypass-napi');
-      vi.mocked(napiFetch).mockResolvedValue({
-        status: 200,
-        headers: { 'content-type': 'text/plain' },
-        body: new Uint8Array(0),
-      });
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      vi.mocked(napiStreamFetch).mockResolvedValue(
+        mockStreamResponse([], 200, { 'content-type': 'text/plain' }),
+      );
 
       const controller = new AbortController();
       const resp = await bypassFetch('https://hitomi.la/', { signal: controller.signal });
       expect(resp.status).toBe(200);
+    });
+
+    it('streams body chunks correctly', async () => {
+      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const chunk1 = new Uint8Array([72, 101]); // "He"
+      const chunk2 = new Uint8Array([108, 108, 111]); // "llo"
+      vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([chunk1, chunk2]));
+
+      const resp = await bypassFetch('https://hitomi.la/');
+      const text = await resp.text();
+      expect(text).toBe('Hello');
     });
   });
 
@@ -185,11 +197,8 @@ describe('bypassFetch', () => {
       vi.doMock('@hipago/bypass-napi', () => {
         importCount++;
         return {
-          bypassFetch: vi.fn().mockResolvedValue({
-            status: 200,
-            headers: {},
-            body: new Uint8Array(0),
-          }),
+          bypassFetch: vi.fn(),
+          bypassFetchStreaming: vi.fn().mockResolvedValue(mockStreamResponse([])),
         };
       });
       const mod = await import('../bypass-fetch');

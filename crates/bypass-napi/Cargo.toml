@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 bypass-core = { path = "../bypass-core" }
 napi = { version = "2", features = ["async", "napi8"] }
 napi-derive = "2"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 
 [build-dependencies]
 napi-build = "2"

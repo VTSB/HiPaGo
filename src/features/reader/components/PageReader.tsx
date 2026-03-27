@@ -7,7 +7,7 @@ import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 
-const PRELOAD_AHEAD = 10;
+const PRELOAD_AHEAD = 3;
 
 export function PageReader({ images, currentPage, onPageChange }: { images: GalleryImage[]; currentPage: number; onPageChange: (p: number) => void }) {
   const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
@@ -26,23 +26,6 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
   // Range of pages to keep in DOM
   const start = Math.max(0, currentPage - PRELOAD_AHEAD);
   const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
-
-  // Preload adjacent pages
-  useEffect(() => {
-    if (!urls.length) return;
-    const preloaded: HTMLImageElement[] = [];
-    for (let idx = start; idx <= end; idx++) {
-      if (idx === currentPage || !urls[idx]) continue;
-      const img = new Image();
-      img.src = urls[idx];
-      preloaded.push(img);
-    }
-    return () => {
-      for (const img of preloaded) {
-        img.src = '';
-      }
-    };
-  }, [urls, currentPage, start, end]);
 
   if (!urls.length) return (
     <div className="flex min-h-screen items-center justify-center">

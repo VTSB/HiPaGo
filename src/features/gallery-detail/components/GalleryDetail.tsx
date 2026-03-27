@@ -9,7 +9,7 @@ import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard'
 import { getThumbnailUrl } from '@/lib/utils/image-url';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { recordVisit } from '@/lib/db/gallery';
 import { Spinner } from '@/shared/components/Spinner';
 import { useT } from '@/lib/i18n/useT';
@@ -19,6 +19,9 @@ import { getGgConfig } from '@/lib/api/client';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
+
+const INITIAL_THUMBNAILS = 20;
+const LOAD_MORE_COUNT = 20;
 
 const TAG_ORDER: Record<string, number> = {
   [TagType.ARTIST]: 0,
@@ -36,6 +39,8 @@ export function GalleryDetail({ id }: { id: number }) {
   const cachedBlock = useGalleryBlock(id);
   const router = useRouter();
   const [copied, setCopied] = useState(false);
+  const [renderedCount, setRenderedCount] = useState(INITIAL_THUMBNAILS);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
   useEffect(() => {
@@ -44,6 +49,28 @@ export function GalleryDetail({ id }: { id: number }) {
     getGgConfig().catch((e) => console.warn('[detail] GgConfig warm failed:', e));
   }, [id]);
 
+  useEffect(() => {
+    setRenderedCount(INITIAL_THUMBNAILS);
+  }, [id]);
+
+  useEffect(() => {
+    if (renderedCount >= files.length) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setRenderedCount((prev) => Math.min(prev + LOAD_MORE_COUNT, files.length));
+        }
+      },
+      { rootMargin: '200px' },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [renderedCount, files.length]);
+
   // Use full block from gallery-info when available, fall back to cached block from list
   const displayBlock: GalleryBlock | null = block ?? (
     cachedBlock.type !== GalleryBlockType.LOADING && cachedBlock.type !== GalleryBlockType.FAILED
@@ -51,6 +78,7 @@ export function GalleryDetail({ id }: { id: number }) {
       : null
   );
   const stillLoadingFull = isLoading && !block;
+  const detailFailed = !isLoading && error && !block;
 
   const relatedIds = displayBlock?.related?.slice(0, 12) ?? [];
 
@@ -157,7 +185,13 @@ export function GalleryDetail({ id }: { id: number }) {
         </div>
       </div>
 
-      {stillLoadingFull && files.length === 0 && (
+      {detailFailed && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          {t('detail.unavailable')}
+        </div>
+      )}
+
+      {stillLoadingFull && files.length === 0 && !detailFailed && (
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{t('detail.content')}</h2>
           <div className="flex items-center gap-2 text-sm text-zinc-500">
@@ -170,7 +204,7 @@ export function GalleryDetail({ id }: { id: number }) {
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{t('detail.content')} ({files.length})</h2>
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
-            {files.map((file, idx) => (
+            {files.slice(0, renderedCount).map((file, idx) => (
               <Link
                 key={idx}
                 href={`/gallery/${id}/reader?page=${idx + 1}`}
@@ -189,6 +223,11 @@ export function GalleryDetail({ id }: { id: number }) {
                 </span>
               </Link>
             ))}
+            {renderedCount < files.length && (
+              <div ref={sentinelRef} className="col-span-full flex justify-center py-4">
+                <span className="text-sm text-zinc-400">{renderedCount} / {files.length}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

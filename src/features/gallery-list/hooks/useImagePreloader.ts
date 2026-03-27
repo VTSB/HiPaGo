@@ -4,6 +4,9 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { galleryBlockQueryKey, resolveBlock } from './useGalleryBlock';
 import { PAGE_SIZE } from '@/lib/utils/constants';
+import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
+import { GalleryBlockType } from '@/lib/utils/types';
+import type { GalleryBlock } from '@/lib/utils/types';
 import type { VirtualItem } from '@tanstack/react-virtual';
 
 interface UseImagePreloaderOptions {
@@ -84,6 +87,14 @@ export function useImagePreloader({
                 queryFn: ({ signal }) => resolveBlock(id, signal),
                 staleTime: 5 * 60 * 1000,
                 gcTime: 30 * 60 * 1000,
+              })
+              .then(() => {
+                // After block data is cached, preload the thumbnail image
+                const block = queryClient.getQueryData<GalleryBlock>(galleryBlockQueryKey(id));
+                if (block && block.type !== GalleryBlockType.LOADING && block.type !== GalleryBlockType.FAILED && block.thumbnail) {
+                  const img = new Image();
+                  img.src = resolveThumbnailUrl(block.thumbnail);
+                }
               })
               .finally(() => {
                 activeCount--;

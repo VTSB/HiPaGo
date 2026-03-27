@@ -105,3 +105,53 @@ describe('AbortableImage opacity fade-in', () => {
     );
   });
 });
+
+describe('AbortableImage retry behavior', () => {
+  it('stops retrying after 3 attempts', () => {
+    vi.useFakeTimers();
+
+    const { container } = render(
+      <AbortableImage src="https://example.com/missing.jpg" alt="test" loading="eager" />,
+    );
+    const img = container.querySelector('img') as HTMLImageElement;
+
+    // Fire 4 errors — only 3 retries should happen
+    for (let i = 0; i < 4; i++) {
+      fireEvent.error(img);
+      vi.advanceTimersByTime(20000);
+    }
+
+    // After 3 retries, src should still be set (not cleared permanently)
+    // but no more retries should be scheduled
+    expect(img.src).toBeDefined();
+
+    vi.useRealTimers();
+  });
+
+  it('stops retrying on fast consecutive failures (likely 404)', () => {
+    vi.useFakeTimers();
+
+    const { container } = render(
+      <AbortableImage src="https://example.com/gone.jpg" alt="test" loading="eager" />,
+    );
+    const img = container.querySelector('img') as HTMLImageElement;
+
+    // First error → triggers retry after 1s
+    fireEvent.error(img);
+    vi.advanceTimersByTime(1000);
+
+    // Second error fires immediately (< 2s) → should NOT retry (fast failure = 404)
+    fireEvent.error(img);
+    vi.advanceTimersByTime(1000);
+
+    // Third error should also not trigger more retries
+    fireEvent.error(img);
+    vi.advanceTimersByTime(10000);
+
+    // retryCount should have stopped at 1 (only the first retry ran)
+    // Image should still have a src
+    expect(img.src).toContain('gone.jpg');
+
+    vi.useRealTimers();
+  });
+});

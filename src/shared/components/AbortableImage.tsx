@@ -9,6 +9,8 @@ interface AbortableImageProps {
   loading?: 'lazy' | 'eager';
   style?: React.CSSProperties;
   draggable?: boolean;
+  /** Called when all retries are exhausted — image permanently failed to load */
+  onPermanentError?: () => void;
 }
 
 /**
@@ -21,13 +23,16 @@ interface AbortableImageProps {
  * - Once an image has fully loaded it is never cleared (even if scrolled away).
  * - `loading="eager"` bypasses the observer and loads immediately.
  */
-export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable }: AbortableImageProps) {
+export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable, onPermanentError }: AbortableImageProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const mountedRef = useRef(true);
   const loadedRef = useRef(false);
   const retryCountRef = useRef(0);
   const [visible, setVisible] = useState(loading === 'eager');
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const onPermanentErrorRef = useRef(onPermanentError);
+  onPermanentErrorRef.current = onPermanentError;
 
   // Reset loaded/retry/visible state when src changes
   // Resetting visible forces the IntersectionObserver to re-fire,
@@ -36,6 +41,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     loadedRef.current = false;
     retryCountRef.current = 0;
     setLoaded(false);
+    setFailed(false);
     if (loading !== 'eager') setVisible(false);
   }, [src, loading]);
 
@@ -46,9 +52,25 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     setLoaded(true);
   }, []);
 
-  // Retry on error (up to 10 times with exponential backoff)
+  // Retry on error (up to 3 times with exponential backoff).
+  // Fast consecutive errors (< 2s apart) indicate a permanent failure (404/gone)
+  // and are not retried to avoid wasting bandwidth.
+  const lastErrorTimeRef = useRef(0);
   const handleError = useCallback(() => {
-    if (loadedRef.current || retryCountRef.current >= 10) return;
+    if (loadedRef.current) return;
+    if (retryCountRef.current >= 3) {
+      setFailed(true);
+      onPermanentErrorRef.current?.();
+      return;
+    }
+    const now = Date.now();
+    if (retryCountRef.current > 0 && now - lastErrorTimeRef.current < 2000) {
+      // Two fast failures in a row → likely 404, stop retrying
+      setFailed(true);
+      onPermanentErrorRef.current?.();
+      return;
+    }
+    lastErrorTimeRef.current = now;
     retryCountRef.current += 1;
     const delay = Math.min(1000 * 2 ** (retryCountRef.current - 1), 10000);
     setTimeout(() => {
@@ -66,6 +88,17 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     if (loading === 'eager') return;
     const img = imgRef.current;
     if (!img) return;
+
+    // Sync check: if already near viewport, set visible immediately to avoid 1-frame flash
+    // for preloaded/cached images in virtual scroll
+    const rect = img.getBoundingClientRect();
+    const margin = 400;
+    if (
+      rect.bottom >= -margin &&
+      rect.top <= (window.innerHeight || document.documentElement.clientHeight) + margin
+    ) {
+      setVisible(true);
+    }
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -90,6 +123,16 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       mountedRef.current = false;
     };
   }, []);
+
+  if (failed) {
+    return (
+      <div className={className} style={{ ...style, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-zinc-800, #27272a)' }}>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style={{ width: 32, height: 32, color: 'var(--color-zinc-500, #71717a)' }}>
+          <path fillRule="evenodd" d="M1.5 6a2.25 2.25 0 012.25-2.25h16.5A2.25 2.25 0 0122.5 6v12a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18V6zM3 16.06V18c0 .414.336.75.75.75h16.5A.75.75 0 0021 18v-1.94l-2.69-2.689a1.5 1.5 0 00-2.12 0l-.88.879.97.97a.75.75 0 11-1.06 1.06l-5.16-5.159a1.5 1.5 0 00-2.12 0L3 16.061zm10.125-7.81a1.125 1.125 0 112.25 0 1.125 1.125 0 01-2.25 0z" clipRule="evenodd" />
+        </svg>
+      </div>
+    );
+  }
 
   return (
     <img

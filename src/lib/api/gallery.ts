@@ -19,9 +19,22 @@ import { GalleryBlockType, ImageType } from '@/lib/utils/types';
 import { PAGE_SIZE } from '@/lib/utils/constants';
 import { saveGalleryImages, getGalleryImages as getGalleryImagesFromDb } from '@/lib/db/gallery';
 
+// Cache 404'd gallery IDs to avoid repeated requests for deleted galleries
+const notFoundIds = new Set<number>();
+
 export async function fetchGalleryInfo(id: number): Promise<GalleryInfo> {
-  const text = await apiClient.fetchLtnText(`galleries/${id}.js`);
-  return parseGalleryJson(text);
+  if (notFoundIds.has(id)) {
+    throw Object.assign(new Error(`Gallery ${id} not found (cached)`), { status: 404 });
+  }
+  try {
+    const text = await apiClient.fetchLtnText(`galleries/${id}.js`);
+    return parseGalleryJson(text);
+  } catch (e) {
+    if (e && typeof e === 'object' && 'status' in e && (e as { status: number }).status === 404) {
+      notFoundIds.add(id);
+    }
+    throw e;
+  }
 }
 
 export async function fetchGalleryBlockHtmlById(

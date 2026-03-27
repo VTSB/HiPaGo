@@ -72,6 +72,11 @@ export function useGalleryDetail(id: number) {
     enabled: id > 0,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
+    // Don't retry on 404 (deleted gallery) — only retry on transient errors
+    retry: (failureCount, error) => {
+      if (error && 'status' in error && (error as { status: number }).status === 404) return false;
+      return failureCount < 2;
+    },
   });
 
   return {

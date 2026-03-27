@@ -54,6 +54,7 @@ function CardSkeleton() {
 }
 
 function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: () => void }) {
+  const queryClient = useQueryClient();
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
   const blurred = useMemo(() => shouldBlur(block, blurTags), [block, blurTags]);
@@ -94,7 +95,16 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     <Link href={`/gallery/${block.id}`} className="group block" onPointerEnter={onPrefetch}>
       <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 transition-shadow hover:shadow-lg">
         {block.thumbnail ? (
-          <AbortableImage src={resolveThumbnailUrl(block.thumbnail)} alt={block.title} className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`} loading="lazy" />
+          <AbortableImage
+            src={resolveThumbnailUrl(block.thumbnail)}
+            alt={block.title}
+            className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`}
+            loading="lazy"
+            onPermanentError={() => {
+              // Thumbnail URL is stale/dead — invalidate the block cache so it re-fetches with fresh URL
+              queryClient.invalidateQueries({ queryKey: ['gallery-block', block.id] });
+            }}
+          />
         ) : (
           <div className="flex h-full items-center justify-center text-zinc-400">{t('detail.noImage')}</div>
         )}

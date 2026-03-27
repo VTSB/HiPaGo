@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { fetchGalleryBlockHtmlById, createLoadingBlock } from '@/lib/api/gallery';
 import { getGalleryBlock, saveGalleryBlock } from '@/lib/db/gallery';
 import type { GalleryBlock } from '@/lib/utils/types';
@@ -8,14 +8,14 @@ import { GalleryBlockType } from '@/lib/utils/types';
 
 export const galleryBlockQueryKey = (id: number) => ['gallery-block', id] as const;
 
-export async function resolveBlock(id: number, signal?: AbortSignal): Promise<GalleryBlock> {
+export async function resolveBlock(id: number, signal?: AbortSignal, queryClient?: QueryClient): Promise<GalleryBlock> {
   // Try local DB first — silently skip if DB not initialized
   try {
     const local = await getGalleryBlock(id);
     if (local) {
       // SWR: return cached immediately, revalidate in background if stale
       if (isStale(local)) {
-        revalidateBlock(id);
+        revalidateBlock(id, queryClient);
       }
       return local;
     }
@@ -36,12 +36,16 @@ function isStale(block: GalleryBlock): boolean {
   return block.updatedAt.getTime() < threshold;
 }
 
-/** Background revalidation — fire and forget, no signal */
-function revalidateBlock(id: number): void {
+/** Background revalidation — updates DB and React Query cache */
+function revalidateBlock(id: number, queryClient?: QueryClient): void {
   fetchGalleryBlockHtmlById(id)
     .then((block) => {
       if (block.type === GalleryBlockType.NOT_DETAILED || block.type === GalleryBlockType.DETAILED) {
-        return saveGalleryBlock(block);
+        saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
+        // Update React Query cache so UI reflects the fresh data immediately
+        if (queryClient) {
+          queryClient.setQueryData(galleryBlockQueryKey(id), block);
+        }
       }
     })
     .catch((e) => console.warn('[gallery-block] Revalidation failed:', e));
@@ -52,9 +56,10 @@ function revalidateBlock(id: number): void {
  * Returns a LOADING placeholder immediately, swapped with real data once resolved.
  */
 export function useGalleryBlock(id: number): GalleryBlock {
+  const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: galleryBlockQueryKey(id),
-    queryFn: ({ signal }) => resolveBlock(id, signal),
+    queryFn: ({ signal }) => resolveBlock(id, signal, queryClient),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });

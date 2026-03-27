@@ -30,6 +30,7 @@ const translations = {
   'detail.related': { en: 'Related', ko: '관련 작품' },
   'detail.noImage': { en: 'No image', ko: '이미지 없음' },
   'detail.loadFailed': { en: 'Failed to load gallery', ko: '갤러리 로딩 실패' },
+  'detail.unavailable': { en: 'This gallery has been removed or is temporarily unavailable.', ko: '이 갤러리는 삭제되었거나 일시적으로 이용할 수 없습니다.' },
   'detail.invalidId': { en: 'Invalid gallery ID', ko: '잘못된 갤러리 ID' },
   'detail.download': { en: 'Download', ko: '다운로드' },
   'detail.copyId': { en: 'Copy ID', ko: 'ID 복사' },

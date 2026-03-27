@@ -7,6 +7,7 @@ use crate::{BypassError, BypassResponse};
 use rquest::Impersonate;
 use std::collections::HashMap;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 /// HTTP client configured with Chrome TLS fingerprint and SOCKS5 proxy.
 pub struct Client {
@@ -71,4 +72,64 @@ impl Client {
             body,
         })
     }
+
+    /// Fetch with streaming body — headers/status return immediately,
+    /// body chunks arrive via the mpsc receiver. Memory usage = 1 chunk at a time.
+    pub async fn fetch_streaming(
+        &self,
+        url: &str,
+        headers: Option<HashMap<String, String>>,
+    ) -> Result<StreamingResponse, BypassError> {
+        let mut request = self.inner.get(url);
+        if let Some(hdrs) = headers {
+            for (key, value) in hdrs {
+                request = request.header(&key, &value);
+            }
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| BypassError::HttpError(format!("Request failed: {e}")))?;
+
+        let status = response.status().as_u16();
+        let mut resp_headers = HashMap::new();
+        for (key, value) in response.headers() {
+            if let Ok(v) = value.to_str() {
+                resp_headers.insert(key.to_string(), v.to_string());
+            }
+        }
+
+        // Channel with small buffer — provides backpressure
+        let (tx, rx) = mpsc::channel::<Vec<u8>>(4);
+
+        tokio::spawn(async move {
+            let mut response = response;
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => {
+                        if tx.send(chunk.to_vec()).await.is_err() {
+                            break; // receiver dropped (client disconnected)
+                        }
+                    }
+                    Ok(None) => break, // body complete
+                    Err(_) => break,   // read error — signal EOF
+                }
+            }
+            // tx drops here → receiver gets None
+        });
+
+        Ok(StreamingResponse {
+            status,
+            headers: resp_headers,
+            body_rx: rx,
+        })
+    }
+}
+
+/// Response with streaming body via channel.
+pub struct StreamingResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body_rx: mpsc::Receiver<Vec<u8>>,
 }

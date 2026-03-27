@@ -62,3 +62,60 @@ pub async fn bypass_fetch(
         body: resp.body.into(),
     })
 }
+
+use tokio::sync::Mutex;
+
+/// Streaming response — headers/status available immediately,
+/// body chunks read one at a time via `read()`.
+#[napi]
+pub struct BypassResponseStream {
+    status: u16,
+    headers: HashMap<String, String>,
+    receiver: Mutex<tokio::sync::mpsc::Receiver<Vec<u8>>>,
+}
+
+#[napi]
+impl BypassResponseStream {
+    #[napi(getter)]
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+
+    #[napi(getter)]
+    pub fn headers(&self) -> HashMap<String, String> {
+        self.headers.clone()
+    }
+
+    /// Read the next body chunk. Returns null when the body is complete.
+    #[napi]
+    pub async fn read(&self) -> Option<Buffer> {
+        self.receiver
+            .lock()
+            .await
+            .recv()
+            .await
+            .map(|chunk| chunk.into())
+    }
+}
+
+/// Streaming version of bypass_fetch — returns headers immediately,
+/// body is read chunk-by-chunk via the returned stream object.
+/// Memory usage per request = 1 chunk (~64KB) instead of entire body.
+#[napi]
+pub async fn bypass_fetch_streaming(
+    url: String,
+    headers: Option<HashMap<String, String>>,
+) -> napi::Result<BypassResponseStream> {
+    let client = get_client().await?;
+
+    let resp = client
+        .fetch_streaming(&url, headers)
+        .await
+        .map_err(|e| napi::Error::from_reason(format!("Bypass fetch failed: {e}")))?;
+
+    Ok(BypassResponseStream {
+        status: resp.status,
+        headers: resp.headers,
+        receiver: Mutex::new(resp.body_rx),
+    })
+}

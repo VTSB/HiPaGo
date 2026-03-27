@@ -4,10 +4,10 @@
  */
 
 interface NativeBypassModule {
-  bypassFetch(url: string, headers?: Record<string, string> | null): Promise<{
+  bypassFetchStreaming(url: string, headers?: Record<string, string> | null): Promise<{
     status: number;
     headers: Record<string, string>;
-    body: Buffer;
+    read(): Promise<Buffer | null>;
   }>;
 }
 
@@ -34,7 +34,7 @@ interface BypassFetchInit {
 
 /**
  * Fetch a URL with ISP bypass (DoH + TLS fragmentation + Chrome fingerprint).
- * Uses native Rust addon when available, falls back to plain fetch.
+ * Uses streaming napi addon (no full-body buffering), falls back to plain fetch.
  */
 export async function bypassFetch(
   url: string | URL,
@@ -46,29 +46,36 @@ export async function bypassFetch(
   const native = await getNativeBypassFetch();
   if (native) {
     const signal = init?.signal;
-    const nativePromise = native.bypassFetch(urlStr, headers).then(
-      (resp) =>
-        new Response(resp.body as unknown as BodyInit, {
-          status: resp.status,
-          headers: new Headers(resp.headers),
-        }),
-    );
 
-    if (!signal) {
-      return nativePromise;
-    }
-
-    if (signal.aborted) {
+    if (signal?.aborted) {
       return Promise.reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
     }
 
-    const abortPromise = new Promise<never>((_, reject) => {
-      signal.addEventListener('abort', () => {
-        reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
-      }, { once: true });
+    // Streaming API — no full-body buffering in Rust/JS memory
+    const stream = await native.bypassFetchStreaming(urlStr, headers ?? undefined);
+
+    let aborted = false;
+    signal?.addEventListener('abort', () => { aborted = true; }, { once: true });
+
+    const readable = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (aborted) {
+          controller.close();
+          return;
+        }
+        const chunk = await stream.read();
+        if (chunk === null || aborted) {
+          controller.close();
+        } else {
+          controller.enqueue(new Uint8Array(chunk));
+        }
+      },
     });
 
-    return Promise.race([nativePromise, abortPromise]);
+    return new Response(readable, {
+      status: stream.status,
+      headers: new Headers(stream.headers),
+    });
   }
 
   // Fallback: plain fetch (no bypass)

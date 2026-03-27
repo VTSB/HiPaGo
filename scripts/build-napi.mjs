@@ -9,7 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const napiDir = join(root, 'crates/bypass-napi');
 
 console.log('Building bypass-napi native addon...');
-execSync('npx napi build --release --platform', {
+execSync('pnpm --package=@napi-rs/cli dlx napi build --release --platform', {
   cwd: napiDir,
   stdio: 'inherit',
 });

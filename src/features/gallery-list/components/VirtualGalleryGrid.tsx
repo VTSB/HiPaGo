@@ -141,7 +141,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     const virtualizer = useWindowVirtualizer({
       count: totalRows,
       estimateSize,
-      overscan: 4,
+      overscan: 8,
       scrollMargin,
     });
 

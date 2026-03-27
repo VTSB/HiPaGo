@@ -100,8 +100,8 @@ export async function GET(
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Cache-Control', 'public, max-age=86400');
 
-    // Stream the upstream body directly to the client — no buffering.
-    // Both bypassFetch and native fetch return Response with ReadableStream body.
+    // Stream the upstream body directly to the client.
+    // bypassFetch returns a Response with a true streaming ReadableStream body.
     return new Response(response.body, {
       status: 200,
       headers,

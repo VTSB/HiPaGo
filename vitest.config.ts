@@ -6,6 +6,7 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     testTimeout: 30000,
+    forks: { singleFork: true },
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}', 'scripts/**/*.{test,spec}.ts'],
     coverage: {
