@@ -6,8 +6,8 @@ use bypass_core::BypassClient;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use std::collections::HashMap;
-use std::sync::OnceLock;
-use tokio::sync::OnceCell;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::RwLock;
 
 /// Global tokio runtime for the napi addon.
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -20,47 +20,42 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// Global bypass client (lazy-initialized on first call).
-static CLIENT: OnceCell<BypassClient> = OnceCell::const_new();
+/// Resettable bypass client — can be recreated if the proxy dies or a transient failure occurs.
+static CLIENT: OnceLock<RwLock<Option<Arc<BypassClient>>>> = OnceLock::new();
 
-async fn get_client() -> napi::Result<&'static BypassClient> {
-    CLIENT
-        .get_or_try_init(|| async {
-            BypassClient::new()
-                .await
-                .map_err(|e| napi::Error::from_reason(format!("Failed to init bypass client: {e}")))
-        })
-        .await
+fn client_lock() -> &'static RwLock<Option<Arc<BypassClient>>> {
+    CLIENT.get_or_init(|| RwLock::new(None))
 }
 
-#[napi(object)]
-pub struct JsBypassResponse {
-    pub status: u16,
-    pub headers: HashMap<String, String>,
-    pub body: Buffer,
+async fn get_client() -> napi::Result<Arc<BypassClient>> {
+    // Fast path: client already initialized
+    {
+        let guard = client_lock().read().await;
+        if let Some(ref client) = *guard {
+            return Ok(Arc::clone(client));
+        }
+    }
+    // Slow path: initialize
+    let mut guard = client_lock().write().await;
+    // Double-check after acquiring write lock
+    if let Some(ref client) = *guard {
+        return Ok(Arc::clone(client));
+    }
+    let client = Arc::new(
+        BypassClient::new()
+            .await
+            .map_err(|e| napi::Error::from_reason(format!("Failed to init bypass client: {e}")))?,
+    );
+    *guard = Some(Arc::clone(&client));
+    Ok(client)
 }
 
-/// Fetch a URL through the ISP bypass pipeline.
-///
-/// Combines DoH (DNS over HTTPS), TLS ClientHello fragmentation,
-/// and Chrome TLS fingerprint impersonation.
-#[napi]
-pub async fn bypass_fetch(
-    url: String,
-    headers: Option<HashMap<String, String>>,
-) -> napi::Result<JsBypassResponse> {
-    let client = get_client().await?;
-
-    let resp = client
-        .fetch(&url, headers)
-        .await
-        .map_err(|e| napi::Error::from_reason(format!("Bypass fetch failed: {e}")))?;
-
-    Ok(JsBypassResponse {
-        status: resp.status,
-        headers: resp.headers,
-        body: resp.body.into(),
-    })
+/// Reset the client so the next call creates a fresh one (new proxy, new connections).
+async fn reset_client() {
+    let mut guard = client_lock().write().await;
+    if let Some(client) = guard.take() {
+        client.shutdown().await;
+    }
 }
 
 use tokio::sync::Mutex;
@@ -102,20 +97,30 @@ impl BypassResponseStream {
 /// body is read chunk-by-chunk via the returned stream object.
 /// Memory usage per request = 1 chunk (~64KB) instead of entire body.
 #[napi]
-pub async fn bypass_fetch_streaming(
+pub async fn bypass_fetch(
     url: String,
     headers: Option<HashMap<String, String>>,
 ) -> napi::Result<BypassResponseStream> {
-    let client = get_client().await?;
-
-    let resp = client
-        .fetch_streaming(&url, headers)
-        .await
-        .map_err(|e| napi::Error::from_reason(format!("Bypass fetch failed: {e}")))?;
-
-    Ok(BypassResponseStream {
-        status: resp.status,
-        headers: resp.headers,
-        receiver: Mutex::new(resp.body_rx),
-    })
+    // Try with existing client, reset and retry once on failure
+    for attempt in 0..2u8 {
+        let client = get_client().await?;
+        match client.fetch_streaming(&url, headers.clone()).await {
+            Ok(resp) => {
+                return Ok(BypassResponseStream {
+                    status: resp.status,
+                    headers: resp.headers,
+                    receiver: Mutex::new(resp.body_rx),
+                });
+            }
+            Err(e) => {
+                if attempt == 0 {
+                    eprintln!("[bypass-napi] streaming fetch failed, resetting client: {e}");
+                    reset_client().await;
+                } else {
+                    return Err(napi::Error::from_reason(format!("Bypass fetch failed: {e}")));
+                }
+            }
+        }
+    }
+    unreachable!()
 }

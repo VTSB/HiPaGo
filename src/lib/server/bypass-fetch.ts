@@ -4,7 +4,7 @@
  */
 
 interface NativeBypassModule {
-  bypassFetchStreaming(url: string, headers?: Record<string, string> | null): Promise<{
+  bypassFetch(url: string, headers?: Record<string, string> | null): Promise<{
     status: number;
     headers: Record<string, string>;
     read(): Promise<Buffer | null>;
@@ -51,8 +51,7 @@ export async function bypassFetch(
       return Promise.reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
     }
 
-    // Streaming API — no full-body buffering in Rust/JS memory
-    const stream = await native.bypassFetchStreaming(urlStr, headers ?? undefined);
+    const stream = await native.bypassFetch(urlStr, headers ?? undefined);
 
     let aborted = false;
     signal?.addEventListener('abort', () => { aborted = true; }, { once: true });

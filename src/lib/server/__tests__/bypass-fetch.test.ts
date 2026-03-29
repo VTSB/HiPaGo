@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock the napi module
 vi.mock('@hipago/bypass-napi', () => ({
   bypassFetch: vi.fn(),
-  bypassFetchStreaming: vi.fn(),
 }));
 
 function mockStreamResponse(
@@ -45,7 +44,7 @@ describe('bypassFetch', () => {
     });
 
     it('routes through napi addon and returns Response', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       const chunk = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
       vi.mocked(napiStreamFetch).mockResolvedValue(
         mockStreamResponse([chunk], 200, { 'content-type': 'text/html' }),
@@ -60,7 +59,7 @@ describe('bypassFetch', () => {
     });
 
     it('forwards headers to napi addon', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([], 200));
 
       await bypassFetch('https://hitomi.la/', {
@@ -74,7 +73,7 @@ describe('bypassFetch', () => {
     });
 
     it('converts URL object to string', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([], 200));
 
       await bypassFetch(new URL('https://hitomi.la/path'));
@@ -82,7 +81,7 @@ describe('bypassFetch', () => {
     });
 
     it('does not use global fetch when napi is available', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([], 200));
 
       await bypassFetch('https://hitomi.la/');
@@ -90,7 +89,7 @@ describe('bypassFetch', () => {
     });
 
     it('propagates napi errors', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       vi.mocked(napiStreamFetch).mockRejectedValue(new Error('connection refused'));
 
       await expect(bypassFetch('https://hitomi.la/')).rejects.toThrow('connection refused');
@@ -106,7 +105,7 @@ describe('bypassFetch', () => {
     });
 
     it('rejects with AbortError when signal is aborted during napi call', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       // Make napi hang forever
       vi.mocked(napiStreamFetch).mockImplementation(() => new Promise(() => {}));
 
@@ -121,7 +120,7 @@ describe('bypassFetch', () => {
     });
 
     it('resolves normally when signal is provided but not aborted', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       vi.mocked(napiStreamFetch).mockResolvedValue(
         mockStreamResponse([], 200, { 'content-type': 'text/plain' }),
       );
@@ -132,7 +131,7 @@ describe('bypassFetch', () => {
     });
 
     it('streams body chunks correctly', async () => {
-      const { bypassFetchStreaming: napiStreamFetch } = await import('@hipago/bypass-napi');
+      const { bypassFetch: napiStreamFetch } = await import('@hipago/bypass-napi');
       const chunk1 = new Uint8Array([72, 101]); // "He"
       const chunk2 = new Uint8Array([108, 108, 111]); // "llo"
       vi.mocked(napiStreamFetch).mockResolvedValue(mockStreamResponse([chunk1, chunk2]));
@@ -197,8 +196,7 @@ describe('bypassFetch', () => {
       vi.doMock('@hipago/bypass-napi', () => {
         importCount++;
         return {
-          bypassFetch: vi.fn(),
-          bypassFetchStreaming: vi.fn().mockResolvedValue(mockStreamResponse([])),
+          bypassFetch: vi.fn().mockResolvedValue(mockStreamResponse([])),
         };
       });
       const mod = await import('../bypass-fetch');

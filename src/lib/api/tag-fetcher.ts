@@ -12,26 +12,45 @@ export interface TagFetcher {
 // ---------------------------------------------------------------------------
 
 class WebProxyFetcher implements TagFetcher {
+  private maxRetries = 3;
+
   async fetchPage(path: string): Promise<string> {
-    const url = '/api/tags/fetch?url=' + encodeURIComponent(path);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
-    try {
-      const resp = await fetch(url, { signal: controller.signal });
-      if (!resp.ok) {
-        throw new Error(
-          `WebProxyFetcher: request failed with status ${resp.status} for path "${path}"`
-        );
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
       }
-      return await resp.text();
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        throw new Error(`WebProxyFetcher: request timed out after 30s for path "${path}"`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const resp = await fetch('/api/tags/fetch?url=' + encodeURIComponent(path), {
+          signal: controller.signal,
+        });
+        if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
+          lastError = new Error(
+            `WebProxyFetcher: status ${resp.status} for "${path}" (attempt ${attempt + 1})`
+          );
+          continue;
+        }
+        if (!resp.ok) {
+          throw new Error(
+            `WebProxyFetcher: request failed with status ${resp.status} for path "${path}"`
+          );
+        }
+        return await resp.text();
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          lastError = new Error(`WebProxyFetcher: timeout for "${path}" (attempt ${attempt + 1})`);
+          continue;
+        }
+        lastError = err as Error;
+        if (attempt < this.maxRetries) continue;
+        throw err;
+      } finally {
+        clearTimeout(timer);
       }
-      throw err;
-    } finally {
-      clearTimeout(timer);
     }
+    throw lastError ?? new Error(`WebProxyFetcher: failed after retries for "${path}"`);
   }
 
   async dispose(): Promise<void> {

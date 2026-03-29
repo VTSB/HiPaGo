@@ -13,10 +13,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 
-// Split ClientHello BEFORE the SNI extension (~byte 120).
-// DPI sees fragment 1 without SNI → passes through.
-// 200ms delay defeats DPI reassembly timeout.
-const SPLIT_OFFSET: usize = 120;
+// Split TLS ClientHello at the record header boundary (byte 5).
+// Fragment 1 = 5-byte TLS record header (content type, version, length) — too small for DPI to inspect.
+// Fragment 2 = rest of ClientHello after delay — DPI reassembly timeout has expired.
+// This is more robust than splitting at a fixed SNI offset (~120) which varies by TLS implementation.
+// Strategy matches GoodbyeDPI / zapret proven approach.
+const FIRST_SPLIT: usize = 5;
 const FRAGMENT_DELAY_MS: u64 = 200;
 
 /// Handle to the running SOCKS5 proxy.
@@ -201,7 +203,7 @@ async fn handle_client_inner(
 }
 
 /// Bidirectional relay between client and target.
-/// The first write from client to target (TLS ClientHello) is fragmented at byte 5.
+/// The first write from client to target (TLS ClientHello) is fragmented at the TLS record header boundary.
 async fn relay_with_fragmentation(
     client: &mut TcpStream,
     target: &mut TcpStream,
@@ -226,16 +228,15 @@ async fn relay_with_fragmentation(
                 }
             };
 
-            if first_write && n > SPLIT_OFFSET {
+            if first_write && n > FIRST_SPLIT {
                 first_write = false;
-                // Split ClientHello before SNI extension.
-                // Fragment 1: TLS record header + handshake start (no SNI) → DPI passes through.
-                // 200ms delay → DPI reassembly timeout expires.
-                // Fragment 2: rest including SNI → DPI already gave up.
-                target_write.write_all(&buf[..SPLIT_OFFSET]).await?;
+                // Fragment 1: TLS record header only (5 bytes) — DPI can't extract SNI from this.
+                target_write.write_all(&buf[..FIRST_SPLIT]).await?;
                 target_write.flush().await?;
+                // Delay exceeds DPI reassembly timeout.
                 tokio::time::sleep(std::time::Duration::from_millis(FRAGMENT_DELAY_MS)).await;
-                target_write.write_all(&buf[SPLIT_OFFSET..n]).await?;
+                // Fragment 2: rest of ClientHello including SNI — DPI already gave up reassembly.
+                target_write.write_all(&buf[FIRST_SPLIT..n]).await?;
                 target_write.flush().await?;
             } else {
                 first_write = false;

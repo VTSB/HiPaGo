@@ -37,18 +37,26 @@ struct DohAnswer {
     ttl: u64,
 }
 
-/// Thread-safe DoH resolver with caching and in-flight deduplication.
+/// Thread-safe DoH resolver with caching, in-flight deduplication, and reusable HTTP client.
 #[derive(Clone)]
 pub struct DohResolver {
     cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
     in_flight: Arc<Mutex<HashMap<String, broadcast::Sender<Result<String, String>>>>>,
+    http_client: Arc<rquest::Client>,
 }
 
 impl DohResolver {
     pub fn new() -> Self {
+        let client = rquest::Client::builder()
+            .timeout(QUERY_TIMEOUT)
+            .no_proxy()
+            .build()
+            .expect("Failed to build DoH HTTP client");
+
         Self {
             cache: Arc::new(Mutex::new(HashMap::new())),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
+            http_client: Arc::new(client),
         }
     }
 
@@ -120,18 +128,20 @@ impl DohResolver {
         &self,
         hostname: &str,
     ) -> Result<(String, Duration), BypassError> {
-        // Primary: Cloudflare
-        match self
-            .query_provider("https://1.1.1.1/dns-query", hostname)
-            .await
-        {
-            Ok(result) => return Ok(result),
-            Err(_) => {}
-        }
+        let providers = [
+            "https://1.1.1.1/dns-query",    // Cloudflare primary
+            "https://1.0.0.1/dns-query",    // Cloudflare secondary
+            "https://8.8.8.8/resolve",      // Google
+        ];
 
-        // Fallback: Google
-        self.query_provider("https://8.8.8.8/resolve", hostname)
-            .await
+        let mut last_err = None;
+        for provider in &providers {
+            match self.query_provider(provider, hostname).await {
+                Ok(result) => return Ok(result),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err.unwrap_or_else(|| BypassError::DohError("All DoH providers failed".into())))
     }
 
     async fn query_provider(
@@ -141,15 +151,7 @@ impl DohResolver {
     ) -> Result<(String, Duration), BypassError> {
         let url = format!("{}?name={}&type=A", base_url, hostname);
 
-        // Use a plain rquest client (no proxy, no impersonation) for DoH queries —
-        // 1.1.1.1 and 8.8.8.8 are not blocked by ISPs
-        let client = rquest::Client::builder()
-            .timeout(QUERY_TIMEOUT)
-            .no_proxy()
-            .build()
-            .map_err(|e| BypassError::DohError(e.to_string()))?;
-
-        let resp = client
+        let resp = self.http_client
             .get(&url)
             .header("Accept", "application/dns-json")
             .send()
