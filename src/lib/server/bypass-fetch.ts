@@ -3,12 +3,20 @@
  * Combines DoH + TLS ClientHello fragmentation + Chrome TLS fingerprint.
  */
 
+interface StreamResponse {
+  status: number;
+  headers: Record<string, string>;
+  read(): Promise<Buffer | null>;
+}
+
+interface BufferedResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: Buffer;
+}
+
 interface NativeBypassModule {
-  bypassFetch(url: string, headers?: Record<string, string> | null): Promise<{
-    status: number;
-    headers: Record<string, string>;
-    read(): Promise<Buffer | null>;
-  }>;
+  bypassFetch(url: string, headers?: Record<string, string> | null): Promise<StreamResponse | BufferedResponse>;
 }
 
 let nativeModule: NativeBypassModule | null = null;
@@ -51,29 +59,31 @@ export async function bypassFetch(
       return Promise.reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
     }
 
-    const stream = await native.bypassFetch(urlStr, headers ?? undefined);
+    const resp = await native.bypassFetch(urlStr, headers ?? undefined);
 
-    let aborted = false;
-    signal?.addEventListener('abort', () => { aborted = true; }, { once: true });
+    // Streaming response (new .node) vs buffered response (old .node)
+    if ('read' in resp && typeof resp.read === 'function') {
+      let aborted = false;
+      signal?.addEventListener('abort', () => { aborted = true; }, { once: true });
 
-    const readable = new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        if (aborted) {
-          controller.close();
-          return;
-        }
-        const chunk = await stream.read();
-        if (chunk === null || aborted) {
-          controller.close();
-        } else {
-          controller.enqueue(new Uint8Array(chunk));
-        }
-      },
-    });
+      const readable = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          if (aborted) { controller.close(); return; }
+          const chunk = await (resp as StreamResponse).read();
+          if (chunk === null || aborted) { controller.close(); }
+          else { controller.enqueue(new Uint8Array(chunk)); }
+        },
+      });
 
-    return new Response(readable, {
-      status: stream.status,
-      headers: new Headers(stream.headers),
+      return new Response(readable, {
+        status: resp.status,
+        headers: new Headers(resp.headers),
+      });
+    }
+
+    return new Response((resp as BufferedResponse).body, {
+      status: resp.status,
+      headers: new Headers(resp.headers),
     });
   }
 
