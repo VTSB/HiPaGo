@@ -11,6 +11,12 @@ interface AbortableImageProps {
   draggable?: boolean;
   /** Called when all retries are exhausted — image permanently failed to load */
   onPermanentError?: () => void;
+  /**
+   * When true, loads the image immediately (like eager) but renders it hidden
+   * so it warms the browser cache without affecting layout or competing with
+   * visible page loads (fetchPriority="low").
+   */
+  preload?: boolean;
 }
 
 /**
@@ -23,12 +29,12 @@ interface AbortableImageProps {
  * - Once an image has fully loaded it is never cleared (even if scrolled away).
  * - `loading="eager"` bypasses the observer and loads immediately.
  */
-export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable, onPermanentError }: AbortableImageProps) {
+export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable, onPermanentError, preload = false }: AbortableImageProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const mountedRef = useRef(true);
   const loadedRef = useRef(false);
   const retryCountRef = useRef(0);
-  const [visible, setVisible] = useState(loading === 'eager');
+  const [visible, setVisible] = useState(loading === 'eager' || preload);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const onPermanentErrorRef = useRef(onPermanentError);
@@ -42,8 +48,8 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     retryCountRef.current = 0;
     setLoaded(false);
     setFailed(false);
-    if (loading !== 'eager') setVisible(false);
-  }, [src, loading]);
+    if (loading !== 'eager' && !preload) setVisible(false);
+  }, [src, loading, preload]);
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
@@ -85,7 +91,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
   // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded)
   useEffect(() => {
-    if (loading === 'eager') return;
+    if (loading === 'eager' || preload) return;
     const img = imgRef.current;
     if (!img) return;
 
@@ -114,7 +120,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
     observer.observe(img);
     return () => observer.disconnect();
-  }, [loading, src]);
+  }, [loading, src, preload]);
 
   // Track mount state for retry safety
   useEffect(() => {
@@ -125,12 +131,28 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   }, []);
 
   if (failed) {
+    if (preload) return null;
     return (
       <div className={className} style={{ ...style, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-zinc-800, #27272a)' }}>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" style={{ width: 32, height: 32, color: 'var(--color-zinc-500, #71717a)' }}>
           <path fillRule="evenodd" d="M1.5 6a2.25 2.25 0 012.25-2.25h16.5A2.25 2.25 0 0122.5 6v12a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18V6zM3 16.06V18c0 .414.336.75.75.75h16.5A.75.75 0 0021 18v-1.94l-2.69-2.689a1.5 1.5 0 00-2.12 0l-.88.879.97.97a.75.75 0 11-1.06 1.06l-5.16-5.159a1.5 1.5 0 00-2.12 0L3 16.061zm10.125-7.81a1.125 1.125 0 112.25 0 1.125 1.125 0 01-2.25 0z" clipRule="evenodd" />
         </svg>
       </div>
+    );
+  }
+
+  if (preload) {
+    return (
+      <img
+        ref={imgRef}
+        src={visible ? src : undefined}
+        alt=""
+        data-preload="true"
+        fetchPriority="low"
+        style={{ position: 'absolute', visibility: 'hidden', width: 0, height: 0, pointerEvents: 'none' }}
+        onLoad={handleLoad}
+        onError={handleError}
+      />
     );
   }
 

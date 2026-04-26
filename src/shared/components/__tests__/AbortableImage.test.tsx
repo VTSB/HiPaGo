@@ -106,6 +106,72 @@ describe('AbortableImage opacity fade-in', () => {
   });
 });
 
+describe('AbortableImage preload prop', () => {
+  it('preload=true renders img with fetchPriority="low"', () => {
+    const { container } = render(
+      <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
+    );
+    const img = container.querySelector('img') as HTMLImageElement;
+    expect(img).not.toBeNull();
+    // HTML attribute is lowercase even though JSX prop is camelCase
+    expect(img.getAttribute('fetchpriority')).toBe('low');
+  });
+
+  it('preload=true renders with hidden styles', () => {
+    const { container } = render(
+      <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
+    );
+    const img = container.querySelector('img') as HTMLImageElement;
+    expect(img.style.visibility).toBe('hidden');
+    expect(img.style.width).toBe('0px');
+  });
+
+  it('preload=true renders with data-preload="true"', () => {
+    const { container } = render(
+      <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
+    );
+    const img = container.querySelector('img') as HTMLImageElement;
+    expect(img.getAttribute('data-preload')).toBe('true');
+  });
+
+  it('preload=true does not create IntersectionObserver', () => {
+    render(
+      <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
+    );
+    expect(mockObserve).not.toHaveBeenCalled();
+  });
+
+  it('preload=true on failed state renders null', () => {
+    vi.useFakeTimers();
+
+    const { container } = render(
+      <AbortableImage src="https://example.com/missing.jpg" alt="test" preload />,
+    );
+
+    const img = container.querySelector('img') as HTMLImageElement;
+
+    // Fire errors to exhaust retries and reach permanent fail
+    // First error — starts retry 1
+    fireEvent.error(img);
+    vi.advanceTimersByTime(20000);
+    // Second error — starts retry 2
+    fireEvent.error(img);
+    vi.advanceTimersByTime(20000);
+    // Third error — starts retry 3
+    fireEvent.error(img);
+    vi.advanceTimersByTime(20000);
+    // Fourth error — retryCount >= 3, sets failed=true
+    fireEvent.error(img);
+    vi.advanceTimersByTime(20000);
+
+    // With preload=true and failed=true, component should render null
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('div')).toBeNull();
+
+    vi.useRealTimers();
+  });
+});
+
 describe('AbortableImage retry behavior', () => {
   it('stops retrying after 3 attempts', () => {
     vi.useFakeTimers();

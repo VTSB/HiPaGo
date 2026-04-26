@@ -7,7 +7,14 @@ import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 
-const PRELOAD_AHEAD = 3;
+// High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
+// tags still get decoded by the browser, so a large mounted window pins
+// hundreds of MB of bitmap memory and OOMs during rapid prev/next mashing.
+// We keep the window small and asymmetric (readers mostly move forward)
+// and warm the cache via JS Image() objects whose decoded bitmaps are
+// released the moment the user navigates again.
+const PRELOAD_AHEAD = 15;
+const PRELOAD_BEHIND = 5;
 
 export function PageReader({ images, currentPage, onPageChange }: { images: GalleryImage[]; currentPage: number; onPageChange: (p: number) => void }) {
   const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
@@ -23,9 +30,26 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
   }, [images, ggConfig, imageFormat]);
 
-  // Range of pages to keep in DOM
-  const start = Math.max(0, currentPage - PRELOAD_AHEAD);
-  const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
+  // Warm the HTTP cache for nearby pages without mounting them as DOM <img>.
+  // Cleanup clears src on each navigation, aborting any in-flight request
+  // and releasing the decoded bitmap so memory stays bounded under rapid nav.
+  useEffect(() => {
+    if (!urls.length) return;
+    const start = Math.max(0, currentPage - PRELOAD_BEHIND);
+    const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
+    const skip = new Set(dualPage ? [currentPage, currentPage + 1] : [currentPage]);
+    const loaders: HTMLImageElement[] = [];
+    for (let i = start; i <= end; i++) {
+      if (skip.has(i)) continue;
+      const img = new Image();
+      img.fetchPriority = 'low';
+      img.src = urls[i];
+      loaders.push(img);
+    }
+    return () => {
+      for (const img of loaders) img.src = '';
+    };
+  }, [urls, currentPage, dualPage]);
 
   if (!urls.length) return (
     <div className="flex min-h-screen items-center justify-center">
@@ -65,10 +89,15 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
           </svg>
         </div>
       )}
-      {/* Pages */}
+      {/* Pages — stable keys so React reuses the same <img> element across
+          page changes. Keying by `currentPage` creates a fresh element on
+          every nav, so rapid prev/next leaves dead elements (each pinning a
+          decoded bitmap) churning faster than the browser can GC them and
+          the same URL gets re-decoded into a new bitmap slot every revisit
+          instead of hitting the image cache — that's the real OOM source. */}
       <div className={dualPage ? 'flex items-center justify-center gap-1' : ''}>
         <AbortableImage
-          key={currentPage}
+          key="primary"
           src={urls[currentPage]}
           alt={`Page ${currentPage + 1}`}
           draggable={false}
@@ -77,7 +106,7 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
         />
         {hasSecond && (
           <AbortableImage
-            key={secondPage}
+            key="secondary"
             src={urls[secondPage]}
             alt={`Page ${secondPage + 1}`}
             draggable={false}
