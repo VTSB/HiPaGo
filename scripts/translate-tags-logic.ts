@@ -94,15 +94,6 @@ export interface StatusReport {
   partial: number;
   pending: number;
   batches: BatchStatusEntry[];
-  progress?: ProgressReport;
-}
-
-export interface ProgressReport {
-  total: number;
-  translated: number;
-  validated: number;
-  failed: number;
-  updatedAt: string;
 }
 
 // ─── normalizeVerdict ─────────────────────────────────────────────────────────
@@ -204,53 +195,35 @@ function makeBatchId(category: string, index: number): string {
   return `${category}-${String(index + 1).padStart(3, '0')}`;
 }
 
-// ─── Levenshtein distance for orphan detection ────────────────────────────────
+// Read every batch JSON in `batchDir` in parallel with bounded concurrency.
+// On v9fs (WSL2) sequential sync reads of thousands of small files dominate
+// runtime; this helper turns the scans in getStatus / runAnalyze resume /
+// collectVerdictsFromBatches into chunked async reads.
+async function readBatchesParallel(
+  batchDir: string,
+  options: { sort?: boolean; concurrency?: number } = {},
+): Promise<Array<{ file: string; batch: BatchFile }>> {
+  const { sort = false, concurrency = 64 } = options;
+  if (!fs.existsSync(batchDir)) return [];
+  let files = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json'));
+  if (sort) files = files.sort();
 
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
+  const results: Array<{ file: string; batch: BatchFile }> = [];
+  for (let i = 0; i < files.length; i += concurrency) {
+    const chunk = files.slice(i, i + concurrency);
+    const batches = await Promise.all(
+      chunk.map(async (file) => {
+        try {
+          const text = await fs.promises.readFile(path.join(batchDir, file), 'utf-8');
+          return { file, batch: JSON.parse(text) as BatchFile };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    for (const r of batches) if (r) results.push(r);
   }
-  return dp[m][n];
-}
-
-function similarity(a: string, b: string): number {
-  const maxLen = Math.max(a.length, b.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(a, b) / maxLen;
-}
-
-// ─── updateProgress ───────────────────────────────────────────────────────────
-
-function updateProgress(outputDir: string, lang: string): void {
-  const batchDir = path.join(outputDir, lang, 'batches');
-  if (!fs.existsSync(batchDir)) return;
-
-  const batchFiles = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json'));
-  let total = 0, translated = 0, validated = 0, failed = 0;
-
-  for (const file of batchFiles) {
-    const batch = readJsonSafe(path.join(batchDir, file), null);
-    if (!batch?.tags) continue;
-    for (const tag of batch.tags) {
-      total++;
-      if (tag.verdict) validated++;
-      else if (tag.translation) translated++;
-    }
-  }
-
-  const progress: ProgressReport = { total, translated, validated, failed, updatedAt: new Date().toISOString() };
-  const progressPath = path.join(outputDir, lang, 'progress.json');
-  fs.writeFileSync(progressPath, JSON.stringify(progress, null, 2));
+  return results;
 }
 
 // ─── getStatus ────────────────────────────────────────────────────────────────
@@ -276,10 +249,9 @@ export async function getStatus(opts: {
     return report;
   }
 
-  const files = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json')).sort();
+  const entries = await readBatchesParallel(batchDir, { sort: true });
 
-  for (const file of files) {
-    const batch = readJsonSafe<BatchFile>(path.join(batchDir, file), null as unknown as BatchFile);
+  for (const { batch } of entries) {
     if (!batch || !Array.isArray(batch.tags)) continue;
 
     const tagCount = batch.tags.length;
@@ -312,12 +284,6 @@ export async function getStatus(opts: {
 
   report.totalBatches = report.batches.length;
 
-  const progressPath = path.join(outputDir, lang, 'progress.json');
-  const progress = readJsonSafe<ProgressReport>(progressPath, null as unknown as ProgressReport);
-  if (progress) {
-    report.progress = progress;
-  }
-
   return report;
 }
 
@@ -328,10 +294,14 @@ export async function runAnalyze(opts: {
   i18nDir: string;
   outputDir: string;
   tags: Tag[];
+  maxBatches: number;
   source?: 'translate' | 'validate';
   fresh?: boolean;
-}): Promise<void> {
-  const { lang, i18nDir, outputDir, tags, source = 'translate', fresh = false } = opts;
+}): Promise<AnalysisReport> {
+  const { lang, i18nDir, outputDir, tags, maxBatches, source = 'translate', fresh = false } = opts;
+  if (!Number.isInteger(maxBatches) || maxBatches <= 0) {
+    throw new Error(`runAnalyze: maxBatches must be a positive integer (got ${maxBatches})`);
+  }
 
   const translationsPath = path.join(i18nDir, `${lang}.json`);
   const existing = readTranslationsFlat(translationsPath);
@@ -362,9 +332,8 @@ export async function runAnalyze(opts: {
     let existingValidatedCount = 0;
 
     if (!fresh && fs.existsSync(batchDir)) {
-      const existingFiles = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json'));
-      for (const file of existingFiles) {
-        const b = readJsonSafe<BatchFile>(path.join(batchDir, file), null as unknown as BatchFile);
+      const existingEntries = await readBatchesParallel(batchDir);
+      for (const { batch: b } of existingEntries) {
         if (!b || !b.tags) continue;
         const allValidated = b.tags.length > 0 && b.tags.every((t) => t.verdict !== undefined);
         if (allValidated) {
@@ -381,9 +350,9 @@ export async function runAnalyze(opts: {
           });
         }
       }
-      if (existingFiles.length > 0) {
+      if (existingEntries.length > 0) {
         console.error(
-          `[analyze] Resuming: found ${existingFiles.length} existing batches, ${existingValidatedCount} already validated`
+          `[analyze] Resuming: found ${existingEntries.length} existing batches, ${existingValidatedCount} already validated`
         );
       }
     }
@@ -391,8 +360,10 @@ export async function runAnalyze(opts: {
     // Only create new batches for entries not already in a validated batch
     const remainingEntries = entries.filter(([key]) => !existingBatchTagKeys.has(key));
     const startBatchIndex = reportBatches.length;
+    let newValidateBatchCount = 0;
 
     for (let i = 0; i < remainingEntries.length; i += VALIDATE_BATCH_SIZE) {
+      if (newValidateBatchCount >= maxBatches) break;
       const chunk = remainingEntries.slice(i, i + VALIDATE_BATCH_SIZE);
       const batchIndex = startBatchIndex + Math.floor(i / VALIDATE_BATCH_SIZE);
       const batchId = `validate-${String(batchIndex + 1).padStart(3, '0')}`;
@@ -428,6 +399,7 @@ export async function runAnalyze(opts: {
         strategy: 'direct',
         count: chunk.length,
       });
+      newValidateBatchCount++;
     }
 
     const report: AnalysisReport = {
@@ -444,7 +416,7 @@ export async function runAnalyze(opts: {
       JSON.stringify(report, null, 2),
       'utf-8'
     );
-    return;
+    return report;
   }
 
   // source === 'translate': batch untranslated tags (original behavior)
@@ -459,9 +431,8 @@ export async function runAnalyze(opts: {
   const resumedReportBatches: AnalysisReport['batches'] = [];
 
   if (!fresh && fs.existsSync(batchDir)) {
-    const existingFiles = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json'));
-    for (const file of existingFiles) {
-      const b = readJsonSafe<BatchFile>(path.join(batchDir, file), null as unknown as BatchFile);
+    const existingEntries = await readBatchesParallel(batchDir);
+    for (const { batch: b } of existingEntries) {
       if (!b || !b.tags) continue;
       const allValidated = b.tags.length > 0 && b.tags.every((t) => t.verdict !== undefined);
       if (allValidated) {
@@ -477,9 +448,9 @@ export async function runAnalyze(opts: {
         count: b.tags.length,
       });
     }
-    if (existingFiles.length > 0) {
+    if (existingEntries.length > 0) {
       console.error(
-        `[analyze] Resuming: found ${existingFiles.length} existing batches, ${existingValidatedCount} already validated`
+        `[analyze] Resuming: found ${existingEntries.length} existing batches, ${existingValidatedCount} already validated`
       );
     }
   }
@@ -505,8 +476,10 @@ export async function runAnalyze(opts: {
   }
 
   const reportBatches: AnalysisReport['batches'] = [...resumedReportBatches];
+  let newBatchCount = 0;
 
   for (const [category, catTags] of Object.entries(tagsByCategory)) {
+    if (newBatchCount >= maxBatches) break;
     const strategy: 'direct' | 'search' = DIRECT_CATEGORIES.has(category) ? 'direct' : 'search';
     const batchSize = strategy === 'direct' ? DIRECT_BATCH_SIZE : SEARCH_BATCH_SIZE;
 
@@ -525,6 +498,7 @@ export async function runAnalyze(opts: {
     ).length;
 
     for (let i = 0; i < catTags.length; i += batchSize) {
+      if (newBatchCount >= maxBatches) break;
       const chunk = catTags.slice(i, i + batchSize);
       const batchIndex = existingCategoryBatchCount + Math.floor(i / batchSize);
       const batchId = makeBatchId(category, batchIndex);
@@ -547,6 +521,7 @@ export async function runAnalyze(opts: {
         strategy,
         count: chunk.length,
       });
+      newBatchCount++;
     }
   }
 
@@ -564,6 +539,7 @@ export async function runAnalyze(opts: {
     JSON.stringify(report, null, 2),
     'utf-8'
   );
+  return report;
 }
 
 // ─── getBatch ─────────────────────────────────────────────────────────────────
@@ -613,7 +589,6 @@ export async function saveTranslations(opts: {
   });
 
   writeJsonAtomic(batchPath, batch);
-  updateProgress(outputDir, lang);
 }
 
 // ─── saveVerdicts ─────────────────────────────────────────────────────────────
@@ -646,7 +621,6 @@ export async function saveVerdicts(opts: {
   });
 
   writeJsonAtomic(batchPath, batch);
-  updateProgress(outputDir, lang);
 }
 
 // ─── collectVerdictsFromBatches ───────────────────────────────────────────────
@@ -658,20 +632,19 @@ interface CollectedVerdict {
   suggestion?: BatchTag['suggestion'];
 }
 
-function collectVerdictsFromBatches(opts: {
+async function collectVerdictsFromBatches(opts: {
   lang: string;
   outputDir: string;
   source?: 'translate' | 'validate';
-}): CollectedVerdict[] {
+}): Promise<CollectedVerdict[]> {
   const { lang, outputDir, source } = opts;
   const batchDir = path.join(outputDir, lang, 'batches');
   if (!fs.existsSync(batchDir)) return [];
 
-  const files = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json'));
+  const entries = await readBatchesParallel(batchDir);
   const results: CollectedVerdict[] = [];
 
-  for (const file of files) {
-    const batch = readJsonSafe<BatchFile>(path.join(batchDir, file), null as unknown as BatchFile);
+  for (const { batch } of entries) {
     if (!batch || !batch.tags) continue;
 
     // Filter by source
@@ -715,7 +688,7 @@ export async function getSummary(opts: {
     orphaned: 0,
   };
 
-  const verdicts = collectVerdictsFromBatches({ lang, outputDir, source });
+  const verdicts = await collectVerdictsFromBatches({ lang, outputDir, source });
 
   for (const v of verdicts) {
     summary.total++;
@@ -742,7 +715,7 @@ export async function applyVerdicts(opts: {
 }): Promise<void> {
   const { lang, i18nDir, outputDir } = opts;
 
-  const verdicts = collectVerdictsFromBatches({ lang, outputDir });
+  const verdicts = await collectVerdictsFromBatches({ lang, outputDir });
   const passItems = verdicts.filter((v) => v.verdict === 'PASS');
   const inaccurateItems = verdicts.filter(
     (v) =>
@@ -773,22 +746,42 @@ export async function applyVerdicts(opts: {
   const doWriteAi = () => {
     const existing = readTranslationsFlat(aiJsonPath);
     const merged = { ...existing };
+    let newPass = 0, changedPass = 0, newInaccurate = 0, changedInaccurate = 0, newOutdated = 0;
+
     for (const item of passItems) {
+      const prev = merged[item.key];
+      if (prev === undefined) newPass++;
+      else if (prev !== item.translation) changedPass++;
+      else continue; // unchanged, skip the assignment too — value identical
       merged[item.key] = item.translation;
     }
     for (const item of inaccurateItems) {
-      merged[item.key] = item.suggestion!.newTranslation!;
+      const newTranslation = item.suggestion!.newTranslation!;
+      const prev = merged[item.key];
+      if (prev === undefined) newInaccurate++;
+      else if (prev !== newTranslation) changedInaccurate++;
+      else continue;
+      merged[item.key] = newTranslation;
     }
     for (const item of outdatedItems) {
       // Build new key from suggestion.newName (preserve original category prefix)
       const [category] = item.key.split(':');
       const newKey = `${category}:${item.suggestion!.newName}`;
       const translation = item.suggestion?.newTranslation ?? item.translation;
+      // Migration is a no-op if old key already gone AND new key already has same translation
+      if (merged[item.key] === undefined && merged[newKey] === translation) continue;
       delete merged[item.key];
       merged[newKey] = translation;
+      newOutdated++;
+    }
+
+    const totalChanges = newPass + changedPass + newInaccurate + changedInaccurate + newOutdated;
+    if (totalChanges === 0) {
+      console.error('[applyVerdicts] No changes — all verdicts already applied.');
+      return;
     }
     console.error(
-      `[applyVerdicts] Applied ${passItems.length} PASS, ${inaccurateItems.length} INACCURATE corrections, ${outdatedItems.length} OUTDATED key migrations`
+      `[applyVerdicts] +${newPass} new PASS, ${changedPass} updated PASS, +${newInaccurate} new INACCURATE, ${changedInaccurate} updated INACCURATE, ${newOutdated} OUTDATED migrations`
     );
     writeTranslationsNested(aiJsonPath, merged);
   };
@@ -807,85 +800,6 @@ export async function applyVerdicts(opts: {
   } else {
     doWriteAi();
   }
-}
-
-// ─── runMigrateAiJson ─────────────────────────────────────────────────────────
-
-export async function runMigrateAiJson(opts: {
-  lang: string;
-  i18nDir: string;
-  outputDir: string;
-}): Promise<void> {
-  const { lang, i18nDir, outputDir } = opts;
-
-  const aiJsonPath = path.join(i18nDir, `${lang}.ai.json`);
-  if (!fs.existsSync(aiJsonPath)) {
-    console.error(`[migrate-ai-json] ${aiJsonPath} does not exist, nothing to migrate.`);
-    return;
-  }
-
-  // Read flat ko.ai.json (keys without category prefix, e.g. "chorus": "코러스")
-  const raw = readJsonSafe<Record<string, unknown>>(aiJsonPath, {});
-
-  // Determine if it's already nested
-  const firstValue = Object.values(raw)[0];
-  if (firstValue && typeof firstValue === 'object') {
-    console.error('[migrate-ai-json] ko.ai.json is already nested format. Nothing to migrate.');
-    return;
-  }
-
-  const flatNoPrefix = raw as Record<string, string>;
-  const totalEntries = Object.keys(flatNoPrefix).length;
-  console.error(`[migrate-ai-json] Found ${totalEntries} flat entries to migrate.`);
-
-  // Build name→category mapping from all batch files
-  const batchDir = path.join(outputDir, lang, 'batches');
-  const nameToCategory = new Map<string, string>();
-
-  if (fs.existsSync(batchDir)) {
-    const batchFiles = fs.readdirSync(batchDir).filter((f) => f.endsWith('.json'));
-    for (const file of batchFiles) {
-      const batch = readJsonSafe<BatchFile>(path.join(batchDir, file), null as unknown as BatchFile);
-      if (!batch || !batch.tags) continue;
-      for (const tag of batch.tags) {
-        if (tag.name && !nameToCategory.has(tag.name)) {
-          // Use tag.type if present (validate batches), otherwise batch.category
-          nameToCategory.set(tag.name, tag.type ?? batch.category);
-        }
-      }
-    }
-    console.error(`[migrate-ai-json] Built name→category map from ${batchFiles.length} batch files (${nameToCategory.size} entries).`);
-  } else {
-    console.error(`[migrate-ai-json] No batch directory found at ${batchDir}, all entries will use fallback category "tag".`);
-  }
-
-  // Build nested flat format: "category:name" → translation
-  const nested: FlatTranslations = {};
-  let mappedCount = 0;
-  let fallbackCount = 0;
-
-  for (const [name, translation] of Object.entries(flatNoPrefix)) {
-    const category = nameToCategory.get(name);
-    if (category && category !== 'mixed') {
-      nested[`${category}:${name}`] = translation;
-      mappedCount++;
-    } else {
-      nested[`tag:${name}`] = translation;
-      fallbackCount++;
-      if (fallbackCount <= 10) {
-        console.error(`[migrate-ai-json] fallback "tag" for: ${name}`);
-      } else if (fallbackCount === 11) {
-        console.error('[migrate-ai-json] (further fallbacks suppressed)');
-      }
-    }
-  }
-
-  writeTranslationsNested(aiJsonPath, nested);
-
-  console.error(`[migrate-ai-json] Done.`);
-  console.error(`  Total:    ${totalEntries}`);
-  console.error(`  Mapped:   ${mappedCount}`);
-  console.error(`  Fallback: ${fallbackCount}`);
 }
 
 // ─── Bypass fetch helper (uses Rust native addon for ISP bypass) ─────────────
@@ -914,14 +828,9 @@ async function getBypassFetch(): Promise<(url: string, headers?: Record<string, 
   }
 }
 
-// ─── crawlTags (uses tagindex API, falls back to HTML scraping) ───────────────
+// ─── crawlTags (HTML scrape only — tagindex.hitomi.la has no bulk endpoint) ───
 
-export async function crawlTags(_opts?: {
-  lang?: string;
-  useHtmlFallback?: boolean;
-}): Promise<Tag[]> {
-  // hitomi.la HTML pages are the only source for full tag lists.
-  // tagindex.hitomi.la is per-tag count lookup only (no bulk list endpoint).
+export async function crawlTags(): Promise<Tag[]> {
   return crawlTagsFromHtml();
 }
 

@@ -3,11 +3,11 @@ name: translate-tags
 description: Orchestrate AI tag translation pipeline. Use when the user wants to translate untranslated tags into a target language. Spawns parallel translator subagents that translate, validate, record verdicts, and apply results.
 user-invocable: true
 disable-model-invocation: false
-allowed-tools: Bash, Read, Glob, Agent
-argument-hint: [lang]
+allowed-tools: Bash, Read, Glob, Agent, AskUserQuestion
+argument-hint: [lang] [max-batches]
 ---
 
-# Translate Tags — `$ARGUMENTS[0]`
+# Translate Tags — `$ARGUMENTS[0]` (max `$ARGUMENTS[1]` batches)
 
 You are a tag translation orchestrator. You MUST NOT read or process any tag data directly.
 Your only job is to run CLI commands, read summary output, spawn subagents, and report statistics.
@@ -16,15 +16,20 @@ You NEVER see individual tag names, translations, or few-shot examples in your c
 
 ## Workflow
 
-### 1. Validate argument
+### 1. Validate arguments
 
-`$ARGUMENTS[0]` must be an ISO 639-1 language code (e.g., `ko`, `ja`, `zh-Hans`).
-If missing, ask the user which language to translate.
+Use the `AskUserQuestion` tool for every prompt below — never reply with a plain question.
+
+- `$ARGUMENTS[0]` should be an ISO 639-1 language code (e.g., `ko`, `ja`, `zh-Hans`).
+  - If `$ARGUMENTS[0]` is missing, call `AskUserQuestion` to pick a target language.
+  - If it does not look like an ISO 639-1 code (e.g., the user wrote `korean`, `한국어`, `Japanese`), infer the most likely code yourself and call `AskUserQuestion` with the inferred code as one option (e.g., "Did you mean `ko`?") plus an "other" option for manual entry. Proceed only after the user confirms.
+- `$ARGUMENTS[1]` must be a positive integer — the maximum number of batch files to generate this run.
+  - If missing or invalid, call `AskUserQuestion` to ask how many batches to process.
 
 ### 2. Run analysis
 
 ```bash
-npx tsx scripts/translate-tags.ts analyze --lang $0
+npx tsx scripts/translate-tags.ts analyze --lang $0 --max-batches $1
 ```
 
 Read ONLY `scripts/output/$0/analysis-report.json` — extract:

@@ -33,7 +33,6 @@ import {
   getSummary,
   applyVerdicts,
   crawlTags,
-  runMigrateAiJson,
   getStatus,
 } from './translate-tags-logic';
 
@@ -94,27 +93,46 @@ async function main() {
     case 'analyze': {
       const lang = requireFlag(flags, 'lang');
       const source = (flags['source'] as 'translate' | 'validate') ?? 'translate';
-      const useHtmlFallback = flags['fallback'] === 'true';
+      const maxBatchesRaw = source === 'validate'
+        ? (flags['max-batches'] ?? String(Number.MAX_SAFE_INTEGER))
+        : requireFlag(flags, 'max-batches');
+      const maxBatches = Number.parseInt(maxBatchesRaw, 10);
+      if (!Number.isInteger(maxBatches) || maxBatches <= 0) {
+        console.error(`Error: --max-batches must be a positive integer (got "${maxBatchesRaw}")`);
+        process.exit(1);
+      }
       const fresh = flags['fresh'] === 'true';
+      const refreshTags = flags['refresh-tags'] === 'true';
 
-      console.error(`[analyze] Crawling tags for lang=${lang}...`);
       let tags: Awaited<ReturnType<typeof crawlTags>>;
-      try {
-        tags = await crawlTags({ lang, useHtmlFallback });
-        console.error(`[analyze] Fetched ${tags.length} tags. Generating batches...`);
-      } catch (err) {
-        if (source === 'validate') {
-          console.error(`[analyze] Crawling failed, proceeding without exists check (all tags assumed existing): ${err}`);
-          tags = [];
-        } else {
-          throw err;
+      const cachePath = path.join(OUTPUT_DIR, '_tagcache.json');
+      const TTL_MS = 24 * 60 * 60 * 1000;
+      const cached = !refreshTags && fs.existsSync(cachePath)
+        ? JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as { fetchedAt: string; tags: Awaited<ReturnType<typeof crawlTags>> }
+        : null;
+      const cacheFresh = cached && Date.now() - new Date(cached.fetchedAt).getTime() < TTL_MS;
+
+      if (cacheFresh) {
+        tags = cached!.tags;
+        console.error(`[analyze] Using cached tag list (${tags.length} tags, fetched ${cached!.fetchedAt}). Use --refresh-tags to re-crawl.`);
+      } else {
+        console.error(`[analyze] Crawling tags for lang=${lang}...`);
+        try {
+          tags = await crawlTags();
+          fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+          fs.writeFileSync(cachePath, JSON.stringify({ fetchedAt: new Date().toISOString(), tags }), 'utf-8');
+          console.error(`[analyze] Fetched ${tags.length} tags. Generating up to ${maxBatches} batches...`);
+        } catch (err) {
+          if (source === 'validate') {
+            console.error(`[analyze] Crawling failed, proceeding without exists check (all tags assumed existing): ${err}`);
+            tags = [];
+          } else {
+            throw err;
+          }
         }
       }
 
-      await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, source, fresh });
-
-      const reportPath = path.join(OUTPUT_DIR, 'analysis-report.json');
-      const report = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
+      const report = await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, maxBatches, source, fresh });
       console.error(
         `[analyze] Done. ${report.translatedCount} translated, ${report.untranslatedCount} untranslated, ${report.batches.length} batches.`
       );
@@ -186,27 +204,19 @@ async function main() {
       break;
     }
 
-    case 'migrate-ai-json': {
-      const lang = requireFlag(flags, 'lang');
-
-      await runMigrateAiJson({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR });
-      break;
-    }
-
     default: {
       console.error(subcommand ? `Unknown subcommand: ${subcommand}` : 'Error: subcommand is required');
       console.error('');
       console.error('Usage: pnpm translate-tags <subcommand> [flags]');
       console.error('');
       console.error('Subcommands:');
-      console.error('  analyze             --lang ko [--source translate|validate] [--fresh]');
+      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--fresh] [--refresh-tags]');
       console.error('  get-batch           --lang ko --id <batchId>');
       console.error('  save-translations   --lang ko --batch <batchId> --input \'{"translations":[...]}\'');
       console.error('  save-verdicts       --lang ko --batch <batchId> --input \'{"verdicts":[...]}\'');
       console.error('  summary             --lang ko [--source translate|validate]');
       console.error('  apply               --lang ko');
       console.error('  status              --lang ko');
-      console.error('  migrate-ai-json     --lang ko');
       process.exit(1);
     }
   }

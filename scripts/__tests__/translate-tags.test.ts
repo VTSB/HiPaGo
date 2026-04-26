@@ -81,6 +81,7 @@ describe('analyze --source translate', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
       source: 'translate',
     });
@@ -124,6 +125,7 @@ describe('analyze --source translate', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
       source: 'translate',
     });
@@ -150,6 +152,7 @@ describe('analyze --source translate', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
     });
 
@@ -185,6 +188,7 @@ describe('analyze --source translate', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
     });
 
@@ -235,6 +239,7 @@ describe('analyze --source validate', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags: currentTags,
       source: 'validate',
     });
@@ -1093,6 +1098,7 @@ describe('runAnalyze resume behavior', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
       source: 'translate',
     });
@@ -1141,6 +1147,7 @@ describe('runAnalyze resume behavior', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
       source: 'translate',
     });
@@ -1179,6 +1186,7 @@ describe('runAnalyze resume behavior', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags,
       source: 'translate',
       fresh: true,
@@ -1231,6 +1239,7 @@ describe('runAnalyze resume behavior', () => {
       lang: 'ko',
       i18nDir: tmpDir,
       outputDir: path.join(tmpDir, 'output'),
+      maxBatches: 1000,
       tags: currentTags,
       source: 'validate',
     });
@@ -1275,192 +1284,6 @@ describe('normalizeVerdict', () => {
   it('maps unknown verdict to _NEEDS_REVIEW', async () => {
     const { normalizeVerdict } = await getLogic();
     expect(normalizeVerdict('unknown')).toBe('_NEEDS_REVIEW');
-  });
-});
-
-// ─── updateProgress (via saveTranslations / saveVerdicts) ─────────────────────
-
-describe('progress tracking', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = makeTempDir();
-  });
-
-  afterEach(() => {
-    cleanDir(tmpDir);
-  });
-
-  it('saveTranslations creates progress.json with correct counts', async () => {
-    const { saveTranslations } = await getLogic();
-
-    const batchDir = path.join(tmpDir, 'output', 'ko', 'batches');
-    fs.mkdirSync(batchDir, { recursive: true });
-
-    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
-      batchId: 'tag-001',
-      category: 'tag',
-      strategy: 'direct',
-      lang: 'ko',
-      tags: [
-        { name: 'glasses', count: 1000 },
-        { name: 'uniform', count: 800 },
-        { name: 'hat', count: 400 },
-      ],
-      fewShotExamples: [],
-    });
-
-    await saveTranslations({
-      lang: 'ko',
-      batchId: 'tag-001',
-      outputDir: path.join(tmpDir, 'output'),
-      translations: [
-        { name: 'glasses', translation: '안경' },
-        { name: 'uniform', translation: '교복' },
-      ],
-    });
-
-    const progressPath = path.join(tmpDir, 'output', 'ko', 'progress.json');
-    expect(fs.existsSync(progressPath)).toBe(true);
-
-    const progress = readJson(progressPath) as { total: number; translated: number; validated: number; failed: number; updatedAt: string };
-    expect(progress.total).toBe(3);
-    expect(progress.translated).toBe(2);
-    expect(progress.validated).toBe(0);
-    expect(progress.failed).toBe(0);
-    expect(typeof progress.updatedAt).toBe('string');
-  });
-
-  it('saveVerdicts updates progress.json with validated counts', async () => {
-    const { saveVerdicts } = await getLogic();
-
-    const batchDir = path.join(tmpDir, 'output', 'ko', 'batches');
-    fs.mkdirSync(batchDir, { recursive: true });
-
-    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
-      batchId: 'tag-001',
-      category: 'tag',
-      strategy: 'direct',
-      lang: 'ko',
-      tags: [
-        { name: 'glasses', count: 1000, translation: '안경' },
-        { name: 'uniform', count: 800, translation: '교복' },
-      ],
-      fewShotExamples: [],
-    });
-
-    await saveVerdicts({
-      lang: 'ko',
-      batchId: 'tag-001',
-      outputDir: path.join(tmpDir, 'output'),
-      verdicts: [
-        { name: 'glasses', verdict: 'PASS' },
-        { name: 'uniform', verdict: 'PASS' },
-      ],
-    });
-
-    const progressPath = path.join(tmpDir, 'output', 'ko', 'progress.json');
-    expect(fs.existsSync(progressPath)).toBe(true);
-
-    const progress = readJson(progressPath) as { total: number; translated: number; validated: number; failed: number };
-    expect(progress.total).toBe(2);
-    expect(progress.validated).toBe(2);
-    expect(progress.translated).toBe(0);
-  });
-
-  it('saveVerdicts accumulates counts across multiple batches', async () => {
-    const { saveVerdicts } = await getLogic();
-
-    const batchDir = path.join(tmpDir, 'output', 'ko', 'batches');
-    fs.mkdirSync(batchDir, { recursive: true });
-
-    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
-      batchId: 'tag-001',
-      category: 'tag',
-      strategy: 'direct',
-      lang: 'ko',
-      tags: [
-        { name: 'glasses', count: 1000, translation: '안경', verdict: 'PASS' },
-      ],
-      fewShotExamples: [],
-    });
-
-    writeJson(path.join(batchDir, 'batch-tag-002.json'), {
-      batchId: 'tag-002',
-      category: 'tag',
-      strategy: 'direct',
-      lang: 'ko',
-      tags: [
-        { name: 'uniform', count: 800, translation: '교복' },
-        { name: 'swimsuit', count: 600 },
-      ],
-      fewShotExamples: [],
-    });
-
-    await saveVerdicts({
-      lang: 'ko',
-      batchId: 'tag-002',
-      outputDir: path.join(tmpDir, 'output'),
-      verdicts: [{ name: 'uniform', verdict: 'PASS' }],
-    });
-
-    const progress = readJson(path.join(tmpDir, 'output', 'ko', 'progress.json')) as {
-      total: number; translated: number; validated: number;
-    };
-    // batch-001: 1 validated; batch-002: 1 validated (uniform), 0 translated (swimsuit has no translation)
-    expect(progress.total).toBe(3);
-    expect(progress.validated).toBe(2);
-    expect(progress.translated).toBe(0);
-  });
-
-  it('getStatus includes progress from progress.json when it exists', async () => {
-    const { saveTranslations, getStatus } = await getLogic();
-
-    const batchDir = path.join(tmpDir, 'output', 'ko', 'batches');
-    fs.mkdirSync(batchDir, { recursive: true });
-
-    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
-      batchId: 'tag-001',
-      category: 'tag',
-      strategy: 'direct',
-      lang: 'ko',
-      tags: [
-        { name: 'glasses', count: 1000 },
-        { name: 'uniform', count: 800 },
-      ],
-      fewShotExamples: [],
-    });
-
-    await saveTranslations({
-      lang: 'ko',
-      batchId: 'tag-001',
-      outputDir: path.join(tmpDir, 'output'),
-      translations: [
-        { name: 'glasses', translation: '안경' },
-        { name: 'uniform', translation: '교복' },
-      ],
-    });
-
-    const report = await getStatus({
-      lang: 'ko',
-      outputDir: path.join(tmpDir, 'output'),
-    });
-
-    expect(report.progress).toBeDefined();
-    expect(report.progress?.total).toBe(2);
-    expect(report.progress?.translated).toBe(2);
-    expect(report.progress?.validated).toBe(0);
-  });
-
-  it('getStatus has no progress field when progress.json does not exist', async () => {
-    const { getStatus } = await getLogic();
-
-    const report = await getStatus({
-      lang: 'ko',
-      outputDir: path.join(tmpDir, 'output'),
-    });
-
-    expect(report.progress).toBeUndefined();
   });
 });
 
