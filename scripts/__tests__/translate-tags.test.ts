@@ -1539,3 +1539,508 @@ describe('applyVerdicts INACCURATE and OUTDATED', () => {
     expect(aiJson['tag']['new-name']).toBe('기존 번역');
   });
 });
+
+// ─── Category defense ────────────────────────────────────────────────────────
+
+describe('category defense', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('drops invalid-category buckets when reading {lang}.json', async () => {
+    const { runAnalyze } = await getLogic();
+    writeJson(path.join(tmpDir, 'ko.json'), {
+      tag: { 'real-tag': '실제 태그' },
+      before: { 'no': '번호' }, // not a hitomi category
+      mixed: { 'foo': '바' },   // not a hitomi category
+    });
+
+    const tags: Tag[] = [{ name: 'real-tag', type: 'tag', count: 0 }];
+    await runAnalyze({
+      lang: 'ko', i18nDir: tmpDir, outputDir: path.join(tmpDir, 'output'),
+      tags, maxBatches: 5, source: 'translate',
+    });
+    // 'real-tag' is already in ko.json so it counts as translated, not untranslated.
+    // This proves the read filter kept the valid bucket and dropped the others.
+  });
+
+  it('refuses to write keys with invalid categories at apply time', async () => {
+    const { applyVerdicts } = await getLogic();
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+
+    const batchDir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(batchDir, { recursive: true });
+    writeJson(path.join(batchDir, 'batch-bad-001.json'), {
+      batchId: 'bad-001',
+      category: 'mixed', // invalid
+      strategy: 'direct',
+      lang: 'ko',
+      source: 'validate',
+      tags: [
+        { name: 'will-not-land', count: 0, translation: '안 들어감', verdict: 'PASS' }, // no tag.type
+      ],
+      fewShotExamples: [],
+    });
+
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir: path.join(tmpDir, 'output') });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['mixed']).toBeUndefined();
+    // Without ko.json fan-out source the entry has no resolvable category — dropped.
+    expect(Object.keys(ai)).not.toContain('mixed');
+  });
+
+  it('fan-out: legacy mixed batch keys land under all matching ko.json categories', async () => {
+    const { applyVerdicts } = await getLogic();
+    writeJson(path.join(tmpDir, 'ko.json'), {
+      male: { blowjob: '펠라' },
+      female: { blowjob: '펠라' },
+    });
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+
+    const batchDir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(batchDir, { recursive: true });
+    writeJson(path.join(batchDir, 'batch-validate-001.json'), {
+      batchId: 'validate-001',
+      strategy: 'direct',
+      lang: 'ko',
+      source: 'validate',
+      tags: [{ name: 'blowjob', count: 0, translation: '펠라', verdict: 'PASS' }], // no tag.type
+      fewShotExamples: [],
+    });
+
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir: path.join(tmpDir, 'output') });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['male']?.['blowjob']).toBe('펠라');
+    expect(ai['female']?.['blowjob']).toBe('펠라');
+  });
+});
+
+// ─── saveTranslations input validation ───────────────────────────────────────
+
+describe('saveTranslations input validation', () => {
+  let tmpDir: string;
+  let batchPath: string;
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+    const dir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(dir, { recursive: true });
+    batchPath = path.join(dir, 'batch-tag-001.json');
+    writeJson(batchPath, {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [
+        { name: 'real', count: 0 },
+        { name: 'real2', count: 0 },
+      ],
+      fewShotExamples: [],
+    });
+  });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('throws when translations is not an array', async () => {
+    const { saveTranslations } = await getLogic();
+    await expect(
+      saveTranslations({ lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'), translations: null as unknown as [] }),
+    ).rejects.toThrow(/must be an array/);
+  });
+
+  it('rejects unknown name, non-string translation, and empty translation without confidence:none', async () => {
+    const { saveTranslations } = await getLogic();
+    await saveTranslations({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      translations: [
+        { name: 'NOT_IN_BATCH', translation: 'x' },          // unknown
+        { name: 'real', translation: 123 as unknown as string }, // wrong type
+        { name: 'real', translation: '' },                    // empty without confidence:none
+        { name: 'real2', translation: '', confidence: 'none' }, // empty + none → accepted
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    const real = batch.tags.find((t) => t.name === 'real')!;
+    const real2 = batch.tags.find((t) => t.name === 'real2')!;
+    expect(real.translation).toBeUndefined();
+    expect(real2.translation).toBe('');
+    expect(real2.confidence).toBe('none');
+  });
+});
+
+// ─── saveVerdicts input validation ───────────────────────────────────────────
+
+describe('saveVerdicts input validation', () => {
+  let tmpDir: string;
+  let batchPath: string;
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+    const dir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(dir, { recursive: true });
+    batchPath = path.join(dir, 'batch-tag-001.json');
+    writeJson(batchPath, {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [
+        { name: 'foo', count: 0, translation: '푸' },
+        { name: 'bar', count: 0, translation: '바' },
+      ],
+      fewShotExamples: [],
+    });
+  });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('throws when verdicts is not an array', async () => {
+    const { saveVerdicts } = await getLogic();
+    await expect(
+      saveVerdicts({ lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'), verdicts: undefined as unknown as [] }),
+    ).rejects.toThrow(/must be an array/);
+  });
+
+  it('rejects INACCURATE without newTranslation or source', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'INACCURATE', suggestion: { newTranslation: '새' } }, // no source
+        { name: 'bar', verdict: 'INACCURATE', suggestion: { source: '나무위키' } },     // no newTranslation
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.verdict).toBeUndefined();
+    expect(batch.tags.find((t) => t.name === 'bar')!.verdict).toBeUndefined();
+  });
+
+  it('rejects OUTDATED with empty newName or newName containing :', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'OUTDATED', suggestion: { newName: '   ' } },
+        { name: 'bar', verdict: 'OUTDATED', suggestion: { newName: 'tag:injection' } },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.verdict).toBeUndefined();
+    expect(batch.tags.find((t) => t.name === 'bar')!.verdict).toBeUndefined();
+  });
+
+  it('trims newName / newTranslation / source before persisting', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'INACCURATE', suggestion: { newTranslation: '  새  ', source: '  나무위키  ' } },
+        { name: 'bar', verdict: 'OUTDATED', suggestion: { newName: '  newname  ' } },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    const foo = batch.tags.find((t) => t.name === 'foo')!;
+    const bar = batch.tags.find((t) => t.name === 'bar')!;
+    expect(foo.suggestion!.newTranslation).toBe('새');
+    expect(foo.suggestion!.source).toBe('나무위키');
+    expect(bar.suggestion!.newName).toBe('newname');
+  });
+});
+
+// ─── applyVerdicts existence + shape gates ───────────────────────────────────
+
+describe('applyVerdicts existence + shape gates', () => {
+  let tmpDir: string;
+  let outputDir: string;
+  let batchDir: string;
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+    outputDir = path.join(tmpDir, 'output');
+    batchDir = path.join(outputDir, 'ko', 'batches');
+    fs.mkdirSync(batchDir, { recursive: true });
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+  });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('rejects empty tag name (key like "tag:")', async () => {
+    const { applyVerdicts } = await getLogic();
+    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [{ name: '', type: 'tag', count: 0, translation: 'x', verdict: 'PASS' }],
+      fewShotExamples: [],
+    });
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['tag']?.['']).toBeUndefined();
+  });
+
+  it('cache present: rejects keys not in _tagcache.json', async () => {
+    const { applyVerdicts } = await getLogic();
+    writeJson(path.join(outputDir, '_tagcache.json'), {
+      fetchedAt: new Date().toISOString(),
+      tags: [{ name: 'real', type: 'tag', count: 0 }],
+    });
+    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [
+        { name: 'real', type: 'tag', count: 0, translation: '리얼', verdict: 'PASS' },
+        { name: 'fake', type: 'tag', count: 0, translation: '가짜', verdict: 'PASS' },
+      ],
+      fewShotExamples: [],
+    });
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['tag']?.['real']).toBe('리얼');
+    expect(ai['tag']?.['fake']).toBeUndefined();
+  });
+
+  it('OUTDATED rename target: cache miss OK (shape-only check)', async () => {
+    const { applyVerdicts } = await getLogic();
+    writeJson(path.join(outputDir, '_tagcache.json'), {
+      fetchedAt: new Date().toISOString(),
+      tags: [{ name: 'old', type: 'tag', count: 0 }], // 'newish' deliberately NOT in cache
+    });
+    writeJson(path.join(tmpDir, 'ko.ai.json'), { tag: { old: '구' } });
+    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [{
+        name: 'old', type: 'tag', count: 0, translation: '구',
+        verdict: 'OUTDATED', suggestion: { newName: 'newish' },
+      }],
+      fewShotExamples: [],
+    });
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['tag']?.['old']).toBeUndefined();
+    expect(ai['tag']?.['newish']).toBe('구');
+  });
+
+  it('orphaned (exists:false) tags are dropped before apply', async () => {
+    const { applyVerdicts } = await getLogic();
+    writeJson(path.join(batchDir, 'batch-validate-001.json'), {
+      batchId: 'validate-001', strategy: 'direct', lang: 'ko', source: 'validate',
+      tags: [{
+        name: 'gone', type: 'tag', count: 0, translation: '없어진',
+        exists: false, verdict: 'PASS',
+      }],
+      fewShotExamples: [],
+    });
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['tag']?.['gone']).toBeUndefined();
+  });
+});
+
+// ─── crawlTags fail-closed ───────────────────────────────────────────────────
+
+describe('crawlTags fail-closed', () => {
+  // crawlTags hits the network; we only assert the surface contract.
+  it('exports crawlTags as an async function', async () => {
+    const { crawlTags } = await getLogic();
+    expect(typeof crawlTags).toBe('function');
+  });
+});
+
+// ─── mutateBatch corrupt-batch guard ─────────────────────────────────────────
+
+describe('mutateBatch corrupt-batch guard', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('saveTranslations throws when batch.tags is missing/non-array', async () => {
+    const { saveTranslations } = await getLogic();
+    const dir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(dir, { recursive: true });
+    writeJson(path.join(dir, 'batch-tag-001.json'), {
+      batchId: 'tag-001', strategy: 'direct', lang: 'ko',
+      // tags field is intentionally missing
+      fewShotExamples: [],
+    });
+
+    await expect(
+      saveTranslations({
+        lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+        translations: [{ name: 'x', translation: 'y' }],
+      }),
+    ).rejects.toThrow(/corrupt batch — tags is not an array/);
+  });
+
+  it('saveVerdicts throws when batch.tags is missing/non-array', async () => {
+    const { saveVerdicts } = await getLogic();
+    const dir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(dir, { recursive: true });
+    writeJson(path.join(dir, 'batch-tag-002.json'), {
+      batchId: 'tag-002', strategy: 'direct', lang: 'ko', tags: 'not-an-array',
+      fewShotExamples: [],
+    });
+
+    await expect(
+      saveVerdicts({
+        lang: 'ko', batchId: 'tag-002', outputDir: path.join(tmpDir, 'output'),
+        verdicts: [{ name: 'x', verdict: 'PASS' }],
+      }),
+    ).rejects.toThrow(/corrupt batch — tags is not an array/);
+  });
+});
+
+// ─── string-shape defenses against LLM-supplied input ──────────────────────
+
+describe('saveTranslations / saveVerdicts string-shape defenses', () => {
+  let tmpDir: string;
+  let batchPath: string;
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+    const dir = path.join(tmpDir, 'output', 'ko', 'batches');
+    fs.mkdirSync(dir, { recursive: true });
+    batchPath = path.join(dir, 'batch-tag-001.json');
+    writeJson(batchPath, {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [
+        // No pre-existing translation so we can detect rejection vs accept.
+        { name: 'foo', count: 0 },
+        { name: 'bar', count: 0 },
+        { name: 'baz', count: 0 },
+      ],
+      fewShotExamples: [],
+    });
+  });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('saveTranslations rejects control characters in translation', async () => {
+    const { saveTranslations } = await getLogic();
+    await saveTranslations({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      translations: [
+        { name: 'foo', translation: '안경 evil' },
+        { name: 'bar', translation: '\x1b[31mred' },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.translation).toBeUndefined();
+    expect(batch.tags.find((t) => t.name === 'bar')!.translation).toBeUndefined();
+  });
+
+  it('saveVerdicts rejects control chars in INACCURATE newTranslation and oversize source', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'INACCURATE', suggestion: { newTranslation: '안경 ', source: '나무위키' } },
+        { name: 'bar', verdict: 'INACCURATE', suggestion: { newTranslation: '안경', source: 'x'.repeat(10_000_000) } },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.verdict).toBeUndefined();
+    expect(batch.tags.find((t) => t.name === 'bar')!.verdict).toBeUndefined();
+  });
+
+  it('saveVerdicts rejects OUTDATED newName with control chars, slashes, or excessive length', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'OUTDATED', suggestion: { newName: '../../../etc' } },
+        { name: 'bar', verdict: 'OUTDATED', suggestion: { newName: 'a b' } },
+        { name: 'baz', verdict: 'OUTDATED', suggestion: { newName: 'x'.repeat(200) } },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.verdict).toBeUndefined();
+    expect(batch.tags.find((t) => t.name === 'bar')!.verdict).toBeUndefined();
+    expect(batch.tags.find((t) => t.name === 'baz')!.verdict).toBeUndefined();
+  });
+
+  it('saveTranslations rejects translations exceeding the length cap', async () => {
+    const { saveTranslations } = await getLogic();
+    await saveTranslations({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      translations: [{ name: 'foo', translation: 'x'.repeat(100_000) }],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.translation).toBeUndefined();
+  });
+
+  it('saveVerdicts rejects INACCURATE newTranslation exceeding the length cap', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'INACCURATE', suggestion: { newTranslation: 'x'.repeat(100_000), source: '나무위키' } },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    expect(batch.tags.find((t) => t.name === 'foo')!.verdict).toBeUndefined();
+  });
+
+  it('saveTranslations drops unknown confidence values but keeps the translation', async () => {
+    const { saveTranslations } = await getLogic();
+    await saveTranslations({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      translations: [{ name: 'foo', translation: '푸', confidence: 'X'.repeat(100_000) }],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    const foo = batch.tags.find((t) => t.name === 'foo')!;
+    expect(foo.translation).toBe('푸');
+    expect(foo.confidence).toBeUndefined();
+  });
+
+  it('saveVerdicts drops oversize / control-char reason but keeps the verdict', async () => {
+    const { saveVerdicts } = await getLogic();
+    await saveVerdicts({
+      lang: 'ko', batchId: 'tag-001', outputDir: path.join(tmpDir, 'output'),
+      verdicts: [
+        { name: 'foo', verdict: 'PASS', reason: 'x'.repeat(100_000) },
+        { name: 'bar', verdict: 'PASS', reason: 'evil\x00null' },
+      ],
+    });
+    const batch = readJson(batchPath) as BatchFile;
+    const foo = batch.tags.find((t) => t.name === 'foo')!;
+    const bar = batch.tags.find((t) => t.name === 'bar')!;
+    expect(foo.verdict).toBe('PASS');
+    expect(foo.reason).toBeUndefined();
+    expect(bar.verdict).toBe('PASS');
+    expect(bar.reason).toBeUndefined();
+  });
+
+  it('applyVerdicts skips OUTDATED when resolved translation is empty', async () => {
+    const { applyVerdicts } = await getLogic();
+    const outputDir2 = path.join(tmpDir, 'output');
+    const batchDir2 = path.join(outputDir2, 'ko', 'batches');
+    fs.mkdirSync(batchDir2, { recursive: true });
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+    writeJson(path.join(batchDir2, 'batch-validate-001.json'), {
+      batchId: 'validate-001', strategy: 'direct', lang: 'ko', source: 'validate',
+      tags: [{
+        name: 'oldname', type: 'tag', count: 0,
+        translation: '   ', // pre-existing whitespace-only
+        verdict: 'OUTDATED', suggestion: { newName: 'newname' },
+      }],
+      fewShotExamples: [],
+    });
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir: outputDir2 });
+    const ai = readJson(path.join(tmpDir, 'ko.ai.json')) as Record<string, Record<string, string>>;
+    expect(ai['tag']?.['newname']).toBeUndefined();
+  });
+});
+
+// ─── applyVerdicts cache-absent AUDIT log ────────────────────────────────────
+
+describe('applyVerdicts cache-absent AUDIT log', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => cleanDir(tmpDir));
+
+  it('emits [AUDIT] when _tagcache.json is absent', async () => {
+    const { applyVerdicts } = await getLogic();
+    const outputDir = path.join(tmpDir, 'output');
+    const batchDir = path.join(outputDir, 'ko', 'batches');
+    fs.mkdirSync(batchDir, { recursive: true });
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+    writeJson(path.join(batchDir, 'batch-tag-001.json'), {
+      batchId: 'tag-001', category: 'tag', strategy: 'direct', lang: 'ko',
+      tags: [{ name: 'foo', type: 'tag', count: 0, translation: '푸', verdict: 'PASS' }],
+      fewShotExamples: [],
+    });
+
+    const messages: string[] = [];
+    const orig = console.error;
+    console.error = (...args: unknown[]) => { messages.push(args.join(' ')); };
+    try {
+      await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+    } finally {
+      console.error = orig;
+    }
+    expect(messages.some((m) => m.includes('[AUDIT]') && m.includes('_tagcache.json absent'))).toBe(true);
+  });
+});

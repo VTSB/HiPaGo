@@ -63,6 +63,9 @@ function requireFlag(flags: Record<string, string>, name: string): string {
   return val;
 }
 
+const MAX_INPUT_BYTES = 10 * 1024 * 1024;
+const INPUT_FILE_ALLOWLIST = ['/tmp/', path.resolve(__dirname, '..') + path.sep];
+
 function parseInput(flags: Record<string, string>): Record<string, unknown> {
   const input = flags['input'];
   if (!input) {
@@ -71,7 +74,29 @@ function parseInput(flags: Record<string, string>): Record<string, unknown> {
   }
 
   if (input.startsWith('@')) {
-    const filePath = input.slice(1);
+    // Defend against prompt-injected paths (`@/etc/passwd`, `@../../.ssh/id_rsa`)
+    // and symlink redirects (any segment, not just leaf): resolve to a real
+    // path, require it under an allowlisted root, require regular file, cap size.
+    let filePath: string;
+    try {
+      filePath = fs.realpathSync(path.resolve(input.slice(1)));
+    } catch (err) {
+      console.error(`Error: --input @${input.slice(1)}: ${(err as Error).message}`);
+      process.exit(1);
+    }
+    if (!INPUT_FILE_ALLOWLIST.some((root) => filePath.startsWith(root))) {
+      console.error(`Error: --input @${filePath} is outside the allowlisted roots (/tmp, project root)`);
+      process.exit(1);
+    }
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      console.error(`Error: --input @${filePath} is not a regular file`);
+      process.exit(1);
+    }
+    if (stat.size > MAX_INPUT_BYTES) {
+      console.error(`Error: --input @${filePath} is ${stat.size} bytes (max ${MAX_INPUT_BYTES})`);
+      process.exit(1);
+    }
     return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
   }
 
@@ -107,9 +132,18 @@ async function main() {
       let tags: Awaited<ReturnType<typeof crawlTags>>;
       const cachePath = path.join(OUTPUT_DIR, '_tagcache.json');
       const TTL_MS = 24 * 60 * 60 * 1000;
-      const cached = !refreshTags && fs.existsSync(cachePath)
-        ? JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as { fetchedAt: string; tags: Awaited<ReturnType<typeof crawlTags>> }
-        : null;
+      // Cache load is fail-soft: a corrupt/partial _tagcache.json triggers a
+      // fresh crawl rather than crashing analyze.
+      let cached: { fetchedAt: string; tags: Awaited<ReturnType<typeof crawlTags>> } | null = null;
+      if (!refreshTags && fs.existsSync(cachePath)) {
+        try {
+          const raw = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+          if (raw && typeof raw.fetchedAt === 'string' && Array.isArray(raw.tags)) cached = raw;
+          else console.error('[analyze] _tagcache.json malformed, ignoring.');
+        } catch (err) {
+          console.error(`[analyze] _tagcache.json unreadable, ignoring: ${(err as Error).message}`);
+        }
+      }
       const cacheFresh = cached && Date.now() - new Date(cached.fetchedAt).getTime() < TTL_MS;
 
       if (cacheFresh) {
@@ -117,19 +151,14 @@ async function main() {
         console.error(`[analyze] Using cached tag list (${tags.length} tags, fetched ${cached!.fetchedAt}). Use --refresh-tags to re-crawl.`);
       } else {
         console.error(`[analyze] Crawling tags for lang=${lang}...`);
-        try {
-          tags = await crawlTags();
-          fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-          fs.writeFileSync(cachePath, JSON.stringify({ fetchedAt: new Date().toISOString(), tags }), 'utf-8');
-          console.error(`[analyze] Fetched ${tags.length} tags. Generating up to ${maxBatches} batches...`);
-        } catch (err) {
-          if (source === 'validate') {
-            console.error(`[analyze] Crawling failed, proceeding without exists check (all tags assumed existing): ${err}`);
-            tags = [];
-          } else {
-            throw err;
-          }
-        }
+        // Fail-closed: a crawl failure for either source mode aborts. Validate
+        // batches without a current tag list would defeat the existence gate
+        // (everything would be stamped exists:true and the apply-time cache
+        // check would be inactive). Keep the cache around for offline reuse.
+        tags = await crawlTags();
+        fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+        fs.writeFileSync(cachePath, JSON.stringify({ fetchedAt: new Date().toISOString(), tags }), 'utf-8');
+        console.error(`[analyze] Fetched ${tags.length} tags. Generating up to ${maxBatches} batches...`);
       }
 
       const report = await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, maxBatches, source, fresh });

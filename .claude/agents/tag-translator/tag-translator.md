@@ -50,10 +50,17 @@ Output JSON: `[{ "name": "original", "translation": "translated", "confidence": 
 
 ### 3. Save translations to batch file
 
-After translating, save the results back to the batch file via CLI:
+Tag names may contain `'`, `$`, backticks, or other shell metacharacters, so
+**always** pass the payload via a tmp file with `--input @file`. Never inline
+the JSON in single quotes.
 
 ```bash
-npx tsx scripts/translate-tags.ts save-translations --lang {lang} --batch {batchId} --input '{"translations": [{"name": "original", "translation": "translated", "confidence": "high"}, ...]}'
+TMP=$(mktemp /tmp/translations-XXXXXX.json)
+cat > "$TMP" <<'EOF'
+{"translations": [{"name": "original", "translation": "translated", "confidence": "high"}, ...]}
+EOF
+npx tsx scripts/translate-tags.ts save-translations --lang {lang} --batch {batchId} --input "@$TMP"
+rm -f "$TMP"
 ```
 
 ## Rules

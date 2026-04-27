@@ -35,10 +35,18 @@ For each tag entry in the batch:
 
 ## Saving Verdicts
 
-After validating all tags, save verdicts back to the batch file via CLI:
+After validating all tags, save verdicts back to the batch file via CLI.
+Tag names may contain `'`, `$`, backticks, or other shell metacharacters, so
+**always** pass the payload via a tmp file with `--input @file`. Never inline
+the JSON in single quotes.
 
 ```bash
-npx tsx scripts/translate-tags.ts save-verdicts --lang {lang} --batch {batchId} --input '{"verdicts": [{"name": "tag_name", "verdict": "PASS"}, {"name": "bad_tag", "verdict": "REJECT", "reason": "empty translation"}, ...]}'
+TMP=$(mktemp /tmp/verdicts-XXXXXX.json)
+cat > "$TMP" <<'EOF'
+{"verdicts": [{"name": "tag_name", "verdict": "PASS"}, {"name": "bad_tag", "verdict": "REJECT", "reason": "empty translation"}, ...]}
+EOF
+npx tsx scripts/translate-tags.ts save-verdicts --lang {lang} --batch {batchId} --input "@$TMP"
+rm -f "$TMP"
 ```
 
 This merges verdict fields into the batch file so the caller can read them.
