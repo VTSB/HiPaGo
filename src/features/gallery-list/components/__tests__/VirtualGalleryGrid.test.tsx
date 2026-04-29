@@ -25,6 +25,7 @@ vi.mock('../GalleryCard', () => ({
 }));
 
 const mockScrollToIndex = vi.fn();
+const mockMeasure = vi.fn();
 
 vi.mock('@tanstack/react-virtual', () => ({
   useWindowVirtualizer: ({
@@ -47,6 +48,7 @@ vi.mock('@tanstack/react-virtual', () => ({
         })),
       getTotalSize: () => count * sz,
       scrollToIndex: mockScrollToIndex,
+      measure: mockMeasure,
     };
   },
 }));
@@ -292,6 +294,67 @@ describe('VirtualGalleryGrid — sliding window', () => {
 // ---------------------------------------------------------------------------
 // scrollToItem ref
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Resize behavior — anchoring policy (regression guard for #perf-resize)
+// ---------------------------------------------------------------------------
+
+describe('VirtualGalleryGrid — resize anchoring', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1500 });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function flushRaf() {
+    // rAF is throttled via setTimeout in jsdom under fake timers
+    act(() => { vi.advanceTimersByTime(32); });
+  }
+
+  it('does NOT call scrollToIndex when resize stays inside the same column breakpoint', () => {
+    // 1500px → lg → 5 cols (gridColumns=5 mock)
+    render(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 10}
+        totalPages={10}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    mockScrollToIndex.mockClear();
+
+    // 1400px is still lg → cols stays 5 → no anchoring should happen.
+    // This is the perf-critical case: dragging the window edge must not
+    // trigger virtualizer.scrollToIndex (which forces synchronous layout).
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1400 });
+    act(() => { window.dispatchEvent(new Event('resize')); });
+    flushRaf();
+
+    expect(mockScrollToIndex).not.toHaveBeenCalled();
+  });
+
+  it('DOES call scrollToIndex when resize crosses a column-count breakpoint', () => {
+    render(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 10}
+        totalPages={10}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    mockScrollToIndex.mockClear();
+
+    // 700px is below md (768) → bp[1] = 3 cols → cols changes from 5 → 3 → anchor
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 700 });
+    act(() => { window.dispatchEvent(new Event('resize')); });
+    flushRaf();
+
+    expect(mockScrollToIndex).toHaveBeenCalled();
+  });
+});
 
 describe('VirtualGalleryGrid — scrollToItem handle', () => {
   beforeEach(() => vi.clearAllMocks());

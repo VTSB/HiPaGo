@@ -79,8 +79,16 @@ function useActualGridColumns(): number {
       setCols(w >= 1024 ? bp[3] : w >= 768 ? bp[2] : w >= 640 ? bp[1] : bp[0]);
     };
     compute();
-    window.addEventListener('resize', compute);
-    return () => window.removeEventListener('resize', compute);
+    let rafId = 0;
+    const onResize = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => { rafId = 0; compute(); });
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, [settingsCols]);
 
   return cols;
@@ -123,9 +131,16 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
         setContainerWidth(Math.round(el.clientWidth));
       };
       update();
-      const ro = new ResizeObserver(() => update());
+      let rafId = 0;
+      const ro = new ResizeObserver(() => {
+        if (rafId) return;
+        rafId = requestAnimationFrame(() => { rafId = 0; update(); });
+      });
       ro.observe(el);
-      return () => ro.disconnect();
+      return () => {
+        ro.disconnect();
+        if (rafId) cancelAnimationFrame(rafId);
+      };
     }, []);
 
     // Deterministic row height — computed directly from current state, no caching
@@ -191,15 +206,20 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       prevActualColsRef.current = actualCols;
       prevContainerWidthRef.current = containerWidth;
 
-      // Invalidate all cached row sizes so virtualizer uses the new estimateSize
+      // Invalidate cached row sizes so virtualizer uses the new estimateSize
       virtualizer.measure();
 
-      // Anchor scroll to the same content position
-      const anchorRow = Math.max(
-        0,
-        Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
-      );
-      virtualizer.scrollToIndex(Math.min(anchorRow, totalRows - 1), { align: 'start' });
+      // Only anchor scroll when column count changes — that fundamentally rearranges
+      // content. Width-only changes (e.g. dragging the window edge) just rescale rows
+      // in place, so calling scrollToIndex on every pixel would force synchronous
+      // layout (Virtualizer.getMaxScrollOffset → Layout) and tank resize FPS.
+      if (colsChanged) {
+        const anchorRow = Math.max(
+          0,
+          Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
+        );
+        virtualizer.scrollToIndex(Math.min(anchorRow, totalRows - 1), { align: 'start' });
+      }
     }, [actualCols, containerWidth, viewingPage, windowStartPage, totalRows, virtualizer]);
 
     // On first render with data, scroll to the initial viewingPage if it's not page 1.
