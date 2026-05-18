@@ -128,6 +128,7 @@ async function main() {
       }
       const fresh = flags['fresh'] === 'true';
       const refreshTags = flags['refresh-tags'] === 'true';
+      const categoryFilter = flags['category'];
 
       let tags: Awaited<ReturnType<typeof crawlTags>>;
       const cachePath = path.join(OUTPUT_DIR, '_tagcache.json');
@@ -161,7 +162,7 @@ async function main() {
         console.error(`[analyze] Fetched ${tags.length} tags. Generating up to ${maxBatches} batches...`);
       }
 
-      const report = await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, maxBatches, source, fresh });
+      const report = await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, maxBatches, source, fresh, categoryFilter });
       console.error(
         `[analyze] Done. ${report.translatedCount} translated, ${report.untranslatedCount} untranslated, ${report.batches.length} batches.`
       );

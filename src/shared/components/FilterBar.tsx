@@ -5,6 +5,8 @@ import { SearchInput } from '@/shared/components/SearchInput';
 import { SuggestionDropdown } from '@/features/search/components/SuggestionDropdown';
 import { parseToken } from '@/shared/utils/parse-token';
 import { searchLocalTags } from '@/lib/db/search-local';
+import { getSuggestionsForQuery } from '@/lib/api/search';
+import { useDbStatusStore } from '@/lib/store/db-status';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
 import { useSearchInputState } from '@/shared/hooks/useSearchInputState';
 import type { TagType, Suggestion } from '@/lib/utils/types';
@@ -22,6 +24,9 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const ignoreMouseRef = useRef(false);
+  const reqIdRef = useRef(0);
+
+  const dbReady = useDbStatusStore((s) => s.dbReady);
 
   const {
     value,
@@ -41,9 +46,13 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
   }, []);
   useClickOutside([inputRef, dropdownRef], handleClickOutside);
 
-  // Debounced autocomplete
+  // Debounced autocomplete. Uses the local tag DB once it has finished
+  // syncing (dbReady), and the remote tagindex API until then. dbReady is a
+  // dependency so suggestions refresh automatically the moment the local DB
+  // becomes ready, without the user re-typing.
   useEffect(() => {
     const searchTerm = colonIdx > 0 ? activeToken.slice(colonIdx + 1) : activeToken;
+    const reqId = ++reqIdRef.current;
 
     if (searchTerm.length < 2) {
       setSuggestions([]);
@@ -52,14 +61,23 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
     }
 
     const timer = setTimeout(async () => {
-      const typeFilter = colonIdx > 0 ? (activeToken.slice(0, colonIdx) as TagType) : undefined;
-      const results = await searchLocalTags(searchTerm, typeFilter, 10);
-      setSuggestions(results);
-      setShowDropdown(results.length > 0);
-    }, 200);
+      try {
+        const typeFilter = colonIdx > 0 ? (activeToken.slice(0, colonIdx) as TagType) : undefined;
+        const results = dbReady
+          ? await searchLocalTags(searchTerm, typeFilter, 10)
+          : await getSuggestionsForQuery(activeToken);
+        // Discard a slow in-flight response superseded by a newer request
+        // (e.g. a remote query still resolving after dbReady flipped true).
+        if (reqId !== reqIdRef.current) return;
+        setSuggestions(results);
+        setShowDropdown(results.length > 0);
+      } catch {
+        // network/db failure — keep existing suggestions
+      }
+    }, dbReady ? 120 : 300);
 
     return () => clearTimeout(timer);
-  }, [activeToken, colonIdx]);
+  }, [activeToken, colonIdx, dbReady]);
 
   // Notify parent when value changes
   useEffect(() => {

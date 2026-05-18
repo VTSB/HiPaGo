@@ -2,12 +2,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import { FilterBar } from '../FilterBar';
+import { useDbStatusStore } from '@/lib/store/db-status';
+import type { Suggestion } from '@/lib/utils/types';
 
-const { mockSearchLocalTags } = vi.hoisted(() => ({
+const { mockSearchLocalTags, mockGetSuggestionsForQuery } = vi.hoisted(() => ({
   mockSearchLocalTags: vi.fn().mockResolvedValue([]),
+  mockGetSuggestionsForQuery: vi.fn().mockResolvedValue([]),
 }));
 
 let onSuggestionSelect: ((tag: string, tagType: string) => void) | null = null;
+let lastDropdownSuggestions: Suggestion[] | null = null;
+
+/** A manually-resolvable promise, for deterministic race tests. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
 
 // ---------------------------------------------------------------------------
 // Mock SearchInput as a simple controlled input so FilterBar logic is testable
@@ -79,13 +90,18 @@ vi.mock('@/lib/db/search-local', () => ({
   searchLocalTags: mockSearchLocalTags,
 }));
 
+vi.mock('@/lib/api/search', () => ({
+  getSuggestionsForQuery: mockGetSuggestionsForQuery,
+}));
+
 vi.mock('@/shared/hooks/useClickOutside', () => ({
   useClickOutside: vi.fn(),
 }));
 
 vi.mock('@/features/search/components/SuggestionDropdown', () => ({
-  SuggestionDropdown: (props: { onSelect: (tag: string, tagType: string) => void }) => {
+  SuggestionDropdown: (props: { onSelect: (tag: string, tagType: string) => void; suggestions: Suggestion[] }) => {
     onSuggestionSelect = props.onSelect;
+    lastDropdownSuggestions = props.suggestions;
     return <div data-testid="suggestion-dropdown" />;
   },
 }));
@@ -99,11 +115,16 @@ describe('FilterBar integration', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     onSuggestionSelect = null;
+    lastDropdownSuggestions = null;
     mockSearchLocalTags.mockResolvedValue([]);
+    mockGetSuggestionsForQuery.mockResolvedValue([]);
+    // Default to a ready tag DB so the local-search path is exercised.
+    useDbStatusStore.setState({ dbReady: true });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    useDbStatusStore.setState({ dbReady: false });
   });
 
   it('selecting a suggestion inserts tag into value and calls onFilterChange', async () => {
@@ -284,5 +305,106 @@ describe('FilterBar integration', () => {
     const lastCall = onFilterChange.mock.calls[onFilterChange.mock.calls.length - 1][0];
     expect(lastCall.tags).toEqual([{ type: 'female', name: 'lion' }]);
     expect(lastCall.titleQuery).toBe('');
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC-002 — remote fallback while the local tag DB is still syncing
+  // ---------------------------------------------------------------------------
+  it('uses remote getSuggestionsForQuery when the tag DB is not ready', async () => {
+    useDbStatusStore.setState({ dbReady: false });
+    mockGetSuggestionsForQuery.mockResolvedValue([{ tagType: 'female', tag: 'remote', amount: 7 }]);
+
+    const { container } = render(
+      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
+    );
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledWith('female:lo');
+    expect(mockSearchLocalTags).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC-001 — autocomplete re-queries the local DB the moment dbReady flips true
+  // ---------------------------------------------------------------------------
+  it('switches to local DB search automatically when the tag DB becomes ready', async () => {
+    useDbStatusStore.setState({ dbReady: false });
+    mockGetSuggestionsForQuery.mockResolvedValue([]);
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
+
+    const { container } = render(
+      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
+    );
+    const mainInput = getMainInput(container);
+
+    // Query typed while the DB is still syncing — remote path runs.
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalled();
+    expect(mockSearchLocalTags).not.toHaveBeenCalled();
+
+    // Tag DB finishes syncing — effect must re-run on the dbReady transition
+    // without the user editing the input.
+    act(() => {
+      useDbStatusStore.setState({ dbReady: true });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120);
+    });
+
+    expect(mockSearchLocalTags).toHaveBeenCalledWith('lo', 'female', 10);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC-003 — a stale in-flight remote response cannot overwrite the fresh
+  // local result produced after the dbReady transition.
+  // ---------------------------------------------------------------------------
+  it('discards a stale remote response that resolves after the dbReady transition', async () => {
+    useDbStatusStore.setState({ dbReady: false });
+    const remote = deferred<Suggestion[]>();
+    mockGetSuggestionsForQuery.mockReturnValue(remote.promise);
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'localtag', amount: 5 }]);
+
+    const { container } = render(
+      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
+    );
+    const mainInput = getMainInput(container);
+
+    // Remote request fires and stays in-flight (deferred not yet resolved).
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalled();
+
+    // DB becomes ready — local search supersedes the in-flight remote request.
+    act(() => {
+      useDbStatusStore.setState({ dbReady: true });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120);
+    });
+    expect(lastDropdownSuggestions).toEqual([{ tagType: 'female', tag: 'localtag', amount: 5 }]);
+
+    // Stale remote response resolves late — the request-id guard must drop it.
+    await act(async () => {
+      remote.resolve([{ tagType: 'female', tag: 'stale-remote', amount: 99 }]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(lastDropdownSuggestions).toEqual([{ tagType: 'female', tag: 'localtag', amount: 5 }]);
   });
 });
