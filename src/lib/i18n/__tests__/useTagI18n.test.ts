@@ -13,10 +13,11 @@ import { TagType } from '@/lib/utils/types';
 const { mockStoreState, mockUseTagI18nStore } = vi.hoisted(() => {
   const state = {
     isLoaded: false,
+    loadedLocale: null as string | null,
     nameToLocal: new Map<string, string>(),
   };
   const store = Object.assign(
-    (selector?: (s: typeof state) => unknown) => selector ? selector(state) : state,
+    (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state),
     { getState: () => state },
   );
   return { mockStoreState: state, mockUseTagI18nStore: store };
@@ -24,6 +25,29 @@ const { mockStoreState, mockUseTagI18nStore } = vi.hoisted(() => {
 
 vi.mock('@/lib/store/tag-i18n', () => ({
   useTagI18nStore: mockUseTagI18nStore,
+  getTagI18nLookupKeys: (type: string, name: string) => {
+    const normalizedName = name.replace(/_/g, ' ').trim();
+    let resolvedType = type;
+    let resolvedName = normalizedName;
+    if (type === 'tag' && normalizedName.endsWith(' ♀')) {
+      resolvedType = 'female';
+      resolvedName = normalizedName.slice(0, -2).trim();
+    } else if (type === 'tag' && normalizedName.endsWith(' ♂')) {
+      resolvedType = 'male';
+      resolvedName = normalizedName.slice(0, -2).trim();
+    }
+    return [
+      ...new Set([
+        `${resolvedType}:${resolvedName}`,
+        `${type}:${normalizedName}`,
+        `${resolvedType}:${resolvedName.toLowerCase()}`,
+        `${type}:${normalizedName.toLowerCase()}`,
+        ...(resolvedType === 'type'
+          ? [`${resolvedType}:${resolvedName.toLowerCase().replace(/ /g, '')}`]
+          : []),
+      ]),
+    ];
+  },
 }));
 
 import { useTagI18n } from '../useTagI18n';
@@ -32,13 +56,15 @@ describe('useTagI18n', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' });
     mockStoreState.isLoaded = false;
+    mockStoreState.loadedLocale = null;
     mockStoreState.nameToLocal = new Map();
   });
 
   describe('returns EMPTY_MAP when prerequisites are not met', () => {
-    it('returns empty map when locale is en (not ko)', () => {
+    it('returns empty map when loaded locale does not match current locale', () => {
       useSettingsStore.setState({ locale: 'en' });
       mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', '나츠키 나루']]);
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
@@ -50,6 +76,7 @@ describe('useTagI18n', () => {
     it('returns empty map when isLoaded is false', () => {
       useSettingsStore.setState({ locale: 'ko' });
       mockStoreState.isLoaded = false;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', '나츠키 나루']]);
 
       const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
@@ -61,6 +88,7 @@ describe('useTagI18n', () => {
     it('returns empty map when tagEntries is empty array', () => {
       useSettingsStore.setState({ locale: 'ko' });
       mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
 
       const { result } = renderHook(() => useTagI18n([]));
 
@@ -69,8 +97,9 @@ describe('useTagI18n', () => {
   });
 
   describe('reads from TagI18nStore.nameToLocal when all conditions met', () => {
-    it('returns translations when locale is ko and isLoaded is true', () => {
+    it('returns translations when current locale data is loaded', () => {
       mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', '나츠키 나루']]);
       useSettingsStore.setState({ locale: 'ko' });
 
@@ -81,8 +110,22 @@ describe('useTagI18n', () => {
       expect(result.current.get('artist:natsuki-naru')).toBe('나츠키 나루');
     });
 
+    it('does not special-case Korean when current locale data is loaded', () => {
+      mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'en';
+      mockStoreState.nameToLocal = new Map([['artist:natsuki-naru', 'Natsuki Naru']]);
+      useSettingsStore.setState({ locale: 'en' });
+
+      const tagEntries: [TagType, string[]][] = [[TagType.ARTIST, ['natsuki-naru']]];
+      const { result } = renderHook(() => useTagI18n(tagEntries));
+
+      expect(result.current.size).toBe(1);
+      expect(result.current.get('artist:natsuki-naru')).toBe('Natsuki Naru');
+    });
+
     it('flattens multiple tag types and names and builds map from nameToLocal', () => {
       mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([
         ['tag:schoolgirl', '여고생'],
         ['female:glasses', '안경'],
@@ -102,6 +145,7 @@ describe('useTagI18n', () => {
 
     it('omits entries where nameToLocal has no mapping', () => {
       mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([['male:yaoi', '야오이']]);
       useSettingsStore.setState({ locale: 'ko' });
 
@@ -115,11 +159,24 @@ describe('useTagI18n', () => {
       expect(result.current.get('male:yaoi')).toBe('야오이');
       expect(result.current.has('tag:full-color')).toBe(false);
     });
+
+    it('resolves legacy gender suffix tags stored under generic tag type', () => {
+      mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
+      mockStoreState.nameToLocal = new Map([['female:big breasts', '거유']]);
+      useSettingsStore.setState({ locale: 'ko' });
+
+      const tagEntries: [TagType, string[]][] = [[TagType.TAG, ['big breasts ♀']]];
+      const { result } = renderHook(() => useTagI18n(tagEntries));
+
+      expect(result.current.get('tag:big breasts ♀')).toBe('거유');
+    });
   });
 
   describe('isLoaded guard behavior', () => {
     it('returns empty map when isLoaded is false even with ko locale', () => {
       mockStoreState.isLoaded = false;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([['tag:doujinshi', '동인지']]);
       useSettingsStore.setState({ locale: 'ko' });
 
@@ -131,8 +188,9 @@ describe('useTagI18n', () => {
   });
 
   describe('reactivity to store changes', () => {
-    it('switches to empty map when locale changes from ko to en', async () => {
+    it('switches to empty map when current locale no longer matches loaded locale', async () => {
       mockStoreState.isLoaded = true;
+      mockStoreState.loadedLocale = 'ko';
       mockStoreState.nameToLocal = new Map([['artist:abc', '에이비씨']]);
       useSettingsStore.setState({ locale: 'ko' });
 

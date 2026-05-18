@@ -7,19 +7,26 @@ import React from 'react';
 // Mocks
 // ---------------------------------------------------------------------------
 
-// IntersectionObserver mock
-let ioCallback: IntersectionObserverCallback | null = null;
 const mockObserve = vi.fn();
 const mockDisconnect = vi.fn();
+const mockUnobserve = vi.fn();
+const mockTakeRecords = vi.fn(() => []);
 
 function MockIntersectionObserver(
   this: IntersectionObserver,
-  callback: IntersectionObserverCallback,
+  _callback: IntersectionObserverCallback,
   _options?: IntersectionObserverInit,
 ) {
-  ioCallback = callback;
-  (this as any).observe = mockObserve;
-  (this as any).disconnect = mockDisconnect;
+  void _options;
+  Object.assign(this, {
+    observe: mockObserve,
+    unobserve: mockUnobserve,
+    disconnect: mockDisconnect,
+    takeRecords: mockTakeRecords,
+    root: null,
+    rootMargin: '',
+    thresholds: [],
+  });
 }
 
 // Mock Next.js
@@ -32,12 +39,15 @@ vi.mock('next/navigation', () => ({
 }));
 
 // Generate N fake files
-const makeFiles = (count: number) =>
+const makeFiles = (count: number): GalleryFile[] =>
   Array.from({ length: count }, (_, i) => ({
     name: `${String(i + 1).padStart(3, '0')}.jpg`,
     hash: `hash${i}`,
     width: 800,
     height: 1200,
+    haswebp: 1,
+    hasavifsmalltn: 1,
+    hasavif: 1,
   }));
 
 vi.mock('@/features/gallery-detail/hooks/useGalleryDetail', () => ({
@@ -62,6 +72,10 @@ vi.mock('@/lib/i18n/useT', () => ({
 
 vi.mock('@/lib/i18n/useTagI18n', () => ({
   useTagI18n: () => new Map(),
+  useTagLocalName: (type: string, name: string | undefined) => {
+    const translations = new Map([['type:manga', '만화']]);
+    return name ? translations.get(`${type}:${name}`) : undefined;
+  },
 }));
 
 vi.mock('@/lib/api/client', () => ({
@@ -103,11 +117,12 @@ vi.mock('@/features/gallery-list/components/GalleryCard', () => ({
 import { GalleryDetail } from '../components/GalleryDetail';
 import { useGalleryDetail } from '../hooks/useGalleryDetail';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
+import type { GalleryBlock, GalleryFile, GalleryImages } from '@/lib/utils/types';
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
-const mockBlock = {
+const mockBlock: GalleryBlock = {
   type: GalleryBlockType.DETAILED,
   id: 123,
   title: 'Test Gallery',
@@ -115,12 +130,30 @@ const mockBlock = {
   tags: { [TagType.TAG]: ['test'] },
   date: new Date('2025-01-01'),
   related: [],
+  language: 'italian',
+  mediaType: 'manga',
 };
+
+const emptyImages: GalleryImages = {
+  id: mockBlock.id,
+  images: [],
+};
+
+function mockDetail(files: GalleryFile[] = []) {
+  vi.mocked(useGalleryDetail).mockReturnValue({
+    block: mockBlock,
+    images: emptyImages,
+    files,
+    isLoading: false,
+    error: null,
+  });
+}
 
 beforeEach(() => {
   mockObserve.mockClear();
+  mockUnobserve.mockClear();
   mockDisconnect.mockClear();
-  ioCallback = null;
+  mockTakeRecords.mockClear();
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
 });
 
@@ -132,15 +165,19 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 describe('GalleryDetail thumbnail virtualization', () => {
+  it('localizes detailed media type and falls back to raw language when no translation exists', () => {
+    mockDetail();
+
+    render(<GalleryDetail id={123} />);
+
+    expect(document.body.textContent).toContain('만화');
+    expect(document.body.textContent).toContain('italian');
+    expect(document.body.textContent).not.toContain('manga · italian');
+  });
+
   it('renders at most 20 thumbnails initially for a large gallery', () => {
     const files = makeFiles(100);
-    vi.mocked(useGalleryDetail).mockReturnValue({
-      block: mockBlock as any,
-      images: [],
-      files,
-      isLoading: false,
-      error: null,
-    });
+    mockDetail(files);
 
     const { container } = render(<GalleryDetail id={123} />);
     const images = container.querySelectorAll('img');
@@ -151,13 +188,7 @@ describe('GalleryDetail thumbnail virtualization', () => {
 
   it('renders all thumbnails for a gallery with fewer than 20 files', () => {
     const files = makeFiles(5);
-    vi.mocked(useGalleryDetail).mockReturnValue({
-      block: mockBlock as any,
-      images: [],
-      files,
-      isLoading: false,
-      error: null,
-    });
+    mockDetail(files);
 
     const { container } = render(<GalleryDetail id={123} />);
     const images = container.querySelectorAll('img');
@@ -167,13 +198,7 @@ describe('GalleryDetail thumbnail virtualization', () => {
 
   it('shows a sentinel with count when more thumbnails are available', () => {
     const files = makeFiles(50);
-    vi.mocked(useGalleryDetail).mockReturnValue({
-      block: mockBlock as any,
-      images: [],
-      files,
-      isLoading: false,
-      error: null,
-    });
+    mockDetail(files);
 
     const { container } = render(<GalleryDetail id={123} />);
     // Sentinel should show "20 / 50"
@@ -182,13 +207,7 @@ describe('GalleryDetail thumbnail virtualization', () => {
 
   it('does not show sentinel when all thumbnails are rendered', () => {
     const files = makeFiles(10);
-    vi.mocked(useGalleryDetail).mockReturnValue({
-      block: mockBlock as any,
-      images: [],
-      files,
-      isLoading: false,
-      error: null,
-    });
+    mockDetail(files);
 
     const { container } = render(<GalleryDetail id={123} />);
     expect(container.textContent).not.toContain('10 / 10');

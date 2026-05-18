@@ -1,0 +1,83 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { useSettingsStore } from '@/lib/store/settings';
+import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { TagType } from '@/lib/utils/types';
+import { TagChip } from '../TagChip';
+
+describe('TagChip', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ locale: 'en' });
+    useTagI18nStore.setState({
+      isLoaded: false,
+      loadedLocale: null,
+      nameToLocal: new Map(),
+      localToNames: new Map(),
+      searchIndex: [],
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders the English tag name by default', () => {
+    render(<TagChip tag="big breasts" type={TagType.FEMALE} linked={false} />);
+
+    expect(screen.getByText('big breasts ♀')).toBeInTheDocument();
+  });
+
+  it('renders the Korean tag name when Korean locale translations are loaded', () => {
+    useSettingsStore.setState({ locale: 'ko' });
+    useTagI18nStore.setState({
+      isLoaded: true,
+      loadedLocale: 'ko',
+      nameToLocal: new Map([['female:big breasts', '거유']]),
+    });
+
+    render(<TagChip tag="big breasts" type={TagType.FEMALE} linked={false} />);
+
+    expect(screen.getByText('거유 ♀')).toBeInTheDocument();
+  });
+
+  it('keeps canonical English tag values in search links', () => {
+    useSettingsStore.setState({ locale: 'ko' });
+    useTagI18nStore.setState({
+      isLoaded: true,
+      loadedLocale: 'ko',
+      nameToLocal: new Map([['female:big breasts', '거유']]),
+    });
+
+    render(<TagChip tag="big breasts" type={TagType.FEMALE} />);
+
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/search?q=female%3Abig_breasts');
+  });
+
+  it('renders translated type tags in Korean locale', () => {
+    useSettingsStore.setState({ locale: 'ko' });
+    useTagI18nStore.setState({
+      isLoaded: true,
+      loadedLocale: 'ko',
+      nameToLocal: new Map([['type:image set', '이미지 세트']]),
+    });
+
+    render(<TagChip tag="image set" type={TagType.TYPE} linked={false} />);
+
+    expect(screen.getByText('이미지 세트')).toBeInTheDocument();
+  });
+
+  it('renders translated language tags in Korean locale', () => {
+    useSettingsStore.setState({ locale: 'ko' });
+    useTagI18nStore.setState({
+      isLoaded: true,
+      loadedLocale: 'ko',
+      nameToLocal: new Map([['language:English', '영어']]),
+    });
+
+    render(<TagChip tag="English" type={TagType.LANGUAGE} linked={false} />);
+
+    expect(screen.getByText('영어')).toBeInTheDocument();
+  });
+});

@@ -64,7 +64,7 @@ describe('WebProxyFetcher — behavior', () => {
 
     expect(mockFetch).toHaveBeenCalledWith(
       '/api/tags/fetch?url=allartists-a.html',
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(result).toBe('<html>test</html>');
   });
@@ -82,9 +82,9 @@ describe('WebProxyFetcher — behavior', () => {
     mockFetch.mockRejectedValue(abortError);
 
     const fetcher = createTagFetcher();
-    await expect(fetcher.fetchPage('test.html')).rejects.toThrow(/timed out/);
-
-    vi.useRealTimers();
+    const request = expect(fetcher.fetchPage('test.html')).rejects.toThrow(/timeout/);
+    await vi.runAllTimersAsync();
+    await request;
   });
 
   it('dispose is a no-op for WebProxyFetcher', async () => {

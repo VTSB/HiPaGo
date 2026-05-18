@@ -24,6 +24,9 @@ import { createTagI18nStore } from '../tag-i18n';
 
 // Sample data mirroring the real ko.json structure
 const SAMPLE_KO_JSON = {
+  type: {
+    artistcg: '작가 CG',
+  },
   female: {
     glasses: '안경',
     'big breasts': '거유',
@@ -65,6 +68,10 @@ describe('TagI18nStore', () => {
       expect(store.getState().isLoaded).toBe(false);
     });
 
+    it('loadedLocale starts as null', () => {
+      expect(store.getState().loadedLocale).toBeNull();
+    });
+
     it('nameToLocal starts as empty Map', () => {
       expect(store.getState().nameToLocal.size).toBe(0);
     });
@@ -82,6 +89,7 @@ describe('TagI18nStore', () => {
 
       const state = store.getState();
       expect(state.isLoaded).toBe(true);
+      expect(state.loadedLocale).toBe('ko');
       expect(state.nameToLocal.size).toBeGreaterThan(0);
     });
 
@@ -91,6 +99,7 @@ describe('TagI18nStore', () => {
       expect(store.getState().isLoaded).toBe(false);
       await store.getState().loadLocale('ko');
       expect(store.getState().isLoaded).toBe(true);
+      expect(store.getState().loadedLocale).toBe('ko');
     });
 
     it('loadLocale("ko") loads ko.ai.json if it exists, AI translations fill gaps only', async () => {
@@ -118,6 +127,14 @@ describe('TagI18nStore', () => {
       expect(store.getState().nameToLocal.get('female:glasses')).toBe('안경');
     });
 
+    it('loadLocale("ko") does not synthesize translations missing from locale files', async () => {
+      await store.getState().loadLocale('ko');
+
+      expect(store.getState().getLocal('type', 'image set')).toBeUndefined();
+      expect(store.getState().getLocal('language', 'English')).toBeUndefined();
+      expect(store.getState().getLocal('language', '日本語')).toBeUndefined();
+    });
+
     it('loadLocale with nonexistent file gracefully returns empty Map', async () => {
       // mockKoJson.default stays {} (empty), simulating no data
       await store.getState().loadLocale('nonexistent');
@@ -125,6 +142,20 @@ describe('TagI18nStore', () => {
       const state = store.getState();
       expect(state.nameToLocal.size).toBe(0);
       expect(state.isLoaded).toBe(true);
+      expect(state.loadedLocale).toBe('nonexistent');
+    });
+
+    it('loadLocale with nonexistent file clears previously loaded translations', async () => {
+      mockKoJson.default = SAMPLE_KO_JSON;
+      await store.getState().loadLocale('ko');
+      expect(store.getState().getLocal('female', 'big breasts')).toBe('거유');
+
+      await store.getState().loadLocale('nonexistent');
+
+      const state = store.getState();
+      expect(state.nameToLocal.size).toBe(0);
+      expect(state.getLocal('female', 'big breasts')).toBeUndefined();
+      expect(state.loadedLocale).toBe('nonexistent');
     });
   });
 
@@ -153,6 +184,18 @@ describe('TagI18nStore', () => {
 
     it('getLocal returns undefined for unknown tag', () => {
       expect(store.getState().getLocal('female', 'nonexistent')).toBeUndefined();
+    });
+
+    it('getLocal resolves underscore tag names to space-based translation keys', () => {
+      expect(store.getState().getLocal('female', 'big_breasts')).toBe('거유');
+    });
+
+    it('getLocal resolves legacy gender suffix tags stored under generic tag type', () => {
+      expect(store.getState().getLocal('tag', 'big breasts ♀')).toBe('거유');
+    });
+
+    it('getLocal resolves compact type translation keys', () => {
+      expect(store.getState().getLocal('type', 'artist CG')).toBe('작가 CG');
     });
   });
 

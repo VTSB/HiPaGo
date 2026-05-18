@@ -6,12 +6,12 @@ type I18nJson = Record<string, Record<string, string>>;
 
 /** Pre-computed search index entry */
 interface SearchEntry {
-  key: string;        // "type:name"
+  key: string; // "type:name"
   type: string;
   name: string;
-  local: string;      // original localized string
+  local: string; // original localized string
   disassembled: string; // pre-computed disassemble(local) for jamo matching
-  choseong: string;   // pre-computed getChoseong(local) with spaces stripped
+  choseong: string; // pre-computed getChoseong(local) with spaces stripped
 }
 
 interface TagI18nState {
@@ -23,6 +23,8 @@ interface TagI18nState {
   searchIndex: SearchEntry[];
   /** True once loadLocale has completed (even if no translations were found) */
   isLoaded: boolean;
+  /** Locale code for the currently loaded translation maps */
+  loadedLocale: string | null;
   loadLocale: (lang: string) => Promise<void>;
   getLocal: (type: string, name: string) => string | undefined;
   searchByLocal: (
@@ -31,11 +33,57 @@ interface TagI18nState {
   ) => Array<{ type: string; name: string; local: string }>;
 }
 
+export function getTagI18nLookupKeys(type: string, name: string): string[] {
+  const rawName = name.trim();
+  const normalizedName = name.replace(/_/g, ' ').trim();
+  let resolvedType = type;
+  let resolvedName = normalizedName;
+
+  if (type === 'tag') {
+    if (normalizedName.endsWith(' ♂')) {
+      resolvedType = 'male';
+      resolvedName = normalizedName.slice(0, -2).trim();
+    } else if (normalizedName.endsWith(' ♀')) {
+      resolvedType = 'female';
+      resolvedName = normalizedName.slice(0, -2).trim();
+    }
+  }
+
+  const candidates = [`${resolvedType}:${resolvedName}`, `${type}:${normalizedName}`];
+
+  if (rawName !== normalizedName) {
+    candidates.push(`${resolvedType}:${rawName}`);
+    candidates.push(`${type}:${rawName}`);
+  }
+
+  const lowerResolvedName = resolvedName.toLowerCase();
+  const lowerNormalizedName = normalizedName.toLowerCase();
+  const lowerRawName = rawName.toLowerCase();
+  candidates.push(`${resolvedType}:${lowerResolvedName}`);
+  candidates.push(`${type}:${lowerNormalizedName}`);
+
+  if (lowerRawName !== lowerNormalizedName) {
+    candidates.push(`${resolvedType}:${lowerRawName}`);
+    candidates.push(`${type}:${lowerRawName}`);
+  }
+
+  if (resolvedType === 'type') {
+    candidates.push(`${resolvedType}:${lowerResolvedName.replace(/ /g, '')}`);
+  }
+
+  if (resolvedType === 'male' || resolvedType === 'female') {
+    candidates.push(`tag:${resolvedName}`);
+    candidates.push(`tag:${lowerResolvedName}`);
+  }
+
+  return [...new Set(candidates)];
+}
+
 // Static import map — Next.js needs deterministic paths at build time.
 const JSON_LOADERS: Record<string, () => Promise<{ default: I18nJson }>> = {
-  'ko': () => import('@/lib/data/tags-i18n/ko.json'),
+  ko: () => import('@/lib/data/tags-i18n/ko.json'),
   'ko.ai': () => import('@/lib/data/tags-i18n/ko.ai.json'),
-  'ja': () => import('@/lib/data/tags-i18n/ja.json'),
+  ja: () => import('@/lib/data/tags-i18n/ja.json'),
   'ja.ai': () => import('@/lib/data/tags-i18n/ja.ai.json'),
   'zh-Hans': () => import('@/lib/data/tags-i18n/zh-Hans.json'),
   'zh-Hans.ai': () => import('@/lib/data/tags-i18n/zh-Hans.ai.json'),
@@ -118,6 +166,7 @@ export function createTagI18nStore() {
     localToNames: new Map(),
     searchIndex: [],
     isLoaded: false,
+    loadedLocale: null,
 
     async loadLocale(lang: string) {
       const [manualData, aiData] = await Promise.all([
@@ -126,18 +175,29 @@ export function createTagI18nStore() {
       ]);
 
       if (!manualData && !aiData) {
-        set({ isLoaded: true });
+        set({
+          nameToLocal: new Map(),
+          localToNames: new Map(),
+          searchIndex: [],
+          isLoaded: true,
+          loadedLocale: lang,
+        });
         return;
       }
 
       const merged = mergeI18nData(manualData ?? {}, aiData ?? {});
       const { nameToLocal, localToNames, searchIndex } = buildMaps(merged);
 
-      set({ nameToLocal, localToNames, searchIndex, isLoaded: true });
+      set({ nameToLocal, localToNames, searchIndex, isLoaded: true, loadedLocale: lang });
     },
 
     getLocal(type: string, name: string): string | undefined {
-      return get().nameToLocal.get(`${type}:${name}`);
+      const { nameToLocal } = get();
+      for (const key of getTagI18nLookupKeys(type, name)) {
+        const local = nameToLocal.get(key);
+        if (local !== undefined) return local;
+      }
+      return undefined;
     },
 
     searchByLocal(

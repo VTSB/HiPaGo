@@ -2,7 +2,6 @@
 
 import { TagChip } from '@/shared/components/TagChip';
 import { useT } from '@/lib/i18n/useT';
-import { useSettingsStore } from '@/lib/store/settings';
 import { getTagColor, TAG_TYPE_DISPLAY } from '@/lib/utils/types';
 import type { Suggestion, TagType } from '@/lib/utils/types';
 import { parseToken } from '@/features/search/components/RecentSearchesDropdown';
@@ -44,13 +43,9 @@ export function buildDropdownItems(params: {
   //   - no suggestions
   //   - inputText is empty
   if (suggestions.length > 0) {
-    items.push(
-      ...suggestions.map((s) => ({ kind: 'suggestion' as const, suggestion: s })),
-    );
+    items.push(...suggestions.map((s) => ({ kind: 'suggestion' as const, suggestion: s })));
   } else if (!inputText && popularTags.length > 0) {
-    items.push(
-      ...popularTags.map((s) => ({ kind: 'suggestion' as const, suggestion: s })),
-    );
+    items.push(...popularTags.map((s) => ({ kind: 'suggestion' as const, suggestion: s })));
   }
 
   return items;
@@ -82,9 +77,10 @@ export function UnifiedDropdown({
   showingPopular = false,
 }: UnifiedDropdownProps) {
   const t = useT();
-  const locale = useSettingsStore((s) => s.locale);
 
-  const recentItems = flatItems.filter((i): i is Extract<FlatItem, { kind: 'recent' }> => i.kind === 'recent');
+  const recentItems = flatItems.filter(
+    (i): i is Extract<FlatItem, { kind: 'recent' }> => i.kind === 'recent',
+  );
   const suggestionItems = flatItems.filter(
     (i): i is Extract<FlatItem, { kind: 'suggestion' }> => i.kind === 'suggestion',
   );
@@ -133,7 +129,7 @@ export function UnifiedDropdown({
                   e.preventDefault();
                   onSelectRecent(item.query);
                 }}
-                                onKeyDown={(e) => {
+                onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     onSelectRecent(item.query);
@@ -231,16 +227,14 @@ export function UnifiedDropdown({
                   e.preventDefault();
                   onSelectSuggestion(suggestion.tag, suggestion.tagType);
                 }}
-                                className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
+                className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
                   isSelected ? 'bg-zinc-100 dark:bg-zinc-700' : ''
                 } hover:bg-zinc-100 dark:hover:bg-zinc-700`}
               >
                 <TagChip
                   tag={suggestion.tag}
                   type={suggestion.tagType}
-                  displayName={
-                    locale === 'ko' && suggestion.localName ? suggestion.localName : undefined
-                  }
+                  displayName={suggestion.localName}
                   linked={false}
                   size="sm"
                 />
