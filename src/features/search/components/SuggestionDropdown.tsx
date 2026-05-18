@@ -8,9 +8,14 @@ import type { RefObject } from 'react';
 interface SuggestionDropdownProps {
   suggestions: Suggestion[];
   selectedIndex: number;
-  onSelect: (tag: string, tagType: string) => void;
+  onSelect: (tag: string, tagType: string, localName?: string) => void;
   onHover: (index: number) => void;
   ignoreMouseRef: RefObject<boolean>;
+  /**
+   * When true the user is typing Korean — suggestion labels render the Korean
+   * candidate name. Driven by the active input token's script, not the locale.
+   */
+  koreanDisplay?: boolean;
 }
 
 export function SuggestionDropdown({
@@ -19,6 +24,7 @@ export function SuggestionDropdown({
   onSelect,
   onHover,
   ignoreMouseRef,
+  koreanDisplay = false,
 }: SuggestionDropdownProps) {
   const t = useT();
 
@@ -40,7 +46,7 @@ export function SuggestionDropdown({
           aria-selected={idx === selectedIndex}
           onMouseDown={(e) => {
             e.preventDefault();
-            onSelect(suggestion.tag, suggestion.tagType);
+            onSelect(suggestion.tag, suggestion.tagType, suggestion.localName);
           }}
           onMouseEnter={() => !ignoreMouseRef.current && onHover(idx)}
           className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
@@ -52,7 +58,7 @@ export function SuggestionDropdown({
           <TagChip
             tag={suggestion.tag}
             type={suggestion.tagType}
-            displayName={suggestion.localName}
+            displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
             linked={false}
             size="sm"
           />

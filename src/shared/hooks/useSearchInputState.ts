@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef, useMemo } from 'react';
 import { tagFromDisplay } from '@/lib/utils/hitomi-tag';
+import { isHangul, buildKoreanToken } from '@/lib/utils/tag-query';
+import type { TagType } from '@/lib/utils/types';
 
 interface UseSearchInputStateOptions {
   initialValue?: string;
@@ -62,12 +64,22 @@ export function useSearchInputState(options: UseSearchInputStateOptions = {}) {
     return parts[parts.length - 1] || null;
   }, [value]);
 
-  // Insert a tag suggestion: replace the current token with the full tag
-  const insertSuggestion = useCallback((tag: string, tagType: string) => {
-    const fullTag = `${tagType}:${tagFromDisplay(tag, tagType as any).searchForm}`;
+  // Insert a tag suggestion: replace the current token with the full tag.
+  // The inserted token matches the script the user is typing — when the active
+  // token contains Hangul and a Korean name is available, the Korean
+  // search-format token is inserted (e.g. 여자:로리); otherwise English
+  // (female:loli). The clicked suggestion always carries the exact English tag.
+  const insertSuggestion = useCallback((tag: string, tagType: string, localName?: string) => {
     const trimmed = value.trimEnd();
     const lastSpaceIdx = trimmed.lastIndexOf(' ');
     const prefix = lastSpaceIdx >= 0 ? trimmed.slice(0, lastSpaceIdx + 1) : '';
+    const activeToken = trimmed.slice(lastSpaceIdx + 1);
+
+    const fullTag =
+      localName && isHangul(activeToken)
+        ? buildKoreanToken(tagType as TagType, localName)
+        : `${tagType}:${tagFromDisplay(tag, tagType as TagType).searchForm}`;
+
     const newValue = prefix + fullTag + ' ';
     setValue(newValue);
     pushHistory(newValue);

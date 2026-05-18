@@ -10,8 +10,9 @@ const { mockSearchLocalTags, mockGetSuggestionsForQuery } = vi.hoisted(() => ({
   mockGetSuggestionsForQuery: vi.fn().mockResolvedValue([]),
 }));
 
-let onSuggestionSelect: ((tag: string, tagType: string) => void) | null = null;
+let onSuggestionSelect: ((tag: string, tagType: string, localName?: string) => void) | null = null;
 let lastDropdownSuggestions: Suggestion[] | null = null;
+let lastKoreanDisplay: boolean | undefined = undefined;
 
 /** A manually-resolvable promise, for deterministic race tests. */
 function deferred<T>() {
@@ -81,10 +82,14 @@ vi.mock('@/shared/utils/parse-token', () => ({
   },
 }));
 
-vi.mock('@/lib/utils/types', () => ({
-  getTagColor: () => 'bg-gray-200',
-  TAG_TYPE_DISPLAY: { female: ' ♀', male: ' ♂' } as Record<string, string>,
-}));
+vi.mock('@/lib/utils/types', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/utils/types')>();
+  return {
+    ...actual,
+    getTagColor: () => 'bg-gray-200',
+    TAG_TYPE_DISPLAY: { female: ' ♀', male: ' ♂' } as Record<string, string>,
+  };
+});
 
 vi.mock('@/lib/db/search-local', () => ({
   searchLocalTags: mockSearchLocalTags,
@@ -99,9 +104,14 @@ vi.mock('@/shared/hooks/useClickOutside', () => ({
 }));
 
 vi.mock('@/features/search/components/SuggestionDropdown', () => ({
-  SuggestionDropdown: (props: { onSelect: (tag: string, tagType: string) => void; suggestions: Suggestion[] }) => {
+  SuggestionDropdown: (props: {
+    onSelect: (tag: string, tagType: string, localName?: string) => void;
+    suggestions: Suggestion[];
+    koreanDisplay?: boolean;
+  }) => {
     onSuggestionSelect = props.onSelect;
     lastDropdownSuggestions = props.suggestions;
+    lastKoreanDisplay = props.koreanDisplay;
     return <div data-testid="suggestion-dropdown" />;
   },
 }));
@@ -116,6 +126,7 @@ describe('FilterBar integration', () => {
     vi.clearAllMocks();
     onSuggestionSelect = null;
     lastDropdownSuggestions = null;
+    lastKoreanDisplay = undefined;
     mockSearchLocalTags.mockResolvedValue([]);
     mockGetSuggestionsForQuery.mockResolvedValue([]);
     // Default to a ready tag DB so the local-search path is exercised.
@@ -406,5 +417,99 @@ describe('FilterBar integration', () => {
       await Promise.resolve();
     });
     expect(lastDropdownSuggestions).toEqual([{ tagType: 'female', tag: 'localtag', amount: 5 }]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC-004 — autocomplete display is input-script-aware
+  // ---------------------------------------------------------------------------
+  it('drives koreanDisplay=false for an English active token', async () => {
+    mockSearchLocalTags.mockResolvedValue([
+      { tagType: 'female', tag: 'loli', amount: 10, localName: '로리' },
+    ]);
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
+    });
+
+    expect(lastKoreanDisplay).toBe(false);
+  });
+
+  it('drives koreanDisplay=true for a Korean active token', async () => {
+    mockSearchLocalTags.mockResolvedValue([
+      { tagType: 'female', tag: 'loli', amount: 10, localName: '로리' },
+    ]);
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: '여자:로리' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
+    });
+
+    // Korean type label resolves to the English type byte for the DB query.
+    expect(mockSearchLocalTags).toHaveBeenCalledWith('로리', 'female', 10);
+    expect(lastKoreanDisplay).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // AC-005 — clicking a suggestion inserts a script-matching token
+  // ---------------------------------------------------------------------------
+  it('inserts an English token when the user is typing English', async () => {
+    mockSearchLocalTags.mockResolvedValue([
+      { tagType: 'female', tag: 'loli', amount: 10, localName: '로리' },
+    ]);
+    const onFilterChange = vi.fn();
+    const { container } = render(<FilterBar onFilterChange={onFilterChange} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
+    });
+    act(() => {
+      onSuggestionSelect?.('loli', 'female', '로리');
+    });
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(getMainInput(container).value).toBe('female:loli ');
+  });
+
+  it('inserts a Korean type-qualified token when the user is typing Korean', async () => {
+    mockSearchLocalTags.mockResolvedValue([
+      { tagType: 'female', tag: 'loli', amount: 10, localName: '로리' },
+    ]);
+    const onFilterChange = vi.fn();
+    const { container } = render(<FilterBar onFilterChange={onFilterChange} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: '여자:로리' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+      await Promise.resolve();
+    });
+    act(() => {
+      onSuggestionSelect?.('loli', 'female', '로리');
+    });
+    act(() => {
+      vi.runAllTimers();
+    });
+
+    expect(getMainInput(container).value).toBe('여자:로리 ');
   });
 });

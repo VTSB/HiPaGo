@@ -10,6 +10,7 @@ import {
 import type { IndexData, IndexNode, Suggestion, SortOrder } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
 import { tagFromSearch } from '@/lib/utils/hitomi-tag';
+import { KOREAN_LABEL_TO_TYPE, normalizeQueryToEnglish } from '@/lib/utils/tag-query';
 import { fetchIndexVersion } from './gallery';
 import { fetchNozomiSearch } from './nozomi';
 import { resolveTagIndexUrl } from './url-resolver';
@@ -175,10 +176,16 @@ async function bTreeSearch(
 export function parseQuery(query: string): { tagType: string | null; tag: string } {
   const colonIndex = query.indexOf(':');
   if (colonIndex > 0) {
-    const possibleType = query.slice(0, colonIndex).toLowerCase();
-    if (
-      (Object.values(TagType) as string[]).includes(possibleType)
-    ) {
+    const rawType = query.slice(0, colonIndex);
+    // Accept both English type prefixes and Korean type labels (여자:, 작가:, …).
+    const koreanType = KOREAN_LABEL_TO_TYPE[rawType];
+    const lowerType = rawType.toLowerCase();
+    const possibleType = koreanType
+      ? (koreanType as string)
+      : (Object.values(TagType) as string[]).includes(lowerType)
+        ? lowerType
+        : null;
+    if (possibleType) {
       // Convert underscores back to spaces — tag links encode spaces as underscores
       // but hitomi's API uses actual spaces in tag names
       return { tagType: possibleType, tag: tagFromSearch(query.slice(colonIndex + 1).trim(), possibleType as TagType).displayForm };
@@ -316,7 +323,9 @@ export async function getGalleryIdsForQuery(
   language: string,
   sort?: SortOrder,
 ): Promise<number[]> {
-  const terms = parseCompoundQuery(query);
+  // Single choke point: translate any Korean type-qualified tokens to canonical
+  // English before nozomi execution. English queries pass through unchanged.
+  const terms = parseCompoundQuery(normalizeQueryToEnglish(query));
   if (terms.length === 0) return [];
 
   // Single term: pass sort through

@@ -9,6 +9,7 @@ import { getSuggestionsForQuery } from '@/lib/api/search';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
 import { useSearchInputState } from '@/shared/hooks/useSearchInputState';
+import { isHangul, KOREAN_LABEL_TO_TYPE } from '@/lib/utils/tag-query';
 import type { TagType, Suggestion } from '@/lib/utils/types';
 
 export interface FilterBarProps {
@@ -62,7 +63,11 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
 
     const timer = setTimeout(async () => {
       try {
-        const typeFilter = colonIdx > 0 ? (activeToken.slice(0, colonIdx) as TagType) : undefined;
+        const rawType = colonIdx > 0 ? activeToken.slice(0, colonIdx) : undefined;
+        // Accept Korean type labels (여자:, 작가:, …) as well as English types.
+        const typeFilter = rawType
+          ? (KOREAN_LABEL_TO_TYPE[rawType] ?? (rawType as TagType))
+          : undefined;
         const results = dbReady
           ? await searchLocalTags(searchTerm, typeFilter, 10)
           : await getSuggestionsForQuery(activeToken);
@@ -91,13 +96,16 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  const handleSuggestionClick = useCallback((tag: string, tagType: string) => {
-    insertSuggestion(tag, tagType);
+  const handleSuggestionClick = useCallback((tag: string, tagType: string, localName?: string) => {
+    insertSuggestion(tag, tagType, localName);
     setSuggestions([]);
     setShowDropdown(false);
     setSelectedIndex(-1);
     inputRef.current?.focus();
   }, [insertSuggestion]);
+
+  // Drive suggestion display + insertion script by the active token, not locale.
+  const koreanInput = isHangul(activeToken);
 
   const handleInputChange = useCallback((text: string) => {
     updateValue(text);
@@ -126,7 +134,7 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
       e.preventDefault();
       if (showDropdown && selectedIndex >= 0 && suggestions[selectedIndex]) {
         const s = suggestions[selectedIndex];
-        handleSuggestionClick(s.tag, s.tagType);
+        handleSuggestionClick(s.tag, s.tagType, s.localName);
       }
       return;
     }
@@ -174,6 +182,7 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
             onSelect={handleSuggestionClick}
             onHover={setSelectedIndex}
             ignoreMouseRef={ignoreMouseRef}
+            koreanDisplay={koreanInput}
           />
         </div>
       )}

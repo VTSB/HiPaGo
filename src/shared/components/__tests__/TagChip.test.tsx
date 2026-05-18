@@ -42,7 +42,7 @@ describe('TagChip', () => {
     expect(screen.getByText('거유 ♀')).toBeInTheDocument();
   });
 
-  it('keeps canonical English tag values in search links', () => {
+  it('links to the Korean type-qualified query under Korean locale', () => {
     useSettingsStore.setState({ locale: 'ko' });
     useTagI18nStore.setState({
       isLoaded: true,
@@ -50,6 +50,24 @@ describe('TagChip', () => {
       nameToLocal: new Map([['female:big breasts', '거유']]),
     });
 
+    render(<TagChip tag="big breasts" type={TagType.FEMALE} />);
+
+    expect(screen.getByRole('link')).toHaveAttribute(
+      'href',
+      `/search?q=${encodeURIComponent('여자:거유')}`,
+    );
+  });
+
+  it('links to the canonical English query under English locale', () => {
+    // beforeEach sets locale 'en'.
+    render(<TagChip tag="big breasts" type={TagType.FEMALE} />);
+
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/search?q=female%3Abig_breasts');
+  });
+
+  it('falls back to the English query when no Korean translation exists', () => {
+    useSettingsStore.setState({ locale: 'ko' });
+    // i18n store left empty by beforeEach — no Korean name for this tag.
     render(<TagChip tag="big breasts" type={TagType.FEMALE} />);
 
     expect(screen.getByRole('link')).toHaveAttribute('href', '/search?q=female%3Abig_breasts');

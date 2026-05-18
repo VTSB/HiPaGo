@@ -60,11 +60,16 @@ interface UnifiedDropdownProps {
   /** Index set by keyboard navigation (ArrowUp/Down). Used for Enter selection. */
   selectedIndex: number;
   onSelectRecent: (query: string) => void;
-  onSelectSuggestion: (tag: string, tagType: TagType) => void;
+  onSelectSuggestion: (tag: string, tagType: TagType, localName?: string) => void;
   onRemoveRecent: (query: string) => void;
   onClearRecents: () => void;
   /** When true the header label changes to "Popular Tags" */
   showingPopular?: boolean;
+  /**
+   * When true the user is typing Korean — suggestion labels render the Korean
+   * candidate name. Driven by the active input token's script, not the locale.
+   */
+  koreanDisplay?: boolean;
 }
 
 export function UnifiedDropdown({
@@ -75,6 +80,7 @@ export function UnifiedDropdown({
   onRemoveRecent,
   onClearRecents,
   showingPopular = false,
+  koreanDisplay = false,
 }: UnifiedDropdownProps) {
   const t = useT();
 
@@ -225,7 +231,7 @@ export function UnifiedDropdown({
                 aria-selected={flatIdx === selectedIndex}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  onSelectSuggestion(suggestion.tag, suggestion.tagType);
+                  onSelectSuggestion(suggestion.tag, suggestion.tagType, suggestion.localName);
                 }}
                 className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
                   isSelected ? 'bg-zinc-100 dark:bg-zinc-700' : ''
@@ -234,7 +240,7 @@ export function UnifiedDropdown({
                 <TagChip
                   tag={suggestion.tag}
                   type={suggestion.tagType}
-                  displayName={suggestion.localName}
+                  displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
                   linked={false}
                   size="sm"
                 />

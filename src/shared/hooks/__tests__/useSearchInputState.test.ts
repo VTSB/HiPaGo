@@ -78,6 +78,53 @@ describe('useSearchInputState', () => {
     expect(result.current.value).toBe('female:loli ');
   });
 
+  // AC-005 — script-aware insertion
+  it('insertSuggestion inserts the Korean token when the active token is Hangul', () => {
+    const { result } = renderHook(() => useSearchInputState());
+    act(() => {
+      result.current.updateValue('여자:로');
+    });
+    act(() => {
+      // The clicked suggestion carries the English tag plus the Korean name.
+      result.current.insertSuggestion('loli', 'female', '로리');
+    });
+    expect(result.current.value).toBe('여자:로리 ');
+  });
+
+  it('insertSuggestion underscores spaces in a multi-word Korean name', () => {
+    const { result } = renderHook(() => useSearchInputState());
+    act(() => {
+      result.current.updateValue('여자:큰');
+    });
+    act(() => {
+      result.current.insertSuggestion('big_breasts', 'female', '큰 가슴');
+    });
+    expect(result.current.value).toBe('여자:큰_가슴 ');
+  });
+
+  it('insertSuggestion inserts the English token when the active token is English', () => {
+    const { result } = renderHook(() => useSearchInputState());
+    act(() => {
+      result.current.updateValue('female:lo');
+    });
+    act(() => {
+      // Even with a Korean name available, English input → English token.
+      result.current.insertSuggestion('loli', 'female', '로리');
+    });
+    expect(result.current.value).toBe('female:loli ');
+  });
+
+  it('insertSuggestion falls back to English when no Korean name is supplied', () => {
+    const { result } = renderHook(() => useSearchInputState());
+    act(() => {
+      result.current.updateValue('여자:로');
+    });
+    act(() => {
+      result.current.insertSuggestion('loli', 'female');
+    });
+    expect(result.current.value).toBe('female:loli ');
+  });
+
   // syncFromQuery
   it('syncFromQuery sets value directly from query string', () => {
     const { result } = renderHook(() => useSearchInputState());

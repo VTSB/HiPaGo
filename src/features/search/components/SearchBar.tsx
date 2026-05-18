@@ -7,6 +7,7 @@ import { useSearch } from '@/features/search/hooks/useSearch';
 import { SearchInput } from '@/shared/components/SearchInput';
 import { useSearchInputState } from '@/shared/hooks/useSearchInputState';
 import { UnifiedDropdown, buildDropdownItems, type FlatItem } from '@/shared/components/UnifiedDropdown';
+import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
@@ -107,13 +108,16 @@ export function SearchBar() {
     router.push(`/search?q=${encodeURIComponent(search)}`);
   }, [syncFromQuery, clearSuggestions, addRecentSearch, router]);
 
-  const handleSuggestionClick = useCallback((tag: string, tagType: string) => {
-    insertSuggestion(tag, tagType);
+  const handleSuggestionClick = useCallback((tag: string, tagType: string, localName?: string) => {
+    insertSuggestion(tag, tagType, localName);
     clearSuggestions();
     setSelectedIndex(-1);
     setShowDropdown(false);
     inputRef.current?.focus();
   }, [insertSuggestion, clearSuggestions]);
+
+  // Drive suggestion display + insertion script by the active token, not locale.
+  const koreanInput = isHangul(currentToken ?? '');
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     // IME guard
@@ -134,7 +138,7 @@ export function SearchBar() {
         if (selectedIndex >= 0 && selectedIndex < flatItems.length) {
           const item = flatItems[selectedIndex];
           if (item.kind === 'recent') { handleHistoryClick(item.query); }
-          else if (item.kind === 'suggestion') { handleSuggestionClick(item.suggestion.tag, item.suggestion.tagType); }
+          else if (item.kind === 'suggestion') { handleSuggestionClick(item.suggestion.tag, item.suggestion.tagType, item.suggestion.localName); }
           setSelectedIndex(-1);
         } else {
           doSubmit();
@@ -200,9 +204,10 @@ export function SearchBar() {
             flatItems={flatItems}
             selectedIndex={selectedIndex}
             onSelectRecent={handleHistoryClick}
-            onSelectSuggestion={(tag, tagType) => handleSuggestionClick(tag, tagType)}
+            onSelectSuggestion={(tag, tagType, localName) => handleSuggestionClick(tag, tagType, localName)}
             onRemoveRecent={removeRecentSearch}
             onClearRecents={clearRecentSearches}
+            koreanDisplay={koreanInput}
           />
         </div>
       )}

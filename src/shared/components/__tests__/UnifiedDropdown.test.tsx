@@ -219,6 +219,7 @@ describe('UnifiedDropdown', () => {
     expect(baseProps.onSelectSuggestion).toHaveBeenCalledWith(
       mockSuggestions[0].tag,
       mockSuggestions[0].tagType,
+      mockSuggestions[0].localName,
     );
   });
 

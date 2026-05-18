@@ -31,6 +31,14 @@ interface TagI18nState {
     query: string,
     options?: { type?: string },
   ) => Array<{ type: string; name: string; local: string }>;
+  /**
+   * Exact reverse lookup: localized name (+ optional type) → English { type, name }.
+   * Returns undefined when no exact match exists.
+   */
+  reverseLookup: (
+    local: string,
+    options?: { type?: string },
+  ) => { type: string; name: string } | undefined;
 }
 
 export function getTagI18nLookupKeys(type: string, name: string): string[] {
@@ -229,6 +237,30 @@ export function createTagI18nStore() {
       }
 
       return results;
+    },
+
+    reverseLookup(
+      local: string,
+      options?: { type?: string },
+    ): { type: string; name: string } | undefined {
+      const { localToNames } = get();
+      const keys = localToNames.get(local.trim());
+      if (!keys || keys.length === 0) return undefined;
+
+      const typeFilter = options?.type;
+      let candidates = keys;
+      if (typeFilter) {
+        candidates = keys.filter((k) => k.slice(0, k.indexOf(':')) === typeFilter);
+        if (candidates.length === 0) return undefined;
+      }
+
+      // Collision resolution: the i18n store carries no gallery `count`, so a
+      // type-scoped name that still maps to multiple English tags is resolved
+      // deterministically to the FIRST key (i.e. the order they appear in the
+      // translation JSON). Documented limitation — see PLAN AC-003.
+      const key = candidates[0];
+      const colonIdx = key.indexOf(':');
+      return { type: key.slice(0, colonIdx), name: key.slice(colonIdx + 1) };
     },
   }));
 }

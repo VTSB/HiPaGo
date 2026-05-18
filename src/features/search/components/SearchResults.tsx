@@ -8,12 +8,34 @@ import { FloatingPageNav, type FloatingPageNavHandle } from '@/shared/components
 import { SortSelector } from '@/shared/components/SortSelector';
 import { useQuery } from '@tanstack/react-query';
 import { getGalleryIdsForQuery, parseCompoundQuery } from '@/lib/api/search';
+import { KOREAN_LABEL_TO_TYPE } from '@/lib/utils/tag-query';
+import { TagType } from '@/lib/utils/types';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { PAGE_SIZE } from '@/lib/utils/constants';
 import type { SortOrder } from '@/lib/utils/types';
 
 const VALID_SORTS: SortOrder[] = ['date_added', 'popular_year', 'popular_month', 'popular_week', 'popular_day'];
+
+/**
+ * Human-readable header for a single search term. Drops a recognized type
+ * prefix (English or Korean) and turns underscores into spaces. The term is
+ * shown in the script it was searched in — Korean queries stay Korean per the
+ * preserve-Korean premise. Falls back to the raw query when not a tag term.
+ */
+function formatSearchHeader(query: string): string {
+  const trimmed = query.trim();
+  const colonIdx = trimmed.indexOf(':');
+  if (colonIdx <= 0) return trimmed.replace(/_/g, ' ');
+
+  const prefix = trimmed.slice(0, colonIdx);
+  const name = trimmed.slice(colonIdx + 1);
+  const isKnownType =
+    KOREAN_LABEL_TO_TYPE[prefix] !== undefined ||
+    (Object.values(TagType) as string[]).includes(prefix.toLowerCase());
+  if (!isKnownType || !name) return trimmed.replace(/_/g, ' ');
+  return name.replace(/_/g, ' ');
+}
 
 export function SearchResults() {
   const searchParams = useSearchParams();
@@ -130,7 +152,7 @@ export function SearchResults() {
     <div>
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{t('search.title')}: {query}</h1>
+          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{t('search.title')}: {isSingleTerm ? formatSearchHeader(query) : query}</h1>
           <p className="text-sm text-zinc-500">
             {allIds
               ? `${totalCount.toLocaleString()} ${t('search.results')}`

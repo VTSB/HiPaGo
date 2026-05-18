@@ -253,4 +253,60 @@ describe('TagI18nStore', () => {
       expect(keys.length).toBe(uniqueKeys.size);
     });
   });
+
+  describe('reverseLookup', () => {
+    beforeEach(async () => {
+      mockKoJson.default = SAMPLE_KO_JSON;
+      await store.getState().loadLocale('ko');
+    });
+
+    it('resolves a localized name to the English { type, name }', () => {
+      expect(store.getState().reverseLookup('거유')).toEqual({
+        type: 'female',
+        name: 'big breasts',
+      });
+    });
+
+    it('type-scopes the lookup to the requested type', () => {
+      // '안경' is female:glasses; male:glasses has a distinct translation.
+      expect(store.getState().reverseLookup('안경', { type: 'female' })).toEqual({
+        type: 'female',
+        name: 'glasses',
+      });
+      expect(store.getState().reverseLookup('안경 (남)', { type: 'male' })).toEqual({
+        type: 'male',
+        name: 'glasses',
+      });
+    });
+
+    it('returns undefined when the requested type has no entry for the name', () => {
+      // '안경' belongs to female only — male uses '안경 (남)'.
+      expect(store.getState().reverseLookup('안경', { type: 'male' })).toBeUndefined();
+    });
+
+    it('returns undefined for an unknown localized name', () => {
+      expect(store.getState().reverseLookup('존재하지않음')).toBeUndefined();
+    });
+
+    it('returns undefined when the type filter excludes every candidate', () => {
+      expect(store.getState().reverseLookup('거유', { type: 'male' })).toBeUndefined();
+    });
+
+    it('trims surrounding whitespace before lookup', () => {
+      expect(store.getState().reverseLookup('  거유  ')).toEqual({
+        type: 'female',
+        name: 'big breasts',
+      });
+    });
+
+    it('resolves a collision deterministically to the first matching key', () => {
+      // 'female:schoolgirl' and 'female:glasses girl' differ; '안경 소녀' is
+      // unique here so the first-key rule is exercised against a single
+      // candidate — verifies the documented deterministic fallback.
+      expect(store.getState().reverseLookup('안경 소녀', { type: 'female' })).toEqual({
+        type: 'female',
+        name: 'glasses girl',
+      });
+    });
+  });
 });

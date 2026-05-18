@@ -18,10 +18,27 @@ vi.mock('../nozomi', () => ({
   fetchNozomiSearch: vi.fn(),
 }));
 
+// JSON fixtures for the tag-i18n store (drives Korean → English normalization).
+const mockKoJson = vi.hoisted(() => ({
+  default: {
+    female: { loli: '로리', 'big breasts': '큰 가슴' },
+    artist: { yam: '얌' },
+  } as Record<string, Record<string, string>>,
+}));
+vi.mock('@/lib/data/tags-i18n/ko.json', () => mockKoJson);
+vi.mock('@/lib/data/tags-i18n/ko.ai.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/ja.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/ja.ai.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hans.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hans.ai.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hant.json', () => ({ default: {} }));
+vi.mock('@/lib/data/tags-i18n/zh-Hant.ai.json', () => ({ default: {} }));
+
 import { apiClient } from '../client';
 import { fetchIndexVersion } from '../gallery';
 import { fetchNozomiSearch } from '../nozomi';
 import { getGalleryIdsForQuery, getSuggestionsForQuery } from '../search';
+import { useTagI18nStore } from '@/lib/store/tag-i18n';
 
 describe('getGalleryIdsForQuery', () => {
   beforeEach(() => {
@@ -531,6 +548,46 @@ describe('getSuggestionsForQuery — encodeTagIndexChar special characters', () 
 
     // 'a' → 'a', '/' → 'slash', '.' → 'dot', 'b' → 'b'
     expect(apiClient.fetchUrl).toHaveBeenCalledWith('/api/tagindex/global/a/slash/dot/b.json');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC-006 — a Korean type-qualified query normalizes to English before nozomi.
+// ---------------------------------------------------------------------------
+describe('getGalleryIdsForQuery — Korean query normalization', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await useTagI18nStore.getState().loadLocale('ko');
+  });
+
+  it('a Korean tag query hits nozomi with the same args as the English query', async () => {
+    vi.mocked(fetchNozomiSearch).mockResolvedValue([100, 200]);
+    const korean = await getGalleryIdsForQuery('여자:로리', 'all');
+
+    vi.mocked(fetchNozomiSearch).mockClear();
+    vi.mocked(fetchNozomiSearch).mockResolvedValue([100, 200]);
+    const english = await getGalleryIdsForQuery('female:loli', 'all');
+
+    expect(korean).toEqual(english);
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'all', undefined);
+  });
+
+  it('underscored multi-word Korean tag normalizes correctly', async () => {
+    vi.mocked(fetchNozomiSearch).mockResolvedValue([300]);
+    await getGalleryIdsForQuery('여자:큰_가슴', 'all');
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:big breasts', 'all', undefined);
+  });
+
+  it('a Korean artist query normalizes to the English artist nozomi path', async () => {
+    vi.mocked(fetchNozomiSearch).mockResolvedValue([500]);
+    await getGalleryIdsForQuery('작가:얌', 'all');
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'yam', 'all', undefined);
+  });
+
+  it('an English query is unaffected by the normalization layer', async () => {
+    vi.mocked(fetchNozomiSearch).mockResolvedValue([1, 2]);
+    await getGalleryIdsForQuery('female:loli', 'all');
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'all', undefined);
   });
 });
 

@@ -144,4 +144,34 @@ describe('SearchResults — VirtualGalleryGrid integration', () => {
     // InfiniteScrollTrigger should not be in the DOM
     expect(container.querySelector('[data-testid="infinite-scroll-trigger"]')).toBeNull();
   });
+
+  // ---------------------------------------------------------------------------
+  // AC-006 — single-term header is human-readable and script-preserving
+  // ---------------------------------------------------------------------------
+  it('header drops the English type prefix and underscores for a single term', async () => {
+    mockQuery = 'female:big_breasts';
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    const { container } = render(<SearchResults />);
+    const h1 = container.querySelector('h1');
+    expect(h1?.textContent).toBe('search.title: big breasts');
+  });
+
+  it('header shows a Korean single-term query in Korean, prefix dropped', async () => {
+    mockQuery = '여자:큰_가슴';
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    const { container } = render(<SearchResults />);
+    const h1 = container.querySelector('h1');
+    expect(h1?.textContent).toBe('search.title: 큰 가슴');
+  });
+
+  it('header keeps the raw query for a multi-term search', async () => {
+    mockQuery = 'female:loli artist:yam';
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    const { container } = render(<SearchResults />);
+    const h1 = container.querySelector('h1');
+    expect(h1?.textContent).toBe('search.title: female:loli artist:yam');
+  });
 });
