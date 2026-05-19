@@ -4,6 +4,8 @@
 /node_modules
 /.pnp
 .pnp.*
+/.pnpm-store/
+/.claude/scheduled_tasks.lock
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
