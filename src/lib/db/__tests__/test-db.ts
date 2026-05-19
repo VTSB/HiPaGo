@@ -62,6 +62,7 @@ export async function setupTestDb(): Promise<void> {
 export async function clearAllTables(): Promise<void> {
   const db = getDb();
   await db.exec(`
+    DELETE FROM download;
     DELETE FROM gallery_tag;
     DELETE FROM gallery_relate;
     DELETE FROM gallery_image;

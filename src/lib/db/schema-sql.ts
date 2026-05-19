@@ -83,4 +83,17 @@ CREATE TABLE IF NOT EXISTS history (
   viewedAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_history_viewedAt ON history(viewedAt);
+
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading'
+);
+CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt);
+CREATE INDEX IF NOT EXISTS idx_download_status ON download(status);
 `;

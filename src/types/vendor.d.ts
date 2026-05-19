@@ -31,6 +31,16 @@ declare module '@tauri-apps/plugin-sql' {
   export default Database;
 }
 
+declare module '@tauri-apps/plugin-fs' {
+  export const BaseDirectory: Record<string, number>;
+  export function mkdir(path: string, options?: Record<string, unknown>): Promise<void>;
+  export function writeFile(path: string, data: Uint8Array, options?: Record<string, unknown>): Promise<void>;
+  export function readFile(path: string, options?: Record<string, unknown>): Promise<Uint8Array>;
+  export function readDir(path: string, options?: Record<string, unknown>): Promise<{ name: string; isDirectory?: boolean; children?: unknown[] }[]>;
+  export function remove(path: string, options?: Record<string, unknown>): Promise<void>;
+  export function stat(path: string, options?: Record<string, unknown>): Promise<{ size?: number; isDirectory?: boolean }>;
+}
+
 declare module '@capacitor-community/sqlite' {
   export const CapacitorSQLite: unknown;
   export class SQLiteConnection {

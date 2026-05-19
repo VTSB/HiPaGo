@@ -7,20 +7,36 @@ import { AbortableImage } from '@/shared/components/AbortableImage';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 
-export function ScrollReader({ images, initialPage, onScrollPositionChange, onVisiblePageChange, scrollCallbackRef, scrollNodeRef }: {
+export function ScrollReader({
+  images,
+  initialPage,
+  onScrollPositionChange,
+  onVisiblePageChange,
+  scrollCallbackRef,
+  offlineUrls,
+}: {
   images: GalleryImage[];
   initialPage?: number;
   onScrollPositionChange: (p: number) => void;
   onVisiblePageChange: (page: number) => void;
   scrollCallbackRef: RefCallback<HTMLDivElement>;
-  scrollNodeRef: RefObject<HTMLDivElement | null>;
+  /** Populated by ReaderView via scrollCallbackRef; ScrollReader itself does not read it. */
+  scrollNodeRef?: RefObject<HTMLDivElement | null>;
+  /** When provided, use these blob URLs instead of fetching from the network. */
+  offlineUrls?: string[];
 }) {
   const localRef = useRef<HTMLDivElement | null>(null);
   const scrolledRef = useRef(false);
   const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
   const imageFormat = useSettingsStore((s) => s.imageFormat);
+
+  // Keep the latest onVisiblePageChange in a ref so the IntersectionObserver
+  // effect (which intentionally omits it from deps) always calls the current
+  // callback. Assigned in an effect, not during render (react-hooks/refs).
   const onVisiblePageChangeRef = useRef(onVisiblePageChange);
-  onVisiblePageChangeRef.current = onVisiblePageChange;
+  useEffect(() => {
+    onVisiblePageChangeRef.current = onVisiblePageChange;
+  });
 
   const setRef = (node: HTMLDivElement | null) => {
     localRef.current = node;
@@ -28,13 +44,16 @@ export function ScrollReader({ images, initialPage, onScrollPositionChange, onVi
   };
 
   useEffect(() => {
+    // Skip the gg.js network fetch when all images are served from local storage.
+    if (offlineUrls) return;
     getGgConfig().then(setGgConfig);
-  }, []);
+  }, [offlineUrls]);
 
   const urls = useMemo(() => {
+    if (offlineUrls) return offlineUrls;
     if (!ggConfig) return [];
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
-  }, [images, ggConfig, imageFormat]);
+  }, [offlineUrls, images, ggConfig, imageFormat]);
 
   // Auto-scroll to initial page
   useEffect(() => {

@@ -90,7 +90,13 @@ export function GalleryDetail({ id }: { id: number }) {
     progress: dlProgress,
     start: handleDownload,
     cancel: handleCancelDownload,
-  } = useDownloadGallery(id, displayBlock?.title || `Gallery ${id}`, files);
+  } = useDownloadGallery(
+    id,
+    displayBlock?.title || `Gallery ${id}`,
+    displayBlock?.thumbnail ?? ``,
+    files,
+    displayBlock?.tags as Record<string, string[]> | undefined,
+  );
 
   const handleShare = useCallback(async () => {
     try {

@@ -14,6 +14,9 @@ importers:
       '@capacitor/core':
         specifier: ^6
         version: 6.2.1
+      '@capacitor/filesystem':
+        specifier: ^6
+        version: 6.0.4(@capacitor/core@6.2.1)
       '@hipago/bypass-napi':
         specifier: file:crates/bypass-napi
         version: file:crates/bypass-napi
@@ -281,6 +284,11 @@ packages:
 
   '@capacitor/core@6.2.1':
     resolution: {integrity: sha512-urZwxa7hVE/BnA18oCFAdizXPse6fCKanQyEqpmz6cBJ2vObwMpyJDG5jBeoSsgocS9+Ax+9vb4ducWJn0y2qQ==}
+
+  '@capacitor/filesystem@6.0.4':
+    resolution: {integrity: sha512-eFlg/ZrwYA4Y6ClLRRikudVu2XvuZxfX/XC0ky9MgfbC9dyqTnVkkEoWM6vr1xR89YNY4mB0EeVTet1m1Jcumw==}
+    peerDependencies:
+      '@capacitor/core': ^6.0.0
 
   '@capacitor/ios@6.2.1':
     resolution: {integrity: sha512-tbMlQdQjxe1wyaBvYVU1yTojKJjgluZQsJkALuJxv/6F8QTw5b6vd7X785O/O7cMpIAZfUWo/vtAHzFkRV+kXw==}
@@ -1506,6 +1514,7 @@ packages:
   '@xmldom/xmldom@0.8.11':
     resolution: {integrity: sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -3608,6 +3617,10 @@ snapshots:
   '@capacitor/core@6.2.1':
     dependencies:
       tslib: 2.8.1
+
+  '@capacitor/filesystem@6.0.4(@capacitor/core@6.2.1)':
+    dependencies:
+      '@capacitor/core': 6.2.1
 
   '@capacitor/ios@6.2.1(@capacitor/core@6.2.1)':
     dependencies:

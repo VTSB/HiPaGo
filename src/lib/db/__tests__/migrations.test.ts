@@ -257,13 +257,13 @@ describe('runMigrations: migration v2 drops tag_i18n', () => {
     expect(tables).toHaveLength(0);
   });
 
-  it('sets user_version to 2 after migration v2', async () => {
+  it('sets user_version to LATEST_VERSION after running all pending migrations from v1', async () => {
     await adapter.exec(SCHEMA_WITH_TAG_I18N);
     await adapter.exec('PRAGMA user_version = 1');
 
     await runMigrations(adapter);
 
-    expect(await getUserVersion(adapter)).toBe(2);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
   });
 
   it('migration v2 is idempotent: no error if tag_i18n does not exist', async () => {
@@ -271,6 +271,6 @@ describe('runMigrations: migration v2 drops tag_i18n', () => {
     await adapter.exec('PRAGMA user_version = 1');
 
     await expect(runMigrations(adapter)).resolves.toBeUndefined();
-    expect(await getUserVersion(adapter)).toBe(2);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
   });
 });

@@ -16,25 +16,42 @@ import { AbortableImage } from '@/shared/components/AbortableImage';
 const PRELOAD_AHEAD = 15;
 const PRELOAD_BEHIND = 5;
 
-export function PageReader({ images, currentPage, onPageChange }: { images: GalleryImage[]; currentPage: number; onPageChange: (p: number) => void }) {
+export function PageReader({
+  images,
+  currentPage,
+  onPageChange,
+  offlineUrls,
+}: {
+  images: GalleryImage[];
+  currentPage: number;
+  onPageChange: (p: number) => void;
+  /** When provided, use these blob URLs instead of fetching from the network. */
+  offlineUrls?: string[];
+}) {
   const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
   const imageFormat = useSettingsStore((s) => s.imageFormat);
   const dualPage = useSettingsStore((s) => s.dualPage);
 
   useEffect(() => {
+    // Skip the gg.js network fetch when all images are served from local storage.
+    if (offlineUrls) return;
     getGgConfig().then(setGgConfig);
-  }, []);
+  }, [offlineUrls]);
 
   const urls = useMemo(() => {
+    if (offlineUrls) return offlineUrls;
     if (!ggConfig) return [];
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
-  }, [images, ggConfig, imageFormat]);
+  }, [offlineUrls, images, ggConfig, imageFormat]);
 
   // Warm the HTTP cache for nearby pages without mounting them as DOM <img>.
   // Cleanup clears src on each navigation, aborting any in-flight request
   // and releasing the decoded bitmap so memory stays bounded under rapid nav.
   useEffect(() => {
     if (!urls.length) return;
+    // Skip JS-Image preloading for offline (blob) URLs — they are already in
+    // memory so there is nothing to warm and no network request to abort.
+    if (offlineUrls) return;
     const start = Math.max(0, currentPage - PRELOAD_BEHIND);
     const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
     const skip = new Set(dualPage ? [currentPage, currentPage + 1] : [currentPage]);
@@ -49,7 +66,7 @@ export function PageReader({ images, currentPage, onPageChange }: { images: Gall
     return () => {
       for (const img of loaders) img.src = '';
     };
-  }, [urls, currentPage, dualPage]);
+  }, [urls, currentPage, dualPage, offlineUrls]);
 
   if (!urls.length) return (
     <div className="flex min-h-screen items-center justify-center">

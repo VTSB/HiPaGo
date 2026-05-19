@@ -35,6 +35,7 @@
   "dependencies": {
     "@capacitor-community/sqlite": "^6",
     "@capacitor/core": "^6",
+    "@capacitor/filesystem": "^6",
     "@hipago/bypass-napi": "file:crates/bypass-napi",
     "@tanstack/react-query": "^5.90.21",
     "@tanstack/react-virtual": "^3.13.21",

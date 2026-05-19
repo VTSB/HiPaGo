@@ -33,6 +33,30 @@ export const MIGRATIONS: Migration[] = [
       await adapter.exec('DROP TABLE IF EXISTS tag_i18n');
     },
   },
+  {
+    version: 3,
+    description: 'Add download table for offline library index',
+    up: async (adapter) => {
+      await adapter.exec(`
+        CREATE TABLE IF NOT EXISTS download (
+          galleryId INTEGER PRIMARY KEY,
+          title TEXT NOT NULL,
+          thumbnail TEXT NOT NULL,
+          tags TEXT NOT NULL DEFAULT '{}',
+          pageCount INTEGER NOT NULL DEFAULT 0,
+          totalBytes INTEGER NOT NULL DEFAULT 0,
+          downloadedAt TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'downloading'
+        )
+      `);
+      await adapter.exec(
+        'CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt)',
+      );
+      await adapter.exec(
+        'CREATE INDEX IF NOT EXISTS idx_download_status ON download(status)',
+      );
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

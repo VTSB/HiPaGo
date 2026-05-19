@@ -5,6 +5,7 @@ const translations = {
   'nav.browse': { en: 'Browse', ko: '둘러보기' },
   'nav.favorites': { en: 'Favorites', ko: '즐겨찾기' },
   'nav.history': { en: 'History', ko: '기록' },
+  'nav.library': { en: 'Library', ko: '라이브러리' },
   'nav.settings': { en: 'Settings', ko: '설정' },
 
   // Search
@@ -56,6 +57,20 @@ const translations = {
   'history.lastWeek': { en: 'Last Week', ko: '지난주' },
   'history.thisMonth': { en: 'This Month', ko: '이번 달' },
   'history.older': { en: 'Older', ko: '더 이전' },
+
+  // Library (offline downloads)
+  'library.title': { en: 'Library', ko: '라이브러리' },
+  'library.empty': { en: 'No downloaded galleries yet.', ko: '다운로드된 갤러리가 없습니다.' },
+  'library.storageUsed': { en: 'Storage used', ko: '사용 중인 저장 공간' },
+  'library.pages': { en: 'pages', ko: '페이지' },
+  'library.open': { en: 'Open', ko: '열기' },
+  'library.delete': { en: 'Delete', ko: '삭제' },
+  'library.exportZip': { en: 'Export ZIP', ko: 'ZIP 내보내기' },
+  'library.confirmDelete': { en: 'Delete this download?', ko: '이 다운로드를 삭제하시겠습니까?' },
+  'library.status.downloading': { en: 'Downloading', ko: '다운로드 중' },
+  'library.status.complete': { en: 'Complete', ko: '완료' },
+  'library.status.failed': { en: 'Failed', ko: '실패' },
+  'library.search.placeholder': { en: 'Search downloads...', ko: '다운로드 검색...' },
 
   // Pagination
   'page.shown': { en: 'shown', ko: '표시' },

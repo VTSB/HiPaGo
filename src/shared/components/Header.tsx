@@ -30,6 +30,7 @@ export function Header() {
           <Link href="/" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.browse')}</Link>
           <Link href="/favorites" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.favorites')}</Link>
           <Link href="/history" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.history')}</Link>
+          <Link href="/library" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.library')}</Link>
           <div className="mx-1 h-4 w-px bg-zinc-300 dark:bg-zinc-700" />
           <Link href="/settings" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.settings')}</Link>
         </nav>
@@ -80,6 +81,13 @@ export function Header() {
               className="rounded-md px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
             >
               {t('nav.history')}
+            </Link>
+            <Link
+              href="/library"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-md px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              {t('nav.library')}
             </Link>
             <Link
               href="/settings"

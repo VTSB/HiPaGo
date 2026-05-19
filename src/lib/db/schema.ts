@@ -78,6 +78,19 @@ export interface DBGalleryImage {
   hash: string;
 }
 
+export type DownloadStatus = 'downloading' | 'complete' | 'failed';
+
+export interface DBDownload {
+  galleryId: number;    // PK
+  title: string;
+  thumbnail: string;
+  tags: string;         // JSON-serialized tag map
+  pageCount: number;
+  totalBytes: number;
+  downloadedAt: string; // ISO string
+  status: DownloadStatus;
+}
+
 // === Database Initialization ===
 
 let _initPromise: Promise<void> | null = null;

@@ -2,10 +2,16 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { getGgConfig } from '@/lib/api/client';
-import { downloadGalleryAsZip, type DownloadProgress } from '@/lib/utils/download-zip';
+import { downloadGalleryToLibrary, type DownloadProgress } from '@/lib/utils/download-zip';
 import type { GalleryFile } from '@/lib/utils/types';
 
-export function useDownloadGallery(id: number, title: string, files: GalleryFile[]) {
+export function useDownloadGallery(
+  id: number,
+  title: string,
+  thumbnail: string,
+  files: GalleryFile[],
+  tags: Record<string, string[]> = {},
+) {
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -15,7 +21,16 @@ export function useDownloadGallery(id: number, title: string, files: GalleryFile
       const config = await getGgConfig();
       abortRef.current = new AbortController();
       setProgress({ current: 0, total: files.length });
-      await downloadGalleryAsZip(id, title, files, config, setProgress, abortRef.current.signal);
+      await downloadGalleryToLibrary(
+        id,
+        title,
+        thumbnail,
+        files,
+        config,
+        tags,
+        setProgress,
+        abortRef.current.signal,
+      );
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') return;
       console.error('Download failed:', e);
@@ -23,7 +38,7 @@ export function useDownloadGallery(id: number, title: string, files: GalleryFile
       setProgress(null);
       abortRef.current = null;
     }
-  }, [id, title, files, progress]);
+  }, [id, title, thumbnail, files, tags, progress]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
