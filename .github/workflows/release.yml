@@ -7,6 +7,11 @@ on:
     branches:
       - release
 
+# Release jobs create GitHub Releases and upload assets — the default
+# GITHUB_TOKEN is read-only, so contents:write must be granted explicitly.
+permissions:
+  contents: write
+
 env:
   NODE_VERSION: '22'
   IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
