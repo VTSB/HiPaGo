@@ -7,7 +7,7 @@
 const mockLocalStorage = vi.hoisted(() => {
   const store: Record<string, string> = {};
   return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
+    getItem: vi.fn((key: string): string | null => store[key] ?? null),
     setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
     removeItem: vi.fn((key: string) => { delete store[key]; }),
     clear: vi.fn(() => { Object.keys(store).forEach((k) => delete store[k]); }),
@@ -334,7 +334,7 @@ describe('initLocaleOnce', () => {
     it('the registered callback sets locale to ko when conditions are met after hydration', () => {
       let capturedCallback: (() => void) | undefined;
       vi.spyOn(useSettingsStore.persist, 'onFinishHydration').mockImplementation((cb) => {
-        capturedCallback = cb;
+        capturedCallback = cb as () => void;
         return () => {};
       });
       mockLocalStorage.getItem.mockReturnValue(null);
@@ -351,7 +351,7 @@ describe('initLocaleOnce', () => {
     it('the registered callback does not change locale when settings are present after hydration', () => {
       let capturedCallback: (() => void) | undefined;
       vi.spyOn(useSettingsStore.persist, 'onFinishHydration').mockImplementation((cb) => {
-        capturedCallback = cb;
+        capturedCallback = cb as () => void;
         return () => {};
       });
       mockLocalStorage.getItem.mockReturnValue('{"state":{}}');

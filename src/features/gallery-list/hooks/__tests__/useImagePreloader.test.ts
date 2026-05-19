@@ -12,7 +12,7 @@ import type { VirtualItem } from '@tanstack/react-virtual';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockResolveBlock = vi.fn<[number, AbortSignal?], Promise<GalleryBlock>>();
+const mockResolveBlock = vi.fn<(id: number, signal?: AbortSignal) => Promise<GalleryBlock>>();
 
 vi.mock('../useGalleryBlock', () => ({
   galleryBlockQueryKey: (id: number) => ['gallery-block', id],
@@ -38,8 +38,8 @@ function makeBlock(id: number, thumbnail: string): GalleryBlock {
     thumbnail,
     tags: {},
     date: new Date(),
-    url: '',
-  } as GalleryBlock;
+    related: [],
+  };
 }
 
 function makeVirtualItems(startIndex: number, count: number): VirtualItem[] {
@@ -147,8 +147,8 @@ describe('useImagePreloader — thumbnail image preloading', () => {
       thumbnail: '',
       tags: {},
       date: new Date(),
-      url: '',
-    } as GalleryBlock;
+      related: [],
+    };
     mockResolveBlock.mockResolvedValue(loadingBlock);
 
     const { wrapper } = createWrapper();

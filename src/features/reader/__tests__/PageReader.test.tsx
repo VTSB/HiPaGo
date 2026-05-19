@@ -137,7 +137,7 @@ describe('PageReader image rendering (Bug 1)', () => {
     const imgs = container.querySelectorAll('img:not([data-preload])');
     expect(imgs.length).toBeGreaterThan(0);
     for (const img of Array.from(imgs)) {
-      expect(img.style.opacity).toBe('0');
+      expect((img as HTMLElement).style.opacity).toBe('0');
     }
   });
 });
