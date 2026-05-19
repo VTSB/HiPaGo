@@ -1,9 +1,19 @@
 // bypass-core native addon (Rust → Node.js via napi-rs)
 declare module '@hipago/bypass-napi' {
+  export interface StreamResponse {
+    status: number;
+    headers: Record<string, string>;
+    read(): Promise<Buffer | null>;
+  }
+  export interface BufferedResponse {
+    status: number;
+    headers: Record<string, string>;
+    body: Uint8Array;
+  }
   export function bypassFetch(
     url: string,
     headers?: Record<string, string>,
-  ): Promise<{ status: number; headers: Record<string, string>; body: Uint8Array }>;
+  ): Promise<StreamResponse | BufferedResponse>;
 }
 
 // Runtime-only modules — installed when Tauri/Capacitor is set up

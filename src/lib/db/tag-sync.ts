@@ -1,10 +1,10 @@
 import { ensureDb, withTransaction } from './adapter';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { markTagSyncCompleted, markTagSyncLoading, SYNC_KEY_TAGS } from './init';
-import { getSyncStatus, setSyncStatus } from './sync-status';
+import { setSyncStatus } from './sync-status';
 import { TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
-import { createTagFetcher, TagFetcher } from '@/lib/api/tag-fetcher';
+import { createTagFetcher } from '@/lib/api/tag-fetcher';
 import { parseTagsFromHtml, parseNavUrls, TAG_TYPES, ParsedTag } from '@/lib/api/tag-parser';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -157,7 +157,7 @@ async function runRuntimeTagSync(): Promise<void> {
   try {
     let totalTagCount = 0;
     let pagesCompleted = 0;
-    let totalPagesEstimate = TAG_TYPES.length * 26; // rough estimate, refined as we go
+    const totalPagesEstimate = TAG_TYPES.length * 26; // rough estimate
 
     const failedPages: Array<{ url: string; defaultType: string }> = [];
 
@@ -179,10 +179,9 @@ async function runRuntimeTagSync(): Promise<void> {
       pagesCompleted++;
       updateProgress(pagesCompleted, totalPagesEstimate);
 
-      // Fetch remaining letter pages
+      // Fetch remaining letter pages back-to-back (sequential, no inter-page
+      // throttle — the per-page delay was removed; retries still back off).
       for (let letterIdx = 0; letterIdx < navUrls.length; letterIdx++) {
-        await sleep(PAGE_DELAY_MS);
-
         try {
           const html = await fetcher.fetchPage(navUrls[letterIdx]);
           const tags = parseTagsFromHtml(html, defaultType);
@@ -243,12 +242,15 @@ export async function runTagSync(): Promise<void> {
 
   await markTagSyncLoading();
   useDbStatusStore.getState().setIsSyncing(true);
+  useDbStatusStore.getState().setSyncError(null);
 
   try {
     useDbStatusStore.getState().setSyncProgress(5);
     await runRuntimeTagSync();
   } catch (error) {
     console.error('[tag-sync] Sync failed:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    useDbStatusStore.getState().setSyncError(message);
     useDbStatusStore.getState().setIsSyncing(false);
   }
 }

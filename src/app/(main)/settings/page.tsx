@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
-import { useSettingsStore, type Locale } from '@/lib/store/settings';
+import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { getSuggestionsForQuery } from '@/lib/api/search';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
 import { tagFromSuggestion, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
@@ -26,8 +27,16 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = input.trim();
-    if (!trimmed) { setSuggestions([]); return; }
     debounceRef.current = setTimeout(async () => {
+      // Empty input — clear. DB not ready + Hangul — the remote tagindex API
+      // is English-keyed and would 400, so skip it and clear too. Both run
+      // inside the debounced callback rather than the effect body so no
+      // setState fires synchronously during the effect.
+      if (!trimmed || (!dbReady && isHangul(trimmed))) {
+        setSuggestions([]);
+        setShowDropdown(false);
+        return;
+      }
       try {
         if (dbReady) {
           const r = await searchLocalTags(trimmed);

@@ -5,6 +5,7 @@ import { useSearchStore } from '@/features/search/store/search.store';
 import { getSuggestionsForQuery, parseQuery } from '@/lib/api/search';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { isHangul } from '@/lib/utils/tag-query';
 import type { TagType } from '@/lib/utils/types';
 
 export function useSearch() {
@@ -67,6 +68,12 @@ export function useSearch() {
           setIsLoadingSuggestions(false);
         }
       }, 100);
+    } else if (isHangul(activeTerm)) {
+      // DB not ready and the user is typing Hangul — the remote tagindex API
+      // is English-keyed and would 400 on every keystroke. Skip it entirely
+      // and show empty suggestions until the local DB has synced.
+      clearSuggestions();
+      setIsLoadingSuggestions(false);
     } else {
       // DB not ready yet — use remote tagindex API
       debounceRef.current = setTimeout(async () => {

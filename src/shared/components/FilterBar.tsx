@@ -61,6 +61,14 @@ export function FilterBar({ onFilterChange, placeholder }: FilterBarProps) {
       return;
     }
 
+    // DB not ready and the user is typing Hangul — the remote tagindex API is
+    // English-keyed and would 400. Skip it; show empty suggestions until sync.
+    if (!dbReady && isHangul(searchTerm)) {
+      setSuggestions([]);
+      setShowDropdown(false);
+      return;
+    }
+
     const timer = setTimeout(async () => {
       try {
         const rawType = colonIdx > 0 ? activeToken.slice(0, colonIdx) : undefined;

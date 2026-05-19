@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { SearchBar } from '@/features/search/components/SearchBar';
 import { LanguageFilter } from '@/shared/components/LanguageFilter';
+import { SyncStatusIndicator } from '@/shared/components/SyncStatusIndicator';
 import { useT } from '@/lib/i18n/useT';
 
 export function Header() {
@@ -25,6 +26,7 @@ export function Header() {
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-2">
+          <SyncStatusIndicator />
           <Link href="/" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.browse')}</Link>
           <Link href="/favorites" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.favorites')}</Link>
           <Link href="/history" className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">{t('nav.history')}</Link>

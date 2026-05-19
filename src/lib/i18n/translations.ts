@@ -20,6 +20,12 @@ const translations = {
   'search.sortUnavailable': { en: 'Sorting is only available for single-tag searches', ko: '정렬은 단일 태그 검색에서만 사용 가능합니다' },
   'search.tagSuggestions': { en: 'Tag Suggestions', ko: '태그 제안' },
   'search.popularTags': { en: 'Popular Tags', ko: '인기 태그' },
+  'search.koreanNeedsDb': { en: 'Korean search needs the local tag DB', ko: '한국어 검색은 로컬 태그 DB가 필요합니다' },
+
+  // Tag DB sync status
+  'sync.syncing': { en: 'Syncing tag DB', ko: '태그 DB 동기화 중' },
+  'sync.failed': { en: 'Tag DB sync failed', ko: '태그 DB 동기화 실패' },
+  'sync.retry': { en: 'Retry', ko: '재시도' },
 
   // Gallery detail
   'detail.back': { en: 'Back', ko: '뒤로' },

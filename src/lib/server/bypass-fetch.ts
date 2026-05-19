@@ -21,14 +21,61 @@ interface NativeBypassModule {
 
 let nativeModule: NativeBypassModule | null = null;
 
+/**
+ * Whether the napi bypass addon failed to load. `null` until the first
+ * `bypassFetch` call resolves the addon; `true`/`false` afterwards. When
+ * `true`, `bypassFetch` is silently using the network-blocked plain `fetch`
+ * fallback — the UI can surface this instead of failing invisibly.
+ */
+let addonLoadFailed: boolean | null = null;
+
+/** Last addon-load error message, for diagnostics. */
+let addonLoadError: string | null = null;
+
+/**
+ * Returns `true` when the napi bypass addon is known to be unavailable
+ * (import failed). Returns `false` when it loaded or has not been probed yet.
+ */
+export function isBypassAddonUnavailable(): boolean {
+  return addonLoadFailed === true;
+}
+
+/** The addon-load failure message, or `null` if the addon loaded / was not probed. */
+export function getBypassAddonError(): string | null {
+  return addonLoadError;
+}
+
 async function getNativeBypassFetch() {
   if (!nativeModule) {
     try {
       // Use a variable so Turbopack/webpack won't statically analyze the import
       const id = '@hipago/bypass-napi';
-      nativeModule = await import(id);
-    } catch {
-      console.warn('[bypass-fetch] napi addon unavailable, falling back to plain fetch');
+      const imported = await import(id);
+      // The addon is a CommonJS module — when loaded via dynamic import its
+      // exports land on the namespace's `.default`. Prefer a direct
+      // `bypassFetch` export when present, otherwise unwrap `.default`.
+      // `pick` reads a key defensively: a strict ESM-namespace proxy throws on
+      // access to an undefined export, so missing keys resolve to `undefined`.
+      const pick = (obj: unknown, key: string): unknown => {
+        try {
+          return (obj as Record<string, unknown>)?.[key];
+        } catch {
+          return undefined;
+        }
+      };
+      const resolved = (typeof pick(imported, 'bypassFetch') === 'function'
+        ? imported
+        : pick(imported, 'default')) as NativeBypassModule | undefined;
+      if (!resolved || typeof pick(resolved, 'bypassFetch') !== 'function') {
+        throw new Error('addon loaded but bypassFetch export is missing');
+      }
+      nativeModule = resolved;
+      addonLoadFailed = false;
+      addonLoadError = null;
+    } catch (err) {
+      addonLoadFailed = true;
+      addonLoadError = err instanceof Error ? err.message : String(err);
+      console.warn(`[bypass-fetch] napi addon unavailable, falling back to plain fetch: ${addonLoadError}`);
       return null;
     }
   }
@@ -81,10 +128,20 @@ export async function bypassFetch(
       });
     }
 
-    return new Response((resp as BufferedResponse).body, {
-      status: resp.status,
-      headers: new Headers(resp.headers),
-    });
+    // Wrap the Node Buffer in a Uint8Array — the WHATWG `Response` constructor
+    // accepts a Uint8Array as BodyInit but not a Node Buffer. Buffer is already
+    // a Uint8Array view, so this re-wraps the same bytes without copying. The
+    // `as ArrayBuffer` cast is sound: a Node Buffer is always backed by a real
+    // ArrayBuffer (never SharedArrayBuffer), and BodyInit requires the precise
+    // `Uint8Array<ArrayBuffer>` type rather than `Uint8Array<ArrayBufferLike>`.
+    const buf = (resp as BufferedResponse).body;
+    return new Response(
+      new Uint8Array(buf.buffer as ArrayBuffer, buf.byteOffset, buf.byteLength),
+      {
+        status: resp.status,
+        headers: new Headers(resp.headers),
+      },
+    );
   }
 
   // Fallback: plain fetch (no bypass)

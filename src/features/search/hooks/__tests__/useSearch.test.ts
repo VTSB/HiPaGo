@@ -213,6 +213,45 @@ describe('useSearch autocomplete term selection', () => {
     expect(mockSetSuggestions).toHaveBeenCalledWith([{ tag: 'remote-suggestion' }]);
   });
 
+  // ---------------------------------------------------------------------------
+  // AC-003 — Hangul input must not hit the English-only remote tagindex API
+  // while the local tag DB is not ready (it would 400 on every keystroke).
+  // ---------------------------------------------------------------------------
+  it('does not call remote getSuggestionsForQuery for Hangul input when dbReady is false', async () => {
+    dbReady = false;
+
+    storeState = {
+      ...storeState,
+      autocompleteQuery: '여자',
+    };
+
+    renderHook(() => useSearch());
+
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+
+    expect(mockGetSuggestionsForQuery).not.toHaveBeenCalled();
+    expect(mockSearchLocalTags).not.toHaveBeenCalled();
+    expect(mockClearSuggestions).toHaveBeenCalled();
+  });
+
+  it('still calls remote getSuggestionsForQuery for English input when dbReady is false', async () => {
+    dbReady = false;
+    mockGetSuggestionsForQuery.mockResolvedValueOnce([{ tag: 'english-remote' }]);
+
+    storeState = {
+      ...storeState,
+      autocompleteQuery: 'loli',
+    };
+
+    renderHook(() => useSearch());
+
+    await vi.advanceTimersByTimeAsync(200);
+    await Promise.resolve();
+
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledWith('loli');
+  });
+
   it('uses parsed prefixed tag path before local lookup', async () => {
     const pending = createDeferred<unknown[]>();
     mockSearchLocalTags.mockReturnValueOnce(pending.promise);

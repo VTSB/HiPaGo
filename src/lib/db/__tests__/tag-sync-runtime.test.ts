@@ -52,6 +52,7 @@ function resetStore() {
     isSyncing: false,
     syncDetail: '',
     tagsStale: false,
+    syncError: null,
   });
 }
 
@@ -548,5 +549,31 @@ describe('runTagSync — runtime path', () => {
 
     expect(useDbStatusStore.getState().dbReady).toBe(true);
     expect(mockLoadLocale).toHaveBeenCalledOnce();
+  });
+
+  // -------------------------------------------------------------------------
+  // AC-004 — explicit sync-failure state
+  // -------------------------------------------------------------------------
+  it('sets syncError in the store when the sync fails', async () => {
+    mockFetchPage.mockRejectedValue(new Error('upstream returned 502'));
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    const state = useDbStatusStore.getState();
+    expect(state.syncError).toBe('upstream returned 502');
+    expect(state.isSyncing).toBe(false);
+    expect(state.dbReady).toBe(false);
+  });
+
+  it('clears a stale syncError when a new sync starts', async () => {
+    // Seed a prior failure.
+    useDbStatusStore.getState().setSyncError('previous failure');
+    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    // Successful sync clears the error and marks the DB ready.
+    expect(useDbStatusStore.getState().syncError).toBeNull();
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
   });
 });

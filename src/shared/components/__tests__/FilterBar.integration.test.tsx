@@ -343,6 +343,48 @@ describe('FilterBar integration', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // AC-003 — Hangul input must not hit the English-only remote tagindex API
+  // while the local tag DB is not ready.
+  // ---------------------------------------------------------------------------
+  it('skips remote getSuggestionsForQuery for Hangul input when the tag DB is not ready', async () => {
+    useDbStatusStore.setState({ dbReady: false });
+
+    const { container } = render(
+      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
+    );
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: '여자:로리' } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(mockGetSuggestionsForQuery).not.toHaveBeenCalled();
+    expect(mockSearchLocalTags).not.toHaveBeenCalled();
+  });
+
+  it('still uses remote getSuggestionsForQuery for English input when the tag DB is not ready', async () => {
+    useDbStatusStore.setState({ dbReady: false });
+    mockGetSuggestionsForQuery.mockResolvedValue([{ tagType: 'female', tag: 'remote', amount: 7 }]);
+
+    const { container } = render(
+      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
+    );
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'female:lo' } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledWith('female:lo');
+  });
+
+  // ---------------------------------------------------------------------------
   // AC-001 — autocomplete re-queries the local DB the moment dbReady flips true
   // ---------------------------------------------------------------------------
   it('switches to local DB search automatically when the tag DB becomes ready', async () => {
@@ -412,7 +454,7 @@ describe('FilterBar integration', () => {
 
     // Stale remote response resolves late — the request-id guard must drop it.
     await act(async () => {
-      remote.resolve([{ tagType: 'female', tag: 'stale-remote', amount: 99 }]);
+      remote.resolve([{ tagType: 'female', tag: 'stale-remote', amount: 99 }] as Suggestion[]);
       await Promise.resolve();
       await Promise.resolve();
     });

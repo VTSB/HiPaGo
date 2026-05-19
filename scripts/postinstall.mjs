@@ -13,16 +13,15 @@ mkdirSync(dirname(wasmDest), { recursive: true });
 copyFileSync(wasmSrc, wasmDest);
 console.log('Copied sql-wasm-browser.wasm to public/');
 
-// 2. Sync bypass-napi files (index.js/index.d.ts + .node binaries) to node_modules
+// 2. Sync bypass-napi files (package.json/index.js/index.d.ts + .node binaries) to node_modules
 const napiSrc = join(root, 'crates/bypass-napi');
 const napiDest = join(root, 'node_modules/@hipago/bypass-napi');
-if (existsSync(napiDest)) {
-  const nodeFiles = readdirSync(napiSrc).filter(f => f.endsWith('.node'));
-  for (const f of ['index.js', 'index.d.ts', ...nodeFiles]) {
-    const s = join(napiSrc, f);
-    if (existsSync(s)) {
-      copyFileSync(s, join(napiDest, f));
-    }
+mkdirSync(napiDest, { recursive: true });
+const nodeFiles = readdirSync(napiSrc).filter(f => f.endsWith('.node'));
+for (const f of ['package.json', 'index.js', 'index.d.ts', ...nodeFiles]) {
+  const s = join(napiSrc, f);
+  if (existsSync(s)) {
+    copyFileSync(s, join(napiDest, f));
   }
-  console.log('Synced bypass-napi loader files + native binaries to node_modules');
 }
+console.log('Synced bypass-napi package files + native binaries to node_modules');

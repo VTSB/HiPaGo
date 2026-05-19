@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { StreamResponse } from '@hipago/bypass-napi';
 
 // Mock the napi module
 vi.mock('@hipago/bypass-napi', () => ({
@@ -10,14 +11,14 @@ function mockStreamResponse(
   chunks: Uint8Array[],
   status = 200,
   headers: Record<string, string> = {},
-) {
+): StreamResponse {
   let index = 0;
   return {
     status,
     headers,
     read: vi.fn(async () => {
       if (index < chunks.length) {
-        return chunks[index++];
+        return chunks[index++] as unknown as Buffer;
       }
       return null;
     }),
@@ -207,6 +208,56 @@ describe('bypassFetch', () => {
 
       // Module should only be imported once (cached after first import)
       expect(importCount).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // AC-002 — addon-availability surface. A failed napi import must be
+  // exposed as readable state, not just a console.warn.
+  // -------------------------------------------------------------------------
+  describe('addon-availability surface', () => {
+    it('reports the addon unavailable after an import failure', async () => {
+      vi.resetModules();
+      vi.doMock('@hipago/bypass-napi', () => {
+        throw new Error('Cannot find module');
+      });
+      const mod = await import('../bypass-fetch');
+      vi.mocked(fetch).mockResolvedValue(new Response('OK', { status: 200 }));
+
+      // Not probed yet — must not pre-emptively report unavailable.
+      expect(mod.isBypassAddonUnavailable()).toBe(false);
+      expect(mod.getBypassAddonError()).toBeNull();
+
+      await mod.bypassFetch('https://hitomi.la/');
+
+      // The failure is surfaced as readable state with a non-empty message.
+      expect(mod.isBypassAddonUnavailable()).toBe(true);
+      expect(mod.getBypassAddonError()).toBeTruthy();
+    });
+
+    it('reports the addon available after a successful CJS-default import', async () => {
+      vi.resetModules();
+      // Mimic the CommonJS-via-dynamic-import shape: exports land on `.default`.
+      vi.doMock('@hipago/bypass-napi', () => ({
+        default: { bypassFetch: vi.fn().mockResolvedValue(mockStreamResponse([])) },
+      }));
+      const mod = await import('../bypass-fetch');
+
+      const resp = await mod.bypassFetch('https://hitomi.la/');
+      expect(resp.status).toBe(200);
+      expect(mod.isBypassAddonUnavailable()).toBe(false);
+      expect(mod.getBypassAddonError()).toBeNull();
+    });
+
+    it('treats an addon missing the bypassFetch export as unavailable', async () => {
+      vi.resetModules();
+      vi.doMock('@hipago/bypass-napi', () => ({ default: {} }));
+      const mod = await import('../bypass-fetch');
+      vi.mocked(fetch).mockResolvedValue(new Response('OK', { status: 200 }));
+
+      await mod.bypassFetch('https://hitomi.la/');
+      expect(mod.isBypassAddonUnavailable()).toBe(true);
+      expect(fetch).toHaveBeenCalled();
     });
   });
 });
