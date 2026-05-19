@@ -38,7 +38,12 @@ export async function GET(request: NextRequest) {
           lastErr = new Error(`upstream ${resp.status}`);
           continue;
         }
-        return NextResponse.json({ error: 'fetch failed' }, { status: resp.status });
+        // Forward the status, and the upstream Retry-After header (429 rate
+        // limit) so the client can honor the rate-limit window.
+        const errResp = NextResponse.json({ error: 'fetch failed' }, { status: resp.status });
+        const retryAfter = resp.headers.get('retry-after');
+        if (retryAfter) errResp.headers.set('Retry-After', retryAfter);
+        return errResp;
       }
 
       const html = await resp.text();
