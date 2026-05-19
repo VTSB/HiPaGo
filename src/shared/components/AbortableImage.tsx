@@ -168,6 +168,8 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
   if (preload) {
     return (
+      // Custom abortable-fetch image; next/image cannot host the abort logic.
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         ref={imgRef}
         src={visible ? src : undefined}
@@ -182,6 +184,8 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   }
 
   return (
+    // Custom abortable-fetch image; next/image cannot host the abort logic.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       ref={imgRef}
       src={visible ? src : undefined}

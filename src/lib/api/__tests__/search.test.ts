@@ -9,7 +9,6 @@ import {
   decodeSuggestionData,
 } from '../search';
 import { TagType } from '@/lib/utils/types';
-import type { IndexNode, Suggestion } from '@/lib/utils/types';
 
 describe('search.ts', () => {
   describe('compareKeys', () => {

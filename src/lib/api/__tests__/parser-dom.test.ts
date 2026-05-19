@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseGalleryBlockHtml, galleryInfoToBlock, parseGalleryJson } from '../parser';
+import { parseGalleryBlockHtml, galleryInfoToBlock } from '../parser';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryInfo } from '@/lib/utils/types';
 
@@ -32,7 +32,7 @@ interface MockTextNode {
 
 // Mock DOMParser for testing without full jsdom environment
 class MockDOMParser {
-  parseFromString(html: string, _type: string): Document {
+  parseFromString(html: string): Document {
     // This is a simplified mock - real tests would use jsdom
     const doc = {
       querySelector: (selector: string) => {

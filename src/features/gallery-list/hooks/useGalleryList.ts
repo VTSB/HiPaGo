@@ -40,15 +40,17 @@ export function useGalleryList(startPage = 0, viewingPage = 1, sort: SortOrder =
     staleTime: 60_000,
   });
 
+  const { data, isFetchingNextPage, hasNextPage, fetchNextPage } = query;
+
   // Prefetch ahead of current viewing page
   useEffect(() => {
-    if (!query.data || query.isFetchingNextPage || !query.hasNextPage) return;
-    const loadedPages = query.data.pages.length;
+    if (!data || isFetchingNextPage || !hasNextPage) return;
+    const loadedPages = data.pages.length;
     if (loadedPages < 1) return;
     if (loadedPages < viewingPage - startPage + PREFETCH_AHEAD) {
-      query.fetchNextPage();
+      fetchNextPage();
     }
-  }, [query.data?.pages.length, query.isFetchingNextPage, query.hasNextPage, query.fetchNextPage, viewingPage]);
+  }, [data, isFetchingNextPage, hasNextPage, fetchNextPage, viewingPage, startPage]);
 
   const ids = query.data?.pages.flatMap((p) => p.ids) ?? [];
   const totalLength = query.data?.pages[0]?.totalLength ?? 0;

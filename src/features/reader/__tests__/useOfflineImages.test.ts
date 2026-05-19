@@ -25,7 +25,7 @@ const createdUrls: string[] = [];
 const revokedUrls: string[] = [];
 
 let urlCounter = 0;
-const mockCreateObjectURL = vi.fn((_blob: unknown) => {
+const mockCreateObjectURL = vi.fn(() => {
   const url = `blob:mock-url-${++urlCounter}`;
   createdUrls.push(url);
   return url;

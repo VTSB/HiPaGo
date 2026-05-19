@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
 import { getDb } from '../adapter';
 import {
@@ -270,7 +270,7 @@ describe('searchLocalTags search query hybrid ranking (JS sort)', () => {
   it('search results rank count=0 tags by local gallery_tag frequency', async () => {
     const db = getDb();
     // bear: count=50, no gallery_tag links needed
-    const rBear = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'bear', 50]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'bear', 50]);
     // beauty: count=0, 10 gallery_tag links
     const rBeauty = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'beauty', 0]);
     const beautyId = rBeauty.lastInsertRowId;
@@ -330,8 +330,7 @@ describe('searchLocalTags empty query hybrid ranking', () => {
   it('ranks count>0 tags above count=0 tags', async () => {
     const db = getDb();
     // Tag A: count=100
-    const rA = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_a', 100]);
-    const tagAId = rA.lastInsertRowId;
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_a', 100]);
     // Tag B: count=0, linked to 5 galleries
     const rB = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_b', 0]);
     const tagBId = rB.lastInsertRowId;
@@ -410,7 +409,7 @@ describe('searchLocalTags empty query hybrid ranking', () => {
 
   it('count=0 tags with no gallery_tag references rank after those with references', async () => {
     const db = getDb();
-    const rNoRef = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'no_ref', 0]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'no_ref', 0]);
     const rWithRef = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'with_ref', 0]);
     const tagWithRefId = rWithRef.lastInsertRowId;
 

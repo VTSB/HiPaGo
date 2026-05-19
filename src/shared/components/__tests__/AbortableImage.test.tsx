@@ -12,8 +12,6 @@ const mockDisconnect = vi.fn();
 
 function MockIntersectionObserver(
   this: IntersectionObserver,
-  _callback: IntersectionObserverCallback,
-  _options?: IntersectionObserverInit,
 ) {
   (this as unknown as { observe: typeof mockObserve }).observe = mockObserve;
   (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;
@@ -87,8 +85,6 @@ describe('AbortableImage opacity fade-in', () => {
   it('creates IntersectionObserver with rootMargin of 400px for lazy images', () => {
     const constructorSpy = vi.fn().mockImplementation(function (
       this: IntersectionObserver,
-      _cb: IntersectionObserverCallback,
-      _opts?: IntersectionObserverInit,
     ) {
       (this as unknown as { observe: typeof mockObserve }).observe = mockObserve;
       (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;

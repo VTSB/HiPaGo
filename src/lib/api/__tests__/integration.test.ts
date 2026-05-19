@@ -5,7 +5,6 @@ import { galleryInfoToImages, galleryInfoToBlock, categorizeTags } from '../pars
 import { getImageUrl, getThumbnailUrl, parseGgJs } from '@/lib/utils/image-url';
 import { fetchGalleryIds } from '../nozomi';
 import { clearGgConfigCache, getGgConfig } from '../client';
-import type { GalleryInfo, GalleryFile, GgConfig } from '@/lib/utils/types';
 import { GalleryBlockType, ImageType, TagType } from '@/lib/utils/types';
 
 // Mock gg.js content
@@ -62,7 +61,7 @@ describe('Integration Tests - Full Pipeline', () => {
   beforeEach(() => {
     clearGgConfigCache();
 
-    mockFetch = vi.fn((url: string, options?: RequestInit) => {
+    mockFetch = vi.fn((url: string) => {
       const urlStr = url;
 
       // Route based on URL pattern

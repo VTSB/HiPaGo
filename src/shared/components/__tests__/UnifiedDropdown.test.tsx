@@ -194,7 +194,7 @@ describe('UnifiedDropdown', () => {
   });
 
   it('uses onMouseDown on the clear-all button (not onClick)', () => {
-    const { container } = render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
+    render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
     // Find clear-all button: it should NOT have an onClick handler
     const clearBtn = screen.getByText('Clear all');
     // Verify it responds to mousedown

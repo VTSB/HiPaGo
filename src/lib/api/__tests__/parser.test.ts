@@ -10,7 +10,7 @@ import {
   parseIndexVersion,
 } from '../parser';
 import { GalleryBlockType, ImageType, TagType } from '@/lib/utils/types';
-import type { GalleryInfo, GalleryTagJson } from '@/lib/utils/types';
+import type { GalleryTagJson } from '@/lib/utils/types';
 
 const SAMPLE_JSON = `var galleryinfo = {
   "language_localname": "日本語",

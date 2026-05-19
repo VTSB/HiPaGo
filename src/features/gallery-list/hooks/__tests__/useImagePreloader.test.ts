@@ -101,7 +101,7 @@ describe('useImagePreloader — thumbnail image preloading', () => {
     const block = makeBlock(42, 'https://cdn.example.com/tn/42.avif');
     mockResolveBlock.mockResolvedValue(block);
 
-    const { queryClient, wrapper } = createWrapper();
+    const { wrapper } = createWrapper();
 
     // Visible rows = [5..9], preloadRows=2 → preload rows [3,4] and [10,11]
     // With 5 cols, row 10 col 0 → itemIndex = 50, id comes from getItemId

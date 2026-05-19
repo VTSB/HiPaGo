@@ -70,6 +70,9 @@ function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
       {/* Thumbnail */}
       <div className="h-24 w-16 shrink-0 overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
         {item.thumbnail ? (
+          // Plain <img>: thumbnails are remote hitomi URLs served through a
+          // custom proxy, not next/image-optimizable.
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={item.thumbnail}
             alt={item.title}

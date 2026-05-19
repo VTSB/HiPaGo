@@ -166,18 +166,6 @@ describe('useVirtualGallery', () => {
 // neededPages ring buffer
 // ---------------------------------------------------------------------------
 
-// Helper: make a wrapper with gcTime:0 and staleTime:0 so React Query never
-// serves cached data — lets us observe fresh fetches after mock changes.
-function makeNoCacheWrapper() {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false, staleTime: 0, gcTime: 0 },
-    },
-  });
-  return function Wrapper({ children }: { children: React.ReactNode }) {
-    return React.createElement(QueryClientProvider, { client }, children);
-  };
-}
 
 describe('neededPages ring buffer', () => {
   beforeEach(() => {

@@ -31,8 +31,6 @@ const mockObserve = vi.fn();
 const mockDisconnect = vi.fn();
 function MockIntersectionObserver(
   this: IntersectionObserver,
-  _cb: IntersectionObserverCallback,
-  _opts?: IntersectionObserverInit,
 ) {
   (this as unknown as { observe: typeof mockObserve }).observe = mockObserve;
   (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;

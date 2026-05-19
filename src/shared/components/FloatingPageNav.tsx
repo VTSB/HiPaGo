@@ -142,7 +142,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
     return () => window.removeEventListener('scroll', onScroll);
-  }, [loadedItems, pageSize]);
+  }, [loadedItems, pageSize, setViewingPage]);
 
   // Custom smooth scroll: fast start → decelerate (ease-out)
   const scrollAnimRef = useRef(0);

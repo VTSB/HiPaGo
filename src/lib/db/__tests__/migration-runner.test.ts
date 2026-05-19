@@ -2,7 +2,7 @@
  * Tests for the migration runner (runMigrations) and MIGRATIONS array.
  * Uses sql.js in-memory adapter — no schema dependency, simulates pre-migration DB.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import type { DbAdapter, QueryResult } from '../adapter';
 
@@ -197,7 +197,7 @@ describe('runMigrations', () => {
       const failingMigration = {
         version: failingVersion,
         description: 'Failing migration for test',
-        up: async (_a: DbAdapter) => {
+        up: async () => {
           throw new Error('intentional failure');
         },
       };

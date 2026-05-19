@@ -13,9 +13,7 @@ import os from 'os';
 import type {
   Tag,
   BatchFile,
-  BatchTag,
   AnalysisReport,
-  SummaryReport,
 } from '../translate-tags-logic';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

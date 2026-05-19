@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // We test the hook's return shape indirectly via resolveGalleryDetail
 // (hooks need jsdom but this is a node environment test file)
@@ -26,8 +26,7 @@ vi.mock('@/lib/api/parser', () => ({
 
 import { resolveGalleryDetail } from '../useGalleryDetail';
 import { getGalleryBlock, getGalleryImages } from '@/lib/db/gallery';
-import { fetchGalleryInfo, filesToGalleryImages } from '@/lib/api/gallery';
-import { galleryInfoToBlock, galleryInfoToImages } from '@/lib/api/parser';
+import { filesToGalleryImages } from '@/lib/api/gallery';
 
 const sampleFiles: GalleryFile[] = [
   { width: 1280, height: 1800, haswebp: 1, hasavif: 1, hasavifsmalltn: 1, name: '001.jpg', hash: 'abc' },

@@ -175,10 +175,6 @@ describe('getGalleryIdsForQuery', () => {
     it('returns empty array when subnode fetch throws (getNodeAtAddress catch block)', async () => {
       vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
 
-      const targetHash = new Uint8Array(
-        await crypto.subtle.digest('SHA-256', new TextEncoder().encode('failterm')),
-      ).slice(0, 4);
-
       const B = 16;
       const numberOfSubNodes = B + 1;
       const subAddrs = new Array<number>(numberOfSubNodes).fill(0);

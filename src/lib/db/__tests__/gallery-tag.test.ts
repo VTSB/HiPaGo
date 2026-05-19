@@ -7,7 +7,7 @@ import {
   deleteGalleryTags,
   getGalleryIdsByTag,
 } from '../gallery-tag';
-import { TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
+import { TagType } from '@/lib/utils/types';
 
 // Mock patchNewTagCounts so saveGalleryBlock tests don't hit the real API
 vi.mock('../patch-tag-counts', () => ({

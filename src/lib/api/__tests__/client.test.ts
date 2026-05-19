@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { apiClient, ApiError, getGgConfig, clearGgConfigCache } from '../client';
-import type { GgConfig } from '@/lib/utils/types';
 
 describe('ApiError', () => {
   it('should set status and message', () => {

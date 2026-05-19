@@ -5,7 +5,6 @@ import { GalleryGridById } from '@/features/gallery-list/components/GalleryGrid'
 import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
-import { useT } from '@/lib/i18n/useT';
 
 const PAGE_SIZE = 25;
 
@@ -17,8 +16,6 @@ interface GalleryIdListPageProps {
 }
 
 export function GalleryIdListPage({ fetchIds, title, emptyMessage, queryKey }: GalleryIdListPageProps) {
-  const t = useT();
-
   const { data: allIds, isLoading } = useQuery({
     queryKey: [queryKey],
     queryFn: () => fetchIds(),

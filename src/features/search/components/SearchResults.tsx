@@ -92,7 +92,7 @@ export function SearchResults() {
     return filteredIds[index] ?? null;
   }, [filteredIds]);
 
-  const requestPage = useCallback((_pageIndex: number) => {}, []);
+  const requestPage = useCallback(() => {}, []);
 
   const totalPages = filteredIds.length > 0 ? Math.ceil(filteredIds.length / PAGE_SIZE) : 0;
 

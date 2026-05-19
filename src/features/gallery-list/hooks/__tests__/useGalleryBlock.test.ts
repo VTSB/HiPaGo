@@ -232,7 +232,7 @@ describe('useGalleryBlock signal threading', () => {
     });
 
     expect(fetchGalleryBlockHtmlById).toHaveBeenCalledOnce();
-    const [_id, signal] = fetchGalleryBlockHtmlById.mock.calls[0];
+    const [, signal] = fetchGalleryBlockHtmlById.mock.calls[0];
     expect(signal).toBeInstanceOf(AbortSignal);
   });
 

@@ -8,10 +8,9 @@
  * route through execute(). The SQL semantics verified here apply to all adapters
  * since they all use SQLite under the hood.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import type { DbAdapter, QueryResult } from '../adapter';
-import { setDb, closeDb } from '../adapter';
 import { runMigrations, LATEST_VERSION } from '../migrations';
 
 // ---------------------------------------------------------------------------

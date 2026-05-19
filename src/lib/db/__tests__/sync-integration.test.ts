@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb, countRows, queryAll, queryOne } from './test-db';
-import { getDb } from '../adapter';
 import {
   saveGalleryBlock,
   getGalleryBlock,
@@ -17,7 +16,6 @@ import {
   deleteGalleryImages,
 } from '../gallery';
 import {
-  findOrCreateTag,
   getTag,
   getTagsByType,
   setTagTransform,

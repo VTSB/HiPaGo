@@ -112,6 +112,14 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     // Tracks previous value to detect when window actually moved
     const prevWindowStartPageRef = useRef(windowStartPage);
 
+    // Ref always reflects the latest onWindowSlide prop so the slide effect can
+    // call it without listing the (potentially unstable) prop in its deps array.
+    // Assigned in a dependency-free effect, not during render (react-hooks/refs).
+    const onWindowSlideRef = useRef(onWindowSlide);
+    useEffect(() => {
+      onWindowSlideRef.current = onWindowSlide;
+    });
+
     // Derived window bounds
     const effectiveTotalPages = totalPages || WINDOW_PAGES;
     const windowEndPage = Math.min(effectiveTotalPages, windowStartPage + WINDOW_PAGES - 1);
@@ -170,6 +178,8 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     // Slide window when viewingPage approaches an edge.
     // setWindowStartPage is deferred via setTimeout to avoid calling setState
     // synchronously in an effect body (react-hooks/set-state-in-effect).
+    // onWindowSlide is read via ref (see onWindowSlideRef above) to avoid
+    // re-running this effect when the parent re-renders with a new inline callback.
     const slidingRef = useRef(false);
     useEffect(() => {
       if (totalPages === 0 || slidingRef.current) return;
@@ -178,20 +188,20 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
 
       if (viewingPage < currentStart + NEAR_EDGE && currentStart > 1) {
         slidingRef.current = true;
-        onWindowSlide?.();
+        onWindowSlideRef.current?.();
         setTimeout(() => {
           setWindowStartPage((p) => Math.max(1, p - SLIDE_BY));
           slidingRef.current = false;
         }, 0);
       } else if (viewingPage > currentStart + WINDOW_PAGES - NEAR_EDGE && currentEnd < totalPages) {
         slidingRef.current = true;
-        onWindowSlide?.();
+        onWindowSlideRef.current?.();
         setTimeout(() => {
           setWindowStartPage((p) => Math.min(totalPages - WINDOW_PAGES + 1, p + SLIDE_BY));
           slidingRef.current = false;
         }, 0);
       }
-    }, [viewingPage, totalPages]); // intentionally omits windowStartPage — read via ref
+    }, [viewingPage, totalPages]); // intentionally omits windowStartPage — read via ref; onWindowSlide — read via ref
 
     // Compensate scroll offset when window slides so the viewport stays on the same content.
     // Use scrollToIndex instead of scrollBy to avoid overshoot from inaccurate estimation.

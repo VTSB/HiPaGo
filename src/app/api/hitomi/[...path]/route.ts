@@ -53,7 +53,7 @@ export async function GET(
       status: response.status,
       headers: responseHeaders,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: 'Proxy fetch failed' },
       { status: 502 },

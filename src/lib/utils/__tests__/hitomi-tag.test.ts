@@ -10,7 +10,6 @@ import {
   toUiString,
   getDisplayName,
   tagsEqual,
-  type HitomiTag,
 } from '../hitomi-tag';
 import { TagType } from '../types';
 import type { Suggestion } from '../types';
