@@ -24,7 +24,7 @@ class InMemoryAdapter implements DbAdapter {
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
-    this.sqlDb.run(sql, params as any[]);
+    this.sqlDb.run(sql, params);
     const changes = this.sqlDb.getRowsModified();
     const result = this.sqlDb.exec('SELECT last_insert_rowid() as id');
     const lastInsertRowId =
@@ -34,7 +34,7 @@ class InMemoryAdapter implements DbAdapter {
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const stmt = this.sqlDb.prepare(sql);
-    stmt.bind(params as any[]);
+    stmt.bind(params);
     const rows: T[] = [];
     while (stmt.step()) {
       rows.push(stmt.getAsObject() as T);

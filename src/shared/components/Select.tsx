@@ -17,23 +17,27 @@ interface CustomSelectProps {
 }
 
 export function Select({ value, options, onChange, className = '', 'aria-label': ariaLabel }: CustomSelectProps) {
-  const [open, setOpen] = useState(false);
-  const [focusedIndex, setFocusedIndex] = useState(-1);
+  // open and focusedIndex are stored together so that opening the dropdown
+  // always atomically resets the focused index — no effect needed.
+  const [dropdownState, setDropdownState] = useState<{ open: boolean; focusedIndex: number }>({
+    open: false,
+    focusedIndex: -1,
+  });
+  const { open, focusedIndex } = dropdownState;
+
   const ref = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
   const selected = options.find((o) => o.value === value);
 
-  const closeDropdown = useCallback(() => setOpen(false), []);
+  const closeDropdown = useCallback(() =>
+    setDropdownState({ open: false, focusedIndex: -1 }), []);
   useClickOutside(ref, closeDropdown);
 
-  // Reset focused index when opening
-  useEffect(() => {
-    if (open) {
-      const idx = options.findIndex((o) => o.value === value);
-      setFocusedIndex(idx >= 0 ? idx : 0);
-    }
-  }, [open, options, value]);
+  const openDropdown = useCallback(() => {
+    const idx = options.findIndex((o) => o.value === value);
+    setDropdownState({ open: true, focusedIndex: idx >= 0 ? idx : 0 });
+  }, [options, value]);
 
   // Scroll focused option into view
   useEffect(() => {
@@ -45,13 +49,13 @@ export function Select({ value, options, onChange, className = '', 'aria-label':
 
   const handleSelect = useCallback((v: string) => {
     onChange(v);
-    setOpen(false);
+    setDropdownState({ open: false, focusedIndex: -1 });
   }, [onChange]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     switch (e.key) {
       case 'Escape':
-        setOpen(false);
+        setDropdownState({ open: false, focusedIndex: -1 });
         break;
       case 'Enter':
       case ' ':
@@ -59,33 +63,39 @@ export function Select({ value, options, onChange, className = '', 'aria-label':
         if (open && focusedIndex >= 0 && focusedIndex < options.length) {
           handleSelect(options[focusedIndex].value);
         } else {
-          setOpen(true);
+          openDropdown();
         }
         break;
       case 'ArrowDown':
         e.preventDefault();
         if (!open) {
-          setOpen(true);
+          openDropdown();
         } else {
-          setFocusedIndex((prev) => (prev < options.length - 1 ? prev + 1 : 0));
+          setDropdownState((prev) => ({
+            open: true,
+            focusedIndex: prev.focusedIndex < options.length - 1 ? prev.focusedIndex + 1 : 0,
+          }));
         }
         break;
       case 'ArrowUp':
         e.preventDefault();
         if (!open) {
-          setOpen(true);
+          openDropdown();
         } else {
-          setFocusedIndex((prev) => (prev > 0 ? prev - 1 : options.length - 1));
+          setDropdownState((prev) => ({
+            open: true,
+            focusedIndex: prev.focusedIndex > 0 ? prev.focusedIndex - 1 : options.length - 1,
+          }));
         }
         break;
       case 'Home':
-        if (open) { e.preventDefault(); setFocusedIndex(0); }
+        if (open) { e.preventDefault(); setDropdownState({ open: true, focusedIndex: 0 }); }
         break;
       case 'End':
-        if (open) { e.preventDefault(); setFocusedIndex(options.length - 1); }
+        if (open) { e.preventDefault(); setDropdownState({ open: true, focusedIndex: options.length - 1 }); }
         break;
     }
-  }, [open, focusedIndex, options, handleSelect]);
+  }, [open, focusedIndex, options, handleSelect, openDropdown]);
 
   const listboxId = useId();
 
@@ -93,7 +103,7 @@ export function Select({ value, options, onChange, className = '', 'aria-label':
     <div ref={ref} className={`relative ${className}`}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? closeDropdown() : openDropdown())}
         onKeyDown={handleKeyDown}
         aria-label={ariaLabel}
         aria-expanded={open}
@@ -121,7 +131,7 @@ export function Select({ value, options, onChange, className = '', 'aria-label':
               aria-selected={opt.value === value}
               tabIndex={-1}
               onClick={() => handleSelect(opt.value)}
-              onMouseEnter={() => setFocusedIndex(idx)}
+              onMouseEnter={() => setDropdownState((prev) => ({ ...prev, focusedIndex: idx }))}
               className={`flex cursor-pointer items-center justify-between px-3 py-2 text-sm transition-colors ${
                 idx === focusedIndex
                   ? 'bg-zinc-100 dark:bg-zinc-700'

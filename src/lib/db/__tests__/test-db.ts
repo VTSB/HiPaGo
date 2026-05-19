@@ -17,7 +17,7 @@ class TestAdapter implements DbAdapter {
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
-    this.db.run(sql, params as any[]);
+    this.db.run(sql, params);
     const changes = this.db.getRowsModified();
     // sql.js doesn't expose last_insert_rowid directly from run,
     // so we query it separately
@@ -29,7 +29,7 @@ class TestAdapter implements DbAdapter {
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const stmt = this.db.prepare(sql);
-    stmt.bind(params as any[]);
+    stmt.bind(params);
     const rows: T[] = [];
     while (stmt.step()) {
       const row = stmt.getAsObject() as T;

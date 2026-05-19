@@ -19,6 +19,17 @@ import { parseGalleryBlockHtml, galleryInfoToBlock, parseGalleryJson } from '../
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryInfo } from '@/lib/utils/types';
 
+/** Minimal element shape used in the mock DOM rows */
+interface MockElement {
+  querySelector(sel: string): { textContent: string } | null;
+  querySelectorAll(sel: string): Array<{ textContent: string }>;
+}
+
+/** Minimal text-node shape */
+interface MockTextNode {
+  textContent: string;
+}
+
 // Mock DOMParser for testing without full jsdom environment
 class MockDOMParser {
   parseFromString(html: string, _type: string): Document {
@@ -63,7 +74,7 @@ class MockDOMParser {
       querySelectorAll: (selector: string) => {
         if (selector === 'tr') {
           // Parse table rows from HTML (ES2017-compatible regex)
-          const rows: any[] = [];
+          const rows: MockElement[] = [];
           const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
           let trMatch;
           while ((trMatch = trRegex.exec(html)) !== null) {
@@ -76,7 +87,7 @@ class MockDOMParser {
             }
             if (tdMatches.length >= 2) {
               const header = tdMatches[0][1].replace(/<[^>]+>/g, '').trim();
-              const links: any[] = [];
+              const links: MockTextNode[] = [];
               const linkRegex = /<a[^>]*>([^<]+)<\/a>/g;
               let linkMatch;
               while ((linkMatch = linkRegex.exec(tdMatches[1][1])) !== null) {
@@ -93,7 +104,7 @@ class MockDOMParser {
           return rows;
         }
         if (selector === 'script') {
-          const scripts: any[] = [];
+          const scripts: MockTextNode[] = [];
           const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/g;
           let scriptMatch;
           while ((scriptMatch = scriptRegex.exec(html)) !== null) {
@@ -102,7 +113,7 @@ class MockDOMParser {
           return scripts;
         }
         if (selector === 'a') {
-          const links: any[] = [];
+          const links: Array<{ textContent: string; nextSibling: MockTextNode }> = [];
           const linkRegex = /<a[^>]*>([^<]+)<\/a>\s*(?:\((\d+)\))?/g;
           let linkMatch;
           while ((linkMatch = linkRegex.exec(html)) !== null) {
@@ -123,7 +134,7 @@ class MockDOMParser {
 
 // Install mock
 if (typeof DOMParser === 'undefined') {
-  global.DOMParser = MockDOMParser as any;
+  global.DOMParser = MockDOMParser as unknown as typeof DOMParser;
 }
 
 describe('parseGalleryBlockHtml', () => {
@@ -358,4 +369,3 @@ describe('galleryInfoToBlock — top-level artist/group/character/parody merging
     expect(block.tags[TagType.SERIES]).toBeUndefined();
   });
 });
-

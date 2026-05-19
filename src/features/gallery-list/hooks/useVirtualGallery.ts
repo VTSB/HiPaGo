@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { fetchBrowseIds } from '@/lib/api/gallery';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -28,13 +28,21 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
   // Ratchet: once we've seen a totalLength, never report lower than that.
   // Prevents the virtualizer height from collapsing to 0 when pages are evicted
   // from neededPages during rapid scrolling (all evicted queries return data=undefined).
-  const maxTotalLengthRef = useRef(0);
+  // Stored as state so we can use the render-phase setState pattern (no ref writes
+  // during render, no effect — react-hooks/refs and react-hooks/set-state-in-effect safe).
+  const [maxTotalLength, setMaxTotalLength] = useState(0);
 
-  // Reset on sort/language change
-  useEffect(() => {
+  // Reset on sort/language change — track previous values to detect changes.
+  // Using render-phase setState (calling setState during render) is the React-documented
+  // pattern for derived state resets; it does not trigger set-state-in-effect.
+  const [prevSort, setPrevSort] = useState(sort);
+  const [prevLanguage, setPrevLanguage] = useState(language);
+  if (sort !== prevSort || language !== prevLanguage) {
+    setPrevSort(sort);
+    setPrevLanguage(language);
     setNeededPages(new Set([0]));
-    maxTotalLengthRef.current = 0;
-  }, [sort, language]);
+    setMaxTotalLength(0);
+  }
 
   const neededPagesArray = Array.from(neededPages);
 
@@ -58,9 +66,13 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
     }
   }
 
-  // Apply ratchet: once totalLength is known, never let it go back to 0
-  if (totalLength > maxTotalLengthRef.current) maxTotalLengthRef.current = totalLength;
-  const safeTotalLength = maxTotalLengthRef.current;
+  // Apply ratchet via render-phase setState: React re-renders immediately when
+  // setState is called during render, so the returned safeTotalLength is always
+  // correct without reading/writing a ref during render (react-hooks/refs).
+  if (totalLength > maxTotalLength) {
+    setMaxTotalLength(totalLength);
+  }
+  const safeTotalLength = maxTotalLength > 0 ? maxTotalLength : totalLength;
 
   const requestPage = useCallback((pageIndex: number) => {
     setNeededPages((prev) => {

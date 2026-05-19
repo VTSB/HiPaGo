@@ -249,7 +249,7 @@ describe('getSuggestionsForQuery', () => {
         ['testartist', 50, 'artist'],
       ]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     const result = await getSuggestionsForQuery('te');
 
@@ -263,7 +263,7 @@ describe('getSuggestionsForQuery', () => {
     const mockResponse = {
       json: vi.fn().mockResolvedValue([]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     await getSuggestionsForQuery('a b');
 
@@ -275,7 +275,7 @@ describe('getSuggestionsForQuery', () => {
     const mockResponse = {
       json: vi.fn().mockResolvedValue([['testartist', 42, 'artist']]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     const result = await getSuggestionsForQuery('artist:te');
 
@@ -300,7 +300,7 @@ describe('getSuggestionsForQuery', () => {
   it('limits results to SEARCH_LIMIT', async () => {
     const bigData = Array.from({ length: 150 }, (_, i) => [`tag${i}`, i, 'tag']);
     const mockResponse = { json: vi.fn().mockResolvedValue(bigData) };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     const result = await getSuggestionsForQuery('t');
 
@@ -311,7 +311,7 @@ describe('getSuggestionsForQuery', () => {
     const mockResponse = {
       json: vi.fn().mockResolvedValue([['sometag', 10, 'unknownns']]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     const result = await getSuggestionsForQuery('so');
 
@@ -518,7 +518,7 @@ describe('getSuggestionsForQuery — encodeTagIndexChar special characters', () 
     const mockResponse = {
       json: vi.fn().mockResolvedValue([]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     await getSuggestionsForQuery('a/b');
 
@@ -530,7 +530,7 @@ describe('getSuggestionsForQuery — encodeTagIndexChar special characters', () 
     const mockResponse = {
       json: vi.fn().mockResolvedValue([]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     await getSuggestionsForQuery('a.b');
 
@@ -542,7 +542,7 @@ describe('getSuggestionsForQuery — encodeTagIndexChar special characters', () 
     const mockResponse = {
       json: vi.fn().mockResolvedValue([]),
     };
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as any);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(mockResponse as unknown as Response);
 
     await getSuggestionsForQuery('a/.b');
 

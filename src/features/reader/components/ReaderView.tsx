@@ -36,29 +36,34 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
 
   const dualPage = useSettingsStore((s) => s.dualPage);
 
+  // Destructure stable reader members so the React Compiler can preserve
+  // manual memoization on the callbacks below (member expressions like
+  // reader.currentPage cannot be tracked by the compiler).
+  const { currentPage, totalPages, mode, setCurrentPage } = reader;
+
   const handleNextPage = useCallback(() => {
-    const step = dualPage && reader.mode === 'page' ? 2 : 1;
-    const nextIdx = Math.min(reader.currentPage + step, reader.totalPages - 1);
-    reader.setCurrentPage(nextIdx);
-    if (reader.mode === 'scroll') scrollToPageElement(nextIdx);
-  }, [reader.currentPage, reader.totalPages, reader.mode, reader.setCurrentPage, scrollToPageElement, dualPage]);
+    const step = dualPage && mode === 'page' ? 2 : 1;
+    const nextIdx = Math.min(currentPage + step, totalPages - 1);
+    setCurrentPage(nextIdx);
+    if (mode === 'scroll') scrollToPageElement(nextIdx);
+  }, [currentPage, totalPages, mode, setCurrentPage, scrollToPageElement, dualPage]);
 
   const handlePrevPage = useCallback(() => {
-    const step = dualPage && reader.mode === 'page' ? 2 : 1;
-    const prevIdx = Math.max(reader.currentPage - step, 0);
-    reader.setCurrentPage(prevIdx);
-    if (reader.mode === 'scroll') scrollToPageElement(prevIdx);
-  }, [reader.currentPage, reader.mode, reader.setCurrentPage, scrollToPageElement, dualPage]);
+    const step = dualPage && mode === 'page' ? 2 : 1;
+    const prevIdx = Math.max(currentPage - step, 0);
+    setCurrentPage(prevIdx);
+    if (mode === 'scroll') scrollToPageElement(prevIdx);
+  }, [currentPage, mode, setCurrentPage, scrollToPageElement, dualPage]);
 
   const handleVisiblePageChange = useCallback((page: number) => {
     if (programmaticScrollRef.current) return;
-    reader.setCurrentPage(page);
-  }, [reader.setCurrentPage]);
+    setCurrentPage(page);
+  }, [setCurrentPage]);
 
   const handlePageChange = useCallback((page: number) => {
-    reader.setCurrentPage(page);
-    if (reader.mode === 'scroll') scrollToPageElement(page);
-  }, [reader.setCurrentPage, reader.mode, scrollToPageElement]);
+    setCurrentPage(page);
+    if (mode === 'scroll') scrollToPageElement(page);
+  }, [setCurrentPage, mode, scrollToPageElement]);
 
   // Arrow key navigation for both page and scroll modes
   useEffect(() => {

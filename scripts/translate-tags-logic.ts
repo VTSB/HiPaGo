@@ -1069,7 +1069,9 @@ async function getBypassFetch(): Promise<(url: string, headers?: Record<string, 
   try {
     // Use process.cwd() based path since tsx runs in CJS mode (import.meta.url unavailable)
     const napiPath = path.join(process.cwd(), 'crates', 'bypass-napi');
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // Targeted suppression: a genuine runtime require() of a native addon
+    // loaded by filesystem path — no clean ESM directory-import equivalent.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { bypassFetch } = require(napiPath);
     return async (url: string, headers?: Record<string, string>) => {
       const resp = await bypassFetch(url, { ...HITOMI_HEADERS, ...headers });

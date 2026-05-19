@@ -99,12 +99,17 @@ export function SearchResults() {
   const handleJumpToPage = useCallback((page: number) => {
     setViewingPage(page);
     gridRef.current?.scrollToPage(page);
-  }, []);
+  }, [setViewingPage]);
 
-  // Debounced URL sync on scroll (200ms)
+  // Debounced URL sync on scroll (200ms).
+  // sortRef holds the latest sort so the scroll handler always uses the current
+  // value without being re-subscribed on every sort change. Assigned in an
+  // effect, not during render (react-hooks/refs).
   const urlTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const sortRef = useRef(sort);
-  sortRef.current = sort;
+  useEffect(() => {
+    sortRef.current = sort;
+  });
   useEffect(() => {
     const syncUrl = () => {
       clearTimeout(urlTimerRef.current);
@@ -146,7 +151,7 @@ export function SearchResults() {
     setSort(newSort);
     setViewingPage(1);
     window.scrollTo({ top: 0 });
-  }, []);
+  }, [setViewingPage]);
 
   return (
     <div>

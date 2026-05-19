@@ -16,7 +16,12 @@ export function useReaderPersistence() {
 
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latestState = useRef({ currentPage, totalPages, mode, storeGalleryId });
-  latestState.current = { currentPage, totalPages, mode, storeGalleryId };
+  // Keep the latest values in a ref so the debounced/unmount saves always use
+  // the current state without re-subscribing effects. Assigned in an effect,
+  // not during render (react-hooks/refs).
+  useEffect(() => {
+    latestState.current = { currentPage, totalPages, mode, storeGalleryId };
+  });
 
   // Debounced save — only persist after 2s of no page changes
   useEffect(() => {

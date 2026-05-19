@@ -36,11 +36,12 @@ vi.mock('@tanstack/react-query', () => ({
   }),
 }));
 
-let capturedGridProps: Record<string, unknown> | null = null;
+// Container for props captured from the mock component via useEffect.
+const capturedGridRef: { current: Record<string, unknown> | null } = { current: null };
 
 vi.mock('@/features/gallery-list/components/VirtualGalleryGrid', () => ({
   VirtualGalleryGrid: React.forwardRef(function MockGrid(props: Record<string, unknown>, ref: React.Ref<unknown>) {
-    capturedGridProps = props;
+    React.useEffect(() => { capturedGridRef.current = props; });
     React.useImperativeHandle(ref, () => ({ scrollToPage: vi.fn(), scrollToItem: vi.fn() }));
     return <div data-testid="virtual-gallery-grid" />;
   }),
@@ -77,7 +78,7 @@ vi.mock('@/lib/utils/constants', () => ({
 describe('SearchResults — VirtualGalleryGrid integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedGridProps = null;
+    capturedGridRef.current = null;
     mockQuery = 'female:test';
     mockSortParam = null;
     mockAtParam = null;
@@ -101,8 +102,8 @@ describe('SearchResults — VirtualGalleryGrid integration', () => {
     const { SearchResults } = await import('../SearchResults');
     render(<SearchResults />);
 
-    if (capturedGridProps) {
-      const getItemId = capturedGridProps.getItemId as (i: number) => number | null;
+    if (capturedGridRef.current) {
+      const getItemId = capturedGridRef.current.getItemId as (i: number) => number | null;
       // ID 200 should be filtered (shown as featured card), so grid should not contain it
       const gridIds: (number | null)[] = [];
       for (let i = 0; i < 5; i++) gridIds.push(getItemId(i));

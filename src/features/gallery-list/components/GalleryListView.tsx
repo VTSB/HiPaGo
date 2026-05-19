@@ -35,7 +35,6 @@ export function GalleryListView() {
     initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1
   );
 
-  const [cachedTotalPages, setCachedTotalPages] = useState(0);
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
 
@@ -46,9 +45,13 @@ export function GalleryListView() {
 
   const totalPages = totalLength > 0 ? Math.ceil(totalLength / PAGE_SIZE) : 0;
 
-  useEffect(() => {
-    if (totalPages > 0) setCachedTotalPages(totalPages);
-  }, [totalPages]);
+  // Ratchet: once totalPages is known, never go back to 0 (prevents height collapse
+  // during rapid scrolling). Use render-phase setState — the React-documented pattern
+  // for derived state (react-hooks/set-state-in-effect safe).
+  const [cachedTotalPages, setCachedTotalPages] = useState(0);
+  if (totalPages > cachedTotalPages) {
+    setCachedTotalPages(totalPages);
+  }
   const displayTotalPages = cachedTotalPages || totalPages;
 
   const handleJumpToPage = useCallback((page: number) => {
@@ -61,10 +64,15 @@ export function GalleryListView() {
     return () => { history.scrollRestoration = 'auto'; };
   }, []);
 
-  // Debounced URL sync on scroll (200ms)
+  // Debounced URL sync on scroll (200ms).
+  // sortRef holds the latest sort so the scroll handler always uses the current
+  // value without being re-subscribed on every sort change. Assigned in an
+  // effect, not during render (react-hooks/refs).
   const urlTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const sortRef = useRef(sort);
-  sortRef.current = sort;
+  useEffect(() => {
+    sortRef.current = sort;
+  });
   useEffect(() => {
     const syncUrl = () => {
       clearTimeout(urlTimerRef.current);

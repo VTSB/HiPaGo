@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, act, cleanup } from '@testing-library/react';
 import React from 'react';
 
-let lastNavProps: Record<string, unknown> = {};
-let lastGridProps: Record<string, unknown> = {};
+// Container objects for props captured from mock components.
+// Populated via useEffect inside each mock (effect runs after render, within act()).
+const navPropsRef: { current: Record<string, unknown> } = { current: {} };
+const gridPropsRef: { current: Record<string, unknown> } = { current: {} };
 let mockAtParam: string | null = null;
 let mockSortParam: string | null = null;
 let mockPageParam: string | null = null;
@@ -32,7 +34,7 @@ vi.mock('../../hooks/useVirtualGallery', () => ({
 
 vi.mock('../VirtualGalleryGrid', () => ({
   VirtualGalleryGrid: React.forwardRef(function MockGrid(props: Record<string, unknown>, ref: React.Ref<unknown>) {
-    lastGridProps = props;
+    React.useEffect(() => { gridPropsRef.current = props; });
     React.useImperativeHandle(ref, () => ({ scrollToPage: vi.fn(), scrollToItem: vi.fn() }));
     return <div data-testid="virtual-grid" />;
   }),
@@ -40,7 +42,7 @@ vi.mock('../VirtualGalleryGrid', () => ({
 
 vi.mock('@/shared/components/FloatingPageNav', () => ({
   FloatingPageNav: React.forwardRef(function MockNav(props: Record<string, unknown>, ref: React.Ref<unknown>) {
-    lastNavProps = props;
+    React.useEffect(() => { navPropsRef.current = props; });
     React.useImperativeHandle(ref, () => ({ suppress: vi.fn() }));
     return <div data-testid="floating-nav" />;
   }),
@@ -69,8 +71,8 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    lastNavProps = {};
-    lastGridProps = {};
+    navPropsRef.current = {};
+    gridPropsRef.current = {};
     mockAtParam = null;
     mockSortParam = null;
     mockPageParam = null;
@@ -86,17 +88,17 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
   it('starts at page 1 when URL has no params', async () => {
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
-    expect(lastNavProps.viewingPage).toBe(1);
+    await act(async () => { render(<GalleryListView />); });
+    expect(navPropsRef.current.viewingPage).toBe(1);
   });
 
   it('reads ?at= and derives viewingPage', async () => {
     mockAtParam = '450';
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
+    await act(async () => { render(<GalleryListView />); });
     // at=450, PAGE_SIZE=25 → page = floor(450/25) + 1 = 19
-    expect(lastNavProps.viewingPage).toBe(19);
+    expect(navPropsRef.current.viewingPage).toBe(19);
   });
 
   it('reads ?sort= from URL', async () => {
@@ -121,9 +123,9 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     mockPageParam = '3';
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
+    await act(async () => { render(<GalleryListView />); });
     // page=3 → at=(3-1)*25=50 → viewingPage = floor(50/25)+1 = 3
-    expect(lastNavProps.viewingPage).toBe(3);
+    expect(navPropsRef.current.viewingPage).toBe(3);
   });
 
   it('writes debounced ?at= to URL via replaceState from visible DOM item', async () => {
@@ -135,10 +137,10 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
 
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
+    await act(async () => { render(<GalleryListView />); });
     replaceStateSpy.mockClear();
 
-    const onViewingPageChange = lastNavProps.onViewingPageChange as (p: number) => void;
+    const onViewingPageChange = navPropsRef.current.onViewingPageChange as (p: number) => void;
     act(() => { onViewingPageChange(5); });
 
     // Before debounce: no replaceState yet
@@ -158,10 +160,10 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
   it('omits ?sort= from URL when sort is date_added (default)', async () => {
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
+    await act(async () => { render(<GalleryListView />); });
     replaceStateSpy.mockClear();
 
-    const onViewingPageChange = lastNavProps.onViewingPageChange as (p: number) => void;
+    const onViewingPageChange = navPropsRef.current.onViewingPageChange as (p: number) => void;
     act(() => { onViewingPageChange(2); });
     act(() => { vi.advanceTimersByTime(200); });
 
@@ -190,8 +192,8 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
-    act(() => { (lastNavProps.onViewingPageChange as (p: number) => void)(10); });
+    await act(async () => { render(<GalleryListView />); });
+    act(() => { (navPropsRef.current.onViewingPageChange as (p: number) => void)(10); });
     act(() => { vi.advanceTimersByTime(200); });
     const galleryCalls = setItemSpy.mock.calls.filter(([key]) => key === 'gallery-list-page');
     expect(galleryCalls).toHaveLength(0);

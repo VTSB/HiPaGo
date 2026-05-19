@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ImageType } from '@/lib/utils/types';
+import type { GalleryFile } from '@/lib/utils/types';
 
 vi.mock('../client', () => ({
   apiClient: {
@@ -32,11 +33,11 @@ describe('fetchGalleryImagesCached', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns cached images from DB when available', async () => {
-    const cachedFiles = [
+    const cachedFiles: GalleryFile[] = [
       { name: '001.jpg', hash: 'h1', width: 800, height: 1200, haswebp: 1, hasavif: 1, hasavifsmalltn: 1 },
       { name: '002.jpg', hash: 'h2', width: 800, height: 1200, haswebp: 1, hasavif: 0, hasavifsmalltn: 0 },
     ];
-    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(cachedFiles as any);
+    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(cachedFiles);
 
     const result = await fetchGalleryImagesCached(123);
 
@@ -51,7 +52,7 @@ describe('fetchGalleryImagesCached', () => {
   });
 
   it('fetches from API and caches when not in DB', async () => {
-    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(null as any);
+    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(null);
 
     const mockInfo = {
       id: 456,
@@ -85,10 +86,10 @@ describe('fetchGalleryImagesCached', () => {
   });
 
   it('includes all image types based on flags', async () => {
-    const cachedFiles = [
+    const cachedFiles: GalleryFile[] = [
       { name: '001.jpg', hash: 'h1', width: 800, height: 1200, haswebp: 0, hasavif: 0, hasavifsmalltn: 0 },
     ];
-    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(cachedFiles as any);
+    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(cachedFiles);
 
     const result = await fetchGalleryImagesCached(789);
 

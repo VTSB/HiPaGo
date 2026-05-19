@@ -103,9 +103,12 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     const [windowStartPage, setWindowStartPage] = useState(() =>
       Math.max(1, viewingPage - Math.floor(WINDOW_PAGES / 2))
     );
-    // Ref always reflects latest windowStartPage (for use in effects without stale closures)
+    // Ref always reflects latest windowStartPage (for use in effects without stale closures).
+    // Assigned in an effect, not during render (react-hooks/refs).
     const windowStartPageRef = useRef(windowStartPage);
-    windowStartPageRef.current = windowStartPage;
+    useEffect(() => {
+      windowStartPageRef.current = windowStartPage;
+    });
     // Tracks previous value to detect when window actually moved
     const prevWindowStartPageRef = useRef(windowStartPage);
 
@@ -143,9 +146,13 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       };
     }, []);
 
-    // Deterministic row height — computed directly from current state, no caching
+    // Deterministic row height — computed directly from current state, no caching.
+    // containerWidth is kept in sync by the ResizeObserver above; fall back to
+    // window.innerWidth - 32 on the very first render before the observer fires.
+    // Do NOT read containerRef.current here — ref access during render is disallowed
+    // by react-hooks/refs; the state value is authoritative after first layout.
     const rowHeight = useMemo(() => {
-      const width = containerWidth || containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth - 32 : 400);
+      const width = containerWidth || (typeof window !== 'undefined' ? window.innerWidth - 32 : 400);
       const gap = 12;
       const cardWidth = (width - gap * (actualCols - 1)) / actualCols;
       return Math.ceil(cardWidth * (3 / 2)) + gap;
@@ -160,7 +167,9 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       scrollMargin,
     });
 
-    // Slide window when viewingPage approaches an edge
+    // Slide window when viewingPage approaches an edge.
+    // setWindowStartPage is deferred via setTimeout to avoid calling setState
+    // synchronously in an effect body (react-hooks/set-state-in-effect).
     const slidingRef = useRef(false);
     useEffect(() => {
       if (totalPages === 0 || slidingRef.current) return;
@@ -170,13 +179,17 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       if (viewingPage < currentStart + NEAR_EDGE && currentStart > 1) {
         slidingRef.current = true;
         onWindowSlide?.();
-        setWindowStartPage((p) => Math.max(1, p - SLIDE_BY));
-        setTimeout(() => { slidingRef.current = false; }, 200);
+        setTimeout(() => {
+          setWindowStartPage((p) => Math.max(1, p - SLIDE_BY));
+          slidingRef.current = false;
+        }, 0);
       } else if (viewingPage > currentStart + WINDOW_PAGES - NEAR_EDGE && currentEnd < totalPages) {
         slidingRef.current = true;
         onWindowSlide?.();
-        setWindowStartPage((p) => Math.min(totalPages - WINDOW_PAGES + 1, p + SLIDE_BY));
-        setTimeout(() => { slidingRef.current = false; }, 200);
+        setTimeout(() => {
+          setWindowStartPage((p) => Math.min(totalPages - WINDOW_PAGES + 1, p + SLIDE_BY));
+          slidingRef.current = false;
+        }, 0);
       }
     }, [viewingPage, totalPages]); // intentionally omits windowStartPage — read via ref
 

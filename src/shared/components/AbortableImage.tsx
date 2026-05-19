@@ -37,18 +37,35 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const [visible, setVisible] = useState(loading === 'eager' || preload);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const onPermanentErrorRef = useRef(onPermanentError);
-  onPermanentErrorRef.current = onPermanentError;
 
-  // Reset loaded/retry/visible state when src changes
+  // Keep the latest onPermanentError in a ref so callbacks always call the
+  // current version without re-subscribing effects (react-hooks/refs).
+  const onPermanentErrorRef = useRef(onPermanentError);
+  useEffect(() => {
+    onPermanentErrorRef.current = onPermanentError;
+  });
+
+  // Reset state when src/loading/preload changes using render-phase setState
+  // (the React-documented derived-state pattern — react-hooks/set-state-in-effect safe).
   // Resetting visible forces the IntersectionObserver to re-fire,
   // which fixes stuck-invisible images when virtual scroll reuses a DOM slot.
-  useEffect(() => {
-    loadedRef.current = false;
-    retryCountRef.current = 0;
+  const [prevSrc, setPrevSrc] = useState(src);
+  const [prevLoading, setPrevLoading] = useState(loading);
+  const [prevPreload, setPrevPreload] = useState(preload);
+  if (src !== prevSrc || loading !== prevLoading || preload !== prevPreload) {
+    setPrevSrc(src);
+    setPrevLoading(loading);
+    setPrevPreload(preload);
     setLoaded(false);
     setFailed(false);
     if (loading !== 'eager' && !preload) setVisible(false);
+  }
+
+  // Reset the internal tracking refs when src/loading/preload changes.
+  // Done in a separate effect (not during render) to satisfy react-hooks/refs.
+  useEffect(() => {
+    loadedRef.current = false;
+    retryCountRef.current = 0;
   }, [src, loading, preload]);
 
   // Track whether the image has completed loading
@@ -89,22 +106,27 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     }, delay);
   }, []);
 
-  // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded)
+  // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded).
+  // The sync viewport check (already-in-view on mount) is deferred via requestAnimationFrame
+  // to avoid calling setState synchronously in an effect body (react-hooks/set-state-in-effect).
   useEffect(() => {
     if (loading === 'eager' || preload) return;
     const img = imgRef.current;
     if (!img) return;
 
-    // Sync check: if already near viewport, set visible immediately to avoid 1-frame flash
-    // for preloaded/cached images in virtual scroll
-    const rect = img.getBoundingClientRect();
-    const margin = 400;
-    if (
-      rect.bottom >= -margin &&
-      rect.top <= (window.innerHeight || document.documentElement.clientHeight) + margin
-    ) {
-      setVisible(true);
-    }
+    // Async viewport check: if already near viewport, set visible on next frame
+    // to avoid a 1-frame flash for preloaded/cached images in virtual scroll.
+    // Using rAF keeps the setState out of the synchronous effect body.
+    const rafId = requestAnimationFrame(() => {
+      const rect = img.getBoundingClientRect();
+      const margin = 400;
+      if (
+        rect.bottom >= -margin &&
+        rect.top <= (window.innerHeight || document.documentElement.clientHeight) + margin
+      ) {
+        setVisible(true);
+      }
+    });
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -119,7 +141,10 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     );
 
     observer.observe(img);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
   }, [loading, src, preload]);
 
   // Track mount state for retry safety

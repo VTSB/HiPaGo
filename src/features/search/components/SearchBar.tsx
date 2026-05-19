@@ -6,7 +6,7 @@ import { useSearchStore } from '@/features/search/store/search.store';
 import { useSearch } from '@/features/search/hooks/useSearch';
 import { SearchInput } from '@/shared/components/SearchInput';
 import { useSearchInputState } from '@/shared/hooks/useSearchInputState';
-import { UnifiedDropdown, buildDropdownItems, type FlatItem } from '@/shared/components/UnifiedDropdown';
+import { UnifiedDropdown, buildDropdownItems } from '@/shared/components/UnifiedDropdown';
 import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
 import { searchLocalTags } from '@/lib/db/search-local';
@@ -23,7 +23,6 @@ export function SearchBar() {
   const suggestions = useSearchStore((s) => s.suggestions);
   const clearSuggestions = useSearchStore((s) => s.clearSuggestions);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(-1);
   const recentSearches = useSearchStore((s) => s.recentSearches);
   const addRecentSearch = useSearchStore((s) => s.addRecentSearch);
   const removeRecentSearch = useSearchStore((s) => s.removeRecentSearch);
@@ -57,9 +56,25 @@ export function SearchBar() {
   // Trigger auto-fetch of suggestions
   useSearch();
 
-  // Reset selection when suggestions change
-  useEffect(() => {
-    setSelectedIndex(-1);
+  // selectedIndex is stored alongside the suggestions snapshot it belongs to.
+  // When suggestions changes identity, the effective index is derived as -1
+  // during render — no setState needed, no effect needed.
+  const [selectionState, setSelectionState] = useState<{
+    snapshot: Suggestion[];
+    index: number;
+  }>(() => ({ snapshot: suggestions, index: -1 }));
+
+  const selectedIndex =
+    selectionState.snapshot === suggestions ? selectionState.index : -1;
+
+  const setSelectedIndex = useCallback((indexOrUpdater: number | ((prev: number) => number)) => {
+    setSelectionState((prev) => {
+      const next =
+        typeof indexOrUpdater === 'function'
+          ? indexOrUpdater(prev.snapshot === suggestions ? prev.index : -1)
+          : indexOrUpdater;
+      return { snapshot: suggestions, index: next };
+    });
   }, [suggestions]);
 
   // Load popular tags once DB is ready
@@ -114,7 +129,7 @@ export function SearchBar() {
     setSelectedIndex(-1);
     setShowDropdown(false);
     inputRef.current?.focus();
-  }, [insertSuggestion, clearSuggestions]);
+  }, [insertSuggestion, clearSuggestions, setSelectedIndex]);
 
   // Drive suggestion display + insertion script by the active token, not locale.
   const koreanInput = isHangul(currentToken ?? '');
@@ -155,7 +170,7 @@ export function SearchBar() {
         if (e.ctrlKey || e.metaKey) { e.preventDefault(); redo(); return; }
         break;
     }
-  }, [showDropdown, flatItems, selectedIndex, undo, redo, doSubmit, handleHistoryClick, handleSuggestionClick]);
+  }, [showDropdown, flatItems, selectedIndex, undo, redo, doSubmit, handleHistoryClick, handleSuggestionClick, setSelectedIndex]);
 
   // Handle click outside
   const handleClickOutside = useCallback(() => {

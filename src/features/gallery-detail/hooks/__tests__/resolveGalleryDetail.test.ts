@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveGalleryDetail } from '../useGalleryDetail';
 import { GalleryBlockType, ImageType } from '@/lib/utils/types';
-import type { GalleryBlock, GalleryFile } from '@/lib/utils/types';
+import type { GalleryBlock, GalleryFile, GalleryInfo } from '@/lib/utils/types';
 
 vi.mock('@/lib/db/gallery', () => ({
   getGalleryBlock: vi.fn(),
@@ -73,7 +73,7 @@ describe('resolveGalleryDetail', () => {
     vi.mocked(getGalleryBlock).mockResolvedValue(null);
     vi.mocked(getGalleryImages).mockResolvedValue(null);
 
-    const mockInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese' } as any;
+    const mockInfo: GalleryInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese', languageLocalName: '日本語', date: '2024-01-01', tags: [], artists: [], groups: [], characters: [], parodys: [], japaneseTitle: '', title: 'Test', related: [] };
     vi.mocked(fetchGalleryInfo).mockResolvedValue(mockInfo);
     vi.mocked(galleryInfoToBlock).mockReturnValue(sampleBlock);
     vi.mocked(galleryInfoToImages).mockReturnValue(sampleImages);
@@ -90,7 +90,7 @@ describe('resolveGalleryDetail', () => {
     vi.mocked(getGalleryBlock).mockResolvedValue(notDetailedBlock);
     vi.mocked(getGalleryImages).mockResolvedValue(null);
 
-    const mockInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese' } as any;
+    const mockInfo: GalleryInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese', languageLocalName: '日本語', date: '2024-01-01', tags: [], artists: [], groups: [], characters: [], parodys: [], japaneseTitle: '', title: 'Test', related: [] };
     vi.mocked(fetchGalleryInfo).mockResolvedValue(mockInfo);
     vi.mocked(galleryInfoToBlock).mockReturnValue(sampleBlock);
     vi.mocked(galleryInfoToImages).mockReturnValue(sampleImages);
@@ -104,7 +104,7 @@ describe('resolveGalleryDetail', () => {
     vi.mocked(getGalleryBlock).mockResolvedValue(null);
     vi.mocked(getGalleryImages).mockResolvedValue(null);
 
-    const mockInfo = { id: 12345, files: sampleFiles } as any;
+    const mockInfo: GalleryInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese', languageLocalName: '日本語', date: '2024-01-01', tags: [], artists: [], groups: [], characters: [], parodys: [], japaneseTitle: '', title: 'Test', related: [] };
     vi.mocked(fetchGalleryInfo).mockResolvedValue(mockInfo);
     vi.mocked(galleryInfoToBlock).mockReturnValue(sampleBlock);
     vi.mocked(galleryInfoToImages).mockReturnValue(sampleImages);
@@ -125,7 +125,7 @@ describe('resolveGalleryDetail', () => {
     vi.mocked(getGalleryImages).mockResolvedValue(sampleFiles);
     vi.mocked(filesToGalleryImages).mockReturnValue(sampleImages);
 
-    const mockInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese' } as any;
+    const mockInfo: GalleryInfo = { id: 12345, files: sampleFiles, type: 'doujinshi', language: 'japanese', languageLocalName: '日本語', date: '2024-01-01', tags: [], artists: [], groups: [], characters: [], parodys: [], japaneseTitle: '', title: 'Test', related: [] };
     vi.mocked(fetchGalleryInfo).mockResolvedValue(mockInfo);
     vi.mocked(galleryInfoToBlock).mockReturnValue(sampleBlock);
 

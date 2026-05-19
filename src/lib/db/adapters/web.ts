@@ -59,7 +59,7 @@ export class WebAdapter implements DbAdapter {
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
     const stmt = this.db.prepare(sql);
     try {
-      if (params.length > 0) stmt.bind(params as any[]);
+      if (params.length > 0) stmt.bind(params);
       stmt.step();
     } finally {
       stmt.free();
@@ -78,7 +78,7 @@ export class WebAdapter implements DbAdapter {
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const stmt = this.db.prepare(sql);
-    stmt.bind(params as any[]);
+    stmt.bind(params);
     const rows: T[] = [];
     while (stmt.step()) {
       rows.push(stmt.getAsObject() as T);

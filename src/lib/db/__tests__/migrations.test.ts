@@ -27,7 +27,7 @@ class PragmaTestAdapter implements DbAdapter {
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
-    this.db.run(sql, params as any[]);
+    this.db.run(sql, params);
     const changes = this.db.getRowsModified();
     const result = this.db.exec('SELECT last_insert_rowid() as id');
     const lastInsertRowId =
@@ -37,7 +37,7 @@ class PragmaTestAdapter implements DbAdapter {
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     const stmt = this.db.prepare(sql);
-    stmt.bind(params as any[]);
+    stmt.bind(params);
     const rows: T[] = [];
     while (stmt.step()) {
       rows.push(stmt.getAsObject() as T);
