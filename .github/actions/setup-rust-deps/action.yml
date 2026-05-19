@@ -15,7 +15,11 @@ runs:
       if: runner.os == 'macOS'
       shell: bash
       run: |
-        brew install llvm cmake
+        # Install only when absent — macOS runners preinstall cmake, and a
+        # plain `brew install` on an existing formula emits an annotation.
+        for pkg in llvm cmake; do
+          brew list "$pkg" &>/dev/null || brew install "$pkg"
+        done
         echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
 
     - name: Install LLVM + cmake (Windows)
