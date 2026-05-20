@@ -227,8 +227,31 @@ jobs:
       - name: Sync Capacitor
         run: node node_modules/@capacitor/cli/bin/capacitor sync android
 
+      # Decode the operator-injected release keystore (per
+      # doc/release/GUIDE__android-keystore.md) into android/app/ so the
+      # signingConfigs.release block in app/build.gradle can pick it up via
+      # the HIPAGO_KEYSTORE_PATH Gradle property below.
+      # Step is skipped when the secret is absent so branch builds and PRs
+      # still produce an (unsigned) APK and the CI surface stays usable.
+      - name: Materialize Android release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/hipago-release.jks
+          test -s android/app/hipago-release.jks
+          echo "Keystore materialized: $(wc -c < android/app/hipago-release.jks) bytes"
+
       - name: Build APK
         working-directory: android
+        env:
+          # Gradle reads ORG_GRADLE_PROJECT_X env vars as -PX. The app
+          # module's signingConfigs.release uses findProperty('HIPAGO_*')
+          # to consume these. All four must be present for signing to engage.
+          ORG_GRADLE_PROJECT_HIPAGO_KEYSTORE_PATH: hipago-release.jks
+          ORG_GRADLE_PROJECT_HIPAGO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
         run: ./gradlew assembleRelease
 
       - name: Upload APK to release

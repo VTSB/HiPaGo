@@ -53,9 +53,11 @@ captures/
 .idea/navEditor.xml
 
 # Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# CI materializes app/hipago-release.jks from the ANDROID_KEYSTORE_BASE64
+# secret per doc/release/GUIDE__android-keystore.md. Keep all .jks/.keystore
+# files out of git so a slip in local key generation doesn't leak.
+*.jks
+*.keystore
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

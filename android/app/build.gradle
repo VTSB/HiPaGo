@@ -19,10 +19,34 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        // Release signing is configured only when the four operator-injected
+        // Gradle properties (set via ORG_GRADLE_PROJECT_* env in CI per
+        // doc/release/GUIDE__android-keystore.md) are present. Without them
+        // the block is created but no storeFile is set, so any build that
+        // references it would fail loudly — this is intentional.
+        release {
+            def storeFilePath = findProperty('HIPAGO_KEYSTORE_PATH') as String
+            if (storeFilePath) {
+                storeFile file(storeFilePath)
+                storePassword findProperty('HIPAGO_KEYSTORE_PASSWORD') as String
+                keyAlias findProperty('HIPAGO_KEY_ALIAS') as String
+                keyPassword findProperty('HIPAGO_KEY_ALIAS_PASSWORD') as String
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Apply release signing only when the operator's keystore props
+            // are present. Local dev (no props) falls back to AGP's default
+            // (unsigned release APK), so `./gradlew assembleRelease` does
+            // not require a developer to provision the secret. CI sets the
+            // props before `gradlew assembleRelease` runs.
+            if (findProperty('HIPAGO_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     sourceSets {
