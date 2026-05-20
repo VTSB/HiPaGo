@@ -79,6 +79,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Tag pushes: derive the build version from the tag and patch
+      # tauri.conf.json + package.json + android/app/build.gradle in
+      # the workspace so the bundlers bake the tagged version into
+      # artifacts. Skipped on branch pushes (the if: guard).
+      - name: Derive version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: ./.github/actions/derive-version
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v5
@@ -180,6 +188,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Derive version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: ./.github/actions/derive-version
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v5
@@ -279,6 +291,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+
+      - name: Derive version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: ./.github/actions/derive-version
 
       - uses: pnpm/action-setup@v6
 

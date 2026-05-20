@@ -1,0 +1,88 @@
+name: 'Derive build version from git tag'
+description: >
+  Reads ${{ github.ref_name }} (expected vX.Y.Z), strips the leading v,
+  validates the X.Y.Z shape, computes an Android-friendly versionCode,
+  and patches src-tauri/tauri.conf.json + package.json + android/app/build.gradle
+  with the derived version. Patching happens in the workspace only; the
+  composite does NOT commit anything back. Use behind a
+  startsWith(github.ref, 'refs/tags/v') guard so branch builds skip cleanly.
+
+outputs:
+  version:
+    description: 'Semver string from the tag (e.g. 0.0.7).'
+    value: ${{ steps.parse.outputs.version }}
+  version_code:
+    description: 'Integer suitable for Android versionCode (major*1_000_000 + minor*1_000 + patch).'
+    value: ${{ steps.parse.outputs.version_code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse tag and patch version-bearing files
+      id: parse
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        tag="${GITHUB_REF_NAME:-}"
+        if [ -z "$tag" ]; then
+          echo "::error::GITHUB_REF_NAME is empty; derive-version must run on a tag-push event."
+          exit 1
+        fi
+
+        version="${tag#v}"
+        if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Tag '$tag' does not match required vX.Y.Z (got version='$version'). Pre-release suffixes are not supported."
+          exit 1
+        fi
+
+        IFS='.' read -r major minor patch <<<"$version"
+        version_code=$(( major * 1000000 + minor * 1000 + patch ))
+
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+        echo "Tag $tag -> version=$version versionCode=$version_code"
+
+        # tauri.conf.json — preserve formatting via Python's json round-trip
+        python3 - "$version" <<'PY'
+        import json, pathlib, sys
+        ver = sys.argv[1]
+        p = pathlib.Path("src-tauri/tauri.conf.json")
+        d = json.loads(p.read_text())
+        old = d.get("version")
+        d["version"] = ver
+        p.write_text(json.dumps(d, indent=2) + "\n")
+        print(f"tauri.conf.json: {old} -> {ver}")
+        PY
+
+        # package.json — same pattern; preserves field order via dict insertion
+        python3 - "$version" <<'PY'
+        import json, pathlib, sys
+        ver = sys.argv[1]
+        p = pathlib.Path("package.json")
+        d = json.loads(p.read_text())
+        old = d.get("version")
+        d["version"] = ver
+        p.write_text(json.dumps(d, indent=2) + "\n")
+        print(f"package.json: {old} -> {ver}")
+        PY
+
+        # android/app/build.gradle — sed in place, then verify the substitution
+        # landed (sed silently succeeds on zero matches; we want loud failure).
+        bg=android/app/build.gradle
+        sed -i.bak \
+          -e "s/versionCode [0-9]\+/versionCode $version_code/" \
+          -e "s/versionName \".*\"/versionName \"$version\"/" \
+          "$bg"
+        rm -f "$bg.bak"
+
+        if ! grep -q "versionCode $version_code\$" "$bg"; then
+          echo "::error::Failed to patch versionCode in $bg (pattern miss)."
+          exit 1
+        fi
+        if ! grep -q "versionName \"$version\"" "$bg"; then
+          echo "::error::Failed to patch versionName in $bg (pattern miss)."
+          exit 1
+        fi
+        echo "$bg patched:"
+        grep -E 'versionCode|versionName' "$bg" | head -2
