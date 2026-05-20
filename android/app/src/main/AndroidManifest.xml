@@ -38,4 +38,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required by UpdaterPlugin: fires the system install intent for
+         the freshly downloaded APK. User grants the permission once
+         via system UI on first update attempt. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

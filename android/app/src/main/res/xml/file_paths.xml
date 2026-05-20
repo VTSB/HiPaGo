@@ -2,4 +2,9 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
+    <!-- UpdaterPlugin writes APK downloads here
+         (Context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)).
+         Exposed via FileProvider so the install intent can read it on
+         Android 7+ without N+ URI exposure errors. -->
+    <external-files-path name="updater_downloads" path="Download/" />
 </paths>
