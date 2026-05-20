@@ -1,4 +1,7 @@
 apply plugin: 'com.android.application'
+// Required to compile the UniFFI-generated Kotlin bindings dropped into
+// src/main/java/uniffi/bypass/ by scripts/build-android.mjs.
+apply plugin: 'kotlin-android'
 
 android {
     namespace "com.hipago.app"
@@ -27,6 +30,11 @@ android {
             jniLibs.srcDirs = ['src/main/jniLibs']
         }
     }
+    // Match the JVM target capacitor.build.gradle sets for Java (17),
+    // so the kotlin-android plugin and javac agree on bytecode level.
+    kotlinOptions {
+        jvmTarget = '17'
+    }
 }
 
 repositories {
@@ -41,6 +49,9 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // Kotlin stdlib + JNA — the generated UniFFI bindings link against both.
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$rootProject.ext.kotlinVersion"
+    implementation "net.java.dev.jna:jna:5.14.0@aar"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
