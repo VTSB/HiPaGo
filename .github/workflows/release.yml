@@ -56,6 +56,11 @@ jobs:
   build-desktop:
     name: Desktop (${{ matrix.platform }})
     needs: test
+    # Belt-and-suspenders: also declare write at the job level so the
+    # GITHUB_TOKEN passed to tauri-action can create the draft release
+    # even if a workflow-level permission inheritance bug applies.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +143,8 @@ jobs:
     name: Android
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -211,6 +218,8 @@ jobs:
     name: iOS
     needs: test
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
