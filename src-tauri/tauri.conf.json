@@ -40,7 +40,7 @@
       "endpoints": [
         "https://github.com/VTSB/HiPaGo/releases/latest/download/latest.json"
       ],
-      "dialog": true,
+      "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJDQUE3NUFBOEY4RDEzNzcKUldSM0U0MlBxbldxTEFaUDRENjJRWGhaOHkrVENncHdVWG1CZ1pqTWE3a28wMC9Za0hrR2VwWVAK"
     }
   }

@@ -123,6 +123,24 @@ const translations = {
   // Language filter (header)
   'langFilter.label': { en: 'Language filter', ko: '언어 필터' },
 
+  // Update banner (top of layout, on-mount check)
+  'update.banner.title': { en: 'New version available', ko: '새 버전 사용 가능' },
+  'update.banner.install': { en: 'Install', ko: '설치' },
+  'update.banner.viewOnGitHub': { en: 'View on GitHub', ko: 'GitHub에서 보기' },
+  'update.banner.later': { en: 'Later', ko: '나중에' },
+  'update.banner.installing': { en: 'Installing…', ko: '설치 중…' },
+  'update.banner.downloading': { en: 'Downloading', ko: '다운로드 중' },
+
+  // Settings → About / Update
+  'update.about': { en: 'Updates', ko: '업데이트' },
+  'update.about.desc': { en: 'Current version and manual update check', ko: '현재 버전 및 수동 업데이트 확인' },
+  'update.about.currentVersion': { en: 'Current version', ko: '현재 버전' },
+  'update.about.check': { en: 'Check for updates', ko: '업데이트 확인' },
+  'update.about.checking': { en: 'Checking…', ko: '확인 중…' },
+  'update.about.upToDate': { en: "You're on the latest version", ko: '최신 버전입니다' },
+  'update.about.newAvailable': { en: 'available', ko: '버전이 출시되었습니다' },
+  'update.about.checkFailed': { en: "Couldn't check for updates", ko: '업데이트를 확인하지 못했습니다' },
+
   // Error pages
   'error.title': { en: 'Something went wrong', ko: '문제가 발생했습니다' },
   'error.tryAgain': { en: 'Try again', ko: '다시 시도' },

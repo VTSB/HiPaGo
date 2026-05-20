@@ -20,12 +20,18 @@ const OWNER = 'VTSB';
 const REPO = 'HiPaGo';
 const APP_VERSION: string = packageJson.version;
 
+export const CURRENT_VERSION = APP_VERSION;
+
+export type ProgressCallback = (percent: number) => void;
+
 export type CheckResult = {
   available: boolean;
   version?: string;
   notes?: string;
-  /** Present when the platform can install in-place. UI calls this on "Install". */
-  applyFn?: () => Promise<void>;
+  /** Present when the platform can install in-place. UI calls this on
+   *  "Install" and may pass a progress callback (0-100). Currently only
+   *  the Tauri backend reports progress; Android no-ops the callback. */
+  applyFn?: (onProgress?: ProgressCallback) => Promise<void>;
   /** Present when the platform cannot install in-place (iOS). UI deep-links. */
   releaseUrl?: string;
 };
@@ -66,8 +72,22 @@ async function checkTauri(): Promise<CheckResult> {
     available: true,
     version: update.version,
     notes: update.body || undefined,
-    applyFn: async () => {
-      await update.downloadAndInstall();
+    applyFn: async (onProgress) => {
+      let contentLength = 0;
+      let received = 0;
+      await update.downloadAndInstall((event) => {
+        // Tauri 2 emits Started → Progress* → Finished. Translate the
+        // running byte total into a 0-100% value for the UI.
+        if (event.event === 'Started') {
+          contentLength = event.data.contentLength ?? 0;
+          onProgress?.(0);
+        } else if (event.event === 'Progress') {
+          received += event.data.chunkLength;
+          if (contentLength > 0) onProgress?.((received / contentLength) * 100);
+        } else if (event.event === 'Finished') {
+          onProgress?.(100);
+        }
+      });
     },
   };
 }
