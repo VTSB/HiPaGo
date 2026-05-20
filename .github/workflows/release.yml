@@ -175,7 +175,9 @@ jobs:
           java-version: '21'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        # v4 runs on node24 (v3 was the last Node 20 release — deprecated
+        # June 2 2026, removed Sep 16 2026).
+        uses: android-actions/setup-android@v4
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
