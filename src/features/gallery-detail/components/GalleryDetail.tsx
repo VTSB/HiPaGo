@@ -144,7 +144,7 @@ export function GalleryDetail({ id }: { id: number }) {
     <div className="space-y-6">
       <button
         onClick={() => router.back()}
-        className="inline-block text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400"
+        className="-mx-2 inline-flex min-h-11 items-center gap-1 px-2 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
       >
         &larr; {t('detail.back')}
       </button>
@@ -249,10 +249,10 @@ export function GalleryDetail({ id }: { id: number }) {
               ))}
             </div>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Link
               href={`/gallery/${id}/reader`}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-10 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-zinc-900 px-10 py-3 text-base font-medium text-white hover:bg-zinc-800 sm:w-auto sm:py-2.5 sm:text-sm dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
             >
               {t('detail.read')}
             </Link>
@@ -260,7 +260,7 @@ export function GalleryDetail({ id }: { id: number }) {
               (dlProgress ? (
                 <button
                   onClick={handleCancelDownload}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-300 px-8 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-8 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 sm:w-auto dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   <Spinner size="sm" />
                   {dlProgress.current}/{dlProgress.total}
@@ -268,7 +268,7 @@ export function GalleryDetail({ id }: { id: number }) {
               ) : (
                 <button
                   onClick={handleDownload}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-8 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-8 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 sm:w-auto dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -308,7 +308,7 @@ export function GalleryDetail({ id }: { id: number }) {
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
             {t('detail.content')} ({files.length})
           </h2>
-          <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
             {files.slice(0, renderedCount).map((file, idx) => (
               <Link
                 key={idx}
@@ -323,7 +323,9 @@ export function GalleryDetail({ id }: { id: number }) {
                     loading="lazy"
                   />
                 </div>
-                <span className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+                {/* Page-number badge is always visible on touch devices
+                    (no hover state) and fades in on hover on desktop. */}
+                <span className="absolute right-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] tabular-nums text-white opacity-100 backdrop-blur-sm transition-opacity md:opacity-0 md:group-hover:opacity-100">
                   {idx + 1}
                 </span>
               </Link>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { getRecentlyViewedWithDates } from '@/lib/db/gallery';
 import { filterHistoryByTags } from '@/lib/db/search-local';
@@ -95,6 +96,7 @@ export default function HistoryPage() {
 
   const totalCount = entries?.length ?? 0;
   const groups = entries ? groupByDate(entries) : [];
+  const showFilterBar = !isLoading && (totalCount > 0 || hasFilters);
 
   return (
     <>
@@ -105,10 +107,12 @@ export default function HistoryPage() {
         </h1>
       </div>
 
-      {/* Filter bar */}
-      <div className="mb-4">
-        <FilterBar onFilterChange={setFilters} placeholder={t('search.placeholder')} />
-      </div>
+      {/* Filter bar — hidden when history is empty and no filter active. */}
+      {showFilterBar && (
+        <div className="mb-4">
+          <FilterBar onFilterChange={setFilters} placeholder={t('search.placeholder')} />
+        </div>
+      )}
 
       {hasFilters ? (
         isFilterLoading ? (
@@ -127,7 +131,18 @@ export default function HistoryPage() {
         isLoading ? (
           <div className="flex justify-center py-12"><Spinner size="md" /></div>
         ) : totalCount === 0 ? (
-          <p className="text-zinc-500 dark:text-zinc-400">{t('history.empty')}</p>
+          <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-14 w-14 text-zinc-300 dark:text-zinc-700" aria-hidden="true">
+              <path d="M12 7v5l3 1.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">{t('history.empty')}</p>
+            <Link
+              href="/"
+              className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {t('empty.browseGalleries')}
+            </Link>
+          </div>
         ) : (
           <div className="space-y-4">
             {groups.map(({ dateKey, ids }) => (

@@ -90,23 +90,43 @@ export default function LicensesPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
+      {/* Back link sits above the h1 on mobile (top-left, platform convention),
+          and inline on the right on ≥sm where there's room. */}
+      <Link
+        href="/settings"
+        className="-mx-2 mb-2 inline-flex min-h-11 items-center gap-1 px-2 text-sm text-zinc-500 hover:text-zinc-700 sm:hidden dark:text-zinc-400 dark:hover:text-zinc-200"
+      >
+        ← {t('nav.settings')}
+      </Link>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{t('licenses.title')}</h1>
         <Link
           href="/settings"
-          className="text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          className="hidden text-sm text-zinc-500 hover:text-zinc-700 sm:inline dark:text-zinc-400 dark:hover:text-zinc-200"
         >
           ← {t('nav.settings')}
         </Link>
       </div>
 
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder={t('licenses.search.placeholder')}
-        className="mb-6 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-      />
+      <div className="relative mb-6">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('licenses.search.placeholder')}
+          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 pr-9 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            aria-label={t('licenses.search.clear')}
+            className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       <GroupSection heading={t('licenses.npm.heading')} entries={npm} query={query} />
       <GroupSection heading={t('licenses.cargo.heading')} entries={cargo} query={query} />

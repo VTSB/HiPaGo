@@ -252,6 +252,8 @@ export default function LibraryPage() {
     await exportGalleryZip(galleryId, title);
   }, []);
 
+  const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);
+
   return (
     <>
       <div className="mb-4 flex flex-wrap items-baseline gap-3">
@@ -266,21 +268,36 @@ export default function LibraryPage() {
         <StorageIndicator />
       </div>
 
-      {/* Search bar — AC-006 */}
-      <div className="mb-4">
-        <SearchInputSimple
-          value={rawQuery}
-          onChange={handleQueryChange}
-          placeholder={t('library.search.placeholder')}
-        />
-      </div>
+      {/* Search bar — hidden when library is empty and no query active. */}
+      {showSearchBar && (
+        <div className="mb-4">
+          <SearchInputSimple
+            value={rawQuery}
+            onChange={handleQueryChange}
+            placeholder={t('library.search.placeholder')}
+          />
+        </div>
+      )}
 
       {activeLoading ? (
         <div className="flex justify-center py-12"><Spinner size="md" /></div>
       ) : totalCount === 0 ? (
-        <p className="text-zinc-500 dark:text-zinc-400">
-          {hasQuery ? t('search.noResults') : t('library.empty')}
-        </p>
+        <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-14 w-14 text-zinc-300 dark:text-zinc-700" aria-hidden="true">
+            <path d="M4 4h4v16H4zM10 4h4v16h-4zM18 4l2 16-2 .25" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
+            {hasQuery ? t('search.noResults') : t('library.empty')}
+          </p>
+          {!hasQuery && (
+            <Link
+              href="/"
+              className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {t('empty.browseGalleries')}
+            </Link>
+          )}
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           {(activeItems ?? []).map((item) => (

@@ -60,7 +60,7 @@ export function UpdateCheckCard() {
         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('update.about')}</p>
         <p className="mb-4 text-xs text-zinc-500 dark:text-zinc-400">{t('update.about.desc')}</p>
 
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('update.about.currentVersion')}</p>
             <p className="font-mono text-sm font-medium text-zinc-900 dark:text-zinc-100">v{CURRENT_VERSION}</p>
@@ -69,7 +69,7 @@ export function UpdateCheckCard() {
             type="button"
             onClick={onCheck}
             disabled={status.kind === 'checking' || status.kind === 'installing'}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 sm:w-auto dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
             {status.kind === 'checking' ? t('update.about.checking') : t('update.about.check')}
           </button>

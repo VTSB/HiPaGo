@@ -123,7 +123,7 @@ export function GalleryListView() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
           {t(`sort.${sort}` as const)}
           {totalLength > 0 && (

@@ -123,6 +123,13 @@ const translations = {
   // Language filter (header)
   'langFilter.label': { en: 'Language filter', ko: '언어 필터' },
 
+  // Mobile drawer + empty-state CTAs
+  'mobile.menu.close': { en: 'Close menu', ko: '메뉴 닫기' },
+  'mobile.menu.open': { en: 'Open menu', ko: '메뉴 열기' },
+  'empty.browseGalleries': { en: 'Browse galleries', ko: '갤러리 둘러보기' },
+  'licenses.search.clear': { en: 'Clear filter', ko: '필터 지우기' },
+  'reader.jumpToPage': { en: 'Jump to page', ko: '페이지 이동' },
+
   // Open-source licenses page + settings link card
   'licenses.title': { en: 'Open-source licenses', ko: '오픈소스 라이선스' },
   'licenses.search.placeholder': { en: 'Filter by name or license…', ko: '이름이나 라이선스로 필터…' },

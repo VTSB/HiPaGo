@@ -112,7 +112,10 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
           <div className="px-2 pt-1.5 pb-2 backdrop-blur-sm">
             <h3 className="line-clamp-2 text-sm font-semibold leading-tight text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)]">{block.title || `#${block.id}`}</h3>
             {displayTags.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1 overflow-hidden" style={{ maxHeight: '44px' }}>
+              // Mobile (<md): cap chips to 1 visible row to reclaim ~22px per
+              // card. Desktop (≥md): keep the original 2-row affordance since
+              // cards are larger and the metadata helps scanability there.
+              <div className="mt-1 flex flex-wrap gap-1 overflow-hidden max-h-[22px] md:max-h-[44px]">
                 {displayTags.map(({ tag, type }) => (
                   <TagChip key={`${type}-${tag}`} tag={tag} type={type} displayName={tagI18n.get(`${type}:${tag}`)} linked={false} size="sm" />
                 ))}

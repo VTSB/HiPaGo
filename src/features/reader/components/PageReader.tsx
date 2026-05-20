@@ -119,7 +119,16 @@ export function PageReader({
           alt={`Page ${currentPage + 1}`}
           draggable={false}
           loading="eager"
-          className={`pointer-events-none select-none object-contain ${dualPage ? 'max-h-screen max-w-[50vw]' : 'max-h-screen max-w-full'}`}
+          // On <sm we drop max-h so the image fills the viewport width
+          // (portrait phones + portrait manga → no big black bands above
+          // and below). The page scrolls vertically if the image is taller
+          // than the viewport; tap zones still work because they use
+          // clientX relative to the image rect, not the viewport.
+          className={`pointer-events-none select-none object-contain ${
+            dualPage
+              ? 'max-h-screen max-w-[50vw]'
+              : 'max-w-full sm:max-h-screen'
+          }`}
         />
         {hasSecond && (
           <AbortableImage

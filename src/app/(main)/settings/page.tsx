@@ -104,7 +104,7 @@ export default function SettingsPage() {
   const t = useT();
 
   const segmentClass = (active: boolean) =>
-    `rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+    `flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors sm:flex-initial ${
       active
         ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
         : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
@@ -116,12 +116,12 @@ export default function SettingsPage() {
 
       <div className="divide-y divide-zinc-200 rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
         {/* System Language */}
-        <div className="flex items-center justify-between px-5 py-4">
+        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.locale')}</p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.locale.desc')}</p>
           </div>
-          <div className="flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+          <div className="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 sm:w-auto dark:bg-zinc-800">
             <button onClick={() => setLocale('en')} className={segmentClass(locale === 'en')}>
               {t('settings.locale.en')}
             </button>
@@ -132,7 +132,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Language Filter */}
-        <div className="flex items-center justify-between px-5 py-4">
+        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.langFilter')}</p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.langFilter.desc')}</p>
@@ -140,7 +140,7 @@ export default function SettingsPage() {
           <Select
             value={language}
             onChange={setLanguage}
-            className="w-36"
+            className="w-full sm:w-36"
             options={[
               { value: 'all', label: t('settings.langFilter.all') },
               { value: 'japanese', label: t('settings.langFilter.japanese') },
@@ -152,12 +152,12 @@ export default function SettingsPage() {
         </div>
 
         {/* Reader Mode */}
-        <div className="flex items-center justify-between px-5 py-4">
+        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.reader')}</p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.reader.desc')}</p>
           </div>
-          <div className="flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+          <div className="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 sm:w-auto dark:bg-zinc-800">
             <button onClick={() => setReaderMode('page')} className={segmentClass(readerMode === 'page')}>
               {t('settings.reader.page')}
             </button>
@@ -168,7 +168,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Image Format */}
-        <div className="flex items-center justify-between px-5 py-4">
+        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.imageFormat')}</p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.imageFormat.desc')}</p>
@@ -176,7 +176,7 @@ export default function SettingsPage() {
           <Select
             value={imageFormat}
             onChange={(v) => { const valid = ['auto', 'avif', 'webp', 'original'] as const; if ((valid as readonly string[]).includes(v)) setImageFormat(v as typeof valid[number]); }}
-            className="w-32"
+            className="w-full sm:w-32"
             options={[
               { value: 'auto', label: 'Auto' },
               { value: 'avif', label: 'AVIF' },

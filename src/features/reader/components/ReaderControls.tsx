@@ -37,14 +37,21 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
 
   const pageText = `${currentPage + 1} / ${totalPages}`;
 
+  // Mobile (<sm):
+  //   - Toolbar centered horizontally for thumb-reach.
+  //   - 2-page toggle hidden (unreadable side-by-side at 375px).
+  // Desktop (≥sm):
+  //   - Toolbar pinned bottom-right (original placement; familiar mouse target).
+  // Tap targets are ≥44×44 on all viewports — a small win on desktop too,
+  // and the original 38px buttons were borderline for any precision-input UX.
   return (
-    <div className="fixed bottom-4 right-4 z-50">
-      <div className="flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-2 shadow-2xl backdrop-blur-md">
-        <button onClick={onBack} className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10" aria-label={t('reader.back')}>
+    <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0">
+      <div className="flex items-center gap-0.5 rounded-full bg-black/60 px-2 py-1.5 shadow-2xl backdrop-blur-md sm:gap-1.5 sm:px-3 sm:py-2">
+        <button onClick={onBack} className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10" aria-label={t('reader.back')}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]"><path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" /></svg>
         </button>
         <div className="mx-0.5 h-5 w-px bg-zinc-600" />
-        <button onClick={onPrevPage} disabled={currentPage <= 0} className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10 disabled:opacity-30" aria-label={t('reader.prev')}>
+        <button onClick={onPrevPage} disabled={currentPage <= 0} className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10 disabled:opacity-30" aria-label={t('reader.prev')}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]"><path fillRule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clipRule="evenodd" /></svg>
         </button>
         {editing ? (
@@ -62,15 +69,15 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
             <span className="ml-1 text-sm tabular-nums text-zinc-400">/ {totalPages}</span>
           </form>
         ) : (
-          <button onClick={startEditing} className="min-w-[4.5rem] select-none text-center text-sm tabular-nums text-zinc-300 transition-colors hover:text-white">
+          <button onClick={startEditing} className="flex min-h-11 min-w-[4.5rem] select-none items-center justify-center text-center text-sm tabular-nums text-zinc-300 transition-colors hover:text-white">
             {pageText}
           </button>
         )}
-        <button onClick={onNextPage} disabled={currentPage >= totalPages - 1} className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10 disabled:opacity-30" aria-label={t('reader.next')}>
+        <button onClick={onNextPage} disabled={currentPage >= totalPages - 1} className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10 disabled:opacity-30" aria-label={t('reader.next')}>
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]"><path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" /></svg>
         </button>
         <div className="mx-0.5 h-5 w-px bg-zinc-600" />
-        <button onClick={() => onModeChange(mode === 'page' ? 'scroll' : 'page')} className="rounded-full p-2 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10" aria-label={mode === 'page' ? t('reader.scroll') : t('reader.page')}>
+        <button onClick={() => onModeChange(mode === 'page' ? 'scroll' : 'page')} className="flex min-h-11 min-w-11 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/10 hover:text-white active:bg-white/10" aria-label={mode === 'page' ? t('reader.scroll') : t('reader.page')}>
           {mode === 'page' ? (
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]"><path fillRule="evenodd" d="M2 3.75A.75.75 0 012.75 3h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 3.75zm0 4.167a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zm0 4.166a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75zm0 4.167a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clipRule="evenodd" /></svg>
           ) : (
@@ -78,7 +85,9 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
           )}
         </button>
         {mode === 'page' && (
-          <button onClick={() => setDualPage(!dualPage)} className={`rounded-full p-2 transition-colors hover:bg-white/10 active:bg-white/10 ${dualPage ? 'text-white' : 'text-zinc-400 hover:text-white'}`} aria-label={dualPage ? '1-page' : '2-page'}>
+          // 2-page toggle is hidden on <sm — two pages side-by-side at 375px
+          // are unreadable. Users who want it can still use desktop / tablet.
+          <button onClick={() => setDualPage(!dualPage)} className={`hidden min-h-11 min-w-11 items-center justify-center rounded-full transition-colors hover:bg-white/10 active:bg-white/10 sm:flex ${dualPage ? 'text-white' : 'text-zinc-400 hover:text-white'}`} aria-label={dualPage ? '1-page' : '2-page'}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-[22px] w-[22px]">
               {dualPage ? (
                 <><rect x="1.5" y="3" width="7.5" height="14" rx="1" /><rect x="11" y="3" width="7.5" height="14" rx="1" /></>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { GalleryGridById } from '@/features/gallery-list/components/GalleryGrid';
 import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
@@ -43,6 +44,7 @@ export default function FavoritesPage() {
   );
 
   const totalCount = activeIds?.length ?? 0;
+  const showFilterBar = !activeLoading && (totalCount > 0 || hasFilters);
 
   return (
     <>
@@ -53,16 +55,42 @@ export default function FavoritesPage() {
         </h1>
       </div>
 
-      <div className="mb-4">
-        <FilterBar onFilterChange={setFilters} placeholder={t('search.placeholder')} />
-      </div>
+      {/* Hide FilterBar entirely when the list is empty and no filter is
+          active — the duplicate search input on top of an empty page was
+          confusing on mobile and added clutter on desktop. */}
+      {showFilterBar && (
+        <div className="mb-4">
+          <FilterBar onFilterChange={setFilters} placeholder={t('search.placeholder')} />
+        </div>
+      )}
 
       {activeLoading ? (
         <div className="flex justify-center py-12"><Spinner size="md" /></div>
       ) : totalCount === 0 ? (
-        <p className="text-zinc-500 dark:text-zinc-400">
-          {hasFilters ? t('search.noResults') : t('favorites.empty')}
-        </p>
+        <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="h-14 w-14 text-zinc-300 dark:text-zinc-700"
+            aria-hidden="true"
+          >
+            <path d="m11.48 3.5 2.13 5.11a.56.56 0 0 0 .47.34l5.52.45c.5.04.7.66.32.99l-4.2 3.6a.56.56 0 0 0-.18.55l1.29 5.39a.56.56 0 0 1-.84.6l-4.73-2.88a.56.56 0 0 0-.58 0l-4.73 2.88a.56.56 0 0 1-.84-.6l1.29-5.39a.56.56 0 0 0-.18-.55l-4.2-3.6c-.38-.33-.18-.95.32-.99l5.52-.45a.56.56 0 0 0 .47-.34l2.13-5.11a.56.56 0 0 1 1.04 0z" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
+            {hasFilters ? t('search.noResults') : t('favorites.empty')}
+          </p>
+          {!hasFilters && (
+            <Link
+              href="/"
+              className="inline-flex min-h-11 items-center justify-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {t('empty.browseGalleries')}
+            </Link>
+          )}
+        </div>
       ) : (
         <GalleryGridById ids={visibleIds} isLoading={false} />
       )}
