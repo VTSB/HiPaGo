@@ -41,6 +41,7 @@
     "@tanstack/react-virtual": "^3.13.21",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-sql": "^2",
+    "@tauri-apps/plugin-updater": "^2",
     "es-hangul": "^2.3.8",
     "fflate": "^0.8.2",
     "next": "16.1.6",

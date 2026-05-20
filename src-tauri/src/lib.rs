@@ -38,6 +38,10 @@ async fn bypass_fetch(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::new().build())
+        // Auto-update from GitHub Releases. Endpoint + pubkey live in
+        // tauri.conf.json's plugins.updater block. Signature verification
+        // is enforced by the plugin against the embedded pubkey.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![bypass_fetch])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
