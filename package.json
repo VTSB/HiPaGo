@@ -6,6 +6,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
     "dev": "node scripts/dev.mjs",
+    "prebuild": "node scripts/build-licenses.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

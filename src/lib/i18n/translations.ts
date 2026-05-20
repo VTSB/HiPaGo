@@ -123,6 +123,16 @@ const translations = {
   // Language filter (header)
   'langFilter.label': { en: 'Language filter', ko: '언어 필터' },
 
+  // Open-source licenses page + settings link card
+  'licenses.title': { en: 'Open-source licenses', ko: '오픈소스 라이선스' },
+  'licenses.search.placeholder': { en: 'Filter by name or license…', ko: '이름이나 라이선스로 필터…' },
+  'licenses.empty': { en: 'No matches', ko: '일치하는 항목 없음' },
+  'licenses.npm.heading': { en: 'JavaScript / npm', ko: 'JavaScript / npm' },
+  'licenses.cargo.heading': { en: 'Rust / cargo', ko: 'Rust / cargo' },
+  'licenses.viewRepo': { en: 'Repository', ko: '저장소' },
+  'licenses.about': { en: 'Open-source licenses', ko: '오픈소스 라이선스' },
+  'licenses.about.desc': { en: 'See every bundled dependency and its license', ko: '번들된 모든 라이브러리와 라이선스 보기' },
+
   // Update banner (top of layout, on-mount check)
   'update.banner.title': { en: 'New version available', ko: '새 버전 사용 가능' },
   'update.banner.install': { en: 'Install', ko: '설치' },

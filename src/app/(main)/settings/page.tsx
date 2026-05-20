@@ -10,6 +10,7 @@ import { useDbStatusStore } from '@/lib/store/db-status';
 import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
 import { tagFromSuggestion, toSearchString } from '@/lib/utils/hitomi-tag';
+import Link from 'next/link';
 import { TagChip } from '@/shared/components/TagChip';
 import { Select } from '@/shared/components/Select';
 import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
@@ -210,6 +211,18 @@ export default function SettingsPage() {
 
       {/* About / Updates */}
       <UpdateCheckCard />
+
+      {/* Open-source licenses — link to /licenses */}
+      <Link
+        href="/licenses"
+        className="mt-6 flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-5 py-4 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800/60"
+      >
+        <div>
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('licenses.about')}</p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('licenses.about.desc')}</p>
+        </div>
+        <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">›</span>
+      </Link>
     </div>
   );
 }
