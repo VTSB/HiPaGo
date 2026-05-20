@@ -12,6 +12,7 @@ import type { Suggestion } from '@/lib/utils/types';
 import { tagFromSuggestion, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { Select } from '@/shared/components/Select';
+import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
 
 function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   const [input, setInput] = useState('');
@@ -206,6 +207,9 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* About / Updates */}
+      <UpdateCheckCard />
     </div>
   );
 }
