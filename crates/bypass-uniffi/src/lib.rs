@@ -42,9 +42,14 @@ impl From<CoreBypassError> for BypassError {
     }
 }
 
+// `status` is intentionally i32, not u16. UniFFI maps u16 → Kotlin UShort,
+// which is `@JvmInline value class` and emits name-mangled getters
+// (`getStatus-Mh2AYeg()` etc.) that Java callers cannot resolve.
+// BypassPlugin.java is Java, so we expose a signed Int that yields a
+// plain `int getStatus()` on the JVM. HTTP status fits in i32 trivially.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BypassResponse {
-    pub status: u16,
+    pub status: i32,
     pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
 }
@@ -69,7 +74,8 @@ pub fn bypass_fetch(
         let resp = client.fetch(&url, headers).await?;
 
         Ok(BypassResponse {
-            status: resp.status,
+            // bypass-core's HTTP status is u16; widen to i32 for FFI.
+            status: i32::from(resp.status),
             headers: resp.headers,
             body: resp.body,
         })
