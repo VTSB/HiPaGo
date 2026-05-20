@@ -67,7 +67,11 @@ jobs:
         include:
           - platform: ubuntu-latest
             target: linux
-          - platform: windows-latest
+          # Pinned to the explicit current image (= what `windows-latest`
+          # resolves to today, VS 2022) to silence the
+          # "windows-latest → windows-2025-vs2026 by June 15 2026"
+          # runner notice and avoid surprise MSVC-major migration mid-CI.
+          - platform: windows-2025
             target: windows
           - platform: macos-latest
             target: macos
