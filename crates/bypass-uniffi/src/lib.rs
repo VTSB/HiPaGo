@@ -9,7 +9,11 @@ use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 use tokio::sync::OnceCell;
 
-uniffi::setup_scaffolding!();
+// Pin the binding namespace to `bypass` (matches BypassPlugin.java's
+// `import uniffi.bypass.*`). Without this, UniFFI proc-macro mode derives
+// the namespace from the crate name (`bypass_uniffi`), producing
+// `uniffi.bypass_uniffi.*` and breaking the Java imports.
+uniffi::setup_scaffolding!("bypass");
 
 fn runtime() -> &'static Runtime {
     static RT: OnceLock<Runtime> = OnceLock::new();
@@ -20,16 +24,20 @@ fn runtime() -> &'static Runtime {
 
 static CLIENT: OnceCell<BypassClient> = OnceCell::const_new();
 
+// NOTE: the variant field is named `reason`, not `message`. UniFFI's Kotlin
+// generator emits a `val <field>` on the generated Exception subclass; a
+// field named `message` collides with `kotlin.Throwable.message` and
+// fails to compile ("hides member of supertype" + recursive type check).
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum BypassError {
-    #[error("Bypass error: {message}")]
-    General { message: String },
+    #[error("Bypass error: {reason}")]
+    General { reason: String },
 }
 
 impl From<CoreBypassError> for BypassError {
     fn from(e: CoreBypassError) -> Self {
         BypassError::General {
-            message: e.to_string(),
+            reason: e.to_string(),
         }
     }
 }
