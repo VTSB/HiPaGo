@@ -363,14 +363,16 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           'fixed bottom-4 z-40 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm dark:bg-zinc-100/80 dark:text-zinc-900',
           // D1: mobile center, desktop bottom-right.
           'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
-          // Animate transform (D1 centering + D5 slide + D6 bounce-scale) AND opacity
-          // (D5 fade + D8 idle-fade). 300ms gives the show direction enough time to
-          // register — pure slide-only over 200ms felt like a pop because the pill's
-          // upward translate happens IN THE SAME DIRECTION as the page scrolling up,
-          // so the eye tracks the page content and misses the pill motion. Fading in
-          // alongside the slide gives a second visual cue that survives same-direction
-          // masking.
-          'transition-[transform,opacity] duration-300 ease-out',
+          // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
+          // property and `scale-*` to `scale:`, NOT to legacy `transform: translate(...)`.
+          // The transition list MUST name those properties directly — `transition-transform`
+          // animates the (now unused) `transform` property and lets `translate:` / `scale:`
+          // jump instantly. That mismatch made the show direction read as fade-only-pop
+          // even after the opacity-0 cue landed. Naming `translate, scale, opacity`
+          // explicitly animates D5 slide + D6 bounce-scale + D5/D8 opacity.
+          // 300ms gives both directions enough time to register; pure slide over 200ms
+          // was visually masked when the page scrolled in the same direction as the pill.
+          'transition-[translate,scale,opacity] duration-300 ease-out',
           // D5: slide + fade hide on scroll-down (mobile). The translation needs to
           // clear BOTH the pill's own height AND the `bottom-4` (16px = 1rem) anchor
           // offset. `calc(100% + 1rem)` does exactly that, height-agnostic — a literal
