@@ -366,8 +366,14 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           // Animate transform (D1 centering + D5 slide-out + D6 bounce-scale) and opacity (D8 idle-fade) only.
           // transition-all was animating background-color/blur and felt heavy on the return.
           'transition-[transform,opacity] duration-200 ease-out',
-          // D5: slide-only hide on scroll-down (mobile). 110% clears the pill past the bottom-4 anchor.
-          hiddenByScroll ? 'translate-y-[110%] sm:translate-y-0' : '',
+          // D5: slide-only hide on scroll-down (mobile). The translation needs to
+          // clear BOTH the pill's own height AND the `bottom-4` (16px = 1rem)
+          // anchor offset. `calc(100% + 1rem)` does exactly that, height-agnostic —
+          // a literal `110%` (or any flat percentage) left a thin slice visible at
+          // the viewport bottom for the actual ~52px pill (math: 110% × 52 = 57.2 px,
+          // need ≥ 52 + 16 = 68 px). The previous user-visible bug shipped because
+          // 110% mathematically can't clear bottom-4 for any pill of typical height.
+          hiddenByScroll ? 'translate-y-[calc(100%_+_1rem)] sm:translate-y-0' : '',
           // D8: idle fade (mobile only).
           idle && !hiddenByScroll ? 'opacity-40 sm:opacity-100' : '',
           // D6: bounce pulse at boundaries.
