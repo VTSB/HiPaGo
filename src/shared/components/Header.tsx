@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { SearchBar } from '@/features/search/components/SearchBar';
@@ -37,17 +37,42 @@ const NAV = [
   ) },
 ];
 
+const DRAWER_ANIM_MS = 200;
+
 export function Header() {
   const t = useT();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [drawerMounted, setDrawerMounted] = useState(false);
+  const [drawerEntered, setDrawerEntered] = useState(false);
+  const animTimerRef = useRef<number>(0);
+  const frameRef = useRef<number>(0);
 
-  // Close drawer when route changes (e.g. user taps a link).
+  // Drive mount + animation classes off menuOpen. Every setState call is
+  // deferred into a callback (rAF / setTimeout) so React's
+  // react-hooks/set-state-in-effect rule stays happy — synchronous setState
+  // in an effect body is the cascading-render footgun the rule guards.
+  // Mount path: rAF #1 mounts the drawer, rAF #2 flips the entered class so
+  // the CSS transition runs from the closed baseline.
   useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname]);
+    window.clearTimeout(animTimerRef.current);
+    window.cancelAnimationFrame(frameRef.current);
+    if (menuOpen) {
+      frameRef.current = window.requestAnimationFrame(() => {
+        setDrawerMounted(true);
+        frameRef.current = window.requestAnimationFrame(() => setDrawerEntered(true));
+      });
+    } else {
+      frameRef.current = window.requestAnimationFrame(() => setDrawerEntered(false));
+      animTimerRef.current = window.setTimeout(() => setDrawerMounted(false), DRAWER_ANIM_MS);
+    }
+    return () => {
+      window.clearTimeout(animTimerRef.current);
+      window.cancelAnimationFrame(frameRef.current);
+    };
+  }, [menuOpen]);
 
-  // ESC to dismiss + lock body scroll while drawer is open.
+  // ESC dismiss + body scroll lock while drawer is open.
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -62,12 +87,35 @@ export function Header() {
     };
   }, [menuOpen]);
 
-  const isActive = (href: string) => href === '/' ? pathname === '/' : pathname.startsWith(href);
+  const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname.startsWith(href));
+  const closeMenu = () => setMenuOpen(false);
 
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80">
         <div className="mx-auto flex min-h-14 max-w-7xl items-center gap-3 px-4 py-2 md:gap-4">
+          {/* Hamburger — mobile only, left-most. Same side the drawer slides in from. */}
+          <button
+            type="button"
+            aria-label={menuOpen ? t('mobile.menu.close') : t('mobile.menu.open')}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((p) => !p)}
+            className="md:hidden relative flex h-11 w-11 flex-shrink-0 flex-col items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            <span
+              aria-hidden="true"
+              className={`absolute block h-0.5 w-5 rounded-full bg-current transition-transform duration-200 ease-out ${menuOpen ? 'rotate-45' : '-translate-y-[6px]'}`}
+            />
+            <span
+              aria-hidden="true"
+              className={`absolute block h-0.5 w-5 rounded-full bg-current transition-opacity duration-150 ${menuOpen ? 'opacity-0' : 'opacity-100'}`}
+            />
+            <span
+              aria-hidden="true"
+              className={`absolute block h-0.5 w-5 rounded-full bg-current transition-transform duration-200 ease-out ${menuOpen ? '-rotate-45' : 'translate-y-[6px]'}`}
+            />
+          </button>
+
           <Link href="/" className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
             HiPaGo
           </Link>
@@ -91,40 +139,27 @@ export function Header() {
               {t('nav.settings')}
             </Link>
           </nav>
-
-          {/* Hamburger — mobile only */}
-          <button
-            type="button"
-            aria-label={menuOpen ? t('mobile.menu.close') : t('mobile.menu.open')}
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((prev) => !prev)}
-            className="md:hidden flex h-11 w-11 items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
-          </button>
         </div>
       </header>
 
-      {/* Mobile overlay drawer */}
-      {menuOpen && (
+      {/* Mobile overlay drawer — slides in from the LEFT, the same side as the hamburger button. */}
+      {drawerMounted && (
         <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true">
-          {/* Backdrop */}
           <button
             type="button"
             aria-label={t('mobile.menu.close')}
-            onClick={() => setMenuOpen(false)}
-            className="absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity"
+            onClick={closeMenu}
+            className={`absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity duration-200 ${drawerEntered ? 'opacity-100' : 'opacity-0'}`}
           />
-          {/* Drawer panel — slides in from the right, takes ~80vw */}
-          <div className="absolute inset-y-0 right-0 flex w-[80%] max-w-sm flex-col bg-white shadow-2xl dark:bg-zinc-950">
+          <div
+            className={`absolute inset-y-0 left-0 flex w-[80%] max-w-sm flex-col bg-white shadow-2xl transition-transform duration-200 ease-out dark:bg-zinc-950 ${drawerEntered ? 'translate-x-0' : '-translate-x-full'}`}
+          >
             <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <span className="text-base font-semibold text-zinc-900 dark:text-zinc-100">HiPaGo</span>
               <button
                 type="button"
                 aria-label={t('mobile.menu.close')}
-                onClick={() => setMenuOpen(false)}
+                onClick={closeMenu}
                 className="flex h-11 w-11 items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -137,6 +172,7 @@ export function Header() {
                 <Link
                   key={n.href}
                   href={n.href}
+                  onClick={closeMenu}
                   className={`flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                     isActive(n.href)
                       ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
