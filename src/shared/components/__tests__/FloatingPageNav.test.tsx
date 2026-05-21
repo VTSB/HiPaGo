@@ -7,9 +7,28 @@ import { FloatingPageNav, getNextPageAction } from '../FloatingPageNav';
 let mockGridColumns = 5;
 const mockSetGridColumns = vi.fn();
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { gridColumns: number; setGridColumns: (n: number) => void }) => unknown) =>
-    sel({ gridColumns: mockGridColumns, setGridColumns: mockSetGridColumns }),
+  useSettingsStore: (sel: (s: { gridColumns: number; setGridColumns: (n: number) => void; locale: 'en' | 'ko' }) => unknown) =>
+    sel({ gridColumns: mockGridColumns, setGridColumns: mockSetGridColumns, locale: 'en' }),
 }));
+
+// Stub matchMedia (jsdom doesn't ship it) so the mobile/desktop branch in
+// FloatingPageNav resolves deterministically to "desktop" — keeping existing
+// click assertions valid. Mobile-specific behavior is covered by qa-browser.
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Pure function: getNextPageAction

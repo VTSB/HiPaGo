@@ -126,6 +126,18 @@ const translations = {
   // Mobile drawer + empty-state CTAs
   'mobile.menu.close': { en: 'Close menu', ko: '메뉴 닫기' },
   'mobile.menu.open': { en: 'Open menu', ko: '메뉴 열기' },
+
+  // Floating page nav — page-jump modal + ARIA
+  'pageJump.title': { en: 'Go to page', ko: '페이지 이동' },
+  'pageJump.current': { en: 'Current', ko: '현재' },
+  'pageJump.go': { en: 'Go', ko: '이동' },
+  'pageJump.cancel': { en: 'Cancel', ko: '취소' },
+  'pageJump.close': { en: 'Close dialog', ko: '대화상자 닫기' },
+  'pageNav.prev': { en: 'Previous page', ko: '이전 페이지' },
+  'pageNav.next': { en: 'Next page', ko: '다음 페이지' },
+  'pageNav.shrinkGrid': { en: 'Larger cards', ko: '카드 크게' },
+  'pageNav.growGrid': { en: 'Smaller cards', ko: '카드 작게' },
+  'pageNav.jumpToPage': { en: 'Jump to page', ko: '페이지 이동' },
   'empty.browseGalleries': { en: 'Browse galleries', ko: '갤러리 둘러보기' },
   'licenses.search.clear': { en: 'Clear filter', ko: '필터 지우기' },
   'reader.jumpToPage': { en: 'Jump to page', ko: '페이지 이동' },

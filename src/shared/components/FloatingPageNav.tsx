@@ -2,6 +2,10 @@
 
 import { useEffect, useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useSettingsStore } from '@/lib/store/settings';
+import { useT } from '@/lib/i18n/useT';
+import { useScrollDirection } from '@/shared/hooks/useScrollDirection';
+import { useHaptic } from '@/shared/hooks/useHaptic';
+import { PageJumpModal } from '@/shared/components/PageJumpModal';
 
 /** Poll for an element to appear, then call callback. */
 export function pollForElement(
@@ -41,27 +45,24 @@ export interface FloatingPageNavHandle {
 }
 
 interface FloatingPageNavProps {
-  /** Total number of items across all pages */
   totalItems: number;
-  /** Number of items currently rendered */
   loadedItems: number;
-  /** Items per page */
   pageSize: number;
-  /** Whether more pages can be loaded */
   hasMore?: boolean;
-  /** Called when user navigates past loaded content */
   onLoadMore?: () => void;
-  /** Controlled viewing page — when passed, parent drives the display */
   viewingPage?: number;
-  /** Called whenever scroll tracking updates the viewing page */
   onViewingPageChange?: (page: number) => void;
-  /** Called when user requests a non-adjacent or unloaded-page jump */
   onJumpToPage?: (page: number) => void;
-  /** When true, disables prev/next navigation buttons */
   isJumping?: boolean;
-  /** First page available in the current loaded window (disable prev when viewingPage <= this) */
   firstLoadedPage?: number;
 }
+
+const IDLE_FADE_MS = 2000;
+const BOUNCE_MS = 240;
+const SWIPE_MAX_MS = 400;
+const SWIPE_MIN_DX = 50;
+const SWIPE_MAX_DY = 30;
+const MOBILE_BREAKPOINT_QUERY = '(max-width: 639px)';
 
 export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNavProps>(function FloatingPageNav({
   totalItems,
@@ -75,23 +76,35 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
   isJumping,
   firstLoadedPage,
 }: FloatingPageNavProps, ref) {
+  const t = useT();
+  const haptic = useHaptic();
+  const scrollDir = useScrollDirection();
+
   const [localViewingPage, setLocalViewingPage] = useState(viewingPageProp ?? 1);
   const viewingPage = viewingPageProp ?? localViewingPage;
   const setViewingPage = useCallback((p: number) => {
     setLocalViewingPage(p);
     onViewingPageChange?.(p);
   }, [onViewingPageChange]);
+
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
+  const [showJumpModal, setShowJumpModal] = useState(false);
+  const [bouncing, setBouncing] = useState(false);
+  const [idle, setIdle] = useState(false);
+
   const inputRef = useRef<HTMLInputElement>(null);
+  const bounceTimerRef = useRef<number>(0);
+  const idleTimerRef = useRef<number>(0);
+
   const gridColumns = useSettingsStore((s) => s.gridColumns);
   const setGridColumns = useSettingsStore((s) => s.setGridColumns);
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const loadedPages = Math.ceil(loadedItems / pageSize);
 
-  // Suppress scroll-based page tracking briefly after a button click
-  // so the immediate page update isn't overwritten by scroll animation events.
+  // Suppress scroll-based page tracking briefly after a button click so the
+  // immediate page update isn't overwritten by scroll animation events.
   const suppressScrollRef = useRef(false);
   const suppressTimerRef = useRef(0);
   const suppressScrollTracking = useCallback(() => {
@@ -102,7 +115,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     }, 400);
   }, []);
 
-  // Suppress scroll tracking when grid columns change to prevent page jumps
+  // Suppress scroll tracking when grid columns change to prevent page jumps.
   const prevGridColumnsRef = useRef(gridColumns);
   useEffect(() => {
     if (prevGridColumnsRef.current !== gridColumns) {
@@ -113,7 +126,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
 
   useImperativeHandle(ref, () => ({ suppress: suppressScrollTracking }), [suppressScrollTracking]);
 
-  // Track scroll position by finding the first visible item in the viewport
+  // Track scroll position by finding the first visible item in the viewport.
   useEffect(() => {
     if (loadedItems === 0) return;
     let ticking = false;
@@ -144,7 +157,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     return () => window.removeEventListener('scroll', onScroll);
   }, [loadedItems, pageSize, setViewingPage]);
 
-  // Custom smooth scroll: fast start → decelerate (ease-out)
+  // Custom smooth scroll: fast start → decelerate (ease-out).
   const scrollAnimRef = useRef(0);
   const scrollToPage = useCallback((page: number) => {
     const targetIndex = (page - 1) * pageSize;
@@ -163,26 +176,59 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     cancelAnimationFrame(scrollAnimRef.current);
     const animate = (now: number) => {
       const elapsed = now - startTime;
-      const t = Math.min(elapsed / duration, 1);
-      // ease-out cubic: fast start, smooth deceleration
-      const eased = 1 - (1 - t) ** 3;
+      const tt = Math.min(elapsed / duration, 1);
+      const eased = 1 - (1 - tt) ** 3;
       window.scrollTo(0, startTop + distance * eased);
-      if (t < 1) {
+      if (tt < 1) {
         scrollAnimRef.current = requestAnimationFrame(animate);
       }
     };
     scrollAnimRef.current = requestAnimationFrame(animate);
   }, [pageSize]);
 
+  // Idle-fade timer. Resets on any scroll or pill interaction; sets `idle=true`
+  // after IDLE_FADE_MS of silence. Mobile-only via CSS (sm:opacity-100 overrides).
+  const resetIdle = useCallback(() => {
+    setIdle(false);
+    window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => setIdle(true), IDLE_FADE_MS);
+  }, []);
+
+  useEffect(() => {
+    // Initial idle timer — kick it off without calling resetIdle (which
+    // would setIdle(false) synchronously in the effect body and trip
+    // react-hooks/set-state-in-effect). Initial state is already false,
+    // so we just schedule the first idle flip.
+    idleTimerRef.current = window.setTimeout(() => setIdle(true), IDLE_FADE_MS);
+    const onScroll = () => resetIdle();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.clearTimeout(idleTimerRef.current);
+    };
+  }, [resetIdle]);
+
+  // Bounce + haptic when user taps past a boundary.
+  const triggerBounce = useCallback(() => {
+    setBouncing(true);
+    window.clearTimeout(bounceTimerRef.current);
+    bounceTimerRef.current = window.setTimeout(() => setBouncing(false), BOUNCE_MS);
+    haptic.light();
+  }, [haptic]);
+
+  useEffect(() => () => window.clearTimeout(bounceTimerRef.current), []);
+
+  // Core nav primitives — these don't fire bounce themselves; the wrapper does.
   const goPrev = useCallback(() => {
     const firstPage = firstLoadedPage ?? 1;
-    if (viewingPage <= firstPage) return;
+    if (viewingPage <= firstPage) return false;
     const target = viewingPage - 1;
     setViewingPage(target);
     suppressScrollTracking();
     const el = document.querySelector(`[data-item-index="${(target - 1) * pageSize}"]`);
     if (el) scrollToPage(target);
     else onJumpToPage?.(target);
+    return true;
   }, [viewingPage, firstLoadedPage, pageSize, scrollToPage, onJumpToPage, setViewingPage, suppressScrollTracking]);
 
   const goNext = useCallback(() => {
@@ -194,7 +240,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
         const el = document.querySelector(`[data-item-index="${(result.targetPage - 1) * pageSize}"]`);
         if (el) scrollToPage(result.targetPage);
         else onJumpToPage?.(result.targetPage);
-        break;
+        return true;
       }
       case 'loadAndScroll': {
         setViewingPage(result.targetPage);
@@ -205,17 +251,31 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           () => document.querySelector(`[data-item-index="${targetIndex}"]`),
           () => scrollToPage(result.targetPage),
         );
-        break;
+        return true;
       }
       case 'noop':
-        break;
+        return false;
     }
   }, [viewingPage, loadedPages, totalPages, hasMore, onLoadMore, scrollToPage, pageSize, onJumpToPage, setViewingPage, suppressScrollTracking]);
+
+  // Bounce-on-boundary wrappers — fire haptic + scale pulse if at limit, else delegate.
+  const goPrevWithBounce = useCallback(() => {
+    resetIdle();
+    const moved = goPrev();
+    if (!moved) triggerBounce();
+  }, [goPrev, resetIdle, triggerBounce]);
+
+  const goNextWithBounce = useCallback(() => {
+    resetIdle();
+    const moved = goNext();
+    if (!moved) triggerBounce();
+  }, [goNext, resetIdle, triggerBounce]);
 
   const startEditing = useCallback(() => {
     setEditValue(String(viewingPage));
     setEditing(true);
-  }, [viewingPage]);
+    resetIdle();
+  }, [viewingPage, resetIdle]);
 
   const commitEdit = useCallback(() => {
     setEditing(false);
@@ -234,25 +294,24 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     }
   }, [editValue, totalPages, viewingPage, pageSize, scrollToPage, goNext, onJumpToPage]);
 
-  // Focus input when editing starts
+  // Focus the inline desktop input when entering edit mode.
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
 
-  // Arrow key navigation
+  // Arrow key navigation (window-level). Skips when typing in an editable element.
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      // Skip if user is typing in an input/textarea/select/contentEditable
       const el = e.target as HTMLElement;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (el?.isContentEditable) return;
-      if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
-      else if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); goPrevWithBounce(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); goNextWithBounce(); }
     }
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [goPrev, goNext]);
+  }, [goPrevWithBounce, goNextWithBounce]);
 
   const shrinkGrid = useCallback(() => {
     const current = gridColumns || 5;
@@ -264,70 +323,162 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     if (current < 7) setGridColumns(current + 1);
   }, [gridColumns, setGridColumns]);
 
+  // Swipe gesture handler — mobile only. Vertical scroll always wins via |dy|<30 guard.
+  const touchStartRef = useRef<{ x: number; y: number; t: number; target: EventTarget | null } | null>(null);
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    const tt = e.touches[0];
+    touchStartRef.current = { x: tt.clientX, y: tt.clientY, t: Date.now(), target: e.currentTarget };
+    resetIdle();
+  }, [resetIdle]);
+  const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (!start) return;
+    if (start.target !== e.currentTarget) return;
+    const end = e.changedTouches[0];
+    const dx = end.clientX - start.x;
+    const dy = end.clientY - start.y;
+    const dt = Date.now() - start.t;
+    if (dt > SWIPE_MAX_MS) return;
+    if (Math.abs(dy) > SWIPE_MAX_DY) return;
+    if (Math.abs(dx) < SWIPE_MIN_DX) return;
+    if (dx < 0) goNextWithBounce();
+    else goPrevWithBounce();
+  }, [goPrevWithBounce, goNextWithBounce]);
+
   if (totalPages <= 0) return null;
 
   const effectiveCols = gridColumns || 5;
+  const hiddenByScroll = scrollDir === 'down' && !showJumpModal;
+  const atFirst = viewingPage <= (firstLoadedPage ?? 1) || !!isJumping;
+  const atLast = viewingPage >= totalPages || !!isJumping;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex items-center gap-1 rounded-full bg-zinc-900/80 px-3 py-2 text-sm text-white shadow-lg backdrop-blur-sm dark:bg-zinc-100/80 dark:text-zinc-900">
-      <button
-        onClick={shrinkGrid}
-        disabled={effectiveCols <= 2}
-        className="rounded-full px-1.5 py-0.5 hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
-        aria-label="Larger cards"
+    <>
+      <div
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onPointerDown={resetIdle}
+        className={[
+          'fixed bottom-4 z-40 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm dark:bg-zinc-100/80 dark:text-zinc-900',
+          // D1: mobile center, desktop bottom-right.
+          'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
+          'transition-all duration-200 ease-out',
+          // D5: hide on scroll-down (mobile only).
+          hiddenByScroll ? 'translate-y-[160%] sm:translate-y-0 opacity-0 sm:opacity-100' : '',
+          // D8: idle fade (mobile only).
+          idle && !hiddenByScroll ? 'opacity-40 sm:opacity-100' : '',
+          // D6: bounce pulse at boundaries.
+          bouncing ? 'scale-105' : 'scale-100',
+        ].filter(Boolean).join(' ')}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path d="M3.75 7.25a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5z" /></svg>
-      </button>
-      <button
-        onClick={growGrid}
-        disabled={effectiveCols >= 7}
-        className="rounded-full px-1.5 py-0.5 hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
-        aria-label="Smaller cards"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path d="M8.75 3.75a.75.75 0 00-1.5 0v3.5h-3.5a.75.75 0 000 1.5h3.5v3.5a.75.75 0 001.5 0v-3.5h3.5a.75.75 0 000-1.5h-3.5v-3.5z" /></svg>
-      </button>
-      <div className="mx-0.5 h-4 w-px bg-white/20 dark:bg-black/20" />
-      <button
-        onClick={goPrev}
-        disabled={viewingPage <= (firstLoadedPage ?? 1) || !!isJumping}
-        className="rounded-full px-2 py-0.5 hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
-        aria-label="Previous page"
-      >
-        &lsaquo;
-      </button>
-      {editing ? (
-        <form
-          onSubmit={(e) => { e.preventDefault(); commitEdit(); }}
-          className="flex items-center gap-1"
-        >
-          <input
-            ref={inputRef}
-            type="number"
-            min={1}
-            max={totalPages}
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={commitEdit}
-            className="w-12 rounded bg-white/20 px-1 py-0.5 text-center tabular-nums text-white outline-none dark:bg-black/20 dark:text-zinc-900 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
-          />
-          <span>/ {totalPages.toLocaleString()}</span>
-        </form>
-      ) : (
+        {/* D3: Grid column controls — desktop only. */}
         <button
-          onClick={startEditing}
-          className="min-w-[4rem] cursor-text rounded px-1 py-0.5 text-center tabular-nums hover:bg-white/10 dark:hover:bg-black/10"
+          onClick={() => { shrinkGrid(); resetIdle(); }}
+          disabled={effectiveCols <= 2}
+          className="hidden sm:inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+          aria-label={t('pageNav.shrinkGrid')}
         >
-          {viewingPage} / {totalPages.toLocaleString()}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+            <path d="M3.75 7.25a.75.75 0 000 1.5h8.5a.75.75 0 000-1.5h-8.5z" />
+          </svg>
         </button>
+        <button
+          onClick={() => { growGrid(); resetIdle(); }}
+          disabled={effectiveCols >= 7}
+          className="hidden sm:inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+          aria-label={t('pageNav.growGrid')}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+            <path d="M8.75 3.75a.75.75 0 00-1.5 0v3.5h-3.5a.75.75 0 000 1.5h3.5v3.5a.75.75 0 001.5 0v-3.5h3.5a.75.75 0 000-1.5h-3.5v-3.5z" />
+          </svg>
+        </button>
+        <div className="hidden sm:block mx-0.5 h-4 w-px bg-white/20 dark:bg-black/20" />
+
+        {/* D2: prev chevron — SVG, 44×44. */}
+        <button
+          onClick={goPrevWithBounce}
+          disabled={atFirst}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+          aria-label={t('pageNav.prev')}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+            <path d="M10 4l-4 4 4 4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        {/* D4: page-jump label/input. Desktop = inline number input (existing).
+            Mobile = button that opens PageJumpModal. */}
+        {editing ? (
+          <form
+            onSubmit={(e) => { e.preventDefault(); commitEdit(); }}
+            className="flex items-center gap-1 px-1"
+          >
+            <input
+              ref={inputRef}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={totalPages}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={commitEdit}
+              className="w-14 rounded bg-white/20 px-1 py-0.5 text-center tabular-nums text-white outline-none dark:bg-black/20 dark:text-zinc-900 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+            />
+            <span className="tabular-nums">/ {totalPages.toLocaleString()}</span>
+          </form>
+        ) : (
+          <button
+            onClick={() => {
+              resetIdle();
+              if (typeof window !== 'undefined' && window.matchMedia(MOBILE_BREAKPOINT_QUERY).matches) {
+                setShowJumpModal(true);
+              } else {
+                startEditing();
+              }
+            }}
+            className="inline-flex min-h-11 min-w-[5rem] cursor-text items-center justify-center rounded-full px-2 tabular-nums hover:bg-white/10 dark:hover:bg-black/10"
+            aria-label={t('pageNav.jumpToPage')}
+          >
+            {viewingPage} / {totalPages.toLocaleString()}
+          </button>
+        )}
+
+        {/* D2: next chevron — SVG, 44×44. */}
+        <button
+          onClick={goNextWithBounce}
+          disabled={atLast}
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+          aria-label={t('pageNav.next')}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+            <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+
+      {showJumpModal && (
+        <PageJumpModal
+          currentPage={viewingPage}
+          totalPages={totalPages}
+          onCommit={(target) => {
+            setShowJumpModal(false);
+            resetIdle();
+            const clamped = Math.max(1, Math.min(target, totalPages));
+            if (clamped === viewingPage) return;
+            const targetIndex = (clamped - 1) * pageSize;
+            const el = document.querySelector(`[data-item-index="${targetIndex}"]`);
+            if (el) {
+              scrollToPage(clamped);
+            } else if (clamped === viewingPage + 1) {
+              goNext();
+            } else {
+              onJumpToPage?.(clamped);
+            }
+          }}
+          onClose={() => { setShowJumpModal(false); resetIdle(); }}
+        />
       )}
-      <button
-        onClick={goNext}
-        disabled={viewingPage >= totalPages || !!isJumping}
-        className="rounded-full px-2 py-0.5 hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
-        aria-label="Next page"
-      >
-        &rsaquo;
-      </button>
-    </div>
+    </>
   );
 });
