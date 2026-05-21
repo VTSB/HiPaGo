@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { isTauri } from '@/lib/utils/platform';
 
 interface AbortableImageProps {
   src: string;
@@ -19,6 +20,38 @@ interface AbortableImageProps {
   preload?: boolean;
 }
 
+const CDN_HOST_SUFFIX = '.gold-usergeneratedcontent.net';
+
+function shouldUseTauriImageFetch(src: string): boolean {
+  if (!isTauri()) return false;
+  try {
+    const url = new URL(src);
+    return url.protocol === 'https:' && url.hostname.endsWith(CDN_HOST_SUFFIX);
+  } catch {
+    return false;
+  }
+}
+
+async function fetchTauriImageObjectUrl(src: string): Promise<string> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const resp = (await invoke('bypass_fetch', {
+    url: src,
+    headers: {
+      Referer: 'https://hitomi.la/',
+      Origin: 'https://hitomi.la',
+      Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
+    },
+  })) as { status: number; headers: Record<string, string>; body: string };
+
+  if (resp.status < 200 || resp.status >= 300) {
+    throw new Error(`Image fetch failed with HTTP ${resp.status}`);
+  }
+
+  const bytes = Uint8Array.from(atob(resp.body), (c) => c.charCodeAt(0));
+  const contentType = Object.entries(resp.headers).find(([key]) => key.toLowerCase() === 'content-type')?.[1] || 'application/octet-stream';
+  return URL.createObjectURL(new Blob([bytes], { type: contentType }));
+}
+
 /**
  * Image that prioritises viewport-visible loads and cancels off-screen requests.
  *
@@ -34,6 +67,11 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const mountedRef = useRef(true);
   const loadedRef = useRef(false);
   const retryCountRef = useRef(0);
+  const needsTauriImageFetch = shouldUseTauriImageFetch(src);
+  const [tauriObjectUrl, setTauriObjectUrl] = useState<{ src: string; url: string } | null>(null);
+  const effectiveSrc = needsTauriImageFetch
+    ? tauriObjectUrl?.src === src ? tauriObjectUrl.url : null
+    : src;
   const [visible, setVisible] = useState(loading === 'eager' || preload);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -45,15 +83,42 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     onPermanentErrorRef.current = onPermanentError;
   });
 
+  useEffect(() => {
+    if (!needsTauriImageFetch) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    fetchTauriImageObjectUrl(src)
+      .then((url) => {
+        objectUrl = url;
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setTauriObjectUrl({ src, url });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+          onPermanentErrorRef.current?.();
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [needsTauriImageFetch, src]);
+
   // Reset state when src/loading/preload changes using render-phase setState
   // (the React-documented derived-state pattern — react-hooks/set-state-in-effect safe).
   // Resetting visible forces the IntersectionObserver to re-fire,
   // which fixes stuck-invisible images when virtual scroll reuses a DOM slot.
-  const [prevSrc, setPrevSrc] = useState(src);
+  const [prevSrc, setPrevSrc] = useState(effectiveSrc);
   const [prevLoading, setPrevLoading] = useState(loading);
   const [prevPreload, setPrevPreload] = useState(preload);
-  if (src !== prevSrc || loading !== prevLoading || preload !== prevPreload) {
-    setPrevSrc(src);
+  if (effectiveSrc !== prevSrc || loading !== prevLoading || preload !== prevPreload) {
+    setPrevSrc(effectiveSrc);
     setPrevLoading(loading);
     setPrevPreload(preload);
     setLoaded(false);
@@ -66,7 +131,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   useEffect(() => {
     loadedRef.current = false;
     retryCountRef.current = 0;
-  }, [src, loading, preload]);
+  }, [effectiveSrc, loading, preload]);
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
@@ -145,7 +210,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       cancelAnimationFrame(rafId);
       observer.disconnect();
     };
-  }, [loading, src, preload]);
+  }, [loading, effectiveSrc, preload]);
 
   // Track mount state for retry safety
   useEffect(() => {
@@ -172,7 +237,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       // eslint-disable-next-line @next/next/no-img-element
       <img
         ref={imgRef}
-        src={visible ? src : undefined}
+        src={visible ? effectiveSrc ?? undefined : undefined}
         alt=""
         data-preload="true"
         fetchPriority="low"
@@ -188,7 +253,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     // eslint-disable-next-line @next/next/no-img-element
     <img
       ref={imgRef}
-      src={visible ? src : undefined}
+      src={visible ? effectiveSrc ?? undefined : undefined}
       alt={alt}
       className={className}
       loading={loading === 'eager' ? 'eager' : undefined}

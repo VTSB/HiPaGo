@@ -207,6 +207,10 @@ jobs:
         # v4 runs on node24 (v3 was the last Node 20 release — deprecated
         # June 2 2026, removed Sep 16 2026).
         uses: android-actions/setup-android@v4
+        with:
+          # Avoid the default obsolete `tools` package, which pulls the
+          # Android Emulator package even though release builds do not need it.
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

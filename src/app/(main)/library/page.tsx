@@ -4,9 +4,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { Spinner } from '@/shared/components/Spinner';
+import { AbortableImage } from '@/shared/components/AbortableImage';
 import { useT } from '@/lib/i18n/useT';
 import { listDownloads, searchDownloads, deleteDownload } from '@/lib/db/download';
 import { createDownloadStore } from '@/lib/storage/download-store';
+import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -70,11 +72,8 @@ function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
       {/* Thumbnail */}
       <div className="h-24 w-16 shrink-0 overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
         {item.thumbnail ? (
-          // Plain <img>: thumbnails are remote hitomi URLs served through a
-          // custom proxy, not next/image-optimizable.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={item.thumbnail}
+          <AbortableImage
+            src={resolveThumbnailUrl(item.thumbnail)}
             alt={item.title}
             className="h-full w-full object-cover"
             loading="lazy"
