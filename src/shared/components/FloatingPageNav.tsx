@@ -363,17 +363,22 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           'fixed bottom-4 z-40 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm dark:bg-zinc-100/80 dark:text-zinc-900',
           // D1: mobile center, desktop bottom-right.
           'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
-          // Animate transform (D1 centering + D5 slide-out + D6 bounce-scale) and opacity (D8 idle-fade) only.
-          // transition-all was animating background-color/blur and felt heavy on the return.
-          'transition-[transform,opacity] duration-200 ease-out',
-          // D5: slide-only hide on scroll-down (mobile). The translation needs to
-          // clear BOTH the pill's own height AND the `bottom-4` (16px = 1rem)
-          // anchor offset. `calc(100% + 1rem)` does exactly that, height-agnostic —
-          // a literal `110%` (or any flat percentage) left a thin slice visible at
-          // the viewport bottom for the actual ~52px pill (math: 110% × 52 = 57.2 px,
-          // need ≥ 52 + 16 = 68 px). The previous user-visible bug shipped because
-          // 110% mathematically can't clear bottom-4 for any pill of typical height.
-          hiddenByScroll ? 'translate-y-[calc(100%_+_1rem)] sm:translate-y-0' : '',
+          // Animate transform (D1 centering + D5 slide + D6 bounce-scale) AND opacity
+          // (D5 fade + D8 idle-fade). 300ms gives the show direction enough time to
+          // register — pure slide-only over 200ms felt like a pop because the pill's
+          // upward translate happens IN THE SAME DIRECTION as the page scrolling up,
+          // so the eye tracks the page content and misses the pill motion. Fading in
+          // alongside the slide gives a second visual cue that survives same-direction
+          // masking.
+          'transition-[transform,opacity] duration-300 ease-out',
+          // D5: slide + fade hide on scroll-down (mobile). The translation needs to
+          // clear BOTH the pill's own height AND the `bottom-4` (16px = 1rem) anchor
+          // offset. `calc(100% + 1rem)` does exactly that, height-agnostic — a literal
+          // `110%` (or any flat percentage) left a thin slice visible at the viewport
+          // bottom for the actual ~52px pill (math: 110% × 52 = 57.2 px, need ≥ 52 +
+          // 16 = 68 px). Opacity-0 added back as a second cue for the restore direction.
+          // sm: reverts preserve byte-identical desktop.
+          hiddenByScroll ? 'translate-y-[calc(100%_+_1rem)] opacity-0 sm:translate-y-0 sm:opacity-100' : '',
           // D8: idle fade (mobile only).
           idle && !hiddenByScroll ? 'opacity-40 sm:opacity-100' : '',
           // D6: bounce pulse at boundaries.
