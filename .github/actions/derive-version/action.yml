@@ -1,6 +1,6 @@
 name: 'Derive build version from git tag'
 description: >
-  Reads ${{ github.ref_name }} (expected vX.Y.Z), strips the leading v,
+  Reads GITHUB_REF_NAME (expected vX.Y.Z), strips the leading v,
   validates the X.Y.Z shape, computes an Android-friendly versionCode,
   and patches src-tauri/tauri.conf.json + package.json + android/app/build.gradle
   with the derived version. Patching happens in the workspace only; the
