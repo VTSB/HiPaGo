@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
-import { useScrollDirection } from '@/shared/hooks/useScrollDirection';
+import { useHideOnScroll } from '@/shared/hooks/useHideOnScroll';
 import { useHaptic } from '@/shared/hooks/useHaptic';
 import { PageJumpModal } from '@/shared/components/PageJumpModal';
 
@@ -78,7 +78,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
 }: FloatingPageNavProps, ref) {
   const t = useT();
   const haptic = useHaptic();
-  const scrollDir = useScrollDirection();
+  const scrollHidden = useHideOnScroll();
 
   const [localViewingPage, setLocalViewingPage] = useState(viewingPageProp ?? 1);
   const viewingPage = viewingPageProp ?? localViewingPage;
@@ -349,7 +349,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
   if (totalPages <= 0) return null;
 
   const effectiveCols = gridColumns || 5;
-  const hiddenByScroll = scrollDir === 'down' && !showJumpModal;
+  const hiddenByScroll = scrollHidden && !showJumpModal;
   const atFirst = viewingPage <= (firstLoadedPage ?? 1) || !!isJumping;
   const atLast = viewingPage >= totalPages || !!isJumping;
 
@@ -363,9 +363,11 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           'fixed bottom-4 z-40 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm dark:bg-zinc-100/80 dark:text-zinc-900',
           // D1: mobile center, desktop bottom-right.
           'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
-          'transition-all duration-200 ease-out',
-          // D5: hide on scroll-down (mobile only).
-          hiddenByScroll ? 'translate-y-[160%] sm:translate-y-0 opacity-0 sm:opacity-100' : '',
+          // Animate transform (D1 centering + D5 slide-out + D6 bounce-scale) and opacity (D8 idle-fade) only.
+          // transition-all was animating background-color/blur and felt heavy on the return.
+          'transition-[transform,opacity] duration-200 ease-out',
+          // D5: slide-only hide on scroll-down (mobile). 110% clears the pill past the bottom-4 anchor.
+          hiddenByScroll ? 'translate-y-[110%] sm:translate-y-0' : '',
           // D8: idle fade (mobile only).
           idle && !hiddenByScroll ? 'opacity-40 sm:opacity-100' : '',
           // D6: bounce pulse at boundaries.
