@@ -150,7 +150,8 @@ function SearchInputSimple({ value, onChange, placeholder }: SearchInputSimplePr
       />
       {value && (
         <button
-          onMouseDown={(e) => { e.preventDefault(); onChange(''); }}
+          type="button"
+          onClick={() => onChange('')}
           className="absolute right-2 text-zinc-500 hover:text-zinc-300 text-lg"
           aria-label="Clear"
         >

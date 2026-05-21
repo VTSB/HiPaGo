@@ -295,8 +295,9 @@ describe('LibraryPage', () => {
       { timeout: 3000 },
     );
 
-    // Clear → wait for full list to reappear
-    act(() => { fireEvent.change(input, { target: { value: '' } }); });
+    // Clear via the visible clear control → wait for full list to reappear
+    const clearButton = screen.getByRole('button', { name: 'Clear' });
+    act(() => { fireEvent.click(clearButton); });
     await waitFor(
       () => expect(screen.getByText('Full List Item')).toBeTruthy(),
       { timeout: 3000 },
