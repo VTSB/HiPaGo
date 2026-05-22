@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Environment;
 
@@ -32,7 +33,7 @@ import java.net.URL;
  * Two methods:
  *   check({owner, repo}) → {available, version?, notes?, apkUrl?}
  *     Queries https://api.github.com/repos/{owner}/{repo}/releases/latest,
- *     compares the tag (e.g. "v0.0.7") against BuildConfig.VERSION_NAME,
+ *     compares the tag (e.g. "v0.0.7") against the installed app version,
  *     finds the first `.apk` asset, returns the download URL. Resolves
  *     {available:false} on any network or parse error (UI prefers silent
  *     no-op over a broken banner).
@@ -83,7 +84,7 @@ public class UpdaterPlugin extends Plugin {
                 JSONObject json = new JSONObject(body.toString());
                 String tag = json.optString("tag_name", "");
                 String remoteVer = tag.startsWith("v") ? tag.substring(1) : tag;
-                String currentVer = BuildConfig.VERSION_NAME;
+                String currentVer = getCurrentVersion();
                 if (remoteVer.isEmpty() || !isNewer(remoteVer, currentVer)) {
                     JSObject ret = new JSObject();
                     ret.put("available", false);
@@ -217,6 +218,12 @@ public class UpdaterPlugin extends Plugin {
             if (ri < ci) return false;
         }
         return false;
+    }
+
+    private String getCurrentVersion() throws Exception {
+        Context ctx = getContext();
+        PackageInfo info = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
+        return info.versionName != null ? info.versionName : "0.0.0";
     }
 
     private static int parseIntSafe(String s) {
