@@ -20,9 +20,11 @@ import type { GalleryBlock } from '@/lib/utils/types';
 import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
 import { readerHref } from '@/lib/utils/routes';
+import { isNativePlatform } from '@/lib/utils/platform';
 
 const INITIAL_THUMBNAILS = 20;
 const LOAD_MORE_COUNT = 20;
+const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 
 const TAG_ORDER: Record<string, number> = {
   [TagType.ARTIST]: 0,
@@ -44,12 +46,39 @@ export function GalleryDetail({ id }: { id: number }) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const t = useT();
   const renderedCount = renderState.id === id ? renderState.count : INITIAL_THUMBNAILS;
+  const backTargetRef = useRef('/');
+
+  const goBackToList = useCallback(() => {
+    router.replace(backTargetRef.current || '/');
+  }, [router]);
 
   useEffect(() => {
     recordVisit(id).catch((e) => console.warn('[detail] Visit record failed:', e));
     // Warm gg.js cache so reader opens instantly
     getGgConfig().catch((e) => console.warn('[detail] GgConfig warm failed:', e));
   }, [id]);
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(LAST_LIST_URL_KEY);
+      if (stored && !stored.startsWith('/gallery') && !stored.startsWith('/reader')) {
+        backTargetRef.current = stored;
+      }
+    } catch {
+      backTargetRef.current = '/';
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isNativePlatform()) return;
+    if (history.state?.hipagoDetailGuard) return;
+    history.pushState({ ...(history.state ?? {}), hipagoDetailGuard: true }, '', window.location.href);
+    const onPopState = () => {
+      setTimeout(goBackToList, 0);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [goBackToList]);
 
   useEffect(() => {
     if (renderedCount >= files.length) return;
@@ -144,7 +173,7 @@ export function GalleryDetail({ id }: { id: number }) {
   return (
     <div className="space-y-5 sm:space-y-6">
       <button
-        onClick={() => router.back()}
+        onClick={goBackToList}
         className="-mx-2 inline-flex min-h-12 items-center gap-1 rounded-xl px-2 text-base font-medium text-zinc-500 active:bg-zinc-100 sm:min-h-11 sm:text-sm sm:hover:text-zinc-700 dark:text-zinc-400 dark:active:bg-zinc-900 sm:dark:hover:text-zinc-200"
       >
         &larr; {t('detail.back')}
@@ -152,19 +181,19 @@ export function GalleryDetail({ id }: { id: number }) {
       <div className="grid gap-5 md:grid-cols-[300px_1fr] md:gap-6">
         <Link
           href={readerHref(id)}
-          className="group relative self-start overflow-hidden rounded-2xl border border-zinc-200 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800"
+          className="group relative aspect-[3/4] w-full self-start overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
         >
           {bigThumbnail ? (
             <AbortableImage
               src={bigThumbnail}
               alt={displayBlock.title}
-              className="w-full object-cover transition-transform group-hover:scale-[1.02]"
+              className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
             />
           ) : displayBlock.thumbnail ? (
             <AbortableImage
               src={resolveThumbnailUrl(displayBlock.thumbnail)}
               alt={displayBlock.title}
-              className="w-full object-cover transition-transform group-hover:scale-[1.02]"
+              className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
             />
           ) : (
             <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { AbortableImage } from '../AbortableImage';
+import { AbortableImage, __resetAbortableImageCacheForTests } from '../AbortableImage';
 
 // ---------------------------------------------------------------------------
 // IntersectionObserver mock — must be a constructor-compatible function
@@ -20,6 +20,7 @@ function MockIntersectionObserver(
 beforeEach(() => {
   mockObserve.mockClear();
   mockDisconnect.mockClear();
+  __resetAbortableImageCacheForTests();
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
 });
 

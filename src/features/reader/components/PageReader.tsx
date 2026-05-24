@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import type { GalleryImage, GgConfig } from '@/lib/utils/types';
 import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
-import { AbortableImage } from '@/shared/components/AbortableImage';
+import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
 
 // High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
 // tags still get decoded by the browser, so a large mounted window pins
@@ -31,6 +31,8 @@ export function PageReader({
   const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
   const imageFormat = useSettingsStore((s) => s.imageFormat);
   const dualPage = useSettingsStore((s) => s.dualPage);
+  const pointerStartRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     // Skip the gg.js network fetch when all images are served from local storage.
@@ -44,9 +46,10 @@ export function PageReader({
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
   }, [offlineUrls, images, ggConfig, imageFormat]);
 
-  // Warm the HTTP cache for nearby pages without mounting them as DOM <img>.
-  // Cleanup clears src on each navigation, aborting any in-flight request
-  // and releasing the decoded bitmap so memory stays bounded under rapid nav.
+  // Warm nearby pages through the same platform-aware image loader used by
+  // AbortableImage. This matters on Capacitor: a raw JS Image() cannot attach
+  // the bypass headers, so Android would skip preloading and then visibly wait
+  // on every page turn.
   useEffect(() => {
     if (!urls.length) return;
     // Skip JS-Image preloading for offline (blob) URLs — they are already in
@@ -55,16 +58,17 @@ export function PageReader({
     const start = Math.max(0, currentPage - PRELOAD_BEHIND);
     const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
     const skip = new Set(dualPage ? [currentPage, currentPage + 1] : [currentPage]);
-    const loaders: HTMLImageElement[] = [];
+    let cancelled = false;
     for (let i = start; i <= end; i++) {
       if (skip.has(i)) continue;
-      const img = new Image();
-      img.fetchPriority = 'low';
-      img.src = urls[i];
-      loaders.push(img);
+      preloadImageSource(urls[i]).catch(() => {
+        if (!cancelled) {
+          // Best-effort warming only. Visible image load still owns user-facing errors.
+        }
+      });
     }
     return () => {
-      for (const img of loaders) img.src = '';
+      cancelled = true;
     };
   }, [urls, currentPage, dualPage, offlineUrls]);
 
@@ -79,6 +83,10 @@ export function PageReader({
   const hasSecond = dualPage && secondPage < images.length;
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     if (e.clientX - rect.left > rect.width / 2) {
       const next = currentPage + step;
@@ -88,9 +96,38 @@ export function PageReader({
       if (prev >= 0) onPageChange(prev);
     }
   };
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse') return;
+    pointerStartRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = pointerStartRef.current;
+    pointerStartRef.current = null;
+    if (!start || start.id !== e.pointerId) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+
+    suppressClickRef.current = true;
+    if (dx < 0) {
+      const next = currentPage + step;
+      if (next < images.length) onPageChange(next);
+    } else {
+      const prev = currentPage - step;
+      if (prev >= 0) onPageChange(prev);
+    }
+  };
 
   return (
-    <div className="group relative flex min-h-screen cursor-pointer items-center justify-center" onClick={handleClick}>
+    <div
+      className="group relative flex min-h-screen cursor-pointer items-center justify-center"
+      style={{ touchAction: 'pan-y' }}
+      onClick={handleClick}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => { pointerStartRef.current = null; }}
+    >
       {/* Navigation affordance arrows */}
       {currentPage > 0 && (
         <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-30">

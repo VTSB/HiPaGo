@@ -112,7 +112,7 @@ export default function SettingsPage() {
 
   return (
     <div className="-mx-4 sm:mx-auto sm:max-w-2xl">
-      <h1 className="mb-4 px-4 text-[2rem] font-bold leading-tight text-zinc-900 sm:mb-8 sm:px-0 sm:text-2xl dark:text-zinc-100">{t('settings.title')}</h1>
+      <h1 className="mb-4 px-4 text-2xl font-bold leading-tight text-zinc-900 sm:mb-8 sm:px-0 dark:text-zinc-100">{t('settings.title')}</h1>
 
       <div className="divide-y divide-zinc-200 border-y border-zinc-200 bg-white sm:rounded-xl sm:border dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
         {/* System Language */}

@@ -35,7 +35,7 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href }, children),
 }));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ back: vi.fn(), push: vi.fn() }),
+  useRouter: () => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }),
 }));
 
 // Generate N fake files

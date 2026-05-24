@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -41,6 +41,7 @@ function MockIntersectionObserver(
 // ---------------------------------------------------------------------------
 import { PageReader } from '../components/PageReader';
 import { type GalleryImage, ImageType } from '@/lib/utils/types';
+import { __resetAbortableImageCacheForTests } from '@/shared/components/AbortableImage';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,6 +61,7 @@ const fakeGgConfig = { b: 0, m: 0 };
 beforeEach(() => {
   mockObserve.mockClear();
   mockDisconnect.mockClear();
+  __resetAbortableImageCacheForTests();
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
   // Reset gg promise for each test
   mockGetGgConfig.mockImplementation(() => new Promise((res) => { resolveGg = res; }));
@@ -218,10 +220,10 @@ describe('PageReader preload window', () => {
     expect(createdImages.length).toBe(9);
   });
 
-  it('aborts in-flight preloads on navigation by clearing src', async () => {
+  it('warms the new preload window after navigation without DOM preload nodes', async () => {
     const images25 = Array.from({ length: 25 }, (_, i) => makeImage(String(i).padStart(3, '0')));
 
-    const { rerender } = render(
+    const { container, rerender } = render(
       <PageReader images={images25} currentPage={5} onPageChange={vi.fn()} />,
     );
 
@@ -233,16 +235,13 @@ describe('PageReader preload window', () => {
     const initialCount = createdImages.length;
     expect(initialCount).toBeGreaterThan(0);
 
-    // Navigate to a different page — old loaders must have src cleared
     rerender(<PageReader images={images25} currentPage={20} onPageChange={vi.fn()} />);
 
     await act(async () => { await Promise.resolve(); });
 
-    // Each loader from the first window had its src cleared (last assignment === '')
-    const firstWindowLoaders = createdImages.slice(0, initialCount);
-    for (const loader of firstWindowLoaders) {
-      expect(loader.srcs[loader.srcs.length - 1]).toBe('');
-    }
+    expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
+    expect(createdImages.length).toBeGreaterThan(initialCount);
+    expect(createdImages.map((r) => r.srcs.at(-1))).toContain('https://cdn.example.com/024.jpg');
   });
 
   it('does not preload when urls are not yet loaded (ggConfig pending)', () => {
@@ -253,5 +252,65 @@ describe('PageReader preload window', () => {
     );
 
     expect(createdImages.length).toBe(0);
+  });
+});
+
+describe('PageReader touch navigation', () => {
+  it('turns to the next page on a left swipe', async () => {
+    const onPageChange = vi.fn();
+    const { container } = render(
+      <PageReader images={images} currentPage={0} onPageChange={onPageChange} />,
+    );
+
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
+
+    const reader = container.firstElementChild as HTMLElement;
+    reader.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(reader, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 240,
+      clientY: 120,
+    });
+    fireEvent.pointerUp(reader, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 120,
+      clientY: 130,
+    });
+
+    expect(onPageChange).toHaveBeenCalledWith(1);
+  });
+
+  it('turns to the previous page on a right swipe', async () => {
+    const onPageChange = vi.fn();
+    const { container } = render(
+      <PageReader images={images} currentPage={2} onPageChange={onPageChange} />,
+    );
+
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
+
+    const reader = container.firstElementChild as HTMLElement;
+    reader.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(reader, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 120,
+      clientY: 120,
+    });
+    fireEvent.pointerUp(reader, {
+      pointerId: 1,
+      pointerType: 'touch',
+      clientX: 240,
+      clientY: 130,
+    });
+
+    expect(onPageChange).toHaveBeenCalledWith(1);
   });
 });

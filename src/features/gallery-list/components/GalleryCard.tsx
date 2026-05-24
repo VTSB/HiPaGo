@@ -16,6 +16,8 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { fetchGalleryInfo } from '@/lib/api/gallery';
 import { galleryHref } from '@/lib/utils/routes';
 
+const LAST_LIST_URL_KEY = 'hipago:last-list-url';
+
 /** Check if a gallery block matches any blur tags. */
 function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
   if (blurTags.length === 0) return false;
@@ -93,7 +95,18 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   }
 
   return (
-    <Link href={galleryHref(block.id)} className="group block touch-manipulation" onPointerEnter={onPrefetch}>
+    <Link
+      href={galleryHref(block.id)}
+      className="group block touch-manipulation"
+      onClick={() => {
+        try {
+          sessionStorage.setItem(LAST_LIST_URL_KEY, window.location.pathname + window.location.search);
+        } catch {
+          // sessionStorage can be unavailable in private/embedded contexts.
+        }
+      }}
+      onPointerEnter={onPrefetch}
+    >
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-800 sm:hover:shadow-lg">
         {block.thumbnail ? (
           <AbortableImage

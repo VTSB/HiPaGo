@@ -21,6 +21,10 @@ interface AbortableImageProps {
 }
 
 const CDN_HOST_SUFFIX = '.gold-usergeneratedcontent.net';
+const loadedSrcCache = new Set<string>();
+const nativeObjectUrlCache = new Map<string, string>();
+const nativeFetchCache = new Map<string, Promise<string>>();
+const MAX_NATIVE_OBJECT_URLS = 80;
 
 function shouldUseNativeImageFetch(src: string): boolean {
   if (!isTauri() && !isCapacitor()) return false;
@@ -40,7 +44,7 @@ function getImageHeaders(): Record<string, string> {
   };
 }
 
-async function fetchNativeImageObjectUrl(src: string): Promise<string> {
+async function fetchNativeImageObjectUrlUncached(src: string): Promise<string> {
   let resp: { status: number; headers: Record<string, string>; body: string | number[] };
 
   if (isCapacitor()) {
@@ -68,6 +72,57 @@ async function fetchNativeImageObjectUrl(src: string): Promise<string> {
   return URL.createObjectURL(new Blob([bytes], { type: contentType }));
 }
 
+async function fetchNativeImageObjectUrl(src: string): Promise<string> {
+  const cached = nativeObjectUrlCache.get(src);
+  if (cached) return cached;
+
+  let promise = nativeFetchCache.get(src);
+  if (!promise) {
+    promise = fetchNativeImageObjectUrlUncached(src).then((url) => {
+      nativeObjectUrlCache.set(src, url);
+      loadedSrcCache.add(src);
+      nativeFetchCache.delete(src);
+      while (nativeObjectUrlCache.size > MAX_NATIVE_OBJECT_URLS) {
+        const oldest = nativeObjectUrlCache.keys().next().value as string | undefined;
+        if (!oldest) break;
+        const oldUrl = nativeObjectUrlCache.get(oldest);
+        nativeObjectUrlCache.delete(oldest);
+        if (oldUrl) URL.revokeObjectURL(oldUrl);
+      }
+      return url;
+    }).catch((err) => {
+      nativeFetchCache.delete(src);
+      throw err;
+    });
+    nativeFetchCache.set(src, promise);
+  }
+  return promise;
+}
+
+export function preloadImageSource(src: string): Promise<void> {
+  if (loadedSrcCache.has(src)) return Promise.resolve();
+  if (shouldUseNativeImageFetch(src)) {
+    return fetchNativeImageObjectUrl(src).then(() => undefined);
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.fetchPriority = 'low';
+    img.onload = () => {
+      loadedSrcCache.add(src);
+      resolve();
+    };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+export function __resetAbortableImageCacheForTests() {
+  loadedSrcCache.clear();
+  nativeFetchCache.clear();
+  for (const url of nativeObjectUrlCache.values()) URL.revokeObjectURL(url);
+  nativeObjectUrlCache.clear();
+}
+
 /**
  * Image that prioritises viewport-visible loads and cancels off-screen requests.
  *
@@ -84,12 +139,15 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const loadedRef = useRef(false);
   const retryCountRef = useRef(0);
   const needsNativeImageFetch = shouldUseNativeImageFetch(src);
-  const [tauriObjectUrl, setTauriObjectUrl] = useState<{ src: string; url: string } | null>(null);
+  const [tauriObjectUrl, setTauriObjectUrl] = useState<{ src: string; url: string } | null>(() => {
+    const url = nativeObjectUrlCache.get(src);
+    return url ? { src, url } : null;
+  });
   const effectiveSrc = needsNativeImageFetch
     ? tauriObjectUrl?.src === src ? tauriObjectUrl.url : null
     : src;
   const [visible, setVisible] = useState(loading === 'eager' || preload);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => loadedSrcCache.has(src));
   const [failed, setFailed] = useState(false);
 
   // Keep the latest onPermanentError in a ref so callbacks always call the
@@ -102,13 +160,9 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   useEffect(() => {
     if (!needsNativeImageFetch) return;
     let cancelled = false;
-    let objectUrl: string | null = null;
-
     fetchNativeImageObjectUrl(src)
       .then((url) => {
-        objectUrl = url;
         if (cancelled) {
-          URL.revokeObjectURL(url);
           return;
         }
         setTauriObjectUrl({ src, url });
@@ -122,7 +176,6 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [needsNativeImageFetch, src]);
 
@@ -137,7 +190,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     setPrevSrc(effectiveSrc);
     setPrevLoading(loading);
     setPrevPreload(preload);
-    setLoaded(false);
+    setLoaded(loadedSrcCache.has(src));
     setFailed(false);
     if (loading !== 'eager' && !preload) setVisible(false);
   }
@@ -153,8 +206,10 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const handleLoad = useCallback(() => {
     loadedRef.current = true;
     retryCountRef.current = 0;
+    loadedSrcCache.add(src);
+    if (effectiveSrc) loadedSrcCache.add(effectiveSrc);
     setLoaded(true);
-  }, []);
+  }, [effectiveSrc, src]);
 
   // Retry on error (up to 3 times with exponential backoff).
   // Fast consecutive errors (< 2s apart) indicate a permanent failure (404/gone)
