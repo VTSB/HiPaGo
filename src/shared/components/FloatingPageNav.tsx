@@ -59,6 +59,7 @@ interface FloatingPageNavProps {
 
 const IDLE_FADE_MS = 2000;
 const BOUNCE_MS = 240;
+const SCROLL_SUPPRESS_MS = 1000;
 const SWIPE_MAX_MS = 400;
 const SWIPE_MIN_DX = 50;
 const SWIPE_MAX_DY = 30;
@@ -103,7 +104,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
   const totalPages = Math.ceil(totalItems / pageSize);
   const loadedPages = Math.ceil(loadedItems / pageSize);
 
-  // Suppress scroll-based page tracking briefly after a button click so the
+  // Suppress scroll-based page tracking after a button click so the
   // immediate page update isn't overwritten by scroll animation events.
   const suppressScrollRef = useRef(false);
   const suppressTimerRef = useRef(0);
@@ -112,7 +113,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     suppressScrollRef.current = true;
     suppressTimerRef.current = window.setTimeout(() => {
       suppressScrollRef.current = false;
-    }, 400);
+    }, SCROLL_SUPPRESS_MS);
   }, []);
 
   // Suppress scroll tracking when grid columns change to prevent page jumps.
@@ -160,6 +161,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
   // Custom smooth scroll: fast start → decelerate (ease-out).
   const scrollAnimRef = useRef(0);
   const scrollToPage = useCallback((page: number) => {
+    suppressScrollTracking();
     const targetIndex = (page - 1) * pageSize;
     const el = document.querySelector(`[data-item-index="${targetIndex}"]`);
     if (!el) return;
@@ -184,7 +186,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
       }
     };
     scrollAnimRef.current = requestAnimationFrame(animate);
-  }, [pageSize]);
+  }, [pageSize, suppressScrollTracking]);
 
   // Idle-fade timer. Resets on any scroll or pill interaction; sets `idle=true`
   // after IDLE_FADE_MS of silence. Mobile-only via CSS (sm:opacity-100 overrides).
@@ -283,6 +285,8 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     if (isNaN(num) || num < 1) return;
     const target = Math.max(1, Math.min(num, totalPages));
     if (target === viewingPage) return;
+    setViewingPage(target);
+    suppressScrollTracking();
     const targetIndex = (target - 1) * pageSize;
     const el = document.querySelector(`[data-item-index="${targetIndex}"]`);
     if (el) {
@@ -292,7 +296,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     } else {
       onJumpToPage?.(target);
     }
-  }, [editValue, totalPages, viewingPage, pageSize, scrollToPage, goNext, onJumpToPage]);
+  }, [editValue, totalPages, viewingPage, pageSize, scrollToPage, goNext, onJumpToPage, setViewingPage, suppressScrollTracking]);
 
   // Focus the inline desktop input when entering edit mode.
   useEffect(() => {
@@ -360,7 +364,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
         onTouchEnd={onTouchEnd}
         onPointerDown={resetIdle}
         className={[
-          'fixed bottom-4 z-40 flex items-center gap-1 rounded-full bg-zinc-900/80 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm dark:bg-zinc-100/80 dark:text-zinc-900',
+          'fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1 rounded-full bg-zinc-900/90 px-2.5 py-1.5 text-base text-white shadow-xl backdrop-blur-sm sm:bottom-4 sm:px-2 sm:py-1 sm:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
           // D1: mobile center, desktop bottom-right.
           'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
           // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
@@ -380,7 +384,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           // bottom for the actual ~52px pill (math: 110% × 52 = 57.2 px, need ≥ 52 +
           // 16 = 68 px). Opacity-0 added back as a second cue for the restore direction.
           // sm: reverts preserve byte-identical desktop.
-          hiddenByScroll ? 'translate-y-[calc(100%_+_1rem)] opacity-0 sm:translate-y-0 sm:opacity-100' : '',
+          hiddenByScroll ? 'translate-y-[calc(100%_+_1rem_+_env(safe-area-inset-bottom))] opacity-0 sm:translate-y-0 sm:opacity-100' : '',
           // D8: idle fade (mobile only).
           idle && !hiddenByScroll ? 'opacity-40 sm:opacity-100' : '',
           // D6: bounce pulse at boundaries.
@@ -414,7 +418,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
         <button
           onClick={goPrevWithBounce}
           disabled={atFirst}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+          className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-30 sm:min-h-11 sm:min-w-11 sm:hover:bg-white/20 dark:active:bg-black/20 sm:dark:hover:bg-black/20"
           aria-label={t('pageNav.prev')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
@@ -452,7 +456,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
                 startEditing();
               }
             }}
-            className="inline-flex min-h-11 min-w-[5rem] cursor-text items-center justify-center rounded-full px-2 tabular-nums hover:bg-white/10 dark:hover:bg-black/10"
+            className="inline-flex min-h-12 min-w-[6rem] cursor-text items-center justify-center rounded-full px-3 tabular-nums active:bg-white/10 sm:min-h-11 sm:min-w-[5rem] sm:px-2 sm:hover:bg-white/10 dark:active:bg-black/10 sm:dark:hover:bg-black/10"
             aria-label={t('pageNav.jumpToPage')}
           >
             {viewingPage} / {totalPages.toLocaleString()}
@@ -463,7 +467,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
         <button
           onClick={goNextWithBounce}
           disabled={atLast}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+          className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-30 sm:min-h-11 sm:min-w-11 sm:hover:bg-white/20 dark:active:bg-black/20 sm:dark:hover:bg-black/20"
           aria-label={t('pageNav.next')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
@@ -481,6 +485,8 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             resetIdle();
             const clamped = Math.max(1, Math.min(target, totalPages));
             if (clamped === viewingPage) return;
+            setViewingPage(clamped);
+            suppressScrollTracking();
             const targetIndex = (clamped - 1) * pageSize;
             const el = document.querySelector(`[data-item-index="${targetIndex}"]`);
             if (el) {

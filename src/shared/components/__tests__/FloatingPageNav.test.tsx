@@ -183,7 +183,7 @@ describe('FloatingPageNav — immediate page update', () => {
     document.body.removeChild(div);
   });
 
-  it('scroll tracking resumes after 400ms suppression window', () => {
+  it('scroll tracking resumes after the suppression window', () => {
     const div = document.createElement('div');
     div.setAttribute('data-item-index', '0');
     div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
@@ -197,7 +197,7 @@ describe('FloatingPageNav — immediate page update', () => {
 
     // Advance past suppression window
     act(() => {
-      vi.advanceTimersByTime(450);
+      vi.advanceTimersByTime(1050);
     });
 
     // Scroll after suppression ends should call onViewingPageChange
@@ -304,9 +304,9 @@ describe('FloatingPageNav — grid column change suppression', () => {
       />,
     );
 
-    // Advance past 400ms suppression window
+    // Advance past suppression window
     act(() => {
-      vi.advanceTimersByTime(450);
+      vi.advanceTimersByTime(1050);
     });
 
     // Now scroll should be tracked again

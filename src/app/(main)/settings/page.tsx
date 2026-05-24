@@ -72,13 +72,13 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
         onChange={(e) => setInput(e.target.value)}
         onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
         placeholder={t('settings.blurTags.placeholder')}
-        className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+        className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
       />
       {showDropdown && suggestions.length > 0 && (
         <div ref={dropdownRef} className="absolute top-full z-50 mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 max-h-60 overflow-y-auto">
           {suggestions.map((s, i) => (
             <button key={`${s.tagType}-${s.tag}-${i}`} type="button" onClick={() => handleSelect(s)}
-              className="w-full flex items-center justify-between px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-700">
+              className="flex min-h-12 w-full items-center justify-between px-4 py-2 text-left text-base active:bg-zinc-100 sm:min-h-0 sm:px-3 sm:text-sm sm:hover:bg-zinc-100 dark:active:bg-zinc-700 sm:dark:hover:bg-zinc-700">
               <TagChip tag={s.tag} type={s.tagType} displayName={locale === 'ko' && s.localName ? s.localName : undefined} linked={false} size="sm" />
               <span className="text-xs text-zinc-500 ml-auto">{s.amount.toLocaleString()}</span>
             </button>
@@ -104,24 +104,24 @@ export default function SettingsPage() {
   const t = useT();
 
   const segmentClass = (active: boolean) =>
-    `flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors sm:flex-initial ${
+    `flex min-h-11 flex-1 items-center justify-center rounded-xl px-4 py-2 text-base font-semibold transition-colors sm:min-h-0 sm:flex-initial sm:rounded-md sm:px-3 sm:py-1.5 sm:text-sm sm:font-medium ${
       active
         ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
         : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'
     }`;
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="mb-8 text-2xl font-bold text-zinc-900 dark:text-zinc-100">{t('settings.title')}</h1>
+    <div className="-mx-4 sm:mx-auto sm:max-w-2xl">
+      <h1 className="mb-4 px-4 text-[2rem] font-bold leading-tight text-zinc-900 sm:mb-8 sm:px-0 sm:text-2xl dark:text-zinc-100">{t('settings.title')}</h1>
 
-      <div className="divide-y divide-zinc-200 rounded-xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="divide-y divide-zinc-200 border-y border-zinc-200 bg-white sm:rounded-xl sm:border dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
         {/* System Language */}
-        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.locale')}</p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.locale.desc')}</p>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('settings.locale')}</p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('settings.locale.desc')}</p>
           </div>
-          <div className="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 sm:w-auto dark:bg-zinc-800">
+          <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
             <button onClick={() => setLocale('en')} className={segmentClass(locale === 'en')}>
               {t('settings.locale.en')}
             </button>
@@ -132,10 +132,10 @@ export default function SettingsPage() {
         </div>
 
         {/* Language Filter */}
-        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.langFilter')}</p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.langFilter.desc')}</p>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('settings.langFilter')}</p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('settings.langFilter.desc')}</p>
           </div>
           <Select
             value={language}
@@ -152,12 +152,12 @@ export default function SettingsPage() {
         </div>
 
         {/* Reader Mode */}
-        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.reader')}</p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.reader.desc')}</p>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('settings.reader')}</p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('settings.reader.desc')}</p>
           </div>
-          <div className="flex w-full gap-1 rounded-lg bg-zinc-100 p-1 sm:w-auto dark:bg-zinc-800">
+          <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
             <button onClick={() => setReaderMode('page')} className={segmentClass(readerMode === 'page')}>
               {t('settings.reader.page')}
             </button>
@@ -168,10 +168,10 @@ export default function SettingsPage() {
         </div>
 
         {/* Image Format */}
-        <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.imageFormat')}</p>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('settings.imageFormat.desc')}</p>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('settings.imageFormat')}</p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('settings.imageFormat.desc')}</p>
           </div>
           <Select
             value={imageFormat}
@@ -189,22 +189,22 @@ export default function SettingsPage() {
       </div>
 
       {/* Blur Tags — separate section */}
-      <div className="mt-6 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="px-5 py-4">
-          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('settings.blurTags')}</p>
-          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">{t('settings.blurTags.desc')}</p>
+      <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="px-4 py-5 sm:px-5 sm:py-4">
+          <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('settings.blurTags')}</p>
+          <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:mb-3 sm:text-xs dark:text-zinc-400">{t('settings.blurTags.desc')}</p>
           <BlurTagInput onAdd={addBlurTag} />
           {blurTags.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-1.5">
+            <div className="mt-4 flex flex-wrap gap-2 sm:mt-3 sm:gap-1.5">
               {blurTags.map((tag) => (
-                <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                <span key={tag} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-600 sm:min-h-0 sm:px-2.5 sm:py-0.5 sm:text-xs dark:bg-zinc-800 dark:text-zinc-400">
                   {tag}
                   <button onClick={() => removeBlurTag(tag)} className="text-zinc-400 hover:text-red-500">&times;</button>
                 </span>
               ))}
             </div>
           ) : (
-            <p className="mt-3 text-xs text-zinc-400">{t('settings.blurTags.empty')}</p>
+            <p className="mt-4 text-sm text-zinc-400 sm:mt-3 sm:text-xs">{t('settings.blurTags.empty')}</p>
           )}
         </div>
       </div>
@@ -215,11 +215,11 @@ export default function SettingsPage() {
       {/* Open-source licenses — link to /licenses */}
       <Link
         href="/licenses"
-        className="mt-6 flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-5 py-4 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800/60"
+        className="mt-5 flex min-h-20 items-center justify-between border-y border-zinc-200 bg-white px-4 py-5 transition-colors active:bg-zinc-50 sm:mt-6 sm:min-h-0 sm:rounded-xl sm:border sm:px-5 sm:py-4 sm:hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:active:bg-zinc-800/60 sm:dark:hover:bg-zinc-800/60"
       >
         <div>
-          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('licenses.about')}</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('licenses.about.desc')}</p>
+          <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('licenses.about')}</p>
+          <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('licenses.about.desc')}</p>
         </div>
         <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">›</span>
       </Link>

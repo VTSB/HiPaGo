@@ -2,6 +2,7 @@
 
 import { useEffect, useCallback, useRef } from 'react';
 import { useReaderStore } from '@/features/reader/store/reader.store';
+import { galleryHref } from '@/lib/utils/routes';
 
 /**
  * Manages browser history entries for page-mode reader navigation.
@@ -65,7 +66,7 @@ export function useReaderHistory(galleryId: number) {
     if (count > 0) {
       window.history.go(-(count + 1));
     } else {
-      window.location.href = `/gallery/${galleryId}`;
+      window.location.href = galleryHref(galleryId);
     }
   }, [galleryId]);
 

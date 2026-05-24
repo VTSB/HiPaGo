@@ -19,6 +19,7 @@ import { getGgConfig } from '@/lib/api/client';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
+import { readerHref } from '@/lib/utils/routes';
 
 const INITIAL_THUMBNAILS = 20;
 const LOAD_MORE_COUNT = 20;
@@ -141,17 +142,17 @@ export function GalleryDetail({ id }: { id: number }) {
   const bigThumbnail = files.length > 0 ? getThumbnailUrl(files[0], 'big') : null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <button
         onClick={() => router.back()}
-        className="-mx-2 inline-flex min-h-11 items-center gap-1 px-2 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+        className="-mx-2 inline-flex min-h-12 items-center gap-1 rounded-xl px-2 text-base font-medium text-zinc-500 active:bg-zinc-100 sm:min-h-11 sm:text-sm sm:hover:text-zinc-700 dark:text-zinc-400 dark:active:bg-zinc-900 sm:dark:hover:text-zinc-200"
       >
         &larr; {t('detail.back')}
       </button>
-      <div className="grid gap-6 md:grid-cols-[300px_1fr]">
+      <div className="grid gap-5 md:grid-cols-[300px_1fr] md:gap-6">
         <Link
-          href={`/gallery/${id}/reader`}
-          className="group relative self-start overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+          href={readerHref(id)}
+          className="group relative self-start overflow-hidden rounded-2xl border border-zinc-200 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800"
         >
           {bigThumbnail ? (
             <AbortableImage
@@ -177,7 +178,7 @@ export function GalleryDetail({ id }: { id: number }) {
               toggleFav();
             }}
             disabled={favPending}
-            className={`absolute left-2 top-2 rounded-full bg-black/50 p-1.5 backdrop-blur-sm transition-colors disabled:opacity-50 ${isFav ? 'text-yellow-400' : 'text-white/70 hover:text-white'}`}
+              className={`absolute left-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-colors disabled:opacity-50 sm:h-auto sm:w-auto sm:p-1.5 ${isFav ? 'text-yellow-400' : 'text-white/70 sm:hover:text-white'}`}
             aria-label={isFav ? t('detail.removeFavorite') : t('detail.addFavorite')}
           >
             <svg
@@ -200,26 +201,26 @@ export function GalleryDetail({ id }: { id: number }) {
           <div className="min-w-0">
             <button
               onClick={handleShare}
-              className="mb-1 inline-flex items-center gap-1 text-sm tabular-nums text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              className="mb-1 inline-flex min-h-10 items-center gap-1 rounded-xl text-base tabular-nums text-zinc-400 transition-colors active:text-zinc-600 sm:min-h-0 sm:text-sm sm:hover:text-zinc-600 dark:text-zinc-500 dark:active:text-zinc-300 sm:dark:hover:text-zinc-300"
             >
               #{id}
             </button>
-            <h1 className="break-words text-3xl font-bold text-zinc-900 dark:text-zinc-100">
+            <h1 className="break-words text-[1.7rem] font-bold leading-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
               {displayBlock.title || `Gallery #${id}`}
             </h1>
           </div>
           {block?.type === GalleryBlockType.DETAILED && (
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            <p className="text-base leading-relaxed text-zinc-500 sm:text-sm dark:text-zinc-400">
               <Link
                 href={`/search?q=${encodeURIComponent(`type:${block.mediaType}`)}`}
-                className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300"
+                className="active:text-zinc-700 sm:hover:text-zinc-700 sm:hover:underline dark:active:text-zinc-300 sm:dark:hover:text-zinc-300"
               >
                 {localizedMediaType ?? block.mediaType}
               </Link>
               {' \u00b7 '}
               <Link
                 href={`/search?q=${encodeURIComponent(`language:${block.language}`)}`}
-                className="hover:text-zinc-700 hover:underline dark:hover:text-zinc-300"
+                className="active:text-zinc-700 sm:hover:text-zinc-700 sm:hover:underline dark:active:text-zinc-300 sm:dark:hover:text-zinc-300"
               >
                 {localizedLanguage ?? block.language}
               </Link>
@@ -230,8 +231,8 @@ export function GalleryDetail({ id }: { id: number }) {
           {tagEntries.length > 0 && (
             <div className="space-y-2">
               {tagEntries.map(([type, tags]) => (
-                <div key={type} className="flex items-baseline gap-2">
-                  <span className="w-20 shrink-0 text-[13px] font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+                <div key={type} className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
+                  <span className="shrink-0 text-sm font-semibold uppercase text-zinc-500 sm:w-20 sm:text-[13px] dark:text-zinc-400">
                     {type}
                   </span>
                   <div className="flex min-w-0 flex-wrap gap-1">
@@ -251,8 +252,8 @@ export function GalleryDetail({ id }: { id: number }) {
           )}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Link
-              href={`/gallery/${id}/reader`}
-              className="inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-zinc-900 px-10 py-3 text-base font-medium text-white hover:bg-zinc-800 sm:w-auto sm:py-2.5 sm:text-sm dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              href={readerHref(id)}
+              className="inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-2xl bg-zinc-900 px-10 py-3 text-base font-semibold text-white active:bg-zinc-800 sm:min-h-12 sm:w-auto sm:rounded-lg sm:py-2.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
             >
               {t('detail.read')}
             </Link>
@@ -260,7 +261,7 @@ export function GalleryDetail({ id }: { id: number }) {
               (dlProgress ? (
                 <button
                   onClick={handleCancelDownload}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-zinc-300 px-8 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 sm:w-auto dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
                 >
                   <Spinner size="sm" />
                   {dlProgress.current}/{dlProgress.total}
@@ -268,7 +269,7 @@ export function GalleryDetail({ id }: { id: number }) {
               ) : (
                 <button
                   onClick={handleDownload}
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-8 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 sm:w-auto dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -308,12 +309,12 @@ export function GalleryDetail({ id }: { id: number }) {
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
             {t('detail.content')} ({files.length})
           </h2>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 sm:gap-2 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
             {files.slice(0, renderedCount).map((file, idx) => (
               <Link
                 key={idx}
-                href={`/gallery/${id}/reader?page=${idx + 1}`}
-                className="group relative overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900"
+                href={readerHref(id, idx + 1)}
+                className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
               >
                 <div className="aspect-[3/4] overflow-hidden">
                   <AbortableImage

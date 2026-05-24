@@ -55,21 +55,21 @@ export function UpdateCheckCard() {
   };
 
   return (
-    <div className="mt-6 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="px-5 py-4">
-        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t('update.about')}</p>
-        <p className="mb-4 text-xs text-zinc-500 dark:text-zinc-400">{t('update.about.desc')}</p>
+    <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="px-4 py-5 sm:px-5 sm:py-4">
+        <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('update.about')}</p>
+        <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('update.about.desc')}</p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">{t('update.about.currentVersion')}</p>
-            <p className="font-mono text-sm font-medium text-zinc-900 dark:text-zinc-100">v{CURRENT_VERSION}</p>
+            <p className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">{t('update.about.currentVersion')}</p>
+            <p className="font-mono text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">v{CURRENT_VERSION}</p>
           </div>
           <button
             type="button"
             onClick={onCheck}
             disabled={status.kind === 'checking' || status.kind === 'installing'}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 sm:w-auto dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-zinc-900 px-4 py-2 text-base font-semibold text-white shadow-sm transition-colors active:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 sm:min-h-11 sm:w-auto sm:rounded-md sm:px-3 sm:py-1.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
           >
             {status.kind === 'checking' ? t('update.about.checking') : t('update.about.check')}
           </button>
@@ -77,7 +77,7 @@ export function UpdateCheckCard() {
 
         {/* Inline status row */}
         {status.kind === 'upToDate' && (
-          <div className="mt-4 flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <div className="mt-4 flex min-h-12 items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
@@ -86,16 +86,16 @@ export function UpdateCheckCard() {
         )}
 
         {status.kind === 'available' && (
-          <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 sm:rounded-md sm:px-3 sm:py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-blue-800 dark:text-blue-200">
+              <p className="text-base text-blue-800 sm:text-sm dark:text-blue-200">
                 <span className="font-mono font-medium">v{status.result.version}</span>{' '}
                 {t('update.about.newAvailable')}
               </p>
               <button
                 type="button"
                 onClick={onInstall}
-                className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+                className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm active:bg-blue-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-blue-700"
               >
                 {status.result.applyFn ? t('update.banner.install') : t('update.banner.viewOnGitHub')}
               </button>
@@ -109,8 +109,8 @@ export function UpdateCheckCard() {
         )}
 
         {status.kind === 'installing' && (
-          <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
-            <p className="text-sm text-blue-800 dark:text-blue-200">
+          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 sm:rounded-md sm:px-3 sm:py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
+            <p className="text-base text-blue-800 sm:text-sm dark:text-blue-200">
               {status.percent > 0
                 ? `${t('update.banner.downloading')} ${Math.round(status.percent)}%`
                 : t('update.banner.installing')}
@@ -125,7 +125,7 @@ export function UpdateCheckCard() {
         )}
 
         {status.kind === 'failed' && (
-          <div className="mt-4 flex items-center gap-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+          <div className="mt-4 flex min-h-12 items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-base text-red-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-red-950/40 dark:text-red-300">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>

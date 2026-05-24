@@ -14,6 +14,7 @@ import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchGalleryInfo } from '@/lib/api/gallery';
+import { galleryHref } from '@/lib/utils/routes';
 
 /** Check if a gallery block matches any blur tags. */
 function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
@@ -92,8 +93,8 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   }
 
   return (
-    <Link href={`/gallery/${block.id}`} className="group block" onPointerEnter={onPrefetch}>
-      <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-800 transition-shadow hover:shadow-lg">
+    <Link href={galleryHref(block.id)} className="group block touch-manipulation" onPointerEnter={onPrefetch}>
+      <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-800 sm:hover:shadow-lg">
         {block.thumbnail ? (
           <AbortableImage
             src={resolveThumbnailUrl(block.thumbnail)}
@@ -109,8 +110,8 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
           <div className="flex h-full items-center justify-center text-zinc-400">{t('detail.noImage')}</div>
         )}
         <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/95 via-black/70'} to-transparent pt-10`}>
-          <div className="px-2 pt-1.5 pb-2 backdrop-blur-sm">
-            <h3 className="line-clamp-2 text-sm font-semibold leading-tight text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)]">{block.title || `#${block.id}`}</h3>
+          <div className="px-3 pt-2 pb-3 backdrop-blur-sm sm:px-2 sm:pt-1.5 sm:pb-2">
+            <h3 className="line-clamp-2 text-base font-semibold leading-snug text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)] sm:text-sm sm:leading-tight">{block.title || `#${block.id}`}</h3>
             {displayTags.length > 0 && (
               // Mobile (<md): cap chips to 1 visible row to reclaim ~22px per
               // card. Desktop (≥md): keep the original 2-row affordance since

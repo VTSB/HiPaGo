@@ -69,8 +69,8 @@ function useActualGridColumns(): number {
       3: [2, 3, 3, 3],
       4: [2, 3, 4, 4],
       5: [2, 3, 4, 5],
-      6: [3, 4, 5, 6],
-      7: [3, 4, 6, 7],
+      6: [2, 4, 5, 6],
+      7: [2, 4, 6, 7],
     };
     const compute = () => {
       const w = window.innerWidth;
@@ -161,7 +161,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     // by react-hooks/refs; the state value is authoritative after first layout.
     const rowHeight = useMemo(() => {
       const width = containerWidth || (typeof window !== 'undefined' ? window.innerWidth - 32 : 400);
-      const gap = 12;
+      const gap = width < 640 ? 16 : 12;
       const cardWidth = (width - gap * (actualCols - 1)) / actualCols;
       return Math.ceil(cardWidth * (3 / 2)) + gap;
     }, [actualCols, containerWidth]);
@@ -345,7 +345,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
                   width: '100%',
                   height: `${rowHeight}px`,
                   transform: `translateY(${vRow.index * rowHeight}px)`,
-                  paddingBottom: '12px',
+                  paddingBottom: rowHeight > 0 && (containerWidth || 0) < 640 ? '16px' : '12px',
                   overflow: 'hidden',
                 }}
               >
@@ -353,7 +353,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
                   style={{
                     display: 'grid',
                     gridTemplateColumns: `repeat(${actualCols}, minmax(0, 1fr))`,
-                    gap: '12px',
+                    gap: (containerWidth || 0) < 640 ? '16px' : '12px',
                   }}
                 >
                   {Array.from({ length: actualCols }, (_, col) => {

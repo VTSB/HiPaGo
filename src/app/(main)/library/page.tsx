@@ -10,6 +10,7 @@ import { listDownloads, searchDownloads, deleteDownload } from '@/lib/db/downloa
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
+import { galleryHref } from '@/lib/utils/routes';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,9 +69,9 @@ function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
   const t = useT();
 
   return (
-    <div className="flex gap-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:rounded-lg dark:border-zinc-800 dark:bg-zinc-900">
       {/* Thumbnail */}
-      <div className="h-24 w-16 shrink-0 overflow-hidden rounded-md bg-zinc-100 dark:bg-zinc-800">
+      <div className="h-32 w-[5.35rem] shrink-0 overflow-hidden rounded-xl bg-zinc-100 sm:h-24 sm:w-16 sm:rounded-md dark:bg-zinc-800">
         {item.thumbnail ? (
           <AbortableImage
             src={resolveThumbnailUrl(item.thumbnail)}
@@ -86,10 +87,10 @@ function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col justify-between gap-1">
         <div>
-          <h3 className="line-clamp-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          <h3 className="line-clamp-2 text-base font-semibold leading-snug text-zinc-900 sm:text-sm dark:text-zinc-100">
             {item.title || `#${item.galleryId}`}
           </h3>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-zinc-500 sm:mt-1 sm:text-xs dark:text-zinc-400">
             <span>{item.pageCount} {t('library.pages')}</span>
             <span>{formatBytes(item.totalBytes)}</span>
             <span>{formatDate(item.downloadedAt)}</span>
@@ -100,22 +101,22 @@ function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
         {/* Actions */}
         <div className="flex flex-wrap gap-2">
           <Link
-            href={`/gallery/${item.galleryId}`}
-            className="inline-flex items-center rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            href={galleryHref(item.galleryId)}
+            className="inline-flex min-h-10 items-center rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white active:bg-zinc-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-300 sm:dark:hover:bg-zinc-300"
           >
             {t('library.open')}
           </Link>
           <button
             type="button"
             onClick={() => onExport(item.galleryId, item.title)}
-            className="inline-flex items-center rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="inline-flex min-h-10 items-center rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 active:bg-zinc-50 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
           >
             {t('library.exportZip')}
           </button>
           <button
             type="button"
             onClick={() => onDelete(item.galleryId)}
-            className="inline-flex items-center rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+            className="inline-flex min-h-10 items-center rounded-xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 active:bg-red-50 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:active:bg-red-950 sm:dark:hover:bg-red-950"
           >
             {t('library.delete')}
           </button>
@@ -256,11 +257,11 @@ export default function LibraryPage() {
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-baseline gap-3">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+      <div className="mb-5 flex flex-wrap items-baseline gap-3">
+        <h1 className="text-[2rem] font-bold leading-tight text-zinc-900 sm:text-2xl dark:text-zinc-100">
           {t('library.title')}
           {!activeLoading && (
-            <span className="ml-2 text-lg font-normal text-zinc-500">
+            <span className="ml-2 text-xl font-normal text-zinc-500 sm:text-lg">
               ({totalCount.toLocaleString()})
             </span>
           )}
@@ -299,7 +300,7 @@ export default function LibraryPage() {
           )}
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4 sm:gap-3">
           {(activeItems ?? []).map((item) => (
             <LibraryCard
               key={item.galleryId}

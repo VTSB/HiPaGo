@@ -123,11 +123,11 @@ export function GalleryListView() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+      <div className="mb-5 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-[1.75rem] font-bold leading-tight text-zinc-900 dark:text-zinc-100 sm:text-2xl">
           {t(`sort.${sort}` as const)}
           {totalLength > 0 && (
-            <span className="ml-2 text-lg font-normal text-zinc-500">
+            <span className="ml-2 text-xl font-normal text-zinc-500 sm:text-lg">
               ({totalLength.toLocaleString()})
             </span>
           )}

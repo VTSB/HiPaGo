@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { isTauri } from '@/lib/utils/platform';
+import { isCapacitor, isTauri } from '@/lib/utils/platform';
 
 interface AbortableImageProps {
   src: string;
@@ -22,8 +22,8 @@ interface AbortableImageProps {
 
 const CDN_HOST_SUFFIX = '.gold-usergeneratedcontent.net';
 
-function shouldUseTauriImageFetch(src: string): boolean {
-  if (!isTauri()) return false;
+function shouldUseNativeImageFetch(src: string): boolean {
+  if (!isTauri() && !isCapacitor()) return false;
   try {
     const url = new URL(src);
     return url.protocol === 'https:' && url.hostname.endsWith(CDN_HOST_SUFFIX);
@@ -32,22 +32,38 @@ function shouldUseTauriImageFetch(src: string): boolean {
   }
 }
 
-async function fetchTauriImageObjectUrl(src: string): Promise<string> {
-  const { invoke } = await import('@tauri-apps/api/core');
-  const resp = (await invoke('bypass_fetch', {
-    url: src,
-    headers: {
-      Referer: 'https://hitomi.la/',
-      Origin: 'https://hitomi.la',
-      Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
-    },
-  })) as { status: number; headers: Record<string, string>; body: string };
+function getImageHeaders(): Record<string, string> {
+  return {
+    Referer: 'https://hitomi.la/',
+    Origin: 'https://hitomi.la',
+    Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
+  };
+}
+
+async function fetchNativeImageObjectUrl(src: string): Promise<string> {
+  let resp: { status: number; headers: Record<string, string>; body: string | number[] };
+
+  if (isCapacitor()) {
+    const { Bypass } = await import('@/lib/plugins/bypass');
+    resp = await Bypass.fetch({
+      url: src,
+      headers: getImageHeaders(),
+    });
+  } else {
+    const { invoke } = await import('@tauri-apps/api/core');
+    resp = (await invoke('bypass_fetch', {
+      url: src,
+      headers: getImageHeaders(),
+    })) as { status: number; headers: Record<string, string>; body: string };
+  }
 
   if (resp.status < 200 || resp.status >= 300) {
     throw new Error(`Image fetch failed with HTTP ${resp.status}`);
   }
 
-  const bytes = Uint8Array.from(atob(resp.body), (c) => c.charCodeAt(0));
+  const bytes = Array.isArray(resp.body)
+    ? Uint8Array.from(resp.body)
+    : Uint8Array.from(atob(resp.body), (c) => c.charCodeAt(0));
   const contentType = Object.entries(resp.headers).find(([key]) => key.toLowerCase() === 'content-type')?.[1] || 'application/octet-stream';
   return URL.createObjectURL(new Blob([bytes], { type: contentType }));
 }
@@ -67,9 +83,9 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const mountedRef = useRef(true);
   const loadedRef = useRef(false);
   const retryCountRef = useRef(0);
-  const needsTauriImageFetch = shouldUseTauriImageFetch(src);
+  const needsNativeImageFetch = shouldUseNativeImageFetch(src);
   const [tauriObjectUrl, setTauriObjectUrl] = useState<{ src: string; url: string } | null>(null);
-  const effectiveSrc = needsTauriImageFetch
+  const effectiveSrc = needsNativeImageFetch
     ? tauriObjectUrl?.src === src ? tauriObjectUrl.url : null
     : src;
   const [visible, setVisible] = useState(loading === 'eager' || preload);
@@ -84,11 +100,11 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   });
 
   useEffect(() => {
-    if (!needsTauriImageFetch) return;
+    if (!needsNativeImageFetch) return;
     let cancelled = false;
     let objectUrl: string | null = null;
 
-    fetchTauriImageObjectUrl(src)
+    fetchNativeImageObjectUrl(src)
       .then((url) => {
         objectUrl = url;
         if (cancelled) {
@@ -108,7 +124,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [needsTauriImageFetch, src]);
+  }, [needsNativeImageFetch, src]);
 
   // Reset state when src/loading/preload changes using render-phase setState
   // (the React-documented derived-state pattern — react-hooks/set-state-in-effect safe).

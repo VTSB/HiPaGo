@@ -11,8 +11,8 @@ const backup = join(root, '.build-backup');
 
 const HIDE_DIRS = [
   'src/app/api',
-  'src/app/(main)/gallery',
-  'src/app/(reader)/gallery',
+  'src/app/(main)/gallery/[id]',
+  'src/app/(reader)/gallery/[id]',
 ];
 
 function hide() {
@@ -57,6 +57,11 @@ try {
     mkdirSync(fallbackDir, { recursive: true });
     cpSync(indexHtml, join(fallbackDir, 'index.html'));
     console.log('Created SPA fallback: out/gallery/index.html');
+
+    const readerFallbackDir = join(root, 'out/reader');
+    mkdirSync(readerFallbackDir, { recursive: true });
+    cpSync(indexHtml, join(readerFallbackDir, 'index.html'));
+    console.log('Created SPA fallback: out/reader/index.html');
   }
 } finally {
   restore();

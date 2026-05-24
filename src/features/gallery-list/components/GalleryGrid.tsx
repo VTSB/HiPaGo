@@ -5,18 +5,18 @@ import { GalleryCard, GalleryCardById } from './GalleryCard';
 import { useSettingsStore } from '@/lib/store/settings';
 import { PAGE_SIZE } from '@/lib/utils/constants';
 
-const GRID_AUTO = 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5';
+const GRID_AUTO = 'grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5';
 
 function useGridClass() {
   const cols = useSettingsStore((s) => s.gridColumns);
   if (!cols || cols === 0) return GRID_AUTO;
   const colMap: Record<number, string> = {
-    2: 'grid grid-cols-2 gap-3',
-    3: 'grid grid-cols-2 gap-3 sm:grid-cols-3',
-    4: 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4',
-    5: 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
-    6: 'grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6',
-    7: 'grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7',
+    2: 'grid grid-cols-2 gap-4 sm:gap-3',
+    3: 'grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3',
+    4: 'grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4',
+    5: 'grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5',
+    6: 'grid grid-cols-2 gap-4 sm:grid-cols-4 sm:gap-3 md:grid-cols-5 lg:grid-cols-6',
+    7: 'grid grid-cols-2 gap-4 sm:grid-cols-4 sm:gap-3 md:grid-cols-6 lg:grid-cols-7',
   };
   return colMap[cols] ?? GRID_AUTO;
 }

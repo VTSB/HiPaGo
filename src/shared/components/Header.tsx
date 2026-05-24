@@ -92,15 +92,15 @@ export function Header() {
 
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/80 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80">
-        <div className="mx-auto flex min-h-14 max-w-7xl items-center gap-3 px-4 py-2 md:gap-4">
+      <header className="sticky top-0 z-50 border-b border-zinc-200 bg-white/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/90">
+        <div className="mx-auto flex min-h-16 max-w-7xl items-center gap-3 px-4 py-2 md:min-h-14 md:gap-4">
           {/* Hamburger — mobile only, left-most. Same side the drawer slides in from. */}
           <button
             type="button"
             aria-label={menuOpen ? t('mobile.menu.close') : t('mobile.menu.open')}
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((p) => !p)}
-            className="md:hidden relative flex h-11 w-11 flex-shrink-0 flex-col items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="relative flex h-12 w-12 flex-shrink-0 flex-col items-center justify-center rounded-xl text-zinc-600 active:bg-zinc-100 md:hidden dark:text-zinc-400 dark:active:bg-zinc-800"
           >
             <span
               aria-hidden="true"
@@ -116,7 +116,7 @@ export function Header() {
             />
           </button>
 
-          <Link href="/" className="text-lg font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          <Link href="/" className="text-xl font-bold tracking-tight text-zinc-900 md:text-lg dark:text-zinc-100">
             HiPaGo
           </Link>
           <div className="flex flex-1 items-center gap-2">
@@ -160,7 +160,7 @@ export function Header() {
                 type="button"
                 aria-label={t('mobile.menu.close')}
                 onClick={closeMenu}
-                className="flex h-11 w-11 items-center justify-center rounded-md text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="flex h-12 w-12 items-center justify-center rounded-xl text-zinc-600 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-800"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -173,7 +173,7 @@ export function Header() {
                   key={n.href}
                   href={n.href}
                   onClick={closeMenu}
-                  className={`flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                className={`flex min-h-14 items-center gap-3 rounded-xl px-3 py-2 text-base font-medium transition-colors ${
                     isActive(n.href)
                       ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
                       : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'

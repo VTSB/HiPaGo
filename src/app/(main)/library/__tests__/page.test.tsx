@@ -148,7 +148,7 @@ describe('LibraryPage', () => {
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const openLink = screen.getByRole('link', { name: 'library.open' });
-    expect(openLink.getAttribute('href')).toBe('/gallery/1001');
+    expect(openLink.getAttribute('href')).toBe('/gallery?id=1001');
   });
 
   it('renders page count and formatted size metadata', async () => {
