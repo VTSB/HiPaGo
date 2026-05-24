@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DbInitializer } from '@/shared/components/DbInitializer';
 import { initLocaleOnce, useSettingsStore } from '@/lib/store/settings';
+import { AndroidBackButtonProvider } from '@/shared/providers/AndroidBackButtonProvider';
 
 const LOCALE_TO_LANG: Record<string, string> = { en: 'en', ko: 'ko' };
 
@@ -39,8 +40,10 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <DbInitializer />
-      {children}
+      <AndroidBackButtonProvider>
+        <DbInitializer />
+        {children}
+      </AndroidBackButtonProvider>
     </QueryClientProvider>
   );
 }
