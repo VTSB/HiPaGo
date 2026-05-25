@@ -14,14 +14,23 @@ const translations = {
   'search.results': { en: 'results', ko: '개' },
   'search.searching': { en: 'Searching...', ko: '검색 중...' },
   'search.noResults': { en: 'No results', ko: '결과 없음' },
-  'search.langFallback': { en: 'No results in selected language. Showing all languages.', ko: '선택한 언어의 결과가 없어 전체 언어로 표시합니다.' },
+  'search.langFallback': {
+    en: 'No results in selected language. Showing all languages.',
+    ko: '선택한 언어의 결과가 없어 전체 언어로 표시합니다.',
+  },
   'search.otherResults': { en: 'Other results', ko: '다른 결과' },
   'search.recentSearches': { en: 'Recent Searches', ko: '최근 검색' },
   'search.clearHistory': { en: 'Clear all', ko: '전체 삭제' },
-  'search.sortUnavailable': { en: 'Sorting is only available for single-tag searches', ko: '정렬은 단일 태그 검색에서만 사용 가능합니다' },
+  'search.sortUnavailable': {
+    en: 'Sorting is only available for single-tag searches',
+    ko: '정렬은 단일 태그 검색에서만 사용 가능합니다',
+  },
   'search.tagSuggestions': { en: 'Tag Suggestions', ko: '태그 제안' },
   'search.popularTags': { en: 'Popular Tags', ko: '인기 태그' },
-  'search.koreanNeedsDb': { en: 'Korean search needs the local tag DB', ko: '한국어 검색은 로컬 태그 DB가 필요합니다' },
+  'search.koreanNeedsDb': {
+    en: 'Korean search needs the local tag DB',
+    ko: '한국어 검색은 로컬 태그 DB가 필요합니다',
+  },
 
   // Tag DB sync status
   'sync.syncing': { en: 'Syncing tag DB', ko: '태그 DB 동기화 중' },
@@ -37,7 +46,10 @@ const translations = {
   'detail.related': { en: 'Related', ko: '관련 작품' },
   'detail.noImage': { en: 'No image', ko: '이미지 없음' },
   'detail.loadFailed': { en: 'Failed to load gallery', ko: '갤러리 로딩 실패' },
-  'detail.unavailable': { en: 'This gallery has been removed or is temporarily unavailable.', ko: '이 갤러리는 삭제되었거나 일시적으로 이용할 수 없습니다.' },
+  'detail.unavailable': {
+    en: 'This gallery has been removed or is temporarily unavailable.',
+    ko: '이 갤러리는 삭제되었거나 일시적으로 이용할 수 없습니다.',
+  },
   'detail.invalidId': { en: 'Invalid gallery ID', ko: '잘못된 갤러리 ID' },
   'detail.download': { en: 'Download', ko: '다운로드' },
   'detail.copyId': { en: 'Copy ID', ko: 'ID 복사' },
@@ -48,7 +60,10 @@ const translations = {
 
   // Favorites / History
   'favorites.title': { en: 'Favorites', ko: '즐겨찾기' },
-  'favorites.empty': { en: 'No favorites yet. Browse galleries and add some!', ko: '즐겨찾기가 없습니다. 갤러리를 둘러보고 추가해보세요!' },
+  'favorites.empty': {
+    en: 'No favorites yet. Browse galleries and add some!',
+    ko: '즐겨찾기가 없습니다. 갤러리를 둘러보고 추가해보세요!',
+  },
   'history.title': { en: 'History', ko: '기록' },
   'history.empty': { en: 'No recently viewed galleries.', ko: '최근 본 갤러리가 없습니다.' },
   'history.today': { en: 'Today', ko: '오늘' },
@@ -92,7 +107,10 @@ const translations = {
   // Settings
   'settings.title': { en: 'Settings', ko: '설정' },
   'settings.locale': { en: 'System Language', ko: '시스템 언어' },
-  'settings.locale.desc': { en: 'Change UI and tag display language', ko: 'UI 및 태그 표시 언어 변경' },
+  'settings.locale.desc': {
+    en: 'Change UI and tag display language',
+    ko: 'UI 및 태그 표시 언어 변경',
+  },
   'settings.locale.en': { en: 'English', ko: 'English' },
   'settings.locale.ko': { en: '한국어', ko: '한국어' },
   'settings.langFilter': { en: 'Language Filter', ko: '언어 필터' },
@@ -113,7 +131,10 @@ const translations = {
   'settings.imageFormat': { en: 'Image Format', ko: '이미지 형식' },
   'settings.imageFormat.desc': { en: 'Preferred image format for loading', ko: '이미지 로딩 형식' },
   'settings.blurTags': { en: 'Blur Tags', ko: '블러 태그' },
-  'settings.blurTags.desc': { en: 'Galleries with these tags will be blurred', ko: '해당 태그가 포함된 작품은 블러 처리됩니다' },
+  'settings.blurTags.desc': {
+    en: 'Galleries with these tags will be blurred',
+    ko: '해당 태그가 포함된 작품은 블러 처리됩니다',
+  },
   'settings.blurTags.placeholder': { en: 'Search tag to add...', ko: '추가할 태그 검색...' },
   'settings.blurTags.empty': { en: 'No blur tags set', ko: '설정된 블러 태그 없음' },
 
@@ -144,13 +165,19 @@ const translations = {
 
   // Open-source licenses page + settings link card
   'licenses.title': { en: 'Open-source licenses', ko: '오픈소스 라이선스' },
-  'licenses.search.placeholder': { en: 'Filter by name or license…', ko: '이름이나 라이선스로 필터…' },
+  'licenses.search.placeholder': {
+    en: 'Filter by name or license…',
+    ko: '이름이나 라이선스로 필터…',
+  },
   'licenses.empty': { en: 'No matches', ko: '일치하는 항목 없음' },
   'licenses.npm.heading': { en: 'JavaScript / npm', ko: 'JavaScript / npm' },
   'licenses.cargo.heading': { en: 'Rust / cargo', ko: 'Rust / cargo' },
   'licenses.viewRepo': { en: 'Repository', ko: '저장소' },
   'licenses.about': { en: 'Open-source licenses', ko: '오픈소스 라이선스' },
-  'licenses.about.desc': { en: 'See every bundled dependency and its license', ko: '번들된 모든 라이브러리와 라이선스 보기' },
+  'licenses.about.desc': {
+    en: 'See every bundled dependency and its license',
+    ko: '번들된 모든 라이브러리와 라이선스 보기',
+  },
 
   // Update banner (top of layout, on-mount check)
   'update.banner.title': { en: 'New version available', ko: '새 버전 사용 가능' },
@@ -159,23 +186,44 @@ const translations = {
   'update.banner.later': { en: 'Later', ko: '나중에' },
   'update.banner.installing': { en: 'Installing…', ko: '설치 중…' },
   'update.banner.downloading': { en: 'Downloading', ko: '다운로드 중' },
+  'update.banner.permissionRequired': {
+    en: 'Allow installs in Settings, then tap Install again.',
+    ko: '설정에서 설치 권한을 허용한 뒤 다시 설치를 눌러주세요.',
+  },
+  'update.banner.installerStarted': {
+    en: 'Installer opened. If you cancelled it, tap Install again.',
+    ko: '설치 화면을 열었습니다. 취소했다면 다시 설치를 눌러주세요.',
+  },
+  'update.banner.installFailed': {
+    en: "Couldn't start the update. Please try again.",
+    ko: '업데이트를 시작하지 못했습니다. 다시 시도해주세요.',
+  },
 
   // Settings → About / Update
   'update.about': { en: 'Updates', ko: '업데이트' },
-  'update.about.desc': { en: 'Current version and manual update check', ko: '현재 버전 및 수동 업데이트 확인' },
+  'update.about.desc': {
+    en: 'Current version and manual update check',
+    ko: '현재 버전 및 수동 업데이트 확인',
+  },
   'update.about.currentVersion': { en: 'Current version', ko: '현재 버전' },
   'update.about.check': { en: 'Check for updates', ko: '업데이트 확인' },
   'update.about.checking': { en: 'Checking…', ko: '확인 중…' },
   'update.about.upToDate': { en: "You're on the latest version", ko: '최신 버전입니다' },
   'update.about.newAvailable': { en: 'available', ko: '버전이 출시되었습니다' },
-  'update.about.checkFailed': { en: "Couldn't check for updates", ko: '업데이트를 확인하지 못했습니다' },
+  'update.about.checkFailed': {
+    en: "Couldn't check for updates",
+    ko: '업데이트를 확인하지 못했습니다',
+  },
 
   // Error pages
   'error.title': { en: 'Something went wrong', ko: '문제가 발생했습니다' },
   'error.tryAgain': { en: 'Try again', ko: '다시 시도' },
   'error.galleryFailed': { en: 'Failed to load gallery', ko: '갤러리 로딩 실패' },
   'error.backHome': { en: 'Back to home', ko: '홈으로' },
-  'error.unexpected': { en: 'An unexpected error occurred. Please try again.', ko: '예기치 않은 오류가 발생했습니다. 다시 시도해주세요.' },
+  'error.unexpected': {
+    en: 'An unexpected error occurred. Please try again.',
+    ko: '예기치 않은 오류가 발생했습니다. 다시 시도해주세요.',
+  },
 } as const;
 
 export type TranslationKey = keyof typeof translations;

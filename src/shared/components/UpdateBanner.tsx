@@ -19,6 +19,15 @@ import { UpdateService, type CheckResult } from '@/services/UpdateService';
 import { useT } from '@/lib/i18n/useT';
 
 const DISMISS_KEY = 'hipago-update-banner-dismissed-version';
+type ApplyNotice = 'permissionRequired' | 'installerStarted' | 'failed' | null;
+
+function firstMeaningfulLine(notes?: string): string | undefined {
+  const line = notes?.split('\n').find((entry) => {
+    const value = entry.trim().toLowerCase();
+    return value.length > 0 && value !== 'null';
+  });
+  return line?.trim();
+}
 
 export function UpdateBanner() {
   const t = useT();
@@ -26,6 +35,7 @@ export function UpdateBanner() {
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [notice, setNotice] = useState<ApplyNotice>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,15 +58,21 @@ export function UpdateBanner() {
     if (result.applyFn) {
       setInstalling(true);
       setProgress(0);
+      setNotice(null);
       try {
-        await result.applyFn((percent) => setProgress(percent));
+        const applyResult = await result.applyFn((percent) => setProgress(percent));
+        if (applyResult.status === 'permission_required') {
+          setNotice('permissionRequired');
+        } else if (applyResult.status === 'installer_started') {
+          setNotice('installerStarted');
+        }
       } catch (err) {
         console.warn('[UpdateBanner] apply failed', err);
+        setNotice('failed');
+      } finally {
         setInstalling(false);
         setProgress(null);
       }
-      // On Tauri/Android success the app is replaced/restarted by the OS;
-      // we don't clear installing because the page is about to go away.
     } else if (result.releaseUrl) {
       window.open(result.releaseUrl, '_blank', 'noopener,noreferrer');
     }
@@ -76,15 +92,23 @@ export function UpdateBanner() {
       ? t('update.banner.install')
       : t('update.banner.viewOnGitHub');
 
-  const noteLine = result.notes?.split('\n').find((line) => line.trim().length > 0)?.trim();
+  const noticeLine =
+    notice === 'permissionRequired'
+      ? t('update.banner.permissionRequired')
+      : notice === 'installerStarted'
+        ? t('update.banner.installerStarted')
+        : notice === 'failed'
+          ? t('update.banner.installFailed')
+          : undefined;
+  const noteLine = noticeLine ?? firstMeaningfulLine(result.notes);
 
   return (
     <div
       role="region"
       aria-label={t('update.banner.title')}
-      className="sticky top-0 z-[60] border-b border-zinc-800 bg-zinc-900/95 text-zinc-100 shadow-sm backdrop-blur-sm dark:border-zinc-200 dark:bg-zinc-100/95 dark:text-zinc-900"
+      className="sticky top-0 z-[60] border-b border-zinc-200 bg-white/95 text-zinc-900 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95 dark:text-zinc-100"
     >
-      <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-2.5">
+      <div className="mx-auto flex min-h-14 max-w-7xl items-center gap-3 px-4 py-2">
         {/* Download / update icon */}
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -94,7 +118,7 @@ export function UpdateBanner() {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="h-5 w-5 shrink-0 text-blue-400 dark:text-blue-600"
+          className="h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400"
           aria-hidden="true"
         >
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -103,12 +127,16 @@ export function UpdateBanner() {
         </svg>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
+          <p className="truncate text-sm font-semibold">
             {t('update.banner.title')}
-            {result.version ? <span className="ml-1.5 font-mono text-zinc-300 dark:text-zinc-600">v{result.version}</span> : null}
+            {result.version ? (
+              <span className="ml-1.5 font-mono text-zinc-500 dark:text-zinc-400">
+                v{result.version}
+              </span>
+            ) : null}
           </p>
           {noteLine && (
-            <p className="truncate text-xs text-zinc-400 dark:text-zinc-500">{noteLine}</p>
+            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{noteLine}</p>
           )}
         </div>
 
@@ -116,7 +144,7 @@ export function UpdateBanner() {
           type="button"
           onClick={onApply}
           disabled={installing}
-          className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 shadow-sm transition-colors hover:bg-white disabled:cursor-wait disabled:opacity-70 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-black"
+          className="min-h-10 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors active:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 md:min-h-0 md:rounded-md md:px-3 md:py-1.5 md:font-medium md:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 md:dark:hover:bg-zinc-200"
         >
           {primaryLabel}
         </button>
@@ -125,7 +153,7 @@ export function UpdateBanner() {
           type="button"
           onClick={onDismiss}
           disabled={installing}
-          className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-40 dark:border-zinc-300 dark:text-zinc-600 dark:hover:bg-zinc-200"
+          className="min-h-10 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors active:bg-zinc-100 disabled:opacity-40 md:min-h-0 md:rounded-md md:px-3 md:py-1.5 md:font-medium md:hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:active:bg-zinc-800 md:dark:hover:bg-zinc-800"
         >
           {t('update.banner.later')}
         </button>

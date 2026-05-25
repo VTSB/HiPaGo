@@ -10,8 +10,7 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 // ---------------------------------------------------------------------------
 
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { gridColumns: number }) => unknown) =>
-    sel({ gridColumns: 5 }),
+  useSettingsStore: (sel: (s: { gridColumns: number }) => unknown) => sel({ gridColumns: 5 }),
 }));
 
 vi.mock('../../hooks/useImagePreloader', () => ({
@@ -19,9 +18,7 @@ vi.mock('../../hooks/useImagePreloader', () => ({
 }));
 
 vi.mock('../GalleryCard', () => ({
-  GalleryCardById: ({ id }: { id: number }) => (
-    <div data-testid={`card-${id}`} data-card-id={id} />
-  ),
+  GalleryCardById: ({ id }: { id: number }) => <div data-testid={`card-${id}`} data-card-id={id} />,
 }));
 
 const mockScrollToIndex = vi.fn();
@@ -53,11 +50,14 @@ vi.mock('@tanstack/react-virtual', () => ({
   },
 }));
 
-vi.stubGlobal('ResizeObserver', class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-});
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -264,7 +264,9 @@ describe('VirtualGalleryGrid — sliding window', () => {
     vi.useFakeTimers();
   });
 
-  afterEach(() => { vi.useRealTimers(); });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('window is centered near viewingPage on initial render (sliding window)', () => {
     // viewingPage=150 → windowStartPage = max(1, 150-100) = 50
@@ -303,13 +305,19 @@ describe('VirtualGalleryGrid — resize anchoring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1500 });
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1500,
+    });
   });
   afterEach(() => vi.useRealTimers());
 
   function flushRaf() {
     // rAF is throttled via setTimeout in jsdom under fake timers
-    act(() => { vi.advanceTimersByTime(32); });
+    act(() => {
+      vi.advanceTimersByTime(32);
+    });
   }
 
   it('does NOT call scrollToIndex when resize stays inside the same column breakpoint', () => {
@@ -328,8 +336,14 @@ describe('VirtualGalleryGrid — resize anchoring', () => {
     // 1400px is still lg → cols stays 5 → no anchoring should happen.
     // This is the perf-critical case: dragging the window edge must not
     // trigger virtualizer.scrollToIndex (which forces synchronous layout).
-    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 1400 });
-    act(() => { window.dispatchEvent(new Event('resize')); });
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      writable: true,
+      value: 1400,
+    });
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
     flushRaf();
 
     expect(mockScrollToIndex).not.toHaveBeenCalled();
@@ -349,7 +363,9 @@ describe('VirtualGalleryGrid — resize anchoring', () => {
 
     // 700px is below md (768) → bp[1] = 3 cols → cols changes from 5 → 3 → anchor
     Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 700 });
-    act(() => { window.dispatchEvent(new Event('resize')); });
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
     flushRaf();
 
     expect(mockScrollToIndex).toHaveBeenCalled();

@@ -23,6 +23,9 @@ const WINDOW_PAGES = 200;
 const NEAR_EDGE = 30;
 /** Pages to slide per step */
 const SLIDE_BY = 100;
+const MOBILE_GRID_COLUMN_GAP = 8;
+const MOBILE_GRID_ROW_GAP = 10;
+const DESKTOP_GRID_GAP = 12;
 
 export interface VirtualGalleryGridHandle {
   scrollToPage: (page: number) => void;
@@ -82,7 +85,10 @@ function useActualGridColumns(): number {
     let rafId = 0;
     const onResize = () => {
       if (rafId) return;
-      rafId = requestAnimationFrame(() => { rafId = 0; compute(); });
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        compute();
+      });
     };
     window.addEventListener('resize', onResize);
     return () => {
@@ -94,14 +100,17 @@ function useActualGridColumns(): number {
   return cols;
 }
 
-export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Props>(
-  function VirtualGalleryGrid({ totalLength, totalPages, viewingPage, getItemId, requestPage, onWindowSlide }, ref) {
+export const VirtualGalleryGrid = memo(
+  forwardRef<VirtualGalleryGridHandle, Props>(function VirtualGalleryGrid(
+    { totalLength, totalPages, viewingPage, getItemId, requestPage, onWindowSlide },
+    ref,
+  ) {
     const actualCols = useActualGridColumns();
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Sliding window: always WINDOW_PAGES pages wide, slides as user scrolls
     const [windowStartPage, setWindowStartPage] = useState(() =>
-      Math.max(1, viewingPage - Math.floor(WINDOW_PAGES / 2))
+      Math.max(1, viewingPage - Math.floor(WINDOW_PAGES / 2)),
     );
     // Ref always reflects latest windowStartPage (for use in effects without stale closures).
     // Assigned in an effect, not during render (react-hooks/refs).
@@ -145,7 +154,10 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       let rafId = 0;
       const ro = new ResizeObserver(() => {
         if (rafId) return;
-        rafId = requestAnimationFrame(() => { rafId = 0; update(); });
+        rafId = requestAnimationFrame(() => {
+          rafId = 0;
+          update();
+        });
       });
       ro.observe(el);
       return () => {
@@ -160,10 +172,12 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     // Do NOT read containerRef.current here — ref access during render is disallowed
     // by react-hooks/refs; the state value is authoritative after first layout.
     const rowHeight = useMemo(() => {
-      const width = containerWidth || (typeof window !== 'undefined' ? window.innerWidth - 32 : 400);
-      const gap = width < 640 ? 16 : 12;
-      const cardWidth = (width - gap * (actualCols - 1)) / actualCols;
-      return Math.ceil(cardWidth * (3 / 2)) + gap;
+      const width =
+        containerWidth || (typeof window !== 'undefined' ? window.innerWidth - 16 : 400);
+      const columnGap = width < 640 ? MOBILE_GRID_COLUMN_GAP : DESKTOP_GRID_GAP;
+      const rowGap = width < 640 ? MOBILE_GRID_ROW_GAP : DESKTOP_GRID_GAP;
+      const cardWidth = (width - columnGap * (actualCols - 1)) / actualCols;
+      return Math.ceil(cardWidth * (3 / 2)) + rowGap;
     }, [actualCols, containerWidth]);
 
     const estimateSize = useCallback(() => rowHeight, [rowHeight]);
@@ -212,7 +226,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       // Target the row that corresponds to viewingPage in the new window
       const anchorRow = Math.max(
         0,
-        Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
+        Math.floor(((viewingPage - windowStartPage) * PAGE_SIZE) / actualCols),
       );
       virtualizer.scrollToIndex(Math.min(anchorRow, totalRows - 1), { align: 'start' });
 
@@ -224,7 +238,10 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     const prevContainerWidthRef = useRef(containerWidth);
     useLayoutEffect(() => {
       const colsChanged = prevActualColsRef.current !== actualCols;
-      const widthChanged = prevContainerWidthRef.current !== containerWidth && prevContainerWidthRef.current > 0 && containerWidth > 0;
+      const widthChanged =
+        prevContainerWidthRef.current !== containerWidth &&
+        prevContainerWidthRef.current > 0 &&
+        containerWidth > 0;
       if (!colsChanged && !widthChanged) return;
       prevActualColsRef.current = actualCols;
       prevContainerWidthRef.current = containerWidth;
@@ -239,7 +256,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
       if (colsChanged) {
         const anchorRow = Math.max(
           0,
-          Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
+          Math.floor(((viewingPage - windowStartPage) * PAGE_SIZE) / actualCols),
         );
         virtualizer.scrollToIndex(Math.min(anchorRow, totalRows - 1), { align: 'start' });
       }
@@ -254,7 +271,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
 
       const targetRow = Math.max(
         0,
-        Math.floor((viewingPage - windowStartPage) * PAGE_SIZE / actualCols),
+        Math.floor(((viewingPage - windowStartPage) * PAGE_SIZE) / actualCols),
       );
       virtualizer.scrollToIndex(Math.min(targetRow, totalRows - 1), { align: 'start' });
     }, [totalRows, viewingPage, windowStartPage, actualCols, virtualizer]);
@@ -266,7 +283,10 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
           const clampedPage = Math.max(1, Math.min(page, effectiveTotalPages));
           const newWindowStart = Math.max(
             1,
-            Math.min(clampedPage - Math.floor(WINDOW_PAGES / 2), effectiveTotalPages - WINDOW_PAGES + 1),
+            Math.min(
+              clampedPage - Math.floor(WINDOW_PAGES / 2),
+              effectiveTotalPages - WINDOW_PAGES + 1,
+            ),
           );
 
           // Skip compensation for explicit jumps — set prev = new before triggering layout effect
@@ -275,9 +295,12 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
 
           const targetRow = Math.floor(((clampedPage - newWindowStart) * PAGE_SIZE) / actualCols);
           setTimeout(() => {
-            virtualizer.scrollToIndex(Math.min(targetRow, Math.ceil((WINDOW_PAGES * PAGE_SIZE) / actualCols) - 1), {
-              align: 'start',
-            });
+            virtualizer.scrollToIndex(
+              Math.min(targetRow, Math.ceil((WINDOW_PAGES * PAGE_SIZE) / actualCols) - 1),
+              {
+                align: 'start',
+              },
+            );
           }, 0);
         },
         scrollToItem: (itemIndex: number) => {
@@ -285,7 +308,10 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
           const clampedPage = Math.max(1, Math.min(targetPage, effectiveTotalPages));
           const newWindowStart = Math.max(
             1,
-            Math.min(clampedPage - Math.floor(WINDOW_PAGES / 2), effectiveTotalPages - WINDOW_PAGES + 1),
+            Math.min(
+              clampedPage - Math.floor(WINDOW_PAGES / 2),
+              effectiveTotalPages - WINDOW_PAGES + 1,
+            ),
           );
           prevWindowStartPageRef.current = newWindowStart;
           setWindowStartPage(newWindowStart);
@@ -317,7 +343,10 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     useEffect(() => {
       for (const vRow of virtualItems) {
         const startItem = windowStartItem + vRow.index * actualCols;
-        const endItem = Math.min(windowStartItem + (vRow.index + 1) * actualCols - 1, totalLength - 1);
+        const endItem = Math.min(
+          windowStartItem + (vRow.index + 1) * actualCols - 1,
+          totalLength - 1,
+        );
         requestPage(Math.floor(startItem / PAGE_SIZE));
         const endPage = Math.floor(endItem / PAGE_SIZE);
         if (endPage !== Math.floor(startItem / PAGE_SIZE)) requestPage(endPage);
@@ -325,7 +354,7 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
     }, [virtualItems, windowStartItem, actualCols, totalLength, requestPage]);
 
     return (
-      <div ref={containerRef} style={{ overflowAnchor: 'none' }}>
+      <div ref={containerRef} className="-mx-2 sm:mx-0" style={{ overflowAnchor: 'none' }}>
         <div
           style={{
             height: `${totalRows * rowHeight}px`,
@@ -345,7 +374,10 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
                   width: '100%',
                   height: `${rowHeight}px`,
                   transform: `translateY(${vRow.index * rowHeight}px)`,
-                  paddingBottom: rowHeight > 0 && (containerWidth || 0) < 640 ? '16px' : '12px',
+                  paddingBottom:
+                    rowHeight > 0 && (containerWidth || 0) < 640
+                      ? `${MOBILE_GRID_ROW_GAP}px`
+                      : `${DESKTOP_GRID_GAP}px`,
                   overflow: 'hidden',
                 }}
               >
@@ -353,7 +385,14 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
                   style={{
                     display: 'grid',
                     gridTemplateColumns: `repeat(${actualCols}, minmax(0, 1fr))`,
-                    gap: (containerWidth || 0) < 640 ? '16px' : '12px',
+                    columnGap:
+                      (containerWidth || 0) < 640
+                        ? `${MOBILE_GRID_COLUMN_GAP}px`
+                        : `${DESKTOP_GRID_GAP}px`,
+                    rowGap:
+                      (containerWidth || 0) < 640
+                        ? `${MOBILE_GRID_ROW_GAP}px`
+                        : `${DESKTOP_GRID_GAP}px`,
                   }}
                 >
                   {Array.from({ length: actualCols }, (_, col) => {
@@ -373,5 +412,5 @@ export const VirtualGalleryGrid = memo(forwardRef<VirtualGalleryGridHandle, Prop
         </div>
       </div>
     );
-  },
-));
+  }),
+);

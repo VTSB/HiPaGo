@@ -17,11 +17,26 @@ import { fetchGalleryInfo } from '@/lib/api/gallery';
 import { galleryHref } from '@/lib/utils/routes';
 
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
+const LIST_SCROLL_STATE_KEY = 'hipago:list-scroll-state';
+
+function getCurrentListItemIndex(): number {
+  const items = document.querySelectorAll('[data-item-index]');
+  let at = 0;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const rect = items[i].getBoundingClientRect();
+    if (rect.top <= 100) {
+      at = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
+      break;
+    }
+  }
+  return at;
+}
 
 /** Check if a gallery block matches any blur tags. */
 function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
   if (blurTags.length === 0) return false;
-  if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED) return false;
+  if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED)
+    return false;
   for (const [type, tags] of Object.entries(block.tags)) {
     for (const tag of tags || []) {
       const key = toSearchString(tagFromGalleryEntry(type as TagType, tag));
@@ -29,10 +44,14 @@ function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
       // Handle legacy cached blocks where ♂/♀ tags are stored under generic 'tag' type
       if (type === 'tag') {
         if (tag.endsWith(' ♂')) {
-          const legacyKey = toSearchString(tagFromGalleryEntry('male' as TagType, tag.slice(0, -2)));
+          const legacyKey = toSearchString(
+            tagFromGalleryEntry('male' as TagType, tag.slice(0, -2)),
+          );
           if (blurTags.includes(legacyKey)) return true;
         } else if (tag.endsWith(' ♀')) {
-          const legacyKey = toSearchString(tagFromGalleryEntry('female' as TagType, tag.slice(0, -2)));
+          const legacyKey = toSearchString(
+            tagFromGalleryEntry('female' as TagType, tag.slice(0, -2)),
+          );
           if (blurTags.includes(legacyKey)) return true;
         }
       }
@@ -61,14 +80,17 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
   const blurred = useMemo(() => shouldBlur(block, blurTags), [block, blurTags]);
-  const tagEntries = useMemo(() =>
-    block.type === GalleryBlockType.DETAILED || block.type === GalleryBlockType.NOT_DETAILED
-      ? (Object.entries(block.tags) as [TagType, string[]][])
-      : [],
-    [block.type, block.tags]);
+  const tagEntries = useMemo(
+    () =>
+      block.type === GalleryBlockType.DETAILED || block.type === GalleryBlockType.NOT_DETAILED
+        ? (Object.entries(block.tags) as [TagType, string[]][])
+        : [],
+    [block.type, block.tags],
+  );
   const tagI18n = useTagI18n(tagEntries);
   const displayTags = useMemo(() => {
-    if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED) return [];
+    if (block.type === GalleryBlockType.LOADING || block.type === GalleryBlockType.FAILED)
+      return [];
     const all: { tag: string; type: TagType; priority: number }[] = [];
     for (const [type, tags] of Object.entries(block.tags)) {
       for (const tag of tags || []) {
@@ -100,7 +122,18 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       className="group block touch-manipulation"
       onClick={() => {
         try {
-          sessionStorage.setItem(LAST_LIST_URL_KEY, window.location.pathname + window.location.search);
+          const url = window.location.pathname + window.location.search;
+          const at = getCurrentListItemIndex();
+          sessionStorage.setItem(LAST_LIST_URL_KEY, url);
+          sessionStorage.setItem(
+            LIST_SCROLL_STATE_KEY,
+            JSON.stringify({
+              url,
+              at,
+              scrollY: window.scrollY,
+              ts: Date.now(),
+            }),
+          );
         } catch {
           // sessionStorage can be unavailable in private/embedded contexts.
         }
@@ -120,18 +153,31 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
             }}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-zinc-400">{t('detail.noImage')}</div>
+          <div className="flex h-full items-center justify-center text-zinc-400">
+            {t('detail.noImage')}
+          </div>
         )}
-        <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/95 via-black/70'} to-transparent pt-10`}>
+        <div
+          className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/95 via-black/70'} to-transparent pt-10`}
+        >
           <div className="px-3 pt-2 pb-3 backdrop-blur-sm sm:px-2 sm:pt-1.5 sm:pb-2">
-            <h3 className="line-clamp-2 text-base font-semibold leading-snug text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)] sm:text-sm sm:leading-tight">{block.title || `#${block.id}`}</h3>
+            <h3 className="line-clamp-2 text-base font-semibold leading-snug text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)] sm:text-sm sm:leading-tight">
+              {block.title || `#${block.id}`}
+            </h3>
             {displayTags.length > 0 && (
               // Mobile (<md): cap chips to 1 visible row to reclaim ~22px per
               // card. Desktop (≥md): keep the original 2-row affordance since
               // cards are larger and the metadata helps scanability there.
               <div className="mt-1 flex flex-wrap gap-1 overflow-hidden max-h-[22px] md:max-h-[44px]">
                 {displayTags.map(({ tag, type }) => (
-                  <TagChip key={`${type}-${tag}`} tag={tag} type={type} displayName={tagI18n.get(`${type}:${tag}`)} linked={false} size="sm" />
+                  <TagChip
+                    key={`${type}-${tag}`}
+                    tag={tag}
+                    type={type}
+                    displayName={tagI18n.get(`${type}:${tag}`)}
+                    linked={false}
+                    size="sm"
+                  />
                 ))}
               </div>
             )}

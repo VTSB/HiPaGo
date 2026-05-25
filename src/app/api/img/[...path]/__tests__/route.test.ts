@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { resolveTnSubdomain } from '../route';
+import { resolveTnSubdomain } from '../subdomain';
 import type { GgConfig } from '@/lib/utils/types';
 
 function makeConfig(overrides: Partial<GgConfig> = {}): GgConfig {

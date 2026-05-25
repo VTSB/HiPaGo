@@ -1,13 +1,17 @@
 package com.hipago.app;
 
 import android.app.DownloadManager;
+import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
+import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
+import android.provider.Settings;
 
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
@@ -38,13 +42,13 @@ import java.net.URL;
  *     {available:false} on any network or parse error (UI prefers silent
  *     no-op over a broken banner).
  *
- *   install({apkUrl}) → void
+ *   install({apkUrl}) → {status}
  *     Downloads via DownloadManager into the app's external-files Downloads
  *     directory (path declared in res/xml/file_paths.xml), then on
  *     ACTION_DOWNLOAD_COMPLETE fires an Intent.ACTION_VIEW with a
- *     FileProvider URI and the application/vnd.android.package-archive
- *     MIME type. The system installer takes over — user grants the
- *     "Install unknown apps" permission to HiPaGo on first attempt.
+ *     FileProvider URI and the application/vnd.android.package-archive MIME
+ *     type. Resolves when the installer/settings UI is opened so the app UI
+ *     can recover if the user cancels or returns without installing.
  */
 @CapacitorPlugin(name = "Updater")
 public class UpdaterPlugin extends Plugin {
@@ -125,6 +129,15 @@ public class UpdaterPlugin extends Plugin {
         }
         final Context ctx = getContext();
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    && !ctx.getPackageManager().canRequestPackageInstalls()) {
+                openUnknownSourcesSettings(ctx);
+                JSObject ret = new JSObject();
+                ret.put("status", "permission_required");
+                call.resolve(ret);
+                return;
+            }
+
             File dlDir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
             if (dlDir == null) {
                 call.reject("external files dir unavailable");
@@ -165,6 +178,16 @@ public class UpdaterPlugin extends Plugin {
                         // Already unregistered; safe to ignore.
                     }
 
+                    if (!isSuccessfulDownload(dm, downloadId)) {
+                        call.reject("download failed");
+                        return;
+                    }
+
+                    if (!apkFile.exists() || apkFile.length() <= 0) {
+                        call.reject("downloaded APK missing or empty");
+                        return;
+                    }
+
                     Uri apkUri = FileProvider.getUriForFile(
                             ctx,
                             ctx.getPackageName() + ".fileprovider",
@@ -173,8 +196,15 @@ public class UpdaterPlugin extends Plugin {
                     install.setDataAndType(apkUri, "application/vnd.android.package-archive");
                     install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                             | Intent.FLAG_ACTIVITY_NEW_TASK);
-                    ctx.startActivity(install);
-                    call.resolve();
+                    try {
+                        ctx.startActivity(install);
+                        JSObject ret = new JSObject();
+                        ret.put("status", "installer_started");
+                        call.resolve(ret);
+                    } catch (Exception e) {
+                        call.reject("installer launch failed: "
+                                + (e.getMessage() != null ? e.getMessage() : e.toString()), e);
+                    }
                 }
             };
             IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
@@ -184,6 +214,34 @@ public class UpdaterPlugin extends Plugin {
             ContextCompat.registerReceiver(ctx, onComplete, filter, ContextCompat.RECEIVER_EXPORTED);
         } catch (Exception e) {
             call.reject("install failed: " + (e.getMessage() != null ? e.getMessage() : e.toString()), e);
+        }
+    }
+
+    private static void openUnknownSourcesSettings(Context ctx) {
+        Intent intent = new Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:" + ctx.getPackageName()));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            ctx.startActivity(intent);
+        } catch (ActivityNotFoundException e) {
+            Intent fallback = new Intent(Settings.ACTION_SECURITY_SETTINGS);
+            fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(fallback);
+        }
+    }
+
+    private static boolean isSuccessfulDownload(DownloadManager dm, long downloadId) {
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
+        try (Cursor cursor = dm.query(query)) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                return false;
+            }
+            int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (statusIndex < 0) {
+                return false;
+            }
+            return cursor.getInt(statusIndex) == DownloadManager.STATUS_SUCCESSFUL;
         }
     }
 

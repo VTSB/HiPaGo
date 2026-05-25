@@ -11,7 +11,63 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 import { useT } from '@/lib/i18n/useT';
 import type { SortOrder } from '@/lib/utils/types';
 
-const VALID_SORTS: SortOrder[] = ['date_added', 'popular_year', 'popular_month', 'popular_week', 'popular_day'];
+const VALID_SORTS: SortOrder[] = [
+  'date_added',
+  'popular_year',
+  'popular_month',
+  'popular_week',
+  'popular_day',
+];
+const LIST_SCROLL_STATE_KEY = 'hipago:list-scroll-state';
+const LIST_SCROLL_STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+type ListScrollState = {
+  url: string;
+  at: number;
+  scrollY: number;
+  ts: number;
+};
+
+function normalizeListUrlForScrollState(url: string): string | null {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    parsed.searchParams.delete('at');
+    parsed.searchParams.delete('page');
+    parsed.searchParams.sort();
+    return parsed.pathname + parsed.search;
+  } catch {
+    return null;
+  }
+}
+
+function readListScrollState(): ListScrollState | null {
+  try {
+    const raw = sessionStorage.getItem(LIST_SCROLL_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ListScrollState>;
+    if (
+      typeof parsed.url !== 'string' ||
+      typeof parsed.at !== 'number' ||
+      typeof parsed.scrollY !== 'number' ||
+      typeof parsed.ts !== 'number'
+    ) {
+      return null;
+    }
+    if (Date.now() - parsed.ts > LIST_SCROLL_STATE_MAX_AGE_MS) return null;
+    const currentUrl = window.location.pathname + window.location.search;
+    if (normalizeListUrlForScrollState(parsed.url) !== normalizeListUrlForScrollState(currentUrl)) {
+      return null;
+    }
+    return {
+      url: parsed.url,
+      at: Math.max(0, parsed.at),
+      scrollY: Math.max(0, parsed.scrollY),
+      ts: parsed.ts,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function GalleryListView() {
   const searchParams = useSearchParams();
@@ -32,14 +88,13 @@ export function GalleryListView() {
   })();
 
   const [viewingPage, setViewingPage] = useState(() =>
-    initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1
+    initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1,
   );
 
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
 
-  const { totalLength, requestPage, getItemId, isInitialLoading, error } =
-    useVirtualGallery(sort);
+  const { totalLength, requestPage, getItemId, isInitialLoading, error } = useVirtualGallery(sort);
 
   const t = useT();
 
@@ -61,7 +116,9 @@ export function GalleryListView() {
 
   useEffect(() => {
     history.scrollRestoration = 'manual';
-    return () => { history.scrollRestoration = 'auto'; };
+    return () => {
+      history.scrollRestoration = 'auto';
+    };
   }, []);
 
   // Debounced URL sync on scroll (200ms).
@@ -106,9 +163,19 @@ export function GalleryListView() {
   // Scroll restoration
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (restoredRef.current || totalLength === 0 || initialAt <= 0) return;
+    if (restoredRef.current || totalLength === 0) return;
+    const stored = readListScrollState();
+    const restoreAt = stored?.at ?? initialAt;
+    if (restoreAt <= 0 && !stored) return;
     restoredRef.current = true;
-    gridRef.current?.scrollToItem(initialAt);
+    if (restoreAt > 0) {
+      gridRef.current?.scrollToItem(restoreAt);
+    }
+    if (stored) {
+      window.setTimeout(() => {
+        window.scrollTo({ top: stored.scrollY, behavior: 'auto' });
+      }, 0);
+    }
   }, [totalLength, initialAt]);
 
   const handleSortChange = useCallback((newSort: SortOrder) => {

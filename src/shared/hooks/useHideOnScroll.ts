@@ -15,10 +15,7 @@ import { useEffect, useRef, useState } from 'react';
  * dropped below the direction-flip threshold, the hook flipped to 'idle',
  * the pill briefly returned, then momentum resumed and the pill hid again.
  */
-export function useHideOnScroll(
-  topThreshold = 80,
-  deltaPx = 8,
-): boolean {
+export function useHideOnScroll(topThreshold = 80, deltaPx = 8, disabled = false): boolean {
   const [hidden, setHidden] = useState(false);
   const lastYRef = useRef(0);
   const hiddenRef = useRef(false);
@@ -26,6 +23,11 @@ export function useHideOnScroll(
   useEffect(() => {
     if (typeof window === 'undefined') return;
     lastYRef.current = window.scrollY;
+    if (disabled) {
+      hiddenRef.current = false;
+      const resetTimer = window.setTimeout(() => setHidden(false), 0);
+      return () => window.clearTimeout(resetTimer);
+    }
     const onScroll = () => {
       const y = window.scrollY;
       if (y < topThreshold) {
@@ -53,7 +55,7 @@ export function useHideOnScroll(
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [topThreshold, deltaPx]);
+  }, [topThreshold, deltaPx, disabled]);
 
-  return hidden;
+  return disabled ? false : hidden;
 }

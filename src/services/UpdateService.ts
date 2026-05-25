@@ -23,6 +23,10 @@ const APP_VERSION: string = packageJson.version;
 export const CURRENT_VERSION = APP_VERSION;
 
 export type ProgressCallback = (percent: number) => void;
+export type ApplyResult = {
+  status: 'completed' | 'installer_started' | 'permission_required';
+  message?: string;
+};
 
 export type CheckResult = {
   available: boolean;
@@ -31,7 +35,7 @@ export type CheckResult = {
   /** Present when the platform can install in-place. UI calls this on
    *  "Install" and may pass a progress callback (0-100). Currently only
    *  the Tauri backend reports progress; Android no-ops the callback. */
-  applyFn?: (onProgress?: ProgressCallback) => Promise<void>;
+  applyFn?: (onProgress?: ProgressCallback) => Promise<ApplyResult>;
   /** Present when the platform cannot install in-place (iOS). UI deep-links. */
   releaseUrl?: string;
 };
@@ -43,7 +47,7 @@ interface AndroidUpdaterPlugin {
     notes?: string;
     apkUrl?: string;
   }>;
-  install(opts: { apkUrl: string }): Promise<void>;
+  install(opts: { apkUrl: string }): Promise<ApplyResult>;
 }
 
 // `registerPlugin` returns a proxy even when the native plugin is absent —
@@ -88,6 +92,7 @@ async function checkTauri(): Promise<CheckResult> {
           onProgress?.(100);
         }
       });
+      return { status: 'completed' };
     },
   };
 }
@@ -102,9 +107,10 @@ async function checkAndroid(): Promise<CheckResult> {
     notes: res.notes,
     applyFn: async () => {
       // Native side: DownloadManager → ACTION_DOWNLOAD_COMPLETE →
-      // install intent via FileProvider. Resolves after the install
-      // intent is fired (user still has to tap "Install" in system UI).
-      await AndroidUpdater.install({ apkUrl });
+      // install intent via FileProvider. Opening the system installer is
+      // not the same thing as a completed install, so the native result is
+      // surfaced to let the UI recover if the user cancels.
+      return await AndroidUpdater.install({ apkUrl });
     },
   };
 }

@@ -5,8 +5,7 @@ import { GalleryGridById } from '../GalleryGrid';
 import { PAGE_SIZE } from '@/lib/utils/constants';
 
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { gridColumns: number }) => unknown) =>
-    sel({ gridColumns: 0 }),
+  useSettingsStore: (sel: (s: { gridColumns: number }) => unknown) => sel({ gridColumns: 0 }),
 }));
 
 vi.mock('../GalleryCard', () => ({

@@ -11,6 +11,16 @@ import { useState } from 'react';
 import { UpdateService, CURRENT_VERSION, type CheckResult } from '@/services/UpdateService';
 import { useT } from '@/lib/i18n/useT';
 
+type InstallNotice = 'permissionRequired' | 'installerStarted' | null;
+
+function firstMeaningfulLine(notes?: string): string | undefined {
+  const line = notes?.split('\n').find((entry) => {
+    const value = entry.trim().toLowerCase();
+    return value.length > 0 && value !== 'null';
+  });
+  return line?.trim();
+}
+
 type CheckStatus =
   | { kind: 'idle' }
   | { kind: 'checking' }
@@ -22,9 +32,11 @@ type CheckStatus =
 export function UpdateCheckCard() {
   const t = useT();
   const [status, setStatus] = useState<CheckStatus>({ kind: 'idle' });
+  const [installNotice, setInstallNotice] = useState<InstallNotice>(null);
 
   const onCheck = async () => {
     setStatus({ kind: 'checking' });
+    setInstallNotice(null);
     try {
       const result = await UpdateService.checkForUpdate();
       if (!result.available) {
@@ -43,9 +55,15 @@ export function UpdateCheckCard() {
     if (result.applyFn) {
       setStatus({ kind: 'installing', percent: 0 });
       try {
-        await result.applyFn((percent) => {
+        const applyResult = await result.applyFn((percent) => {
           setStatus({ kind: 'installing', percent });
         });
+        setStatus({ kind: 'available', result });
+        if (applyResult.status === 'permission_required') {
+          setInstallNotice('permissionRequired');
+        } else if (applyResult.status === 'installer_started') {
+          setInstallNotice('installerStarted');
+        }
       } catch {
         setStatus({ kind: 'failed' });
       }
@@ -57,13 +75,21 @@ export function UpdateCheckCard() {
   return (
     <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
       <div className="px-4 py-5 sm:px-5 sm:py-4">
-        <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('update.about')}</p>
-        <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('update.about.desc')}</p>
+        <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+          {t('update.about')}
+        </p>
+        <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+          {t('update.about.desc')}
+        </p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">{t('update.about.currentVersion')}</p>
-            <p className="font-mono text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">v{CURRENT_VERSION}</p>
+            <p className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">
+              {t('update.about.currentVersion')}
+            </p>
+            <p className="font-mono text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+              v{CURRENT_VERSION}
+            </p>
           </div>
           <button
             type="button"
@@ -78,8 +104,17 @@ export function UpdateCheckCard() {
         {/* Inline status row */}
         {status.kind === 'upToDate' && (
           <div className="mt-4 flex min-h-12 items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-4 w-4 shrink-0"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clipRule="evenodd"
+              />
             </svg>
             {t('update.about.upToDate')}
           </div>
@@ -97,12 +132,21 @@ export function UpdateCheckCard() {
                 onClick={onInstall}
                 className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm active:bg-blue-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-blue-700"
               >
-                {status.result.applyFn ? t('update.banner.install') : t('update.banner.viewOnGitHub')}
+                {status.result.applyFn
+                  ? t('update.banner.install')
+                  : t('update.banner.viewOnGitHub')}
               </button>
             </div>
-            {status.result.notes && (
+            {firstMeaningfulLine(status.result.notes) && (
               <p className="mt-2 text-xs text-blue-700/80 dark:text-blue-300/80">
-                {status.result.notes.split('\n').find((l) => l.trim().length > 0)?.trim()}
+                {firstMeaningfulLine(status.result.notes)}
+              </p>
+            )}
+            {installNotice && (
+              <p className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+                {installNotice === 'permissionRequired'
+                  ? t('update.banner.permissionRequired')
+                  : t('update.banner.installerStarted')}
               </p>
             )}
           </div>
@@ -126,8 +170,17 @@ export function UpdateCheckCard() {
 
         {status.kind === 'failed' && (
           <div className="mt-4 flex min-h-12 items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-base text-red-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-red-950/40 dark:text-red-300">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-4 w-4 shrink-0"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clipRule="evenodd"
+              />
             </svg>
             {t('update.about.checkFailed')}
           </div>

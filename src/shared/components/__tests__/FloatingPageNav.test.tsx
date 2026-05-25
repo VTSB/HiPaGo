@@ -7,8 +7,13 @@ import { FloatingPageNav, getNextPageAction } from '../FloatingPageNav';
 let mockGridColumns = 5;
 const mockSetGridColumns = vi.fn();
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { gridColumns: number; setGridColumns: (n: number) => void; locale: 'en' | 'ko' }) => unknown) =>
-    sel({ gridColumns: mockGridColumns, setGridColumns: mockSetGridColumns, locale: 'en' }),
+  useSettingsStore: (
+    sel: (s: {
+      gridColumns: number;
+      setGridColumns: (n: number) => void;
+      locale: 'en' | 'ko';
+    }) => unknown,
+  ) => sel({ gridColumns: mockGridColumns, setGridColumns: mockSetGridColumns, locale: 'en' }),
 }));
 
 // Stub matchMedia (jsdom doesn't ship it) so the mobile/desktop branch in
@@ -46,7 +51,10 @@ describe('getNextPageAction', () => {
   });
 
   it('returns loadAndScroll when nextPage is beyond loaded range and hasMore=true', () => {
-    expect(getNextPageAction(10, 10, 20, true)).toEqual({ action: 'loadAndScroll', targetPage: 11 });
+    expect(getNextPageAction(10, 10, 20, true)).toEqual({
+      action: 'loadAndScroll',
+      targetPage: 11,
+    });
   });
 
   it('returns noop when nextPage is beyond loaded range and hasMore=false', () => {
@@ -155,11 +163,12 @@ describe('FloatingPageNav — immediate page update', () => {
   // Scroll suppression after button click
   // ---------------------------------------------------------------------------
 
-  it('scroll events are suppressed for 400ms after clicking next', () => {
+  it('scroll events are suppressed for 1600ms after clicking next', () => {
     // Add a data-item-index element so scroll handler can find a page
     const div = document.createElement('div');
     div.setAttribute('data-item-index', '0');
-    div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
+    div.getBoundingClientRect = () =>
+      ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 }) as DOMRect;
     document.body.appendChild(div);
 
     renderNav(5);
@@ -186,7 +195,8 @@ describe('FloatingPageNav — immediate page update', () => {
   it('scroll tracking resumes after the suppression window', () => {
     const div = document.createElement('div');
     div.setAttribute('data-item-index', '0');
-    div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
+    div.getBoundingClientRect = () =>
+      ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 }) as DOMRect;
     document.body.appendChild(div);
 
     renderNav(5);
@@ -197,7 +207,7 @@ describe('FloatingPageNav — immediate page update', () => {
 
     // Advance past suppression window
     act(() => {
-      vi.advanceTimersByTime(1050);
+      vi.advanceTimersByTime(1650);
     });
 
     // Scroll after suppression ends should call onViewingPageChange
@@ -207,6 +217,38 @@ describe('FloatingPageNav — immediate page update', () => {
     });
 
     expect(onViewingPageChange.mock.calls.length).toBeGreaterThan(callCountAfterClick);
+
+    document.body.removeChild(div);
+  });
+
+  it('mobile page label is kept on one line for large page counts', () => {
+    renderNav(1, 3871);
+    const jump = screen.getByRole('button', { name: /jump to page/i });
+    expect(jump.className).toContain('whitespace-nowrap');
+    expect(jump.textContent).toBe('1\u00a0/\u00a03,871');
+  });
+
+  it('does not apply hidden transform after programmatic next-page scroll settles', () => {
+    const div = document.createElement('div');
+    div.setAttribute('data-item-index', '150');
+    div.getBoundingClientRect = () =>
+      ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 }) as DOMRect;
+    document.body.appendChild(div);
+
+    renderNav(5);
+    const nav = screen.getByRole('button', { name: /jump to page/i }).parentElement as HTMLElement;
+    vi.clearAllMocks();
+
+    fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    act(() => {
+      Object.defineProperty(window, 'scrollY', { value: 1200, writable: true, configurable: true });
+      window.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(1650);
+    });
+
+    expect(nav.className).not.toContain(
+      'translate-y-[calc(100%_+_1rem_+_env(safe-area-inset-bottom))]',
+    );
 
     document.body.removeChild(div);
   });
@@ -233,7 +275,8 @@ describe('FloatingPageNav — grid column change suppression', () => {
     // Add a data-item-index element so scroll handler can find a page
     const div = document.createElement('div');
     div.setAttribute('data-item-index', '100');
-    div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
+    div.getBoundingClientRect = () =>
+      ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 }) as DOMRect;
     document.body.appendChild(div);
 
     const { rerender } = render(
@@ -276,7 +319,8 @@ describe('FloatingPageNav — grid column change suppression', () => {
   it('scroll tracking resumes after suppression from column change', () => {
     const div = document.createElement('div');
     div.setAttribute('data-item-index', '0');
-    div.getBoundingClientRect = () => ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 } as DOMRect);
+    div.getBoundingClientRect = () =>
+      ({ top: 10, bottom: 20, left: 0, right: 100, width: 100, height: 10 }) as DOMRect;
     document.body.appendChild(div);
 
     const { rerender } = render(
@@ -306,7 +350,7 @@ describe('FloatingPageNav — grid column change suppression', () => {
 
     // Advance past suppression window
     act(() => {
-      vi.advanceTimersByTime(1050);
+      vi.advanceTimersByTime(1650);
     });
 
     // Now scroll should be tracked again

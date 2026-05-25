@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { parseGgJs } from '@/lib/utils/image-url';
 import type { GgConfig } from '@/lib/utils/types';
 import { bypassFetch } from '@/lib/server/bypass-fetch';
+import { resolveTnSubdomain } from './subdomain';
 
 // Node.js runtime required for bypass (net/tls modules). Streaming is preserved
 // via WHATWG ReadableStream — bypassFetch returns a standard Response object.
@@ -21,7 +22,7 @@ async function getGgConfig() {
     const resp = await bypassFetch(`${LTN_BASE}/gg.js?_=${Date.now()}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://hitomi.la/',
+        Referer: 'https://hitomi.la/',
       },
       signal: AbortSignal.timeout(10000),
     });
@@ -33,19 +34,6 @@ async function getGgConfig() {
   } catch {
     return null;
   }
-}
-
-/**
- * Resolve 'tn' subdomain to actual atn/btn based on gg.js config.
- * Exported for testing.
- */
-export function resolveTnSubdomain(targetPath: string, config: NonNullable<typeof ggConfig>): string {
-  const hashMatch = /([0-9a-f]+)\./.exec(targetPath);
-  if (!hashMatch) return 'atn'; // fallback
-  const hash = hashMatch[1];
-  const g = parseInt(hash.slice(-1) + hash.slice(-3, -1), 16);
-  const m = config.mCases.has(g) ? config.mCaseValue : config.mDefault;
-  return String.fromCharCode(97 + m) + 'tn';
 }
 
 export async function GET(
@@ -80,8 +68,8 @@ export async function GET(
     const response = await bypassFetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://hitomi.la/',
-        'Accept': 'image/avif,image/webp,image/png,image/jpeg,*/*',
+        Referer: 'https://hitomi.la/',
+        Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
       },
       signal: AbortSignal.timeout(30000),
     });
@@ -107,9 +95,6 @@ export async function GET(
       headers,
     });
   } catch {
-    return Response.json(
-      { error: 'Image proxy fetch failed' },
-      { status: 502 },
-    );
+    return Response.json({ error: 'Image proxy fetch failed' }, { status: 502 });
   }
 }
