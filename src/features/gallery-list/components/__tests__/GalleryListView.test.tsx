@@ -245,15 +245,24 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     setItemSpy.mockRestore();
   });
 
-  it('restores stored list scroll state after returning from detail', async () => {
-    sessionStorage.setItem(
-      'hipago:list-scroll-state',
-      JSON.stringify({
-        url: window.location.pathname + window.location.search,
-        at: 175,
-        scrollY: 3200,
-        ts: Date.now(),
-      }),
+  it('restores list scroll state from the current history entry', async () => {
+    window.history.replaceState(
+      {
+        hipagoListScrollSnapshot: {
+          version: 1,
+          url: window.location.pathname + window.location.search,
+          at: 175,
+          scrollY: 3200,
+          ts: Date.now(),
+          anchorIndex: 175,
+          anchorTop: 0,
+          clickedIndex: 180,
+          clickedId: 123,
+          viewportWidth: 390,
+        },
+      },
+      '',
+      window.location.pathname + window.location.search,
     );
     const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
 
@@ -272,17 +281,26 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     scrollToSpy.mockRestore();
   });
 
-  it('restores stored list scroll state when only ?at= changed while away', async () => {
+  it('restores history-entry scroll state when only ?at= changed while away', async () => {
     window.history.replaceState(null, '', '/?at=11');
     mockAtParam = '11';
-    sessionStorage.setItem(
-      'hipago:list-scroll-state',
-      JSON.stringify({
-        url: '/?at=1',
-        at: 25,
-        scrollY: 3612,
-        ts: Date.now(),
-      }),
+    window.history.replaceState(
+      {
+        hipagoListScrollSnapshot: {
+          version: 1,
+          url: '/?at=1',
+          at: 25,
+          scrollY: 3612,
+          ts: Date.now(),
+          anchorIndex: 25,
+          anchorTop: 0,
+          clickedIndex: 26,
+          clickedId: 123,
+          viewportWidth: 390,
+        },
+      },
+      '',
+      '/?at=11',
     );
     const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
 
@@ -299,6 +317,49 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 3612, behavior: 'auto' });
 
     scrollToSpy.mockRestore();
+  });
+
+  it('restores by anchor offset when grid metrics changed', async () => {
+    window.history.replaceState(
+      {
+        hipagoListScrollSnapshot: {
+          version: 1,
+          url: '/?at=1',
+          at: 25,
+          scrollY: 3612,
+          ts: Date.now(),
+          anchorIndex: 25,
+          anchorTop: 48,
+          clickedIndex: 26,
+          clickedId: 123,
+          viewportWidth: 390,
+        },
+      },
+      '',
+      '/?at=11',
+    );
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 });
+    const anchor = document.createElement('div');
+    anchor.dataset.itemIndex = '25';
+    anchor.getBoundingClientRect = () =>
+      ({ top: 120, bottom: 380, left: 0, right: 180, width: 180, height: 260 }) as DOMRect;
+    document.body.appendChild(anchor);
+    const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+
+    vi.resetModules();
+    const { GalleryListView } = await import('../GalleryListView');
+    await act(async () => {
+      render(<GalleryListView />);
+    });
+
+    expect(mockScrollToItem).toHaveBeenCalledWith(25);
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 1072, behavior: 'auto' });
+
+    scrollToSpy.mockRestore();
+    document.body.removeChild(anchor);
   });
 
   it('omits ?at= when viewingPage is 1 (clean URL)', async () => {

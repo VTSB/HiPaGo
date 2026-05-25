@@ -15,22 +15,9 @@ import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchGalleryInfo } from '@/lib/api/gallery';
 import { galleryHref } from '@/lib/utils/routes';
+import { captureListScrollSnapshot } from '../utils/listScrollSnapshot';
 
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
-const LIST_SCROLL_STATE_KEY = 'hipago:list-scroll-state';
-
-function getCurrentListItemIndex(): number {
-  const items = document.querySelectorAll('[data-item-index]');
-  let at = 0;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const rect = items[i].getBoundingClientRect();
-    if (rect.top <= 100) {
-      at = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
-      break;
-    }
-  }
-  return at;
-}
 
 /** Check if a gallery block matches any blur tags. */
 function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
@@ -120,22 +107,13 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     <Link
       href={galleryHref(block.id)}
       className="group block touch-manipulation"
-      onClick={() => {
+      onClick={(event) => {
         try {
           const url = window.location.pathname + window.location.search;
-          const at = getCurrentListItemIndex();
+          captureListScrollSnapshot(event.currentTarget, block.id);
           sessionStorage.setItem(LAST_LIST_URL_KEY, url);
-          sessionStorage.setItem(
-            LIST_SCROLL_STATE_KEY,
-            JSON.stringify({
-              url,
-              at,
-              scrollY: window.scrollY,
-              ts: Date.now(),
-            }),
-          );
         } catch {
-          // sessionStorage can be unavailable in private/embedded contexts.
+          // History/session storage can be unavailable in private/embedded contexts.
         }
       }}
       onPointerEnter={onPrefetch}
