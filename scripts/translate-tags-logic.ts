@@ -230,6 +230,38 @@ function writeTranslationsNested(filePath: string, flat: FlatTranslations): void
   writeJsonAtomic(filePath, nestTranslations(flat));
 }
 
+// ─── Failed archive ───────────────────────────────────────────────────────────
+//
+// `{lang}.failed.json` records tags that were attempted but produced a
+// non-applicable verdict (REJECT or _NEEDS_REVIEW) — typically because no
+// official localized name exists. analyze() treats these keys as "done" so the
+// same untranslatable tags don't get re-batched every run. To force a retry,
+// remove the key via the `retry` subcommand.
+
+export interface FailedRecord {
+  tried: string;        // ISO date (YYYY-MM-DD)
+  verdict: 'REJECT' | '_NEEDS_REVIEW';
+  attempts: number;     // running counter of how many times we've tried
+  reason?: string;
+}
+
+export type FailedArchive = Record<string, FailedRecord>;
+
+function failedPath(i18nDir: string, lang: string): string {
+  return path.join(i18nDir, `${lang}.failed.json`);
+}
+
+export function readFailed(i18nDir: string, lang: string): FailedArchive {
+  return readJsonSafe<FailedArchive>(failedPath(i18nDir, lang), {});
+}
+
+export function writeFailed(i18nDir: string, lang: string, failed: FailedArchive): void {
+  // Sort keys for stable diffs (category, then name).
+  const sorted: FailedArchive = {};
+  for (const key of Object.keys(failed).sort()) sorted[key] = failed[key];
+  writeJsonAtomic(failedPath(i18nDir, lang), sorted);
+}
+
 // ─── File helpers ─────────────────────────────────────────────────────────────
 
 function readJsonSafe<T>(filePath: string, fallback: T): T {
@@ -393,8 +425,12 @@ export async function runAnalyze(opts: {
   fresh?: boolean;
   /** When set, only generate batches for this hitomi category (e.g. "series"). */
   categoryFilter?: string;
+  /** When true, failed.json entries are NOT treated as "done" and may be re-batched.
+   *  Default false: previously-failed tags are skipped so the same untranslatable
+   *  set doesn't get reprocessed every run. */
+  includeFailed?: boolean;
 }): Promise<AnalysisReport> {
-  const { lang, i18nDir, outputDir, tags, maxBatches, source = 'translate', fresh = false, categoryFilter } = opts;
+  const { lang, i18nDir, outputDir, tags, maxBatches, source = 'translate', fresh = false, categoryFilter, includeFailed = false } = opts;
   if (!Number.isInteger(maxBatches) || maxBatches <= 0) {
     throw new Error(`runAnalyze: maxBatches must be a positive integer (got ${maxBatches})`);
   }
@@ -516,6 +552,25 @@ export async function runAnalyze(opts: {
   const aiExisting = readTranslationsFlat(aiTranslationsPath);
   const existingKeys = new Set([...Object.keys(existing), ...Object.keys(aiExisting)]);
 
+  // Also skip keys that were previously attempted but produced REJECT or
+  // _NEEDS_REVIEW (no Korean equivalent found). Otherwise the same
+  // untranslatable tags reappear in every analyze run.
+  let skippedFromFailed = 0;
+  if (!includeFailed) {
+    const failed = readFailed(i18nDir, lang);
+    for (const key of Object.keys(failed)) {
+      if (!existingKeys.has(key)) {
+        existingKeys.add(key);
+        skippedFromFailed++;
+      }
+    }
+    if (skippedFromFailed > 0) {
+      console.error(
+        `[analyze] skipping ${skippedFromFailed} previously-failed tags (use --include-failed to retry them)`
+      );
+    }
+  }
+
   // Resume: collect tag names already in existing batch files (skip validated batches)
   const existingBatchTagNames = new Set<string>(); // "category:name"
   let existingValidatedCount = 0;
@@ -584,6 +639,9 @@ export async function runAnalyze(opts: {
     // Default exclusion: skip artist/group unless explicitly requested via
     // --category (which sets categoryFilter to that exact category).
     if (!categoryFilter && DEFAULT_EXCLUDED_CATEGORIES.has(category)) continue;
+    // Translate high-traffic tags first so partial runs cover the tags users
+    // are most likely to see. Stable order on equal counts via name tiebreak.
+    catTags.sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
     const strategy: 'direct' | 'search' = DIRECT_CATEGORIES.has(category) ? 'direct' : 'search';
     const batchSize = strategy === 'direct' ? DIRECT_BATCH_SIZE : SEARCH_BATCH_SIZE;
 
@@ -771,6 +829,7 @@ interface CollectedVerdict {
   key: string; // "category:name" format for i18n files
   translation: string;
   verdict: string;
+  reason?: string;
   suggestion?: BatchTag['suggestion'];
 }
 
@@ -809,7 +868,7 @@ async function collectVerdictsFromBatches(opts: {
     if (source && (batch.source ?? 'translate') !== source) continue;
 
     for (const tag of batch.tags) {
-      if (!tag.verdict || !tag.translation) continue;
+      if (!tag.verdict) continue;
       if (tag.exists === false) { droppedOrphaned++; continue; }
 
       // Resolve category: per-tag type → batch.category (if valid) → fan-out
@@ -825,8 +884,18 @@ async function collectVerdictsFromBatches(opts: {
       if (!cats) { droppedNoCategory++; continue; }
 
       const verdict = normalizeVerdict(tag.verdict);
+      // Non-writing verdicts (REJECT, _NEEDS_REVIEW, ORPHANED, CORRECT) may have
+      // an empty/missing translation — that's expected. Writing verdicts
+      // (PASS, INACCURATE, OUTDATED) are gated downstream.
+      const translation = tag.translation ?? '';
       for (const cat of cats) {
-        results.push({ key: `${cat}:${tag.name}`, translation: tag.translation, verdict, suggestion: tag.suggestion });
+        results.push({
+          key: `${cat}:${tag.name}`,
+          translation,
+          verdict,
+          reason: tag.reason,
+          suggestion: tag.suggestion,
+        });
       }
     }
   }
@@ -906,6 +975,44 @@ export async function applyVerdicts(opts: {
     // mutate batch files between the time we scan them and the time we write
     // the merged result.
     const verdicts = await collectVerdictsFromBatches({ lang, outputDir, i18nDir });
+
+    // Archive non-applicable verdicts (REJECT / _NEEDS_REVIEW) so the same
+    // untranslatable tags don't keep reappearing in future analyze runs.
+    // We do this BEFORE writing ai.json so the failed archive is persisted
+    // even if the merge writes nothing applicable. Skipped batch files still
+    // get cleaned up by the existing logic below.
+    const archivable = verdicts.filter(
+      (v) => v.verdict === 'REJECT' || v.verdict === '_NEEDS_REVIEW'
+    );
+    if (archivable.length > 0) {
+      const failed = readFailed(i18nDir, lang);
+      const today = new Date().toISOString().slice(0, 10);
+      let newArchived = 0, bumped = 0;
+      for (const item of archivable) {
+        if (!isValidCategory(item.key.split(':')[0])) continue;
+        const prev = failed[item.key];
+        if (prev) {
+          prev.tried = today;
+          prev.verdict = item.verdict as 'REJECT' | '_NEEDS_REVIEW';
+          prev.attempts = (prev.attempts ?? 1) + 1;
+          if (typeof item.reason === 'string' && item.reason.length > 0) prev.reason = item.reason;
+          bumped++;
+        } else {
+          failed[item.key] = {
+            tried: today,
+            verdict: item.verdict as 'REJECT' | '_NEEDS_REVIEW',
+            attempts: 1,
+            ...(typeof item.reason === 'string' && item.reason.length > 0 ? { reason: item.reason } : {}),
+          };
+          newArchived++;
+        }
+      }
+      writeFailed(i18nDir, lang, failed);
+      console.error(
+        `[applyVerdicts] archived ${newArchived} new, ${bumped} re-tried in ${lang}.failed.json`
+      );
+    }
+
     const passItems = verdicts.filter((v) => v.verdict === 'PASS');
     const inaccurateItems = verdicts.filter(
       (v) =>
@@ -920,9 +1027,9 @@ export async function applyVerdicts(opts: {
         typeof v.suggestion?.newName === 'string' &&
         v.suggestion.newName.trim().length > 0
     );
-    if (passItems.length === 0 && inaccurateItems.length === 0 && outdatedItems.length === 0) {
+    const hasApplicable = passItems.length > 0 || inaccurateItems.length > 0 || outdatedItems.length > 0;
+    if (!hasApplicable) {
       console.error('[applyVerdicts] No applicable verdicts.');
-      return;
     }
 
     const existing = readTranslationsFlat(aiJsonPath);
@@ -953,6 +1060,10 @@ export async function applyVerdicts(opts: {
 
     for (const item of passItems) {
       if (!acceptKey(item.key)) continue;
+      // Defensive: never write an empty translation, even on PASS. A validator
+      // marking a blank string as PASS is a bug elsewhere — drop here rather
+      // than corrupt ai.json with empty values.
+      if (typeof item.translation !== 'string' || item.translation.trim() === '') continue;
       const prev = merged[item.key];
       if (prev === undefined) newPass++;
       else if (prev !== item.translation) changedPass++;
@@ -1002,13 +1113,73 @@ export async function applyVerdicts(opts: {
     const totalChanges = newPass + changedPass + newInaccurate + changedInaccurate + newOutdated;
     if (totalChanges === 0) {
       console.error('[applyVerdicts] No changes — all verdicts already applied.');
-      return;
+    } else {
+      const outdatedNote = outdatedNotInCache ? ` (${outdatedNotInCache} unverified)` : '';
+      console.error(
+        `[applyVerdicts] +${newPass} new PASS, ${changedPass} updated PASS, +${newInaccurate} new INACCURATE, ${changedInaccurate} updated INACCURATE, ${newOutdated} OUTDATED migrations${outdatedNote}`
+      );
+      writeTranslationsNested(aiJsonPath, merged);
     }
-    const outdatedNote = outdatedNotInCache ? ` (${outdatedNotInCache} unverified)` : '';
-    console.error(
-      `[applyVerdicts] +${newPass} new PASS, ${changedPass} updated PASS, +${newInaccurate} new INACCURATE, ${changedInaccurate} updated INACCURATE, ${newOutdated} OUTDATED migrations${outdatedNote}`
-    );
-    writeTranslationsNested(aiJsonPath, merged);
+
+    // Cleanup: remove batch files that are fully reflected in ko.ai.json so the
+    // batches/ directory does not accumulate stale work. A batch is removable
+    // iff every tag has a verdict AND every "writing" verdict (PASS / valid
+    // INACCURATE / valid OUTDATED) matches the merged result. Non-writing
+    // verdicts (REJECT, CORRECT, ORPHANED, _NEEDS_REVIEW) require no merge to
+    // be considered applied.
+    const batchDir = path.join(outputDir, lang, 'batches');
+    if (fs.existsSync(batchDir)) {
+      const allBatches = await readBatchesParallel(batchDir);
+      let deletedCount = 0;
+      for (const { file, batch } of allBatches) {
+        if (!batch || !Array.isArray(batch.tags) || batch.tags.length === 0) continue;
+        if (!batch.tags.every((t) => t.verdict !== undefined)) continue;
+
+        let allApplied = true;
+        for (const tag of batch.tags) {
+          const cat = isValidCategory(tag.type)
+            ? tag.type
+            : isValidCategory(batch.category)
+              ? batch.category
+              : null;
+          if (!cat) { allApplied = false; break; }
+          const key = `${cat}:${tag.name}`;
+          const v = normalizeVerdict(tag.verdict!);
+
+          if (v === 'PASS') {
+            if (!tag.translation || merged[key] !== tag.translation) { allApplied = false; break; }
+          } else if (v === 'INACCURATE') {
+            const newT = tag.suggestion?.newTranslation?.trim();
+            if (newT && tag.suggestion?.source && merged[key] !== newT) {
+              allApplied = false;
+              break;
+            }
+          } else if (v === 'OUTDATED') {
+            const newName = tag.suggestion?.newName?.trim();
+            if (newName && !newName.includes(':')) {
+              const newKey = `${cat}:${newName}`;
+              const trans = tag.suggestion?.newTranslation ?? tag.translation;
+              if (trans && trans.trim() !== '' && merged[newKey] !== trans) {
+                allApplied = false;
+                break;
+              }
+            }
+          }
+        }
+
+        if (allApplied) {
+          try {
+            await fs.promises.unlink(path.join(batchDir, file));
+            deletedCount++;
+          } catch {
+            // Race with concurrent writer — leave the file in place.
+          }
+        }
+      }
+      if (deletedCount > 0) {
+        console.error(`[applyVerdicts] cleanup: removed ${deletedCount} fully-applied batch file(s)`);
+      }
+    }
   };
 
   if (lockfile) {

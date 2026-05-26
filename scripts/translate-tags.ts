@@ -34,6 +34,8 @@ import {
   applyVerdicts,
   crawlTags,
   getStatus,
+  readFailed,
+  writeFailed,
 } from './translate-tags-logic';
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
@@ -129,6 +131,7 @@ async function main() {
       const fresh = flags['fresh'] === 'true';
       const refreshTags = flags['refresh-tags'] === 'true';
       const categoryFilter = flags['category'];
+      const includeFailed = flags['include-failed'] === 'true';
 
       let tags: Awaited<ReturnType<typeof crawlTags>>;
       const cachePath = path.join(OUTPUT_DIR, '_tagcache.json');
@@ -162,7 +165,7 @@ async function main() {
         console.error(`[analyze] Fetched ${tags.length} tags. Generating up to ${maxBatches} batches...`);
       }
 
-      const report = await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, maxBatches, source, fresh, categoryFilter });
+      const report = await runAnalyze({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, tags, maxBatches, source, fresh, categoryFilter, includeFailed });
       console.error(
         `[analyze] Done. ${report.translatedCount} translated, ${report.untranslatedCount} untranslated, ${report.batches.length} batches.`
       );
@@ -234,19 +237,54 @@ async function main() {
       break;
     }
 
+    case 'list-failed': {
+      const lang = requireFlag(flags, 'lang');
+      const failed = readFailed(I18N_DIR, lang);
+      const keys = Object.keys(failed);
+      const byCategory: Record<string, number> = {};
+      const byVerdict: Record<string, number> = { REJECT: 0, _NEEDS_REVIEW: 0 };
+      const byAttemptCount: Record<string, number> = {};
+      for (const key of keys) {
+        const cat = key.split(':')[0];
+        byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+        const v = failed[key].verdict;
+        byVerdict[v] = (byVerdict[v] ?? 0) + 1;
+        const n = String(failed[key].attempts ?? 1);
+        byAttemptCount[n] = (byAttemptCount[n] ?? 0) + 1;
+      }
+      console.log(JSON.stringify({ lang, total: keys.length, byCategory, byVerdict, byAttemptCount }, null, 2));
+      break;
+    }
+
+    case 'retry': {
+      const lang = requireFlag(flags, 'lang');
+      const id = requireFlag(flags, 'id');
+      const failed = readFailed(I18N_DIR, lang);
+      if (!(id in failed)) {
+        console.error(`[retry] ${id} not in ${lang}.failed.json — nothing to do`);
+        break;
+      }
+      delete failed[id];
+      writeFailed(I18N_DIR, lang, failed);
+      console.error(`[retry] removed ${id} from ${lang}.failed.json — it will be re-batched on next analyze`);
+      break;
+    }
+
     default: {
       console.error(subcommand ? `Unknown subcommand: ${subcommand}` : 'Error: subcommand is required');
       console.error('');
       console.error('Usage: pnpm translate-tags <subcommand> [flags]');
       console.error('');
       console.error('Subcommands:');
-      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--fresh] [--refresh-tags]');
+      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--category <cat>] [--fresh] [--refresh-tags] [--include-failed]');
       console.error('  get-batch           --lang ko --id <batchId>');
       console.error('  save-translations   --lang ko --batch <batchId> --input \'{"translations":[...]}\'');
       console.error('  save-verdicts       --lang ko --batch <batchId> --input \'{"verdicts":[...]}\'');
       console.error('  summary             --lang ko [--source translate|validate]');
       console.error('  apply               --lang ko');
       console.error('  status              --lang ko');
+      console.error('  list-failed         --lang ko');
+      console.error('  retry               --lang ko --id <category:name>');
       process.exit(1);
     }
   }

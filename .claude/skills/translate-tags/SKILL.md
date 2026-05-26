@@ -37,6 +37,9 @@ Read ONLY `scripts/output/$0/analysis-report.json` — extract:
 - Category breakdown (how many direct vs search batches)
 - Do NOT open individual batch files
 
+Note: within each category, untranslated tags are batched in descending order of
+work count (most-used tags first), so a partial run prioritizes high-traffic tags.
+
 ### 3. Process batches: translate → validate → apply
 
 Subagents CANNOT spawn other subagents, so YOU orchestrate each step.
@@ -68,6 +71,9 @@ Agent(
 npx tsx scripts/translate-tags.ts apply --lang {lang}
 ```
 This reads PASS verdicts from all batch files and merges them into `{lang}.ai.json`.
+Fully-applied batch files (every tag verdicted and reflected in `{lang}.ai.json`)
+are auto-deleted from `scripts/output/{lang}/batches/` after the merge. In-progress
+batches (missing verdicts) are kept untouched.
 
 ### 4. Report final statistics
 
