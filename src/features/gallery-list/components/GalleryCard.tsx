@@ -16,6 +16,7 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { fetchGalleryInfo } from '@/lib/api/gallery';
 import { galleryHref } from '@/lib/utils/routes';
 import { captureListScrollSnapshot } from '../utils/listScrollSnapshot';
+import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
 
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 
@@ -114,6 +115,13 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
           sessionStorage.setItem(LAST_LIST_URL_KEY, url);
         } catch {
           // History/session storage can be unavailable in private/embedded contexts.
+        }
+        // Pin the list-card thumbnail URL outside the React tree so the detail
+        // page's bottom layer renders the exact pixels the user clicked,
+        // immune to component remounts and React Query revalidation of the
+        // gallery-block cache.
+        if (block.thumbnail) {
+          rememberDetailEntryThumbnail(block.id, resolveThumbnailUrl(block.thumbnail));
         }
       }}
       onPointerEnter={onPrefetch}

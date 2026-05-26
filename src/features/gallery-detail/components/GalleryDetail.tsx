@@ -7,9 +7,10 @@ import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import { TagChip } from '@/shared/components/TagChip';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
-import { AbortableImage } from '@/shared/components/AbortableImage';
+import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { getDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
 import { recordVisit } from '@/lib/db/gallery';
 import { Spinner } from '@/shared/components/Spinner';
 import { useT } from '@/lib/i18n/useT';
@@ -110,6 +111,50 @@ export function GalleryDetail({ id }: { id: number }) {
     (cachedBlock.type !== GalleryBlockType.LOADING && cachedBlock.type !== GalleryBlockType.FAILED
       ? cachedBlock
       : null);
+
+  // Low-detail URL the hero shows first. Sourced from the module-level map
+  // the list-card onClick wrote (the EXACT URL the user clicked), with a
+  // cachedBlock fallback for direct-URL entry. Pinned via useMemo([id])
+  // because the value lives outside the React tree — immune to remounts and
+  // React Query revalidation.
+  const cachedThumbnail = useMemo(() => {
+    const remembered = getDetailEntryThumbnail(id);
+    if (remembered) return remembered;
+    if (
+      cachedBlock.type === GalleryBlockType.LOADING ||
+      cachedBlock.type === GalleryBlockType.FAILED
+    ) {
+      return null;
+    }
+    return cachedBlock.thumbnail ? resolveThumbnailUrl(cachedBlock.thumbnail) : null;
+    // cachedBlock intentionally NOT in deps: we want the first-seen URL only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  // High-res hero variant: derived from the first file as soon as
+  // useGalleryDetail resolves. Stable thereafter (files[0] is set once).
+  const bigThumbnail = files.length > 0 ? getThumbnailUrl(files[0], 'big') : null;
+
+  // The visible hero src. Starts as the cached low-res URL; once the big
+  // variant has been preloaded into loadedSrcCache (and into the browser's
+  // HTTP cache), we flip to the big URL. AbortableImage receives a `loading`
+  // value of "eager", so its render-phase reset on src change skips the
+  // setVisible(false) branch and the swap paints instantly from cache.
+  const [heroSrc, setHeroSrc] = useState<string | null>(cachedThumbnail);
+  useEffect(() => {
+    if (!bigThumbnail) return;
+    let cancelled = false;
+    preloadImageSource(bigThumbnail)
+      .then(() => {
+        if (!cancelled) setHeroSrc(bigThumbnail);
+      })
+      .catch(() => {
+        // Preload failed (404 / network). Keep showing the cached variant.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bigThumbnail]);
+
   const stillLoadingFull = isLoading && !block;
   const detailFailed = !isLoading && error && !block;
 
@@ -168,8 +213,6 @@ export function GalleryDetail({ id }: { id: number }) {
       </div>
     );
 
-  const bigThumbnail = files.length > 0 ? getThumbnailUrl(files[0], 'big') : null;
-
   return (
     <div className="space-y-5 sm:space-y-6">
       <button
@@ -183,22 +226,22 @@ export function GalleryDetail({ id }: { id: number }) {
           href={readerHref(id)}
           className="group relative aspect-[3/4] w-full self-start overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
         >
-          {bigThumbnail ? (
-            <AbortableImage
-              src={bigThumbnail}
-              alt={displayBlock.title}
-              className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
-            />
-          ) : displayBlock.thumbnail ? (
-            <AbortableImage
-              src={resolveThumbnailUrl(displayBlock.thumbnail)}
-              alt={displayBlock.title}
-              className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
-            />
-          ) : (
+          {!heroSrc && (
             <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">
               {t('detail.noImage')}
             </div>
+          )}
+          {/* Single hero image. heroSrc starts at the list-card cached URL
+              (instant paint from loadedSrcCache) and flips to the big URL
+              only after preloadImageSource has fully loaded it. The browser
+              then serves the new src from its HTTP cache → zero flicker. */}
+          {heroSrc && (
+            <AbortableImage
+              src={heroSrc}
+              alt={displayBlock.title}
+              loading="eager"
+              className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            />
           )}
           <button
             onClick={(e) => {
