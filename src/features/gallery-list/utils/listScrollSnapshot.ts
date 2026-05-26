@@ -1,4 +1,5 @@
 const HISTORY_LIST_SCROLL_KEY = 'hipagoListScrollSnapshot';
+const SESSION_LIST_SCROLL_KEY = 'hipago:list-scroll-snapshot-v2';
 const SNAPSHOT_MAX_AGE_MS = 10 * 60 * 1000;
 
 export type ListScrollSnapshot = {
@@ -118,9 +119,25 @@ export function captureListScrollSnapshot(clickedElement: Element, clickedId: nu
     '',
     currentListUrl(),
   );
+
+  // Mirror to sessionStorage so the snapshot survives a router.replace()
+  // that wipes the list history entry's state on native-mobile back nav.
+  try {
+    sessionStorage.setItem(SESSION_LIST_SCROLL_KEY, JSON.stringify(snapshot));
+  } catch {
+    // sessionStorage may be unavailable in private/embedded contexts.
+  }
 }
 
 export function readListScrollSnapshot(): ListScrollSnapshot | null {
   const state = window.history.state as HistoryStateWithListScroll | null;
-  return coerceSnapshot(state?.[HISTORY_LIST_SCROLL_KEY]);
+  const fromState = coerceSnapshot(state?.[HISTORY_LIST_SCROLL_KEY]);
+  if (fromState) return fromState;
+  try {
+    const raw = sessionStorage.getItem(SESSION_LIST_SCROLL_KEY);
+    if (raw) return coerceSnapshot(JSON.parse(raw));
+  } catch {
+    // JSON malformed or sessionStorage unavailable — treat as no snapshot.
+  }
+  return null;
 }
