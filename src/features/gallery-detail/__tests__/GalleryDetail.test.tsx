@@ -102,6 +102,7 @@ vi.mock('@/shared/components/Spinner', () => ({
 vi.mock('@/shared/components/AbortableImage', () => ({
   AbortableImage: ({ src, alt, ...props }: { src: string; alt: string; [key: string]: unknown }) =>
     React.createElement('img', { src, alt, ...props }),
+  preloadImageSource: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('@/shared/components/TagChip', () => ({
