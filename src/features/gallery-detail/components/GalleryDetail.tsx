@@ -214,14 +214,14 @@ export function GalleryDetail({ id }: { id: number }) {
     );
 
   return (
-    <div className="space-y-5 sm:space-y-6">
+    <div className="space-y-3 sm:space-y-6">
       <button
         onClick={goBackToList}
         className="-mx-2 inline-flex min-h-12 items-center gap-1 rounded-xl px-2 text-base font-medium text-zinc-500 active:bg-zinc-100 sm:min-h-11 sm:text-sm sm:hover:text-zinc-700 dark:text-zinc-400 dark:active:bg-zinc-900 sm:dark:hover:text-zinc-200"
       >
         &larr; {t('detail.back')}
       </button>
-      <div className="grid gap-5 md:grid-cols-[300px_1fr] md:gap-6">
+      <div className="grid gap-3 md:grid-cols-[300px_1fr] md:gap-6">
         <Link
           href={readerHref(id)}
           className="group relative aspect-[3/4] w-full self-start overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
@@ -269,7 +269,7 @@ export function GalleryDetail({ id }: { id: number }) {
             </svg>
           </button>
         </Link>
-        <div className="min-w-0 space-y-4">
+        <div className="min-w-0 space-y-3 sm:space-y-4">
           <div className="min-w-0">
             <button
               onClick={handleShare}
@@ -277,7 +277,7 @@ export function GalleryDetail({ id }: { id: number }) {
             >
               #{id}
             </button>
-            <h1 className="break-words text-[1.7rem] font-bold leading-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
+            <h1 className="break-words text-2xl font-bold leading-tight text-zinc-900 dark:text-zinc-100 sm:text-3xl">
               {displayBlock.title || `Gallery #${id}`}
             </h1>
           </div>
@@ -381,7 +381,7 @@ export function GalleryDetail({ id }: { id: number }) {
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
             {t('detail.content')} ({files.length})
           </h2>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 sm:gap-2 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-2 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
             {files.slice(0, renderedCount).map((file, idx) => (
               <Link
                 key={idx}
