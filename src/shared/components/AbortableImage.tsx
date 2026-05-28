@@ -146,7 +146,16 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const effectiveSrc = needsNativeImageFetch
     ? tauriObjectUrl?.src === src ? tauriObjectUrl.url : null
     : src;
-  const [visible, setVisible] = useState(loading === 'eager' || preload);
+  // When the URL is already in loadedSrcCache, treat it as authoritative: the
+  // browser has the bytes and the <img> can paint synchronously. Without this,
+  // a re-mount (e.g. list ↔ detail navigation) makes every cached card wait
+  // for the deferred rAF + IntersectionObserver round-trip — measured ~500ms
+  // with 35+ cards mounting in one commit behind the virtualizer's two-pass
+  // layout. The observer still attaches below; it's only the *initial* gate
+  // that gets the fast path.
+  const [visible, setVisible] = useState(
+    loading === 'eager' || preload || loadedSrcCache.has(src),
+  );
   const [loaded, setLoaded] = useState(() => loadedSrcCache.has(src));
   const [failed, setFailed] = useState(false);
 
@@ -192,7 +201,10 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     setPrevPreload(preload);
     setLoaded(loadedSrcCache.has(src));
     setFailed(false);
-    if (loading !== 'eager' && !preload) setVisible(false);
+    // Same cache-hit fast path as the initial useState: if the new URL is
+    // already cached, keep visible=true so the <img> emits its src on the
+    // first commit instead of waiting for the observer round-trip.
+    if (loading !== 'eager' && !preload && !loadedSrcCache.has(src)) setVisible(false);
   }
 
   // Reset the internal tracking refs when src/loading/preload changes.
