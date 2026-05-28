@@ -69,12 +69,13 @@ The `reader` feature implements a full-screen image viewer with two modes: page-
 2. **Page navigation**:
    - User clicks image, presses arrow key, or uses controls
    - `setCurrentPage()` updates store
-   - URL updates via `window.history.pushState()`
-   - Reading progress saved after 2s debounce
+   - URL is not touched on page flips — the URL stays at `/gallery/<id>/reader`
+     for the whole session
+   - Reading progress saved after 2s debounce (handles resume on next visit)
 3. **Back button behavior**:
-   - Mouse back navigates history entries (one per page flip)
-   - `goBack()` unwraps all reader history entries and goes back to previous page
-   - Uses `pushCountRef` to track how many entries to pop
+   - One reader session === one history entry. Page flips do not grow the stack.
+   - Browser / hardware back exits the reader to the detail page in one press
+   - `goBack()` is a thin wrapper around `window.history.back()`
 
 ### Reading Progress Persistence
 
@@ -85,10 +86,14 @@ The `reader` feature implements a full-screen image viewer with two modes: page-
 
 ### Browser History Management
 
-- **replaceState** on init: establishes base reader page entry
-- **pushState** on each page flip: creates history entry per page
-- **popstate listener**: detects back button, updates page state
-- **goBack()**: calls `window.history.go(-(count + 1))` to skip all reader entries
+- The reader makes no history mutations during a session. Page flips are
+  pure store state — the URL never reflects the current page number.
+- A single back press exits to the detail page because the reader entry
+  is the only one the navigation pushed.
+- **goBack()**: forwards directly to `window.history.back()`.
+- External deep-links may still pass `?page=N` to set the initial page
+  (read by `ReaderFromQuery` / `(reader)/gallery/[id]/reader/page.tsx`);
+  the URL parameter is consumed once and not re-written.
 
 ### Keyboard Shortcuts
 
