@@ -9,6 +9,7 @@ import { SortSelector } from '@/shared/components/SortSelector';
 import { SkeletonGrid } from './GalleryGrid';
 import { PAGE_SIZE } from '@/lib/utils/constants';
 import { useT } from '@/lib/i18n/useT';
+import { useSettingsStore } from '@/lib/store/settings';
 import type { SortOrder } from '@/lib/utils/types';
 import { readListScrollSnapshot } from '../utils/listScrollSnapshot';
 
@@ -46,14 +47,27 @@ export function GalleryListView() {
 
   const { totalLength, requestPage, getItemId, isInitialLoading, error } = useVirtualGallery(sort);
 
+  const language = useSettingsStore((s) => s.language);
+
   const t = useT();
 
   const totalPages = totalLength > 0 ? Math.ceil(totalLength / PAGE_SIZE) : 0;
 
   // Ratchet: once totalPages is known, never go back to 0 (prevents height collapse
   // during rapid scrolling). Use render-phase setState — the React-documented pattern
-  // for derived state (react-hooks/set-state-in-effect safe).
+  // for derived state (react-hooks/set-state-in-effect safe). Reset to 0 when the
+  // sort or language filter changes so the new (typically smaller) total replaces
+  // the stale max from the prior population — otherwise switching from `all` to
+  // a per-language filter leaves FloatingPageNav and the virtualizer showing the
+  // all-languages page total.
   const [cachedTotalPages, setCachedTotalPages] = useState(0);
+  const [prevSortForCache, setPrevSortForCache] = useState(sort);
+  const [prevLanguageForCache, setPrevLanguageForCache] = useState(language);
+  if (sort !== prevSortForCache || language !== prevLanguageForCache) {
+    setPrevSortForCache(sort);
+    setPrevLanguageForCache(language);
+    setCachedTotalPages(0);
+  }
   if (totalPages > cachedTotalPages) {
     setCachedTotalPages(totalPages);
   }
