@@ -29,6 +29,11 @@ function makeWrapper() {
 describe('useVirtualGallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // useVirtualGallery now seeds maxTotalLength from sessionStorage so the
+    // virtualizer height is correct on cold mount for native scroll
+    // restoration. Clear between tests so a prior test's cached totalLength
+    // doesn't leak into the next render.
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
     fetchBrowseIds.mockResolvedValue({ idList: [101, 102, 103], length: 300 });
   });
 
@@ -170,6 +175,7 @@ describe('useVirtualGallery', () => {
 describe('neededPages ring buffer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
     fetchBrowseIds.mockResolvedValue({ idList: [], length: 100 });
   });
 

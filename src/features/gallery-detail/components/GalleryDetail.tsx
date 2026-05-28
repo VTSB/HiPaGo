@@ -21,7 +21,6 @@ import type { GalleryBlock } from '@/lib/utils/types';
 import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
 import { readerHref } from '@/lib/utils/routes';
-import { isNativePlatform } from '@/lib/utils/platform';
 
 const INITIAL_THUMBNAILS = 20;
 const LOAD_MORE_COUNT = 20;
@@ -49,7 +48,16 @@ export function GalleryDetail({ id }: { id: number }) {
   const renderedCount = renderState.id === id ? renderState.count : INITIAL_THUMBNAILS;
   const backTargetRef = useRef('/');
 
+  const cameFromListRef = useRef(false);
+
   const goBackToList = useCallback(() => {
+    // Prefer a real back navigation so the browser restores scroll on the
+    // list entry. Only fall back to a fresh navigate when there's no list
+    // origin in this tab's history (direct URL entry).
+    if (cameFromListRef.current && window.history.length > 1) {
+      window.history.back();
+      return;
+    }
     router.replace(backTargetRef.current || '/');
   }, [router]);
 
@@ -64,22 +72,12 @@ export function GalleryDetail({ id }: { id: number }) {
       const stored = sessionStorage.getItem(LAST_LIST_URL_KEY);
       if (stored && !stored.startsWith('/gallery') && !stored.startsWith('/reader')) {
         backTargetRef.current = stored;
+        cameFromListRef.current = true;
       }
     } catch {
       backTargetRef.current = '/';
     }
   }, []);
-
-  useEffect(() => {
-    if (!isNativePlatform()) return;
-    if (history.state?.hipagoDetailGuard) return;
-    history.pushState({ ...(history.state ?? {}), hipagoDetailGuard: true }, '', window.location.href);
-    const onPopState = () => {
-      setTimeout(goBackToList, 0);
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [goBackToList]);
 
   useEffect(() => {
     if (renderedCount >= files.length) return;

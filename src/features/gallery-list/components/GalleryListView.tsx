@@ -78,13 +78,6 @@ export function GalleryListView() {
     gridRef.current?.scrollToPage(page);
   }, []);
 
-  useEffect(() => {
-    history.scrollRestoration = 'manual';
-    return () => {
-      history.scrollRestoration = 'auto';
-    };
-  }, []);
-
   // Debounced URL sync on scroll (200ms).
   // sortRef holds the latest sort so the scroll handler always uses the current
   // value without being re-subscribed on every sort change. Assigned in an

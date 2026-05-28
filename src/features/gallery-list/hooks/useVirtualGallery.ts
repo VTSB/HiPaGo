@@ -8,6 +8,32 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 import type { SortOrder } from '@/lib/utils/types';
 
 const MAX_ACTIVE_PAGES = 50;
+const TOTAL_LENGTH_CACHE_PREFIX = 'hipago:listTotalLength';
+
+function totalLengthCacheKey(language: string, sort: SortOrder): string {
+  return `${TOTAL_LENGTH_CACHE_PREFIX}:${language}:${sort}`;
+}
+
+function readCachedTotalLength(language: string, sort: SortOrder): number {
+  if (typeof sessionStorage === 'undefined') return 0;
+  try {
+    const raw = sessionStorage.getItem(totalLengthCacheKey(language, sort));
+    if (!raw) return 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeCachedTotalLength(language: string, sort: SortOrder, value: number): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(totalLengthCacheKey(language, sort), String(value));
+  } catch {
+    // sessionStorage unavailable; degrade silently.
+  }
+}
 
 async function fetchIdPage(language: string, pageIndex: number, sort: SortOrder) {
   const { idList, length } = await fetchBrowseIds(language, pageIndex, PAGE_SIZE, sort);
@@ -28,9 +54,12 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
   // Ratchet: once we've seen a totalLength, never report lower than that.
   // Prevents the virtualizer height from collapsing to 0 when pages are evicted
   // from neededPages during rapid scrolling (all evicted queries return data=undefined).
-  // Stored as state so we can use the render-phase setState pattern (no ref writes
-  // during render, no effect — react-hooks/refs and react-hooks/set-state-in-effect safe).
-  const [maxTotalLength, setMaxTotalLength] = useState(0);
+  // Seeded from sessionStorage so the container height is correct on cold mount
+  // — that's what lets native scroll restoration land at the right scrollTop
+  // before the first page query resolves.
+  const [maxTotalLength, setMaxTotalLength] = useState(() =>
+    readCachedTotalLength(language, sort),
+  );
 
   // Reset on sort/language change — track previous values to detect changes.
   // Using render-phase setState (calling setState during render) is the React-documented
@@ -41,7 +70,9 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
     setPrevSort(sort);
     setPrevLanguage(language);
     setNeededPages(new Set([0]));
-    setMaxTotalLength(0);
+    // Seed from the new key's cache so the container height for the
+    // newly-selected filter is correct synchronously.
+    setMaxTotalLength(readCachedTotalLength(language, sort));
   }
 
   const neededPagesArray = Array.from(neededPages);
@@ -71,6 +102,7 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
   // correct without reading/writing a ref during render (react-hooks/refs).
   if (totalLength > maxTotalLength) {
     setMaxTotalLength(totalLength);
+    writeCachedTotalLength(language, sort, totalLength);
   }
   const safeTotalLength = maxTotalLength > 0 ? maxTotalLength : totalLength;
 
