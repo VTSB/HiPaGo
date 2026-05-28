@@ -32,6 +32,7 @@ export function PageReader({
   const imageFormat = useSettingsStore((s) => s.imageFormat);
   const dualPage = useSettingsStore((s) => s.dualPage);
   const pointerStartRef = useRef<{ x: number; y: number; id: number } | null>(null);
+  const activePointersRef = useRef<Set<number>>(new Set());
   const suppressClickRef = useRef(false);
 
   useEffect(() => {
@@ -98,10 +99,19 @@ export function PageReader({
   };
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse') return;
+    activePointersRef.current.add(e.pointerId);
+    // A second concurrent finger means the user is pinching, not swiping.
+    // Abandon the swipe candidate so the trailing pointerup cannot fire
+    // a page change when the gesture ends.
+    if (activePointersRef.current.size > 1) {
+      pointerStartRef.current = null;
+      return;
+    }
     pointerStartRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    activePointersRef.current.delete(e.pointerId);
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
     if (!start || start.id !== e.pointerId) return;
@@ -122,11 +132,14 @@ export function PageReader({
   return (
     <div
       className="group relative flex min-h-screen cursor-pointer items-center justify-center"
-      style={{ touchAction: 'pan-y' }}
+      style={{ touchAction: 'pan-y pinch-zoom' }}
       onClick={handleClick}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
-      onPointerCancel={() => { pointerStartRef.current = null; }}
+      onPointerCancel={(e) => {
+        activePointersRef.current.delete(e.pointerId);
+        pointerStartRef.current = null;
+      }}
     >
       {/* Navigation affordance arrows */}
       {currentPage > 0 && (
