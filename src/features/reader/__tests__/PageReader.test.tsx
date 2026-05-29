@@ -314,3 +314,70 @@ describe('PageReader touch navigation', () => {
     expect(onPageChange).toHaveBeenCalledWith(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Snap carousel — 3-cell track, finger-following drag, prop-driven animation
+// ---------------------------------------------------------------------------
+describe('PageReader snap carousel', () => {
+  const big = Array.from({ length: 8 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+
+  async function mount(props: Partial<Parameters<typeof PageReader>[0]> = {}) {
+    const onPageChange = vi.fn();
+    const utils = render(
+      <PageReader images={big} currentPage={3} onPageChange={onPageChange} {...props} />,
+    );
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const reader = utils.container.firstElementChild as HTMLElement;
+    reader.setPointerCapture = vi.fn();
+    const track = utils.container.querySelector('[style*="translateX"]') as HTMLElement;
+    return { ...utils, onPageChange, reader, track };
+  }
+
+  it('renders a 3-cell track resting at translateX(calc(-100vw + 0px)) with no transition', async () => {
+    const { track } = await mount();
+    expect(track).not.toBeNull();
+    expect(track.style.transform).toContain('-100vw');
+    expect(track.style.transform).toContain('0px');
+    expect(track.style.transition).toBe('none');
+    // prev (2), current (3), next (4) = 3 cells
+    expect(track.children.length).toBe(3);
+  });
+
+  it('follows the finger horizontally during a drag (live offset, no transition)', async () => {
+    const { reader, track, onPageChange } = await mount();
+    fireEvent.pointerDown(reader, { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 100 });
+    fireEvent.pointerMove(reader, { pointerId: 1, pointerType: 'touch', clientX: 140, clientY: 108 });
+    // Track offset tracks the -60px horizontal delta, still no transition mid-drag.
+    expect(track.style.transform).toContain('-60px');
+    expect(track.style.transition).toBe('none');
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
+  it('snaps back (animates to 0, no nav) when the drag is below threshold', async () => {
+    const { reader, track, onPageChange } = await mount();
+    fireEvent.pointerDown(reader, { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 100 });
+    fireEvent.pointerMove(reader, { pointerId: 1, pointerType: 'touch', clientX: 182, clientY: 104 });
+    fireEvent.pointerUp(reader, { pointerId: 1, pointerType: 'touch', clientX: 182, clientY: 104 });
+    expect(onPageChange).not.toHaveBeenCalled();
+    expect(track.style.transform).toContain('0px');
+    expect(track.style.transition).toContain('300ms');
+  });
+
+  it('animates when the currentPage prop changes to an adjacent page', async () => {
+    const { track, rerender } = await mount();
+    await act(async () => {
+      rerender(<PageReader images={big} currentPage={4} onPageChange={vi.fn()} />);
+    });
+    // Adjacent change → transition engaged (sliding toward the next page).
+    expect(track.style.transition).toContain('300ms');
+  });
+
+  it('jumps instantly (no transition) on a far currentPage change', async () => {
+    const { track, rerender } = await mount();
+    await act(async () => {
+      rerender(<PageReader images={big} currentPage={0} onPageChange={vi.fn()} />);
+    });
+    expect(track.style.transition).toBe('none');
+    expect(track.style.transform).toContain('0px');
+  });
+});
