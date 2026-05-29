@@ -101,9 +101,18 @@ export function UpdateCheckCard() {
           </button>
         </div>
 
-        {/* Inline status row */}
+        {/*
+          Status slot — always rendered so the common single-line outcomes
+          (checking / upToDate / failed) fill pre-reserved space instead of
+          appearing on demand and pushing the rest of the page down. The
+          reserved min-height matches one compact status row; when idle the
+          slot is empty (no border/background) and reads as card padding.
+          The taller `available` / `installing` states may expand downward —
+          those are intentional, actionable content (out of scope for CLS).
+        */}
+        <div data-testid="update-status-slot" className="mt-4 min-h-12 sm:min-h-9">
         {status.kind === 'upToDate' && (
-          <div className="mt-4 flex min-h-12 items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300">
+          <div className="flex min-h-12 items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 20 20"
@@ -121,7 +130,7 @@ export function UpdateCheckCard() {
         )}
 
         {status.kind === 'available' && (
-          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 sm:rounded-md sm:px-3 sm:py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 sm:rounded-md sm:px-3 sm:py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
             <div className="flex items-center justify-between gap-3">
               <p className="text-base text-blue-800 sm:text-sm dark:text-blue-200">
                 <span className="font-mono font-medium">v{status.result.version}</span>{' '}
@@ -153,7 +162,7 @@ export function UpdateCheckCard() {
         )}
 
         {status.kind === 'installing' && (
-          <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 sm:rounded-md sm:px-3 sm:py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 sm:rounded-md sm:px-3 sm:py-3 dark:border-blue-900/60 dark:bg-blue-950/40">
             <p className="text-base text-blue-800 sm:text-sm dark:text-blue-200">
               {status.percent > 0
                 ? `${t('update.banner.downloading')} ${Math.round(status.percent)}%`
@@ -169,7 +178,7 @@ export function UpdateCheckCard() {
         )}
 
         {status.kind === 'failed' && (
-          <div className="mt-4 flex min-h-12 items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-base text-red-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-red-950/40 dark:text-red-300">
+          <div className="flex min-h-12 items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-base text-red-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-red-950/40 dark:text-red-300">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 20 20"
@@ -185,6 +194,7 @@ export function UpdateCheckCard() {
             {t('update.about.checkFailed')}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
