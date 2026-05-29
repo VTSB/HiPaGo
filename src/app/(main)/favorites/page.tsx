@@ -8,7 +8,7 @@ import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { DbErrorBanner } from '@/shared/components/DbErrorBanner';
 import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
-import { Spinner } from '@/shared/components/Spinner';
+import { DbStageSpinner } from '@/shared/components/DbStageSpinner';
 import { FilterBar } from '@/shared/components/FilterBar';
 import { getFavoriteIds } from '@/lib/db/gallery';
 import { filterFavoritesByTags } from '@/lib/db/search-local';
@@ -68,7 +68,7 @@ export default function FavoritesPage() {
       )}
 
       {activeLoading ? (
-        <div className="flex justify-center py-12"><Spinner size="md" /></div>
+        <DbStageSpinner />
       ) : totalCount === 0 ? (
         <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
           <svg

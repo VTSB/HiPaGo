@@ -80,6 +80,10 @@ const translations = {
     en: 'History and favorites are stored on this device and need the local database, which failed to start. Try restarting the app.',
     ko: '기록과 즐겨찾기는 이 기기에 저장되며 로컬 데이터베이스가 필요한데, 시작에 실패했습니다. 앱을 다시 시작해 보세요.',
   },
+  'db.preparing': {
+    en: 'Preparing database…',
+    ko: '데이터베이스 준비 중…',
+  },
 
   // Library (offline downloads)
   'library.title': { en: 'Library', ko: '라이브러리' },

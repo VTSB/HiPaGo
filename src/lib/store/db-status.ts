@@ -15,6 +15,9 @@ interface DbStatusState {
   syncError: string | null;
   /** Error message from a failed local-DB init (blocks history/favorites), or null. */
   dbError: string | null;
+  /** Current local-DB init step (e.g. "opening connection (capacitor)"), or null when idle/done.
+   *  Diagnostic only: on a hang the last stage stays set so the UI can show where it stuck. */
+  dbInitStage: string | null;
   setDbReady: (ready: boolean) => void;
   setSyncProgress: (progress: number) => void;
   setIsSyncing: (syncing: boolean) => void;
@@ -22,6 +25,7 @@ interface DbStatusState {
   setTagsStale: (stale: boolean) => void;
   setSyncError: (error: string | null) => void;
   setDbError: (error: string | null) => void;
+  setDbInitStage: (stage: string | null) => void;
 }
 
 export const useDbStatusStore = create<DbStatusState>()((set) => ({
@@ -32,6 +36,7 @@ export const useDbStatusStore = create<DbStatusState>()((set) => ({
   tagsStale: false,
   syncError: null,
   dbError: null,
+  dbInitStage: null,
   setDbReady: (ready) => set({ dbReady: ready }),
   setSyncProgress: (progress) => set({ syncProgress: progress }),
   setIsSyncing: (syncing) => set({ isSyncing: syncing }),
@@ -39,4 +44,5 @@ export const useDbStatusStore = create<DbStatusState>()((set) => ({
   setTagsStale: (stale) => set({ tagsStale: stale }),
   setSyncError: (error) => set({ syncError: error }),
   setDbError: (error) => set({ dbError: error }),
+  setDbInitStage: (stage) => set({ dbInitStage: stage }),
 }));

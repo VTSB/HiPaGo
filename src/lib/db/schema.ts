@@ -3,6 +3,19 @@ import type { DbAdapter } from './adapter';
 import { SCHEMA_SQL } from './schema-sql';
 import { runMigrations } from './migrations';
 import { isTauri, isCapacitor } from '@/lib/utils/platform';
+import { useDbStatusStore } from '@/lib/store/db-status';
+
+// Diagnostic only — record the current init step so a hang (which never throws,
+// so DbErrorBanner never fires) leaves the stuck stage visible in the UI. No
+// timeout/abort: the separate tag bulk-sync may legitimately be slow and is not
+// instrumented here.
+function setStage(stage: string | null): void {
+  try {
+    useDbStatusStore.getState().setDbInitStage(stage);
+  } catch {
+    /* store unavailable (non-React context) — diagnostics are best-effort */
+  }
+}
 
 // === DB Entity Interfaces ===
 
@@ -106,9 +119,12 @@ export async function initializeDatabase(): Promise<void> {
 
   _initPromise = (async () => {
     const adapter = await detectPlatformAdapter();
+    setStage('creating tables');
     await adapter.exec(SCHEMA_SQL);
+    setStage('running migrations');
     await runMigrations(adapter);
     setDb(adapter);
+    setStage(null);
   })();
 
   return _initPromise;
@@ -129,19 +145,24 @@ export async function detectPlatformAdapter(): Promise<DbAdapter> {
   // desktop to the Capacitor adapter, whose native SQLite plugin is absent off
   // device — that crash was silently swallowed and left history/favorites empty.
 
+  setStage('selecting adapter');
+
   // Tauri desktop (Tauri 2 global)
   if (isTauri()) {
     const { TauriAdapter } = await import('./adapters/tauri');
+    setStage('opening connection (tauri)');
     return TauriAdapter.create();
   }
 
   // Capacitor mobile (native only — isNativePlatform() is false on web)
   if (isCapacitor()) {
     const { CapacitorAdapter } = await import('./adapters/capacitor');
+    setStage('opening connection (capacitor)');
     return CapacitorAdapter.create();
   }
 
   // Browser — WASM SQLite with IndexedDB persistence
   const { WebAdapter } = await import('./adapters/web');
+  setStage('opening connection (web)');
   return WebAdapter.create();
 }

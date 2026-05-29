@@ -20,6 +20,7 @@ vi.mock('../adapters/web', () => ({
 }));
 
 import { detectPlatformAdapter } from '../schema';
+import { useDbStatusStore } from '@/lib/store/db-status';
 import { isTauri, isCapacitor } from '@/lib/utils/platform';
 import { TauriAdapter } from '../adapters/tauri';
 import { CapacitorAdapter } from '../adapters/capacitor';
@@ -43,6 +44,8 @@ describe('detectPlatformAdapter', () => {
     // Must NOT fall into the Capacitor path just because window.Capacitor exists.
     expect(CapacitorAdapter.create).not.toHaveBeenCalled();
     expect(TauriAdapter.create).not.toHaveBeenCalled();
+    // Records the diagnostic init stage (no logcat needed if it hangs).
+    expect(useDbStatusStore.getState().dbInitStage).toBe('opening connection (web)');
   });
 
   it('selects TauriAdapter when isTauri() is true', async () => {
@@ -60,5 +63,6 @@ describe('detectPlatformAdapter', () => {
     expect(adapter).toEqual({ kind: 'capacitor' });
     expect(CapacitorAdapter.create).toHaveBeenCalledOnce();
     expect(WebAdapter.create).not.toHaveBeenCalled();
+    expect(useDbStatusStore.getState().dbInitStage).toBe('opening connection (capacitor)');
   });
 });

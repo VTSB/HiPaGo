@@ -11,6 +11,7 @@ import { FilterBar } from '@/shared/components/FilterBar';
 import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { DbErrorBanner } from '@/shared/components/DbErrorBanner';
+import { DbStageSpinner } from '@/shared/components/DbStageSpinner';
 import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { useT } from '@/lib/i18n/useT';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -132,7 +133,7 @@ export default function HistoryPage() {
         )
       ) : (
         isLoading ? (
-          <div className="flex justify-center py-12"><Spinner size="md" /></div>
+          <DbStageSpinner />
         ) : totalCount === 0 ? (
           <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-14 w-14 text-zinc-300 dark:text-zinc-700" aria-hidden="true">
