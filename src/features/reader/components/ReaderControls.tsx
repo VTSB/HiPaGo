@@ -17,8 +17,6 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
   const t = useT();
   const dualPage = useSettingsStore((s) => s.dualPage);
   const setDualPage = useSettingsStore((s) => s.setDualPage);
-  const scrollWidth = useSettingsStore((s) => s.scrollWidth);
-  const setScrollWidth = useSettingsStore((s) => s.setScrollWidth);
 
   const startEditing = useCallback(() => {
     setEditValue(String(currentPage + 1));
@@ -100,25 +98,6 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
               )}
             </svg>
           </button>
-        )}
-        {mode === 'scroll' && (
-          <select
-            value={scrollWidth}
-            onChange={(e) => setScrollWidth(Number(e.target.value))}
-            className="rounded bg-white/10 px-1.5 py-1 text-xs text-zinc-300 outline-none hover:bg-white/20 [&>option]:bg-zinc-900 [&>option]:text-white"
-          >
-            <option value={10}>10%</option>
-            <option value={25}>25%</option>
-            <option value={50}>50%</option>
-            <option value={75}>75%</option>
-            <option value={100}>100%</option>
-            <option value={125}>125%</option>
-            <option value={150}>150%</option>
-            <option value={200}>200%</option>
-            <option value={300}>300%</option>
-            <option value={500}>500%</option>
-            <option value={0}>Full</option>
-          </select>
         )}
       </div>
     </div>

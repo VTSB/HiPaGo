@@ -363,4 +363,17 @@ describe('initLocaleOnce', () => {
       expect(useSettingsStore.getState().locale).toBe('en');
     });
   });
+
+  describe('scrollZoom', () => {
+    it('defaults to 1 (fit-to-width)', () => {
+      expect(useSettingsStore.getState().scrollZoom).toBe(1);
+    });
+
+    it('setScrollZoom updates the scale', () => {
+      useSettingsStore.getState().setScrollZoom(2.5);
+      expect(useSettingsStore.getState().scrollZoom).toBe(2.5);
+      useSettingsStore.getState().setScrollZoom(1);
+      expect(useSettingsStore.getState().scrollZoom).toBe(1);
+    });
+  });
 });

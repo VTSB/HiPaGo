@@ -12,7 +12,8 @@ interface SettingsStoreState {
   blurTags: string[];
   dualPage: boolean;
   gridColumns: number;
-  scrollWidth: number;
+  /** Scroll-mode zoom scale. 1 = fit container width; >1 enlarges (pan), <1 shrinks. */
+  scrollZoom: number;
   setLocale: (locale: Locale) => void;
   setLanguage: (language: string) => void;
   setTheme: (theme: 'light' | 'dark') => void;
@@ -20,7 +21,7 @@ interface SettingsStoreState {
   setImageFormat: (format: 'auto' | 'avif' | 'webp' | 'original') => void;
   setDualPage: (dual: boolean) => void;
   setGridColumns: (cols: number) => void;
-  setScrollWidth: (w: number) => void;
+  setScrollZoom: (z: number) => void;
   addBlurTag: (tag: string) => void;
   removeBlurTag: (tag: string) => void;
 }
@@ -36,7 +37,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       blurTags: ['male:yaoi'],
       dualPage: false,
       gridColumns: 0,
-      scrollWidth: 100,
+      scrollZoom: 1,
       setLocale: (locale) => set({ locale }),
       setLanguage: (language) => set({ language }),
       setTheme: (theme) => set({ theme }),
@@ -44,7 +45,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setImageFormat: (format) => set({ imageFormat: format }),
       setDualPage: (dual) => set({ dualPage: dual }),
       setGridColumns: (cols) => set({ gridColumns: cols }),
-      setScrollWidth: (w) => set({ scrollWidth: w }),
+      setScrollZoom: (z) => set({ scrollZoom: z }),
       addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),

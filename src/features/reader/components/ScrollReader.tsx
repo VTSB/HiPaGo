@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, type RefCallback, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, type RefCallback, type RefObject } from 'react';
 import type { GalleryImage, GgConfig } from '@/lib/utils/types';
 import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
+
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 6;
+const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
 export function ScrollReader({
   images,
@@ -113,20 +117,88 @@ export function ScrollReader({
     return () => observer.disconnect();
   }, [urls.length]);
 
-  const scrollWidth = useSettingsStore((s) => s.scrollWidth);
+  const scrollZoom = useSettingsStore((s) => s.scrollZoom);
+
+  // Desktop zoom + pan. No platform detection — the input type selects behavior:
+  //  - Ctrl/⌘ + wheel (also how browsers deliver trackpad pinch) → cursor-
+  //    anchored zoom. Plain wheel / two-finger trackpad drag → native scroll.
+  //  - Mouse click-drag → hand-tool pan. Double-click → reset to fit.
+  // Touch fires none of these, so mobile stays fully native (pinch + scroll).
+  const zoomAnchorRef = useRef<{ left: number; top: number } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    const el = localRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return; // plain scroll stays native
+      e.preventDefault();
+      const { scrollZoom: oldZoom, setScrollZoom } = useSettingsStore.getState();
+      const newZoom = clampZoom(oldZoom * Math.exp(-e.deltaY * 0.0015));
+      if (newZoom === oldZoom) return;
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const ratio = newZoom / oldZoom;
+      // Keep the content point under the cursor fixed across the zoom.
+      zoomAnchorRef.current = {
+        left: (el.scrollLeft + cx) * ratio - cx,
+        top: (el.scrollTop + cy) * ratio - cy,
+      };
+      setScrollZoom(newZoom);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      dragRef.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+      el.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      e.preventDefault();
+      el.scrollLeft = d.left - (e.clientX - d.x);
+      el.scrollTop = d.top - (e.clientY - d.y);
+    };
+    const endDrag = (e: PointerEvent) => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    };
+    const onDblClick = () => useSettingsStore.getState().setScrollZoom(1);
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', endDrag);
+    el.addEventListener('pointercancel', endDrag);
+    el.addEventListener('dblclick', onDblClick);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', endDrag);
+      el.removeEventListener('pointercancel', endDrag);
+      el.removeEventListener('dblclick', onDblClick);
+    };
+  }, [urls.length]);
+
+  // Apply the cursor-anchored scroll target once the zoom width change reflows.
+  useLayoutEffect(() => {
+    const el = localRef.current;
+    const anchor = zoomAnchorRef.current;
+    if (!el || !anchor) return;
+    el.scrollLeft = anchor.left;
+    el.scrollTop = anchor.top;
+    zoomAnchorRef.current = null;
+  }, [scrollZoom]);
 
   if (!urls.length) return null;
 
-  // 100% base = 56/1.15 ≈ 48.7rem, so that 115% ≈ 56rem (original max-w-4xl).
-  // 0 = Full (no constraint).
-  const BASE_REM = 56 / 1.15;
-  const innerStyle: React.CSSProperties = scrollWidth === 0
-    ? {}
-    : { maxWidth: `${BASE_REM * scrollWidth / 100}rem` };
-
   return (
-    <div ref={setRef} className="h-screen overflow-y-auto">
-      <div className="mx-auto" style={innerStyle}>
+    <div ref={setRef} className="h-screen overflow-auto cursor-grab active:cursor-grabbing">
+      <div className="mx-auto" style={{ width: `${scrollZoom * 100}%` }}>
         {images.map((img, i) => (
           <div key={`${img.hash}-${i}`} data-page-index={i}>
             <AbortableImage src={urls[i]} alt={`Page ${i + 1}`} className="w-full select-none" loading="lazy" draggable={false} style={{ aspectRatio: `${img.width} / ${img.height}` }} />
