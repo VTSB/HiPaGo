@@ -10,6 +10,7 @@ import { Spinner } from '@/shared/components/Spinner';
 import { FilterBar } from '@/shared/components/FilterBar';
 import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
+import { DbErrorBanner } from '@/shared/components/DbErrorBanner';
 import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { useT } from '@/lib/i18n/useT';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -106,6 +107,8 @@ export default function HistoryPage() {
           {!isLoading && <span className="ml-2 text-lg font-normal text-zinc-500">({totalCount.toLocaleString()})</span>}
         </h1>
       </div>
+
+      <DbErrorBanner />
 
       {/* Filter bar — hidden when history is empty and no filter active. */}
       {showFilterBar && (

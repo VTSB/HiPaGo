@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { GalleryGridById } from '@/features/gallery-list/components/GalleryGrid';
 import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
+import { DbErrorBanner } from '@/shared/components/DbErrorBanner';
 import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { Spinner } from '@/shared/components/Spinner';
 import { FilterBar } from '@/shared/components/FilterBar';
@@ -54,6 +55,8 @@ export default function FavoritesPage() {
           {!activeLoading && <span className="ml-2 text-lg font-normal text-zinc-500">({totalCount.toLocaleString()})</span>}
         </h1>
       </div>
+
+      <DbErrorBanner />
 
       {/* Hide FilterBar entirely when the list is empty and no filter is
           active — the duplicate search input on top of an empty page was

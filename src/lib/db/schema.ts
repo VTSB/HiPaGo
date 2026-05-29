@@ -2,6 +2,7 @@ import { setDb, isDbInitialized, setEnsureInit } from './adapter';
 import type { DbAdapter } from './adapter';
 import { SCHEMA_SQL } from './schema-sql';
 import { runMigrations } from './migrations';
+import { isTauri, isCapacitor } from '@/lib/utils/platform';
 
 // === DB Entity Interfaces ===
 
@@ -116,24 +117,31 @@ export async function initializeDatabase(): Promise<void> {
 // Register initializer so ensureDb() can auto-init
 setEnsureInit(() => initializeDatabase());
 
-async function detectPlatformAdapter(): Promise<DbAdapter> {
-  // Tauri desktop
-  if (typeof window !== 'undefined' && '__TAURI__' in window) {
+export async function detectPlatformAdapter(): Promise<DbAdapter> {
+  if (typeof window === 'undefined') {
+    throw new Error('No SQLite platform detected.');
+  }
+
+  // Use the canonical platform predicates, NOT raw global existence checks:
+  // `@capacitor/core` injects `window.Capacitor` on plain web too, and Tauri 2
+  // exposes `__TAURI_INTERNALS__` (not the v1 `__TAURI__`). A bare `'Capacitor'
+  // in window` / `'__TAURI__' in window` check therefore mis-routes web AND
+  // desktop to the Capacitor adapter, whose native SQLite plugin is absent off
+  // device — that crash was silently swallowed and left history/favorites empty.
+
+  // Tauri desktop (Tauri 2 global)
+  if (isTauri()) {
     const { TauriAdapter } = await import('./adapters/tauri');
     return TauriAdapter.create();
   }
 
-  // Capacitor mobile
-  if (typeof window !== 'undefined' && 'Capacitor' in window) {
+  // Capacitor mobile (native only — isNativePlatform() is false on web)
+  if (isCapacitor()) {
     const { CapacitorAdapter } = await import('./adapters/capacitor');
     return CapacitorAdapter.create();
   }
 
   // Browser — WASM SQLite with IndexedDB persistence
-  if (typeof window !== 'undefined') {
-    const { WebAdapter } = await import('./adapters/web');
-    return WebAdapter.create();
-  }
-
-  throw new Error('No SQLite platform detected.');
+  const { WebAdapter } = await import('./adapters/web');
+  return WebAdapter.create();
 }

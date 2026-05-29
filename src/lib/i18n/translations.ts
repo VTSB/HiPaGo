@@ -72,6 +72,14 @@ const translations = {
   'history.lastWeek': { en: 'Last Week', ko: '지난주' },
   'history.thisMonth': { en: 'This Month', ko: '이번 달' },
   'history.older': { en: 'Older', ko: '더 이전' },
+  'db.error.title': {
+    en: 'Local database unavailable',
+    ko: '로컬 데이터베이스를 사용할 수 없습니다',
+  },
+  'db.error.desc': {
+    en: 'History and favorites are stored on this device and need the local database, which failed to start. Try restarting the app.',
+    ko: '기록과 즐겨찾기는 이 기기에 저장되며 로컬 데이터베이스가 필요한데, 시작에 실패했습니다. 앱을 다시 시작해 보세요.',
+  },
 
   // Library (offline downloads)
   'library.title': { en: 'Library', ko: '라이브러리' },

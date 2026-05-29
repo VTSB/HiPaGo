@@ -26,14 +26,21 @@ export function DbInitializer() {
     initializeDatabase()
       .then(() => checkDbReady())
       .then((ready) => {
+        // Init succeeded — clear any prior error so the history/favorites
+        // pages stop showing the failure banner.
+        useDbStatusStore.getState().setDbError(null);
         cleanupStaleCache().catch((e) => console.warn('[db] Cache cleanup failed:', e));
         if (!ready) {
           runTagSync();
         }
       })
       .catch((err) => {
-        console.warn('[db] Database initialization skipped:', err.message);
-        // dbReady stays false — app uses remote API
+        // Surface the failure instead of swallowing it: history/favorites are
+        // local-DB-only, so a silent init failure leaves them mysteriously
+        // empty. The pages read dbError to show an actionable message.
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn('[db] Database initialization failed:', message);
+        useDbStatusStore.getState().setDbError(message);
       });
   }, []);
 

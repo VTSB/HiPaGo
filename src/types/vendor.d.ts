@@ -43,6 +43,19 @@ declare module '@tauri-apps/plugin-fs' {
 
 declare module '@capacitor-community/sqlite' {
   export const CapacitorSQLite: unknown;
+  interface SQLiteDBConnection {
+    open(): Promise<void>;
+    execute(sql: string, params?: unknown[]): Promise<void>;
+    run(
+      sql: string,
+      params?: unknown[],
+    ): Promise<{ changes?: { changes: number; lastId: number } }>;
+    query(
+      sql: string,
+      params?: unknown[],
+    ): Promise<{ values?: unknown[] }>;
+    close(): Promise<void>;
+  }
   export class SQLiteConnection {
     constructor(sqlite: unknown);
     createConnection(
@@ -51,19 +64,16 @@ declare module '@capacitor-community/sqlite' {
       mode: string,
       version: number,
       readonly: boolean,
-    ): Promise<{
-      open(): Promise<void>;
-      execute(sql: string, params?: unknown[]): Promise<void>;
-      run(
-        sql: string,
-        params?: unknown[],
-      ): Promise<{ changes?: { changes: number; lastId: number } }>;
-      query(
-        sql: string,
-        params?: unknown[],
-      ): Promise<{ values?: unknown[] }>;
-      close(): Promise<void>;
-    }>;
+    ): Promise<SQLiteDBConnection>;
+    retrieveConnection(
+      database: string,
+      readonly: boolean,
+    ): Promise<SQLiteDBConnection>;
+    isConnection(
+      database: string,
+      readonly: boolean,
+    ): Promise<{ result?: boolean }>;
+    checkConnectionsConsistency(): Promise<{ result?: boolean }>;
   }
 }
 

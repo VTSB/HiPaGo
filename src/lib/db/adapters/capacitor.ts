@@ -13,13 +13,18 @@ export class CapacitorAdapter implements DbAdapter {
       '@capacitor-community/sqlite'
     );
     const sqlite = new SQLiteConnection(CapacitorSQLite);
-    const db = await sqlite.createConnection(
-      dbName,
-      false,
-      'no-encryption',
-      1,
-      false,
-    );
+
+    // Acquire the connection idempotently. After an app reload the JS bridge
+    // may still hold a connection of this name; calling createConnection again
+    // throws "Connection <name> already exists" and the whole DB init fails
+    // (history/favorites then silently break). Reuse the existing connection
+    // when present, otherwise create a fresh one.
+    await sqlite.checkConnectionsConsistency().catch(() => undefined);
+    const existing = (await sqlite.isConnection(dbName, false)).result;
+    const db = existing
+      ? await sqlite.retrieveConnection(dbName, false)
+      : await sqlite.createConnection(dbName, false, 'no-encryption', 1, false);
+
     await db.open();
     await db.execute('PRAGMA journal_mode = WAL');
     await db.execute('PRAGMA foreign_keys = ON');
