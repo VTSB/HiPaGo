@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { isCapacitor, isTauri } from '@/lib/utils/platform';
+import { Spinner } from '@/shared/components/Spinner';
 
 interface AbortableImageProps {
   src: string;
@@ -18,6 +19,18 @@ interface AbortableImageProps {
    * visible page loads (fetchPriority="low").
    */
   preload?: boolean;
+  /**
+   * When true, renders a centered loading spinner (absolutely positioned in the
+   * nearest positioned ancestor) while the image is visible but not yet loaded
+   * and not failed. Off by default so grid/card call-sites are unchanged.
+   */
+  spinner?: boolean;
+  /**
+   * Maps to the native <img fetchpriority> attribute. The reader passes "high"
+   * for the currently visible page so it is not starved by lower-priority
+   * preload requests sharing the CDN connection pool.
+   */
+  fetchPriority?: 'high' | 'low' | 'auto';
 }
 
 const CDN_HOST_SUFFIX = '.gold-usergeneratedcontent.net';
@@ -99,19 +112,54 @@ async function fetchNativeImageObjectUrl(src: string): Promise<string> {
   return promise;
 }
 
-export function preloadImageSource(src: string): Promise<void> {
+export function preloadImageSource(src: string, signal?: AbortSignal): Promise<void> {
   if (loadedSrcCache.has(src)) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
   if (shouldUseNativeImageFetch(src)) {
-    return fetchNativeImageObjectUrl(src).then(() => undefined);
+    // The native bridge fetch isn't backed by the browser connection pool, so a
+    // hard cancel isn't needed for slot-starvation; just short-circuit the JS
+    // waiter when navigation aborts so the caller's queue can advance.
+    if (!signal) return fetchNativeImageObjectUrl(src).then(() => undefined);
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      fetchNativeImageObjectUrl(src)
+        .then(() => {
+          signal.removeEventListener('abort', onAbort);
+          resolve();
+        })
+        .catch((err) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(err);
+        });
+    });
   }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.fetchPriority = 'low';
+    const detach = () => {
+      img.onload = null;
+      img.onerror = null;
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      // Clearing src aborts the in-flight HTTP request and frees the per-host
+      // connection slot — without this, warm requests stalled by the throttling
+      // CDN pin every slot and the visible page never loads.
+      img.src = '';
+      detach();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
     img.onload = () => {
       loadedSrcCache.add(src);
+      detach();
       resolve();
     };
-    img.onerror = reject;
+    img.onerror = () => {
+      detach();
+      reject(new Error(`preload failed: ${src}`));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     img.src = src;
   });
 }
@@ -133,10 +181,12 @@ export function __resetAbortableImageCacheForTests() {
  * - Once an image has fully loaded it is never cleared (even if scrolled away).
  * - `loading="eager"` bypasses the observer and loads immediately.
  */
-export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable, onPermanentError, preload = false }: AbortableImageProps) {
+export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable, onPermanentError, preload = false, spinner = false, fetchPriority }: AbortableImageProps) {
   const imgRef = useRef<HTMLImageElement>(null);
   const mountedRef = useRef(true);
-  const loadedRef = useRef(false);
+  // Seed from the cache: a src the browser already has is "loaded", so it is
+  // never treated as an abortable in-flight request on re-mount.
+  const loadedRef = useRef(loadedSrcCache.has(src));
   const retryCountRef = useRef(0);
   const needsNativeImageFetch = shouldUseNativeImageFetch(src);
   const [tauriObjectUrl, setTauriObjectUrl] = useState<{ src: string; url: string } | null>(() => {
@@ -210,9 +260,9 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   // Reset the internal tracking refs when src/loading/preload changes.
   // Done in a separate effect (not during render) to satisfy react-hooks/refs.
   useEffect(() => {
-    loadedRef.current = false;
+    loadedRef.current = loadedSrcCache.has(src);
     retryCountRef.current = 0;
-  }, [effectiveSrc, loading, preload]);
+  }, [effectiveSrc, loading, preload, src]);
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
@@ -280,10 +330,13 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       ([entry]) => {
         if (entry.isIntersecting) {
           setVisible(true);
-        } else if (!loadedRef.current) {
-          // Image left viewport before finishing — abort the request
-          setVisible(false);
         }
+        // Deliberately NO abort-on-leave: clearing src for a not-yet-loaded
+        // image raced load-completion and left images permanently blank when
+        // many cards toggled at once (non-virtualized related grid, list
+        // re-mount, fast scroll). Off-screen virtualized rows are unmounted by
+        // their virtualizer, which already cancels those in-flight requests, so
+        // dropping src here bought almost nothing and cost correctness.
       },
       { rootMargin: '400px' }, // start loading slightly before entering viewport
     );
@@ -331,19 +384,34 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     );
   }
 
+  // Spinner is shown while the image is meant to be on screen (visible) but the
+  // browser hasn't painted it yet. `failed` is already handled above, so here
+  // it only ever covers the genuine loading window.
+  const showSpinner = spinner && visible && !loaded;
   return (
-    // Custom abortable-fetch image; next/image cannot host the abort logic.
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      ref={imgRef}
-      src={visible ? effectiveSrc ?? undefined : undefined}
-      alt={alt}
-      className={className}
-      loading={loading === 'eager' ? 'eager' : undefined}
-      style={{ ...style, opacity: loaded ? undefined : 0 }}
-      draggable={draggable}
-      onLoad={handleLoad}
-      onError={handleError}
-    />
+    <>
+      {showSpinner && (
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+          aria-hidden="true"
+        >
+          <Spinner size="md" />
+        </div>
+      )}
+      {/* Custom abortable-fetch image; next/image cannot host the abort logic. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={imgRef}
+        src={visible ? effectiveSrc ?? undefined : undefined}
+        alt={alt}
+        className={className}
+        loading={loading === 'eager' ? 'eager' : undefined}
+        fetchPriority={fetchPriority}
+        style={{ ...style, opacity: loaded ? undefined : 0 }}
+        draggable={draggable}
+        onLoad={handleLoad}
+        onError={handleError}
+      />
+    </>
   );
 }

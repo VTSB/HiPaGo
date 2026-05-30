@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { useT } from '@/lib/i18n/useT';
 
@@ -11,8 +12,21 @@ import { useT } from '@/lib/i18n/useT';
  */
 export function DbErrorBanner() {
   const dbError = useDbStatusStore((s) => s.dbError);
+  const dbInitStage = useDbStatusStore((s) => s.dbInitStage);
   const t = useT();
+  const [copied, setCopied] = useState(false);
   if (!dbError) return null;
+
+  const diagnostic = `${dbInitStage ? `[${dbInitStage}] ` : ''}${dbError}`;
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(diagnostic);
+    } catch {
+      window.prompt(t('db.error.copyPrompt'), diagnostic);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div
@@ -40,6 +54,19 @@ export function DbErrorBanner() {
           <p className="mt-0.5 text-sm leading-snug text-amber-700 dark:text-amber-300/90">
             {t('db.error.desc')}
           </p>
+          {/* Surface the concrete failure so an on-device hang/crash is
+              diagnosable without logcat: the actual exception message and the
+              init step it died on. */}
+          <pre className="mt-2 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-amber-100/70 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200/90">
+            {diagnostic}
+          </pre>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="mt-2 inline-flex min-h-9 items-center rounded-md border border-amber-400 bg-amber-100 px-3 text-xs font-medium text-amber-900 active:bg-amber-200 dark:border-amber-700 dark:bg-amber-900/50 dark:text-amber-100"
+          >
+            {copied ? t('db.error.copied') : t('db.error.copy')}
+          </button>
         </div>
       </div>
     </div>

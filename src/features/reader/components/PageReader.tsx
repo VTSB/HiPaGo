@@ -106,20 +106,49 @@ export function PageReader({
     // Skip JS-Image preloading for offline (blob) URLs — they are already in
     // memory so there is nothing to warm and no network request to abort.
     if (offlineUrls) return;
-    const start = Math.max(0, currentPage - PRELOAD_BEHIND);
     const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
+    const start = Math.max(0, currentPage - PRELOAD_BEHIND);
     const skip = new Set(dualPage ? [currentPage, currentPage + 1] : [currentPage]);
+
+    // Warm nearest-first, forward-biased (readers move forward): +1, +2, …
+    // ahead, then -1, -2, … behind. Order matters because we cap concurrency.
+    const queue: string[] = [];
+    for (let i = currentPage + 1; i <= end; i++) if (!skip.has(i)) queue.push(urls[i]);
+    for (let i = currentPage - 1; i >= start; i--) if (!skip.has(i)) queue.push(urls[i]);
+
+    // Cap in-flight warming requests. The visible page's <img> shares the CDN's
+    // small connection pool; firing all ~20 preloads at once let low-priority
+    // warming starve the page the user is actually looking at (stuck "loading
+    // forever"). MAX_PRELOAD leaves slots free for the high-priority visible
+    // image. No timeout — slow syncs are allowed to finish.
+    const MAX_PRELOAD = 4;
+    // Abort warms for the page we leave: stalled CDN requests otherwise hold the
+    // per-host connection slots forever, permanently starving the next visible
+    // page into "loading". Aborting on navigation frees those slots at once.
+    const controller = new AbortController();
     let cancelled = false;
-    for (let i = start; i <= end; i++) {
-      if (skip.has(i)) continue;
-      preloadImageSource(urls[i]).catch(() => {
-        if (!cancelled) {
-          // Best-effort warming only. Visible image load still owns user-facing errors.
-        }
-      });
-    }
+    let active = 0;
+    let next = 0;
+    const pump = () => {
+      while (!cancelled && active < MAX_PRELOAD && next < queue.length) {
+        const url = queue[next++];
+        active += 1;
+        preloadImageSource(url, controller.signal)
+          .catch(() => {
+            // Best-effort warming only (aborted or failed). Visible image load
+            // owns user-facing errors.
+          })
+          .finally(() => {
+            active -= 1;
+            if (!cancelled) pump();
+          });
+      }
+    };
+    pump();
+
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [urls, currentPage, dualPage, offlineUrls]);
 
@@ -218,10 +247,17 @@ export function PageReader({
     </div>
   );
 
+  // The slide the reader is currently parked on. Its image gets fetchPriority
+  // "high" so it wins CDN connection slots over the low-priority preloads of
+  // surrounding pages — otherwise the visible page can queue behind warming
+  // requests and appear stuck "loading forever".
+  const currentSlide = Math.floor(currentPage / step);
+
   const renderSlide = (slideIndex: number) => {
     const pageIdx = slideIndex * step;
     const secondIdx = dualPage ? pageIdx + 1 : -1;
     const hasSecond = dualPage && secondIdx < images.length;
+    const priority = slideIndex === currentSlide ? 'high' : undefined;
     return (
       <div className={dualPage ? 'flex items-center justify-center gap-1' : ''}>
         <AbortableImage
@@ -229,6 +265,8 @@ export function PageReader({
           alt={`Page ${pageIdx + 1}`}
           draggable={false}
           loading="eager"
+          spinner
+          fetchPriority={priority}
           // On <sm we drop max-h so the image fills the viewport width
           // (portrait phones + portrait manga → no big black bands). The slide
           // scrolls vertically if the image is taller than the viewport.
@@ -242,6 +280,8 @@ export function PageReader({
             alt={`Page ${secondIdx + 1}`}
             draggable={false}
             loading="eager"
+            spinner
+            fetchPriority={priority}
             className="pointer-events-none max-h-screen max-w-[50vw] select-none object-contain"
           />
         )}
@@ -273,6 +313,10 @@ export function PageReader({
               width: vi.size,
               transform: `translateX(${vi.start}px)`,
               scrollSnapAlign: 'start',
+              // Force the scroll to stop at every page: without this a fast
+              // flick's momentum skips past several snap points and jumps
+              // multiple pages at once. `always` snaps exactly one page per swipe.
+              scrollSnapStop: 'always',
             }}
           >
             {renderSlide(vi.index)}

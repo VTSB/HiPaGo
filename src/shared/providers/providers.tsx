@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DbInitializer } from '@/shared/components/DbInitializer';
+import { DbErrorOverlay } from '@/shared/components/DbErrorOverlay';
 import { initLocaleOnce, useSettingsStore } from '@/lib/store/settings';
 import { AndroidBackButtonProvider } from '@/shared/providers/AndroidBackButtonProvider';
 
@@ -42,6 +43,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <AndroidBackButtonProvider>
         <DbInitializer />
+        <DbErrorOverlay />
         {children}
       </AndroidBackButtonProvider>
     </QueryClientProvider>

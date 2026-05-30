@@ -9,25 +9,60 @@ export class CapacitorAdapter implements DbAdapter {
   private db: any;
 
   static async create(dbName: string = 'hipago'): Promise<CapacitorAdapter> {
-    const { CapacitorSQLite, SQLiteConnection } = await import(
-      '@capacitor-community/sqlite'
+    // Wrap every native step so any failure throws an Error whose message names
+    // the exact step. Capacitor's native rejections are otherwise opaque on
+    // device (no logcat), and DbErrorBanner surfaces this message verbatim.
+    const step = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`capacitor: ${name} failed: ${msg}`);
+      }
+    };
+
+    const { CapacitorSQLite, SQLiteConnection } = await step(
+      'import plugin',
+      () => import('@capacitor-community/sqlite'),
     );
     const sqlite = new SQLiteConnection(CapacitorSQLite);
 
-    // Acquire the connection idempotently. After an app reload the JS bridge
-    // may still hold a connection of this name; calling createConnection again
-    // throws "Connection <name> already exists" and the whole DB init fails
-    // (history/favorites then silently break). Reuse the existing connection
-    // when present, otherwise create a fresh one.
+    // Acquire the connection resiliently. After an app reload the JS bridge may
+    // still hold a connection of this name; a blind createConnection throws
+    // "Connection <name> already exists" and the whole DB init fails
+    // (history/favorites then silently break). Conversely, checkConnectionsConsistency
+    // can mark a name as a connection while the JS handle is gone, so a blind
+    // retrieveConnection can also fail. Try the likely path first, fall back to
+    // the other.
     await sqlite.checkConnectionsConsistency().catch(() => undefined);
-    const existing = (await sqlite.isConnection(dbName, false)).result;
-    const db = existing
-      ? await sqlite.retrieveConnection(dbName, false)
-      : await sqlite.createConnection(dbName, false, 'no-encryption', 1, false);
+    const existing = await step(
+      'isConnection',
+      async () => (await sqlite.isConnection(dbName, false)).result,
+    );
 
-    await db.open();
-    await db.execute('PRAGMA journal_mode = WAL');
-    await db.execute('PRAGMA foreign_keys = ON');
+    const fresh = () =>
+      sqlite.createConnection(dbName, false, 'no-encryption', 1, false);
+    const reuse = () => sqlite.retrieveConnection(dbName, false);
+
+    let db;
+    if (existing) {
+      try {
+        db = await reuse();
+      } catch {
+        db = await step('createConnection (after retrieve failed)', fresh);
+      }
+    } else {
+      try {
+        db = await fresh();
+      } catch {
+        // Most likely "already exists" — a native connection without a JS handle.
+        db = await step('retrieveConnection (after create failed)', reuse);
+      }
+    }
+
+    await step('open', () => db.open());
+    await step('PRAGMA journal_mode=WAL', () => db.execute('PRAGMA journal_mode = WAL'));
+    await step('PRAGMA foreign_keys=ON', () => db.execute('PRAGMA foreign_keys = ON'));
     return new CapacitorAdapter(db);
   }
 

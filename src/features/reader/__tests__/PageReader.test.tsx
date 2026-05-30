@@ -62,6 +62,12 @@ const makeImage = (name: string): GalleryImage => ({
 const images = [makeImage('001'), makeImage('002'), makeImage('003')];
 const fakeGgConfig = { b: 0, m: 0 };
 
+// The reader caps concurrent preloads, so a window only fully warms across
+// several microtask rounds (load → finally → pump → next). Flush generously.
+async function drainPreloads() {
+  for (let i = 0; i < 80; i++) await Promise.resolve();
+}
+
 beforeEach(() => {
   mockObserve.mockClear();
   mockDisconnect.mockClear();
@@ -134,7 +140,13 @@ describe('PageReader preload window', () => {
       private _record: { srcs: string[] };
       constructor() { this._record = { srcs: [] }; createdImages.push(this._record); }
       get src() { return this._src; }
-      set src(v: string) { this._src = v; this._record.srcs.push(v); }
+      set src(v: string) {
+        this._src = v;
+        this._record.srcs.push(v);
+        // Auto-resolve so the (now concurrency-capped) preload pump drains the
+        // whole window across microtasks — mirrors a real successful load.
+        queueMicrotask(() => this.onload?.());
+      }
     }
     vi.stubGlobal('Image', MockImage);
   });
@@ -143,7 +155,7 @@ describe('PageReader preload window', () => {
   it('warms surrounding pages via JS Image() (no DOM <img data-preload>)', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { container } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
     expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
     expect(createdImages.length).toBe(20);
     const expected = [15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35].map(
@@ -156,18 +168,18 @@ describe('PageReader preload window', () => {
   it('clamps preload range at start boundary', async () => {
     const images10 = Array.from({ length: 10 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     render(<PageReader images={images10} currentPage={0} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
     expect(createdImages.length).toBe(9);
   });
 
   it('warms the new preload window after navigation without DOM preload nodes', async () => {
     const images25 = Array.from({ length: 25 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { container, rerender } = render(<PageReader images={images25} currentPage={5} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
     const initialCount = createdImages.length;
     expect(initialCount).toBeGreaterThan(0);
     rerender(<PageReader images={images25} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await drainPreloads(); });
     expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
     expect(createdImages.length).toBeGreaterThan(initialCount);
     expect(createdImages.map((r) => r.srcs.at(-1))).toContain('https://cdn.example.com/024.jpg');
@@ -201,6 +213,25 @@ describe('PageReader native scroll-snap', () => {
     expect(scroller.className).toContain('overflow-x-auto');
   });
 
+  it('marks each slide scroll-snap-stop:always so a fast swipe advances exactly one page', async () => {
+    const { container } = await mount(0);
+    const slides = container.querySelectorAll('[data-slide-index]');
+    expect(slides.length).toBeGreaterThan(0);
+    for (const slide of Array.from(slides)) {
+      expect((slide as HTMLElement).style.scrollSnapStop).toBe('always');
+    }
+  });
+
+  it('gives the current page image fetchPriority="high" and leaves others default', async () => {
+    const { container } = await mount(0);
+    const slides = container.querySelectorAll('[data-slide-index]');
+    expect(slides.length).toBeGreaterThan(1);
+    const currentImg = slides[0].querySelector('img') as HTMLImageElement;
+    expect(currentImg.getAttribute('fetchpriority')).toBe('high');
+    const otherImg = slides[1].querySelector('img') as HTMLImageElement;
+    expect(otherImg.getAttribute('fetchpriority')).toBeNull();
+  });
+
   it('only mounts a windowed subset of slides for a large gallery', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { container } = await mount(0, images50);
@@ -219,5 +250,73 @@ describe('PageReader native scroll-snap', () => {
     const { scroller, onPageChange } = await mount(2);
     fireEvent.click(scroller, { clientX: 100, clientY: 400 });
     expect(onPageChange).toHaveBeenCalledWith(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Preload concurrency cap — the visible page must not be starved by a burst of
+// warming requests saturating the CDN connection pool ("loading forever").
+// ---------------------------------------------------------------------------
+describe('PageReader preload concurrency cap', () => {
+  let peak: number;
+  let active: number;
+  let created: number;
+  let cleared: number;
+  let OriginalImage: typeof Image;
+
+  beforeEach(() => {
+    peak = 0; active = 0; created = 0; cleared = 0;
+    OriginalImage = globalThis.Image;
+    class MockImage {
+      private _src = '';
+      fetchPriority = '';
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        // Never resolves: these requests stay "in flight" so we can observe the
+        // peak number the pump allows concurrently and that abort clears src.
+        created += 1;
+        active += 1;
+        peak = Math.max(peak, active);
+      }
+      get src() { return this._src; }
+      set src(v: string) {
+        this._src = v;
+        if (v === '') cleared += 1; // abort path sets src='' to cancel the fetch
+      }
+    }
+    vi.stubGlobal('Image', MockImage);
+  });
+  afterEach(() => { vi.stubGlobal('Image', OriginalImage); });
+
+  it('never fires more than 4 preload requests in flight at once', async () => {
+    const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    // With no load events firing, the pump fills exactly the cap and waits.
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(created).toBe(4);
+  });
+
+  it('aborts in-flight warms on unmount so connection slots are freed', async () => {
+    const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const { unmount } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    expect(created).toBe(4);
+    expect(cleared).toBe(0); // still in flight
+    unmount();
+    // Effect cleanup aborts the controller → every in-flight warm clears its src.
+    expect(cleared).toBe(4);
+  });
+
+  it('aborts the previous page warms when navigating to a new page', async () => {
+    const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const { rerender } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    expect(created).toBe(4);
+    rerender(<PageReader images={images50} currentPage={30} onPageChange={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    // The 4 warms from page 20 were aborted (src cleared) when the effect re-ran.
+    expect(cleared).toBe(4);
   });
 });

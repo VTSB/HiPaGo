@@ -84,6 +84,10 @@ const translations = {
     en: 'Preparing database…',
     ko: '데이터베이스 준비 중…',
   },
+  'db.error.copy': { en: 'Copy error', ko: '에러 복사' },
+  'db.error.copied': { en: 'Copied', ko: '복사됨' },
+  'db.error.copyPrompt': { en: 'Copy this error:', ko: '이 에러를 복사하세요:' },
+  'db.error.dismiss': { en: 'Dismiss', ko: '닫기' },
 
   // Library (offline downloads)
   'library.title': { en: 'Library', ko: '라이브러리' },

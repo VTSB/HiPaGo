@@ -3,13 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import React from 'react';
 import { AndroidBackButtonProvider } from '../AndroidBackButtonProvider';
+import { isCapacitor } from '@/lib/utils/platform';
 
+// Full module shape so the shared mock registry (isolate:false) never exposes a
+// real export when another file's platform mock wins the worker.
 vi.mock('@/lib/utils/platform', () => ({
   isCapacitor: vi.fn(() => true),
+  isTauri: vi.fn(() => false),
+  isNativePlatform: vi.fn(() => false),
 }));
 
 describe('AndroidBackButtonProvider', () => {
   beforeEach(() => {
+    // Set explicitly rather than relying on the factory default — under a shared
+    // mock registry another file's platform mock may have won.
+    vi.mocked(isCapacitor).mockReturnValue(true);
     window.history.replaceState(null, '', '/');
   });
 

@@ -2,9 +2,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Control the platform predicates per test.
+// Full module shape so the shared mock registry (isolate:false) never exposes a
+// real export when another file's platform mock wins the worker.
 vi.mock('@/lib/utils/platform', () => ({
   isTauri: vi.fn(() => false),
   isCapacitor: vi.fn(() => false),
+  isNativePlatform: vi.fn(() => false),
 }));
 
 // Stub each adapter module so the dynamic import() inside detectPlatformAdapter

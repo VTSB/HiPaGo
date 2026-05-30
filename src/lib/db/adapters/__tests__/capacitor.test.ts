@@ -49,4 +49,30 @@ describe('CapacitorAdapter.create — idempotent connection acquisition', () => 
     expect(createConnection).not.toHaveBeenCalled();
     expect(fakeDb.open).toHaveBeenCalledOnce();
   });
+
+  it('falls back to retrieve when createConnection throws "already exists"', async () => {
+    state.isConnectionResult = false; // takes the create-first branch
+    createConnection.mockRejectedValueOnce(new Error('Connection hipago already exists'));
+    await CapacitorAdapter.create('hipago');
+    expect(createConnection).toHaveBeenCalledOnce();
+    expect(retrieveConnection).toHaveBeenCalledOnce(); // fallback
+    expect(fakeDb.open).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to a fresh create when retrieve fails on a stale handle', async () => {
+    state.isConnectionResult = true; // takes the retrieve-first branch
+    retrieveConnection.mockRejectedValueOnce(new Error('Connection hipago not available'));
+    await CapacitorAdapter.create('hipago');
+    expect(retrieveConnection).toHaveBeenCalledOnce();
+    expect(createConnection).toHaveBeenCalledOnce(); // fallback
+    expect(fakeDb.open).toHaveBeenCalledOnce();
+  });
+
+  it('throws a step-named error so the failing native step is visible on device', async () => {
+    state.isConnectionResult = false;
+    fakeDb.open.mockRejectedValueOnce(new Error('unable to open database file'));
+    await expect(CapacitorAdapter.create('hipago')).rejects.toThrow(
+      /capacitor: open failed: unable to open database file/,
+    );
+  });
 });

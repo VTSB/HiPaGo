@@ -1,8 +1,12 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
+// Full module shape so the shared mock registry (isolate:false) never exposes a
+// real export when another file's platform mock wins the worker.
 vi.mock('@/lib/utils/platform', () => ({
-  isNativePlatform: vi.fn(),
+  isNativePlatform: vi.fn(() => false),
+  isTauri: vi.fn(() => false),
+  isCapacitor: vi.fn(() => false),
 }));
 
 import { isNativePlatform } from '@/lib/utils/platform';
