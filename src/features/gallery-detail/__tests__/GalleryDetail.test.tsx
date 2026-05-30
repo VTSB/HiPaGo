@@ -212,6 +212,23 @@ describe('GalleryDetail thumbnail virtualization', () => {
     expect(srcs.some((s) => s?.startsWith('https://cdn.test/big/'))).toBe(true);
   });
 
+  it('remounts the hero on id change so the previous gallery image cannot persist', () => {
+    rememberDetailEntryThumbnail(771, 'https://cdn.test/clicked/771.jpg');
+    rememberDetailEntryThumbnail(772, 'https://cdn.test/clicked/772.jpg');
+    mockDetail(); // no files → a single (cached) hero layer
+
+    const { container, rerender } = render(<GalleryDetail id={771} />);
+    const before = container.querySelector('img');
+    expect(before?.getAttribute('src')).toBe('https://cdn.test/clicked/771.jpg');
+
+    // Navigate detail→detail. The hero is keyed by id, so it must be a FRESH
+    // node (not the reused element that would keep painting 771's pixels).
+    rerender(<GalleryDetail id={772} />);
+    const after = container.querySelector('img');
+    expect(after?.getAttribute('src')).toBe('https://cdn.test/clicked/772.jpg');
+    expect(after).not.toBe(before);
+  });
+
   it('shows a sentinel with count when more thumbnails are available', () => {
     const files = makeFiles(50);
     mockDetail(files);

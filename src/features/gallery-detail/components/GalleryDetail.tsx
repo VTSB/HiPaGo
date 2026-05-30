@@ -221,6 +221,7 @@ export function GalleryDetail({ id }: { id: number }) {
               frame, and the top only appears once ready → no flicker. */}
           {cachedThumbnail && (
             <AbortableImage
+              key={`hero-cached-${id}`}
               src={cachedThumbnail}
               alt={displayBlock.title}
               loading="eager"
@@ -229,6 +230,7 @@ export function GalleryDetail({ id }: { id: number }) {
           )}
           {bigThumbnail && (
             <AbortableImage
+              key={`hero-big-${id}`}
               src={bigThumbnail}
               alt={displayBlock.title}
               loading="eager"
