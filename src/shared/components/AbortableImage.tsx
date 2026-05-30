@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { isCapacitor, isTauri } from '@/lib/utils/platform';
+import { isAndroid, isCapacitor, isTauri } from '@/lib/utils/platform';
 import { Spinner } from '@/shared/components/Spinner';
 
 interface AbortableImageProps {
@@ -40,6 +40,10 @@ const nativeFetchCache = new Map<string, Promise<string>>();
 const MAX_NATIVE_OBJECT_URLS = 80;
 
 function shouldUseNativeImageFetch(src: string): boolean {
+  // Android loads CDN images via the WebView interceptor (BypassWebViewClient),
+  // so a plain <img src={realUrl}> works — no JS fetch/objectURL needed. iOS and
+  // Tauri still need the manual native fetch until their interceptors land.
+  if (isAndroid()) return false;
   if (!isTauri() && !isCapacitor()) return false;
   try {
     const url = new URL(src);

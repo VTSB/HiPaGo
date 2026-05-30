@@ -11,6 +11,7 @@ vi.mock('@/lib/utils/platform', () => ({
   isCapacitor: vi.fn(() => true),
   isTauri: vi.fn(() => false),
   isNativePlatform: vi.fn(() => false),
+  isAndroid: vi.fn(() => false),
 }));
 
 describe('AndroidBackButtonProvider', () => {

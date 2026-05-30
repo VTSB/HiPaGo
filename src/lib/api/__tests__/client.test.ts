@@ -42,6 +42,28 @@ describe('apiClient.fetchUrl', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://example.com/test', expect.objectContaining({ headers: {} }));
   });
 
+  it('uses a plain fetch on Android — not the Bypass plugin (WebView interceptor bypasses)', async () => {
+    // Real platform module reads window.Capacitor; make it Android.
+    vi.stubGlobal('window', {
+      Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' },
+    });
+    const mockResponse = new Response('ok', { status: 200 });
+    fetchMock.mockResolvedValue(mockResponse);
+
+    const response = await apiClient.fetchUrl('https://aa.gold-usergeneratedcontent.net/x');
+
+    expect(response).toBe(mockResponse);
+    // Global fetch is used with the real URL + injected native headers (which the
+    // interceptor honours). If it had taken the iOS plugin branch instead, it
+    // would import @/lib/plugins/bypass and never call global fetch.
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://aa.gold-usergeneratedcontent.net/x',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Referer: 'https://hitomi.la/' }),
+      }),
+    );
+  });
+
   it('should throw ApiError on non-ok response', async () => {
     const mockResponse = new Response('not found', { status: 404, statusText: 'Not Found' });
     Object.defineProperty(mockResponse, 'ok', { value: false });

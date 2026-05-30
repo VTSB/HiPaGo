@@ -8,6 +8,7 @@ vi.mock('@/lib/utils/platform', () => ({
   isTauri: vi.fn(() => false),
   isCapacitor: vi.fn(() => false),
   isNativePlatform: vi.fn(() => false),
+  isAndroid: vi.fn(() => false),
 }));
 
 // Stub each adapter module so the dynamic import() inside detectPlatformAdapter

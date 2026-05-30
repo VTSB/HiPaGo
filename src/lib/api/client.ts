@@ -2,7 +2,7 @@ import { MI_URL } from '@/lib/utils/constants';
 import type { GgConfig } from '@/lib/utils/types';
 import { parseGgJs } from '@/lib/utils/image-url';
 import { resolveLtnUrl, getNativeHeaders } from './url-resolver';
-import { isTauri, isCapacitor } from '@/lib/utils/platform';
+import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
 class ApiError extends Error {
   constructor(
@@ -85,8 +85,10 @@ class ApiClient {
           status: resp.status,
           headers: new Headers(resp.headers),
         });
-      } else if (isCapacitor()) {
-        // Capacitor: use Rust bypass-core via Capacitor plugin
+      } else if (isCapacitor() && !isAndroid()) {
+        // iOS Capacitor: use the Rust bypass-core plugin (until the iOS
+        // interceptor lands). Android falls through to plain fetch below — its
+        // WebView interceptor bypasses + injects headers transparently.
         const { Bypass } = await import('@/lib/plugins/bypass');
         const resp = await Bypass.fetch({ url, headers });
         const bodyBytes = new Uint8Array(resp.body);
@@ -95,7 +97,9 @@ class ApiClient {
           headers: new Headers(resp.headers),
         });
       } else {
-        // Browser: normal fetch (goes through /api/ proxy routes with napi bypass)
+        // Browser: normal fetch through /api/ proxy routes (napi bypass).
+        // Android: also a plain fetch, but to the real https URL — its WebView
+        // interceptor performs the bypass and injects Referer/Origin.
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { range: _range, queuePriority: _qp, ...fetchInit } = options;
         response = await fetch(url, {

@@ -29,3 +29,16 @@ export function isCapacitor(): boolean {
 export function isNativePlatform(): boolean {
   return isTauri() || isCapacitor();
 }
+
+/**
+ * True only on Capacitor Android, where the native WebView interceptor
+ * (BypassWebViewClient) transparently routes hitomi/CDN requests through
+ * bypass-core. On Android the app therefore loads images / API with plain
+ * `<img src>` / `fetch()` to the real https URL; iOS and Tauri still use the
+ * manual native-fetch path until their own interceptors land.
+ */
+export function isAndroid(): boolean {
+  if (typeof window === 'undefined') return false;
+  const cap = (window as { Capacitor?: { getPlatform?: () => string } }).Capacitor;
+  return cap?.getPlatform?.() === 'android';
+}

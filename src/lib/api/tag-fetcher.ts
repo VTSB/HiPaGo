@@ -1,4 +1,4 @@
-import { isTauri, isCapacitor } from '@/lib/utils/platform';
+import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
 export interface TagFetcher {
   /** Fetch a hitomi.la tag page and return raw HTML */
@@ -8,7 +8,9 @@ export interface TagFetcher {
 }
 
 // ---------------------------------------------------------------------------
-// WebProxyFetcher — default for plain browser / Next.js
+// HttpFetcher — plain fetch with retry/backoff. The URL builder is injected so
+// the same retry logic serves the web proxy (/api/tags/fetch) and Android's
+// direct https fetch (bypassed transparently by the WebView interceptor).
 // ---------------------------------------------------------------------------
 
 /**
@@ -26,8 +28,11 @@ export function parseRetryAfter(value: string | null | undefined): number | null
   return null;
 }
 
-class WebProxyFetcher implements TagFetcher {
+class HttpFetcher implements TagFetcher {
   private maxRetries = 3;
+
+  /** @param buildUrl maps a hitomi path to the URL this platform should fetch. */
+  constructor(private readonly buildUrl: (path: string) => string) {}
 
   async fetchPage(path: string): Promise<string> {
     let lastError: Error | undefined;
@@ -43,32 +48,32 @@ class WebProxyFetcher implements TagFetcher {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30_000);
       try {
-        const resp = await fetch('/api/tags/fetch?url=' + encodeURIComponent(path), {
+        const resp = await fetch(this.buildUrl(path), {
           signal: controller.signal,
         });
         if (resp.status === 429) {
           // Rate limited — retry, honoring Retry-After verbatim when present.
           retryAfterMs = parseRetryAfter(resp.headers.get('retry-after'));
           lastError = new Error(
-            `WebProxyFetcher: rate limited (429) for "${path}" (attempt ${attempt + 1})`
+            `HttpFetcher: rate limited (429) for "${path}" (attempt ${attempt + 1})`
           );
           continue;
         }
         if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
           lastError = new Error(
-            `WebProxyFetcher: status ${resp.status} for "${path}" (attempt ${attempt + 1})`
+            `HttpFetcher: status ${resp.status} for "${path}" (attempt ${attempt + 1})`
           );
           continue;
         }
         if (!resp.ok) {
           throw new Error(
-            `WebProxyFetcher: request failed with status ${resp.status} for path "${path}"`
+            `HttpFetcher: request failed with status ${resp.status} for path "${path}"`
           );
         }
         return await resp.text();
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
-          lastError = new Error(`WebProxyFetcher: timeout for "${path}" (attempt ${attempt + 1})`);
+          lastError = new Error(`HttpFetcher: timeout for "${path}" (attempt ${attempt + 1})`);
           continue;
         }
         lastError = err as Error;
@@ -78,7 +83,7 @@ class WebProxyFetcher implements TagFetcher {
         clearTimeout(timer);
       }
     }
-    throw lastError ?? new Error(`WebProxyFetcher: failed after retries for "${path}"`);
+    throw lastError ?? new Error(`HttpFetcher: failed after retries for "${path}"`);
   }
 
   async dispose(): Promise<void> {
@@ -132,6 +137,9 @@ class CapacitorBypassFetcher implements TagFetcher {
 
 export function createTagFetcher(): TagFetcher {
   if (isTauri()) return new TauriBypassFetcher();
+  // Android: plain fetch to the real hitomi URL — the WebView interceptor
+  // bypasses + injects headers. iOS keeps the plugin until its interceptor lands.
+  if (isAndroid()) return new HttpFetcher((path) => `https://hitomi.la/${path}`);
   if (isCapacitor()) return new CapacitorBypassFetcher();
-  return new WebProxyFetcher();
+  return new HttpFetcher((path) => '/api/tags/fetch?url=' + encodeURIComponent(path));
 }

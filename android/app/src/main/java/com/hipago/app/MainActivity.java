@@ -15,6 +15,19 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ReaderZoomPlugin.class);
         super.onCreate(savedInstanceState);
         installBackButtonHandler();
+        installBypassInterceptor();
+    }
+
+    /**
+     * Route hitomi/CDN requests through bypass-core at the WebView layer so the
+     * app can load them as ordinary {@code <img>}/{@code fetch()} resources
+     * (see {@link BypassWebViewClient}). Extends Capacitor's own client, so local
+     * app assets and routing are preserved.
+     */
+    private void installBypassInterceptor() {
+        if (bridge != null && bridge.getWebView() != null) {
+            bridge.getWebView().setWebViewClient(new BypassWebViewClient(bridge));
+        }
     }
 
     private void installBackButtonHandler() {

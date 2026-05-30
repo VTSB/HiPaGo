@@ -7,10 +7,11 @@ vi.mock('@/lib/utils/platform', () => ({
   isTauri: vi.fn(() => false),
   isCapacitor: vi.fn(() => false),
   isNativePlatform: vi.fn(() => false),
+  isAndroid: vi.fn(() => false),
 }));
 
 import { createTagFetcher, parseRetryAfter } from '../tag-fetcher';
-import { isTauri, isCapacitor } from '@/lib/utils/platform';
+import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -18,6 +19,7 @@ vi.stubGlobal('fetch', mockFetch);
 beforeEach(() => {
   vi.mocked(isTauri).mockReturnValue(false);
   vi.mocked(isCapacitor).mockReturnValue(false);
+  vi.mocked(isAndroid).mockReturnValue(false);
   mockFetch.mockReset();
 });
 
@@ -48,6 +50,21 @@ describe('createTagFetcher — factory', () => {
     const fetcher = createTagFetcher();
     expect(typeof fetcher.fetchPage).toBe('function');
     expect(typeof fetcher.dispose).toBe('function');
+  });
+
+  it('fetches the real hitomi URL directly on Android (WebView interceptor bypasses)', async () => {
+    vi.mocked(isAndroid).mockReturnValue(true);
+    vi.mocked(isCapacitor).mockReturnValue(true); // Android is also Capacitor
+    mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html>a</html>') });
+
+    const fetcher = createTagFetcher();
+    const result = await fetcher.fetchPage('allartists-a.html');
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://hitomi.la/allartists-a.html',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(result).toBe('<html>a</html>');
   });
 });
 

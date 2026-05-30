@@ -7,6 +7,7 @@ vi.mock('@/lib/utils/platform', () => ({
   isNativePlatform: vi.fn(() => false),
   isTauri: vi.fn(() => false),
   isCapacitor: vi.fn(() => false),
+  isAndroid: vi.fn(() => false),
 }));
 
 import { isNativePlatform } from '@/lib/utils/platform';
