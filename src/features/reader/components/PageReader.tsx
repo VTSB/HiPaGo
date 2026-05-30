@@ -17,6 +17,15 @@ import { AbortableImage, preloadImageSource } from '@/shared/components/Abortabl
 const PRELOAD_AHEAD = 15;
 const PRELOAD_BEHIND = 5;
 
+// Page-turn animation. A custom rAF tween replaces the browser's native
+// `behavior:'smooth'` (which is ease-in-out, slow→fast→slow, and ~400ms).
+// ~200ms (≈2× faster) + easeOutCubic gives a snappier, decelerating (fast→slow)
+// turn.
+const SCROLL_DURATION_MS = 200;
+export function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
+}
+
 export function PageReader({
   images,
   currentPage,
@@ -47,6 +56,7 @@ export function PageReader({
   // scroll listener doesn't echo a redundant onPageChange back.
   const programmaticRef = useRef(false);
   const programmaticTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scrollAnimRef = useRef(0);
   const didInitRef = useRef(false);
   const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
@@ -179,8 +189,38 @@ export function PageReader({
     };
   }, [step, images.length, hasUrls]);
 
+  // Custom eased page-turn tween. Replaces the browser's native smooth scroll so
+  // we control speed (~2× faster) and easing (ease-out, fast→slow). CSS
+  // scroll-snap is turned off for the duration so `mandatory` snapping doesn't
+  // jump straight to the target and skip the easing.
+  const animateScrollTo = useCallback((el: HTMLDivElement, to: number) => {
+    cancelAnimationFrame(scrollAnimRef.current);
+    const from = el.scrollLeft;
+    const dist = to - from;
+    if (Math.abs(dist) < 1) {
+      el.scrollLeft = to;
+      programmaticRef.current = false;
+      return;
+    }
+    const prevSnap = el.style.scrollSnapType;
+    el.style.scrollSnapType = 'none';
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / SCROLL_DURATION_MS);
+      el.scrollLeft = from + dist * easeOutCubic(t);
+      if (t < 1) {
+        scrollAnimRef.current = requestAnimationFrame(tick);
+      } else {
+        el.scrollLeft = to;
+        el.style.scrollSnapType = prevSnap || 'x mandatory';
+        programmaticRef.current = false;
+      }
+    };
+    scrollAnimRef.current = requestAnimationFrame(tick);
+  }, []);
+
   // Drive the scroll when the logical page changes from outside (buttons, arrow
-  // keys, tap zones, jump modal). The browser's scroll-snap supplies the motion.
+  // keys, tap zones, jump modal).
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el || !width) return;
@@ -189,13 +229,22 @@ export function PageReader({
     if (currentSlide === targetSlide) return;
     programmaticRef.current = true;
     clearTimeout(programmaticTimerRef.current);
-    el.scrollTo({ left: targetSlide * width, behavior: didInitRef.current ? 'smooth' : 'auto' });
+    if (didInitRef.current) {
+      animateScrollTo(el, targetSlide * width);
+    } else {
+      // First positioning (scroll restoration): jump instantly, no animation.
+      el.scrollLeft = targetSlide * width;
+      programmaticRef.current = false;
+    }
     didInitRef.current = true;
-    // Fallback in case `scrollend` doesn't fire (e.g. already at target sub-pixel).
+    // Safety net: clear the programmatic flag even if the tween is interrupted.
     programmaticTimerRef.current = setTimeout(() => { programmaticRef.current = false; }, 600);
-  }, [currentPage, width, step]);
+  }, [currentPage, width, step, animateScrollTo]);
 
-  useEffect(() => () => clearTimeout(programmaticTimerRef.current), []);
+  useEffect(() => () => {
+    clearTimeout(programmaticTimerRef.current);
+    cancelAnimationFrame(scrollAnimRef.current);
+  }, []);
 
   const navigate = useCallback((target: number) => {
     if (target < 0 || target >= images.length || target === currentPageRef.current) return;
@@ -227,7 +276,8 @@ export function PageReader({
     el.releasePointerCapture?.(e.pointerId);
     if (d.moved && width) {
       suppressClickRef.current = true;
-      el.scrollTo({ left: Math.round(el.scrollLeft / width) * width, behavior: 'smooth' });
+      programmaticRef.current = true;
+      animateScrollTo(el, Math.round(el.scrollLeft / width) * width);
     }
   };
 
@@ -292,7 +342,7 @@ export function PageReader({
   return (
     <div
       ref={scrollerRef}
-      className="group relative h-screen w-screen cursor-pointer overflow-x-auto overflow-y-hidden"
+      className="scrollbar-hide group relative h-screen w-screen cursor-pointer overflow-x-auto overflow-y-hidden"
       style={{ scrollSnapType: 'x mandatory' }}
       onClick={handleClick}
       onPointerDown={onPointerDown}
@@ -307,7 +357,7 @@ export function PageReader({
           <div
             key={vi.key}
             data-slide-index={vi.index}
-            className="absolute top-0 flex h-full items-center justify-center overflow-y-auto"
+            className="scrollbar-hide absolute top-0 flex h-full items-center justify-center overflow-y-auto"
             style={{
               left: 0,
               width: vi.size,

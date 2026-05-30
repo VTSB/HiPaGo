@@ -47,7 +47,7 @@ function MockIntersectionObserver(this: IntersectionObserver) {
   (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;
 }
 
-import { PageReader } from '../components/PageReader';
+import { PageReader, easeOutCubic } from '../components/PageReader';
 import { type GalleryImage, ImageType } from '@/lib/utils/types';
 import { __resetAbortableImageCacheForTests } from '@/shared/components/AbortableImage';
 
@@ -213,6 +213,13 @@ describe('PageReader native scroll-snap', () => {
     expect(scroller.className).toContain('overflow-x-auto');
   });
 
+  it('hides the scrollbar on the scroller and on each slide', async () => {
+    const { scroller, container } = await mount(0);
+    expect(scroller.className).toContain('scrollbar-hide');
+    const slide = container.querySelector('[data-slide-index]') as HTMLElement;
+    expect(slide.className).toContain('scrollbar-hide');
+  });
+
   it('marks each slide scroll-snap-stop:always so a fast swipe advances exactly one page', async () => {
     const { container } = await mount(0);
     const slides = container.querySelectorAll('[data-slide-index]');
@@ -318,5 +325,21 @@ describe('PageReader preload concurrency cap', () => {
     await act(async () => { await Promise.resolve(); });
     // The 4 warms from page 20 were aborted (src cleared) when the effect re-ran.
     expect(cleared).toBe(4);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Page-turn easing — ease-out (fast→slow), replacing native ease-in-out.
+// ---------------------------------------------------------------------------
+describe('easeOutCubic', () => {
+  it('is a decelerating curve: anchored at 0/1 and ahead of linear early on', () => {
+    expect(easeOutCubic(0)).toBe(0);
+    expect(easeOutCubic(1)).toBe(1);
+    // Fast start: progress outruns time before the midpoint (ease-OUT, not
+    // ease-in-out which would lag a linear ramp early).
+    expect(easeOutCubic(0.25)).toBeGreaterThan(0.25);
+    expect(easeOutCubic(0.5)).toBeGreaterThan(0.5);
+    // Monotonic increasing.
+    expect(easeOutCubic(0.75)).toBeGreaterThan(easeOutCubic(0.5));
   });
 });
