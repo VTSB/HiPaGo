@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BypassPlugin.class);
         registerPlugin(UpdaterPlugin.class);
+        registerPlugin(ReaderZoomPlugin.class);
         super.onCreate(savedInstanceState);
         installBackButtonHandler();
     }

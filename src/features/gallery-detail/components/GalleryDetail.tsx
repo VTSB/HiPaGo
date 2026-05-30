@@ -7,7 +7,7 @@ import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import { TagChip } from '@/shared/components/TagChip';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
-import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
+import { AbortableImage } from '@/shared/components/AbortableImage';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
@@ -132,26 +132,10 @@ export function GalleryDetail({ id }: { id: number }) {
   // useGalleryDetail resolves. Stable thereafter (files[0] is set once).
   const bigThumbnail = files.length > 0 ? getThumbnailUrl(files[0], 'big') : null;
 
-  // The visible hero src. Starts as the cached low-res URL; once the big
-  // variant has been preloaded into loadedSrcCache (and into the browser's
-  // HTTP cache), we flip to the big URL. AbortableImage receives a `loading`
-  // value of "eager", so its render-phase reset on src change skips the
-  // setVisible(false) branch and the swap paints instantly from cache.
-  const [heroSrc, setHeroSrc] = useState<string | null>(cachedThumbnail);
-  useEffect(() => {
-    if (!bigThumbnail) return;
-    let cancelled = false;
-    preloadImageSource(bigThumbnail)
-      .then(() => {
-        if (!cancelled) setHeroSrc(bigThumbnail);
-      })
-      .catch(() => {
-        // Preload failed (404 / network). Keep showing the cached variant.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [bigThumbnail]);
+  // The hero is two stacked layers (see render): the cached/clicked thumbnail
+  // painted instantly underneath, and the big variant layered on top that only
+  // becomes visible once it has fully decoded. No single-<img> src swap → no
+  // one-frame blank → no flicker on list→detail.
 
   const stillLoadingFull = isLoading && !block;
   const detailFailed = !isLoading && error && !block;
@@ -224,18 +208,28 @@ export function GalleryDetail({ id }: { id: number }) {
           href={readerHref(id)}
           className="group relative aspect-[3/4] w-full self-start overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
         >
-          {!heroSrc && (
+          {!cachedThumbnail && !bigThumbnail && (
             <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">
               {t('detail.noImage')}
             </div>
           )}
-          {/* Single hero image. heroSrc starts at the list-card cached URL
-              (instant paint from loadedSrcCache) and flips to the big URL
-              only after preloadImageSource has fully loaded it. The browser
-              then serves the new src from its HTTP cache → zero flicker. */}
-          {heroSrc && (
+          {/* Two stacked layers for a flicker-free swap. Bottom: the exact
+              clicked thumbnail, painted instantly from loadedSrcCache and never
+              removed. Top: the big variant, which stays opacity:0 (AbortableImage's
+              pre-load state) until it has fully decoded, then snaps in over the
+              cached one. Because the bottom is always present there is no blank
+              frame, and the top only appears once ready → no flicker. */}
+          {cachedThumbnail && (
             <AbortableImage
-              src={heroSrc}
+              src={cachedThumbnail}
+              alt={displayBlock.title}
+              loading="eager"
+              className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            />
+          )}
+          {bigThumbnail && (
+            <AbortableImage
+              src={bigThumbnail}
               alt={displayBlock.title}
               loading="eager"
               className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.02]"

@@ -9,10 +9,14 @@ import { ReaderControls } from './ReaderControls';
 import { Spinner } from '@/shared/components/Spinner';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useHideOnScroll } from '@/shared/hooks/useHideOnScroll';
+import { useReaderZoom } from '@/features/reader/hooks/useReaderZoom';
 
 export function ReaderView({ galleryId, initialPage }: { galleryId: number; initialPage?: number }) {
   const reader = useReader(galleryId, initialPage);
   const offline = useOfflineImages(galleryId);
+  // Enable native WebView pinch-zoom only while the reader is open (Android);
+  // other screens stay non-zoomable.
+  useReaderZoom();
   const scrollNodeRef = useRef<HTMLDivElement | null>(null);
   // Mirrored as state so `useHideOnScroll` can re-subscribe once the
   // ScrollReader mounts its inner overflow container.

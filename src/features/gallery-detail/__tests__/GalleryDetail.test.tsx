@@ -119,6 +119,7 @@ import { GalleryDetail } from '../components/GalleryDetail';
 import { useGalleryDetail } from '../hooks/useGalleryDetail';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile, GalleryImages } from '@/lib/utils/types';
+import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -193,8 +194,22 @@ describe('GalleryDetail thumbnail virtualization', () => {
 
     const { container } = render(<GalleryDetail id={123} />);
     const images = container.querySelectorAll('img');
-    // 5 thumbnails + 1 hero = 6
-    expect(images.length).toBeLessThanOrEqual(6);
+    // 5 thumbnails + up to 2 hero layers (cached + big) = 7; cached is null here
+    // (no remembered/cachedBlock thumbnail) so it is 5 + 1 big = 6.
+    expect(images.length).toBeLessThanOrEqual(7);
+  });
+
+  it('layers the clicked thumbnail UNDER the big thumbnail (no src-swap flicker)', () => {
+    // The clicked thumbnail is remembered outside the React tree on list-card click.
+    rememberDetailEntryThumbnail(777, 'https://cdn.test/clicked/777.jpg');
+    mockDetail(makeFiles(3));
+
+    const { container } = render(<GalleryDetail id={777} />);
+    const srcs = Array.from(container.querySelectorAll('img')).map((i) => i.getAttribute('src'));
+    // Both layers are present at the same time — the cached image is never
+    // removed/swapped, so there is no blank frame when the big one decodes.
+    expect(srcs).toContain('https://cdn.test/clicked/777.jpg');
+    expect(srcs.some((s) => s?.startsWith('https://cdn.test/big/'))).toBe(true);
   });
 
   it('shows a sentinel with count when more thumbnails are available', () => {
