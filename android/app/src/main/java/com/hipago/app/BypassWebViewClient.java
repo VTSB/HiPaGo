@@ -35,11 +35,23 @@ public class BypassWebViewClient extends BridgeWebViewClient {
 
     @Override
     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-        if (request == null || !"GET".equalsIgnoreCase(request.getMethod())) {
+        if (request == null) {
             return super.shouldInterceptRequest(view, request);
         }
         String host = request.getUrl() != null ? request.getUrl().getHost() : null;
         if (host == null || !isBypassHost(host)) {
+            return super.shouldInterceptRequest(view, request);
+        }
+
+        String method = request.getMethod();
+        // Answer the CORS preflight locally. A fetch() to a bypass host is
+        // cross-origin; an OPTIONS sent to the network would hit the ISP block
+        // and fail the preflight (and thus the real GET). Older WebViews can
+        // preflight the Range-based nozomi list reads.
+        if ("OPTIONS".equalsIgnoreCase(method)) {
+            return preflightResponse();
+        }
+        if (!"GET".equalsIgnoreCase(method)) {
             return super.shouldInterceptRequest(view, request);
         }
 
@@ -61,6 +73,23 @@ public class BypassWebViewClient extends BridgeWebViewClient {
             Map<String, String> responseHeaders = new HashMap<>();
             // Cross-origin fetch() reads need CORS; <img> does not, but it is harmless.
             responseHeaders.put("Access-Control-Allow-Origin", "*");
+            // Expose the range headers so cross-origin JS can read Content-Range:
+            // nozomi pagination reads it for the total count. Without this the
+            // header exists but is unreadable from fetch(), so total stays null.
+            responseHeaders.put("Access-Control-Expose-Headers",
+                    "Content-Range, Accept-Ranges, Content-Type");
+            // Forward the upstream range headers so they are present to expose.
+            // Content-Length is intentionally NOT forwarded: bypass-core may have
+            // decompressed the body, so the upstream length can mismatch the
+            // actual bytes; the response stream length is authoritative instead.
+            for (Map.Entry<String, String> e : resp.getHeaders().entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                String k = e.getKey();
+                if (k.equalsIgnoreCase("Content-Range")
+                        || k.equalsIgnoreCase("Accept-Ranges")) {
+                    responseHeaders.put(k, e.getValue());
+                }
+            }
 
             int status = resp.getStatus() >= 100 ? resp.getStatus() : 200;
             WebResourceResponse out = new WebResourceResponse(
@@ -79,6 +108,20 @@ public class BypassWebViewClient extends BridgeWebViewClient {
         return host.endsWith(".gold-usergeneratedcontent.net")
                 || host.equals("hitomi.la")
                 || host.endsWith(".hitomi.la");
+    }
+
+    /** Answer a CORS preflight for a bypass host without touching the network. */
+    private static WebResourceResponse preflightResponse() {
+        Map<String, String> h = new HashMap<>();
+        h.put("Access-Control-Allow-Origin", "*");
+        h.put("Access-Control-Allow-Methods", "GET, OPTIONS");
+        h.put("Access-Control-Allow-Headers", "range, Range, Content-Type");
+        h.put("Access-Control-Max-Age", "86400");
+        WebResourceResponse out = new WebResourceResponse(
+                "text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+        out.setStatusCodeAndReasonPhrase(200, "OK");
+        out.setResponseHeaders(h);
+        return out;
     }
 
     /** WebResourceResponse rejects a null/empty reason phrase on some API levels. */
