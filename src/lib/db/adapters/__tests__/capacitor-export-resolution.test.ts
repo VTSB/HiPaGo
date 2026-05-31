@@ -118,4 +118,21 @@ describe('CapacitorAdapter — defensive SQLiteConnection resolution', () => {
     // Must NOT surface the opaque minified error.
     await expect(A.create('hipago')).rejects.not.toThrow(/r is not a constructor/);
   });
+
+  it('runs PRAGMA journal_mode through query() and never execute() (Android execSQL rejects row-returning statements)', async () => {
+    const A = await loadAdapterWith({
+      CapacitorSQLite: {},
+      SQLiteConnection: makeConnectionClass(),
+      default: undefined,
+    });
+    await A.create('hipago');
+    // journal_mode = WAL returns the resulting mode (a row) → query(), not
+    // execute(). On Android, execute()/execSQL() throws "Queries cannot be
+    // performed using execSQL(), use query() instead."
+    expect(fakeDb.query).toHaveBeenCalledWith('PRAGMA journal_mode = WAL');
+    const execArgs = fakeDb.execute.mock.calls.map((c) => String((c as unknown[])[0]));
+    expect(execArgs.some((s) => /journal_mode/i.test(s))).toBe(false);
+    // foreign_keys = ON is a setter (no rows) → execute() is correct.
+    expect(fakeDb.execute).toHaveBeenCalledWith('PRAGMA foreign_keys = ON');
+  });
 });

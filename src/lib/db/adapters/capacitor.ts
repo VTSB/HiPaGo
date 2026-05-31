@@ -119,7 +119,11 @@ export class CapacitorAdapter implements DbAdapter {
     }
 
     await step('open', () => db.open());
-    await step('PRAGMA journal_mode=WAL', () => db.execute('PRAGMA journal_mode = WAL'));
+    // journal_mode returns the resulting mode (a row), so it must go through
+    // query() — the Android plugin's execute()/execSQL() rejects row-returning
+    // statements ("Queries cannot be performed using execSQL(), use query()").
+    // foreign_keys = ON is a setter (no rows), so execute() is fine.
+    await step('PRAGMA journal_mode=WAL', () => db.query('PRAGMA journal_mode = WAL'));
     await step('PRAGMA foreign_keys=ON', () => db.execute('PRAGMA foreign_keys = ON'));
     return new CapacitorAdapter(db);
   }
