@@ -9,7 +9,7 @@
       "androidIsEncryption": false
     },
     "CapacitorHttp": {
-      "enabled": true
+      "enabled": false
     }
   }
 }
