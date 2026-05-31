@@ -59,6 +59,25 @@ describe('CapacitorAdapter.create — idempotent connection acquisition', () => 
     expect(fakeDb.open).toHaveBeenCalledOnce();
   });
 
+  it('surfaces a non-"already exists" createConnection error instead of masking it with retrieve', async () => {
+    state.isConnectionResult = false; // create-first branch
+    createConnection.mockRejectedValueOnce(new Error('unable to open database file'));
+    await expect(CapacitorAdapter.create('hipago')).rejects.toThrow(
+      /createConnection failed: unable to open database file/,
+    );
+    // Must NOT mask the real cause behind a misleading retrieve "does not exist".
+    expect(retrieveConnection).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a non-missing-handle retrieveConnection error on the existing-connection path', async () => {
+    state.isConnectionResult = true; // retrieve-first branch
+    retrieveConnection.mockRejectedValueOnce(new Error('database disk image is malformed'));
+    await expect(CapacitorAdapter.create('hipago')).rejects.toThrow(
+      /retrieveConnection failed: database disk image is malformed/,
+    );
+    expect(createConnection).not.toHaveBeenCalled();
+  });
+
   it('falls back to a fresh create when retrieve fails on a stale handle', async () => {
     state.isConnectionResult = true; // takes the retrieve-first branch
     retrieveConnection.mockRejectedValueOnce(new Error('Connection hipago not available'));

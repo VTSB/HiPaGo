@@ -82,16 +82,31 @@ export class CapacitorAdapter implements DbAdapter {
     let db;
     if (existing) {
       try {
-        db = await reuse();
-      } catch {
-        db = await step('createConnection (after retrieve failed)', fresh);
+        db = await step('retrieveConnection', reuse);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // Only a missing/stale JS handle is recoverable by creating instead.
+        // Any other retrieve failure is the real problem — surface it.
+        if (/does not exist|not available|no available connection/i.test(msg)) {
+          db = await step('createConnection (retrieve had no handle)', fresh);
+        } else {
+          throw e;
+        }
       }
     } else {
       try {
-        db = await fresh();
-      } catch {
-        // Most likely "already exists" — a native connection without a JS handle.
-        db = await step('retrieveConnection (after create failed)', reuse);
+        db = await step('createConnection', fresh);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // Only the "already exists" race (a native connection without a JS
+        // handle) is recoverable by retrieving. Any other createConnection
+        // failure is the real cause — surface it instead of masking it behind a
+        // misleading "Connection <name> does not exist" from the retrieve path.
+        if (/already exists/i.test(msg)) {
+          db = await step('retrieveConnection (create reported already-exists)', reuse);
+        } else {
+          throw e;
+        }
       }
     }
 
