@@ -217,22 +217,30 @@ export function PageReader({
     if (didInitRef.current) {
       animateScrollTo(el, targetSlide * width);
     } else {
-      // First positioning (open-at-page / scroll restoration). Drive it through
-      // the virtualizer's scrollToIndex, not a raw `el.scrollLeft =`: a far jump
-      // assigned directly lands short while the virtual window is still small,
-      // and the scroll listener then echoes that clamped position back as
-      // currentPage — the "every page past the initial window opens on page 3"
-      // bug. scrollToIndex re-runs across measure passes so it lands precisely.
-      // Keep programmaticRef HELD (no synchronous release) until the jump
-      // settles via the timer below, so the echo can't commit an intermediate
-      // page.
+      // First positioning (open-at-page / scroll restoration). Two device-only
+      // failures have to be defeated here:
+      //  1. The scroll listener echoing the settled position back as currentPage
+      //     — held off by keeping programmaticRef set (see initPendingRef) until
+      //     the jump settles via the timer below.
+      //  2. scroll-snap snap-back: the container is `scroll-snap: x mandatory`,
+      //     and the target slide is not rendered yet, so the snap engine snaps
+      //     the scroll back to the nearest *rendered* slide (the initial-window
+      //     edge, ~page 3) before the virtualizer mounts the target. That left
+      //     the indicator on page N but the image stuck on ~page 3. Disable snap
+      //     for the jump and restore it once the target has rendered (timer).
       initPendingRef.current = true;
+      el.style.scrollSnapType = 'none';
       virtualizer.scrollToIndex(targetSlide, { align: 'start' });
+      el.scrollLeft = targetSlide * width;
     }
     didInitRef.current = true;
-    // Safety net: clear the programmatic flag (and the init guard) even if the
-    // tween or the measure settle is interrupted.
+    // Safety net: restore snap and clear the programmatic/init flags even if the
+    // tween or the measure settle is interrupted. By now the virtualizer has
+    // mounted the target slide, so restoring `mandatory` snaps onto it (not the
+    // stale window edge).
     programmaticTimerRef.current = setTimeout(() => {
+      const node = scrollerRef.current;
+      if (node) node.style.scrollSnapType = 'x mandatory';
       programmaticRef.current = false;
       initPendingRef.current = false;
     }, 600);

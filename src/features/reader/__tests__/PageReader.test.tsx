@@ -377,6 +377,16 @@ describe('PageReader open-at-page positioning', () => {
     expect(scrollToIndexSpy).toHaveBeenCalledWith(20, { align: 'start' });
   });
 
+  it('disables scroll-snap during the initial jump so the scroll cannot snap back to a rendered slide', async () => {
+    // While the far target slide is still unrendered, `scroll-snap: x mandatory`
+    // would snap the scroll back to the nearest rendered slide (the window edge),
+    // leaving the indicator on the target page but the image on ~page 3. The init
+    // jump must run with snap disabled (restored later by the settle timer, which
+    // has not fired in this test).
+    const { scroller } = await mountAt(20);
+    expect(scroller.style.scrollSnapType).toBe('none');
+  });
+
   it('does not echo a clamped scroll position back as the page during the initial jump', async () => {
     const { scroller, onPageChange } = await mountAt(20);
     // Simulate the device failure: the programmatic jump settles short (the
