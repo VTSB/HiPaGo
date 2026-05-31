@@ -4,12 +4,15 @@ description: 'Install LLVM/libclang and cmake required by boring-sys2 (via rques
 runs:
   using: 'composite'
   steps:
+    # llvm-dev + libclang-dev pull hundreds of MB of deps; cache the resolved
+    # .debs so reinstalls across runs are near-instant. On a cache miss the
+    # action installs normally, so first-run behaviour is unchanged.
     - name: Install LLVM + cmake (Ubuntu)
       if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y llvm-dev libclang-dev clang cmake
+      uses: awalsh128/cache-apt-pkgs-action@v1
+      with:
+        packages: llvm-dev libclang-dev clang cmake
+        version: 1.0
 
     - name: Install LLVM + cmake (macOS)
       if: runner.os == 'macOS'
