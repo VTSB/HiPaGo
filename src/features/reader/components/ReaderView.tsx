@@ -8,7 +8,7 @@ import { ScrollReader } from './ScrollReader';
 import { ReaderControls } from './ReaderControls';
 import { Spinner } from '@/shared/components/Spinner';
 import { useSettingsStore } from '@/lib/store/settings';
-import { useHideOnScroll } from '@/shared/hooks/useHideOnScroll';
+import { useScrollReveal } from '@/shared/hooks/useScrollReveal';
 import { useReaderZoom } from '@/features/reader/hooks/useReaderZoom';
 
 export function ReaderView({ galleryId, initialPage }: { galleryId: number; initialPage?: number }) {
@@ -17,8 +17,11 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
   // Enable native WebView pinch-zoom only while the reader is open (Android);
   // other screens stay non-zoomable.
   useReaderZoom();
+  // The chrome (back button + ReaderControls) reveal is driven by the
+  // `--reader-chrome` CSS var set on this root node.
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollNodeRef = useRef<HTMLDivElement | null>(null);
-  // Mirrored as state so `useHideOnScroll` can re-subscribe once the
+  // Mirrored as state so `useScrollReveal` can re-subscribe once the
   // ScrollReader mounts its inner overflow container.
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   const scrollCallbackRef = useCallback((node: HTMLDivElement | null) => {
@@ -50,11 +53,16 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
   // reader.currentPage cannot be tracked by the compiler).
   const { currentPage, totalPages, mode, setCurrentPage } = reader;
 
-  // Slide the back button + ReaderControls out of the way when the user
-  // scrolls the inner reader container down (scroll mode only). Same hook
-  // the site header and FloatingPageNav use, just pointed at the reader's
-  // internal scroll element instead of window.
-  const hiddenOverlay = useHideOnScroll(80, 8, mode !== 'scroll', scrollElement);
+  // Gesture-couple the back button + ReaderControls to the inner reader
+  // scroll (scroll mode only): scrolling down slides them off, scrolling up
+  // brings them back proportionally — native style, not a binary snap. Page
+  // mode keeps the chrome always visible (disabled → var stays 0). Writes the
+  // `--reader-chrome` var onto rootRef; the chrome elements read it.
+  useScrollReveal({
+    scrollElement,
+    targetRef: rootRef,
+    disabled: mode !== 'scroll',
+  });
 
   const handleNextPage = useCallback(() => {
     const step = dualPage && mode === 'page' ? 2 : 1;
@@ -120,10 +128,17 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
   const offlineUrls = offline.urls ?? undefined;
 
   return (
-    <div className="relative min-h-screen bg-black">
+    <div ref={rootRef} className="relative min-h-screen bg-black">
       <button
         onClick={reader.goBack}
-        className={`fixed left-4 top-4 z-50 rounded-full bg-black/60 p-2.5 text-zinc-400 shadow-2xl backdrop-blur-md transition-[transform,colors,background-color] duration-300 will-change-transform hover:bg-black/80 hover:text-white active:bg-black/80 ${hiddenOverlay ? '-translate-y-[200%] opacity-0' : 'translate-y-0 opacity-100'}`}
+        className="fixed left-4 top-4 z-50 rounded-full bg-black/60 p-2.5 text-zinc-400 shadow-2xl backdrop-blur-md transition-[colors,background-color] duration-300 will-change-transform hover:bg-black/80 hover:text-white active:bg-black/80"
+        style={{
+          // Gesture-coupled with ReaderControls: slides up off the top as the
+          // chrome hides (--reader-chrome 0 → 1). No transform transition so it
+          // tracks the scroll without lag.
+          transform: 'translateY(calc(var(--reader-chrome, 0) * -200%))',
+          opacity: 'calc(1 - var(--reader-chrome, 0))',
+        }}
         aria-label="Back"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5"><path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" /></svg>
@@ -131,7 +146,7 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
       {reader.mode === 'page'
         ? <PageReader images={reader.images} currentPage={reader.currentPage} onPageChange={reader.setCurrentPage} offlineUrls={offlineUrls} />
         : <ScrollReader images={reader.images} initialPage={reader.currentPage} onScrollPositionChange={reader.setScrollPosition} onVisiblePageChange={handleVisiblePageChange} scrollCallbackRef={scrollCallbackRef} scrollNodeRef={scrollNodeRef} offlineUrls={offlineUrls} />}
-      <ReaderControls onBack={reader.goBack} currentPage={reader.currentPage} totalPages={reader.totalPages} mode={reader.mode} onModeChange={reader.setMode} onNextPage={handleNextPage} onPrevPage={handlePrevPage} onPageChange={handlePageChange} hidden={hiddenOverlay} />
+      <ReaderControls onBack={reader.goBack} currentPage={reader.currentPage} totalPages={reader.totalPages} mode={reader.mode} onModeChange={reader.setMode} onNextPage={handleNextPage} onPrevPage={handlePrevPage} onPageChange={handlePageChange} />
     </div>
   );
 }
