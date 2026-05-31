@@ -7,9 +7,6 @@ import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
-import { createScrollAnimator } from '@/features/reader/utils/scrollAnimator';
-// Re-export so existing importers (and tests) keep resolving easeOutCubic here.
-export { easeOutCubic } from '@/features/reader/utils/scrollAnimator';
 
 // High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
 // tags still get decoded by the browser, so a large mounted window pins
@@ -19,12 +16,6 @@ export { easeOutCubic } from '@/features/reader/utils/scrollAnimator';
 // released the moment the user navigates again.
 const PRELOAD_AHEAD = 15;
 const PRELOAD_BEHIND = 5;
-
-// Page-turn animation. A custom rAF tween replaces the browser's native
-// `behavior:'smooth'` (which is ease-in-out, slow→fast→slow, and ~400ms).
-// ~200ms (≈2× faster) + easeOutCubic gives a snappier, decelerating (fast→slow)
-// turn.
-const SCROLL_DURATION_MS = 200;
 
 export function PageReader({
   images,
@@ -56,8 +47,6 @@ export function PageReader({
   // scroll listener doesn't echo a redundant onPageChange back.
   const programmaticRef = useRef(false);
   const programmaticTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const animatorRef = useRef<ReturnType<typeof createScrollAnimator> | null>(null);
-  if (!animatorRef.current) animatorRef.current = createScrollAnimator(SCROLL_DURATION_MS);
   const didInitRef = useRef(false);
   // Held while the first programmatic positioning (open-at-page / restoration)
   // is still settling, so onScrollEnd does not release the echo suppression at
@@ -184,7 +173,13 @@ export function PageReader({
         }
       });
     };
-    const onScrollEnd = () => { if (!initPendingRef.current) programmaticRef.current = false; };
+    const onScrollEnd = () => {
+      if (initPendingRef.current) return;
+      // A native page-turn scroll has settled — restore snap (disabled during the
+      // turn) and release the echo suppression.
+      el.style.scrollSnapType = 'x mandatory';
+      programmaticRef.current = false;
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
     el.addEventListener('scrollend', onScrollEnd);
     return () => {
@@ -194,14 +189,16 @@ export function PageReader({
     };
   }, [step, images.length, hasUrls]);
 
-  // Custom eased page-turn tween. Replaces the browser's native smooth scroll so
-  // we control speed (~2× faster) and easing (ease-out, fast→slow). CSS
-  // scroll-snap is turned off for the duration so `mandatory` snapping doesn't
-  // jump straight to the target and skip the easing.
+  // Page turn. Drive the scroll natively (`scrollTo` smooth) so the motion runs
+  // on the compositor thread, exactly like a swipe. A main-thread rAF tween that
+  // wrote `scrollLeft` every frame stuttered on device: each frame's write moved
+  // the virtualizer window, forcing a slide mount/unmount + React re-render on
+  // the same main thread that was drawing the scroll. Snap is turned off for the
+  // duration (the target is an exact page boundary, so it lands without snap)
+  // and restored on `scrollend` / the settle timer so swipes keep snapping.
   const animateScrollTo = useCallback((el: HTMLDivElement, to: number) => {
-    animatorRef.current!.to(el, to, () => {
-      programmaticRef.current = false;
-    });
+    el.style.scrollSnapType = 'none';
+    el.scrollTo({ left: to, behavior: 'smooth' });
   }, []);
 
   // Drive the scroll when the logical page changes from outside (buttons, arrow
@@ -248,7 +245,6 @@ export function PageReader({
 
   useEffect(() => () => {
     clearTimeout(programmaticTimerRef.current);
-    animatorRef.current?.cancel();
   }, []);
 
   const navigate = useCallback((target: number) => {

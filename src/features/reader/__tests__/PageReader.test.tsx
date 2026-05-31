@@ -52,7 +52,7 @@ function MockIntersectionObserver(this: IntersectionObserver) {
   (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;
 }
 
-import { PageReader, easeOutCubic } from '../components/PageReader';
+import { PageReader } from '../components/PageReader';
 import { type GalleryImage, ImageType } from '@/lib/utils/types';
 import { __resetAbortableImageCacheForTests } from '@/shared/components/AbortableImage';
 
@@ -396,17 +396,24 @@ describe('PageReader open-at-page positioning', () => {
     // Suppression must be held: currentPage is NOT overwritten with page 3.
     expect(onPageChange).not.toHaveBeenCalledWith(3);
   });
-});
 
-describe('easeOutCubic', () => {
-  it('is a decelerating curve: anchored at 0/1 and ahead of linear early on', () => {
-    expect(easeOutCubic(0)).toBe(0);
-    expect(easeOutCubic(1)).toBe(1);
-    // Fast start: progress outruns time before the midpoint (ease-OUT, not
-    // ease-in-out which would lag a linear ramp early).
-    expect(easeOutCubic(0.25)).toBeGreaterThan(0.25);
-    expect(easeOutCubic(0.5)).toBeGreaterThan(0.5);
-    // Monotonic increasing.
-    expect(easeOutCubic(0.75)).toBeGreaterThan(easeOutCubic(0.5));
+  it('drives a post-init page turn with native smooth scrollTo (compositor), not a JS tween', async () => {
+    const imgs = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const onPageChange = vi.fn();
+    const { container, rerender } = render(
+      <PageReader images={imgs} currentPage={1} onPageChange={onPageChange} />,
+    );
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const scroller = container.firstElementChild as HTMLElement;
+    const scrollToSpy = vi.fn();
+    scroller.scrollTo = scrollToSpy as unknown as typeof scroller.scrollTo;
+    // Page 1 was the initial positioning (didInit). A real page turn now drives
+    // the scroll natively so the motion runs on the compositor, not a per-frame
+    // main-thread JS loop.
+    await act(async () => {
+      rerender(<PageReader images={imgs} currentPage={2} onPageChange={onPageChange} />);
+      await Promise.resolve();
+    });
+    expect(scrollToSpy).toHaveBeenCalledWith({ left: 2 * W, behavior: 'smooth' });
   });
 });
