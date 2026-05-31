@@ -167,7 +167,7 @@ export function createLoadingBlock(id: number): GalleryBlock {
   };
 }
 
-function createFailedBlock(id: number): GalleryBlock {
+export function createFailedBlock(id: number): GalleryBlock {
   return {
     id,
     type: GalleryBlockType.FAILED,

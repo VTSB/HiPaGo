@@ -92,6 +92,25 @@ export class TauriDownloadStore implements DownloadStore {
     }
   }
 
+  async coverUrl(galleryId: number): Promise<string | null> {
+    try {
+      const dir = this.galleryPath(galleryId);
+      const entries = await this.fs.readDir(dir, { baseDir: this.BaseDirectory.AppData });
+      // First page is "0001.<ext>" (imageFileName(0, ext)).
+      const first = entries
+        .map((e: { name: string }) => e.name)
+        .filter((n: string) => /^0001\./.test(n))
+        .sort()[0];
+      if (!first) return null;
+      const { convertFileSrc } = await import('@tauri-apps/api/core');
+      const { appDataDir, join } = await import('@tauri-apps/api/path');
+      const abs = await join(await appDataDir(), dir, first);
+      return convertFileSrc(abs);
+    } catch {
+      return null;
+    }
+  }
+
   async listGalleries(): Promise<number[]> {
     try {
       const entries = await this.fs.readDir(DOWNLOADS_DIR, {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
@@ -14,6 +14,15 @@ vi.mock('@/lib/api/gallery', () => ({
   createLoadingBlock: (id: number) => ({
     id,
     type: GalleryBlockType.LOADING,
+    title: '',
+    date: new Date(),
+    tags: {},
+    thumbnail: '',
+    related: [],
+  }),
+  createFailedBlock: (id: number) => ({
+    id,
+    type: GalleryBlockType.FAILED,
     title: '',
     date: new Date(),
     tags: {},
@@ -200,6 +209,53 @@ describe('resolveBlock FAILED block handling', () => {
     await resolveBlock(101);
 
     expect(saveGalleryBlock).toHaveBeenCalledWith(notDetailedBlock);
+  });
+});
+
+describe('resolveBlock offline graceful degradation', () => {
+  const setOnline = (v: boolean) =>
+    Object.defineProperty(navigator, 'onLine', { value: v, configurable: true });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getGalleryBlock.mockResolvedValue(null);
+  });
+  afterEach(() => setOnline(true));
+
+  it('returns a FAILED block (not endless LOADING) when offline with no cached block', async () => {
+    setOnline(false);
+    fetchGalleryBlockHtmlById.mockRejectedValue(new Error('network down'));
+
+    const result = await resolveBlock(500);
+
+    expect(result.type).toBe(GalleryBlockType.FAILED);
+    expect(result.id).toBe(500);
+  });
+
+  it('rethrows when online so React Query retries a transient failure', async () => {
+    setOnline(true);
+    fetchGalleryBlockHtmlById.mockRejectedValue(new Error('transient'));
+
+    await expect(resolveBlock(501)).rejects.toThrow('transient');
+  });
+
+  it('still returns the locally cached block when offline (renders normally)', async () => {
+    setOnline(false);
+    const cached = {
+      id: 502,
+      type: GalleryBlockType.NOT_DETAILED,
+      title: 'Cached',
+      date: new Date(),
+      tags: {},
+      thumbnail: '',
+      related: [],
+    };
+    getGalleryBlock.mockResolvedValue(cached);
+
+    const result = await resolveBlock(502);
+
+    expect(result).toBe(cached);
+    expect(fetchGalleryBlockHtmlById).not.toHaveBeenCalled();
   });
 });
 

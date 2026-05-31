@@ -52,6 +52,14 @@ export interface DownloadStore {
     ext: string,
   ): Promise<Uint8Array | null>;
 
+  /**
+   * A WebView-loadable URL (convertFileSrc) for the gallery's first downloaded
+   * page, to use as an offline cover — no image bytes pass through the JS heap.
+   * Returns null when nothing is downloaded. Optional: adapters without a native
+   * file URL (web) omit it, and callers fall back to the network thumbnail.
+   */
+  coverUrl?(galleryId: number): Promise<string | null>;
+
   /** List all gallery IDs that have at least one stored image. */
   listGalleries(): Promise<number[]>;
 

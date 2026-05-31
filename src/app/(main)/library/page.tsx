@@ -65,16 +65,34 @@ interface LibraryCardProps {
   onExport: (galleryId: number, title: string) => void;
 }
 
+/** A WebView file URL for the gallery's downloaded first page, used as an offline
+ *  cover. null on web / when nothing is downloaded → caller uses the network thumb. */
+function useDownloadedCoverUrl(galleryId: number): string | null {
+  const { data } = useQuery({
+    queryKey: ['download-cover', galleryId],
+    queryFn: async () => {
+      const store = await createDownloadStore();
+      return (await store.coverUrl?.(galleryId)) ?? null;
+    },
+    staleTime: Infinity,
+  });
+  return data ?? null;
+}
+
 function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
   const t = useT();
+  // Prefer the locally downloaded first page (offline, no network) and fall back
+  // to the network thumbnail when there is no local file (or on web).
+  const localCover = useDownloadedCoverUrl(item.galleryId);
+  const coverSrc = localCover ?? (item.thumbnail ? resolveThumbnailUrl(item.thumbnail) : null);
 
   return (
     <div className="flex gap-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:rounded-lg dark:border-zinc-800 dark:bg-zinc-900">
       {/* Thumbnail */}
       <div className="h-32 w-[5.35rem] shrink-0 overflow-hidden rounded-xl bg-zinc-100 sm:h-24 sm:w-16 sm:rounded-md dark:bg-zinc-800">
-        {item.thumbnail ? (
+        {coverSrc ? (
           <AbortableImage
-            src={resolveThumbnailUrl(item.thumbnail)}
+            src={coverSrc}
             alt={item.title}
             className="h-full w-full object-cover"
             loading="lazy"

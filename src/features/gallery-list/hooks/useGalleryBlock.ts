@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { fetchGalleryBlockHtmlById, createLoadingBlock } from '@/lib/api/gallery';
+import { fetchGalleryBlockHtmlById, createLoadingBlock, createFailedBlock } from '@/lib/api/gallery';
 import { getGalleryBlock, saveGalleryBlock } from '@/lib/db/gallery';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { GalleryBlockType } from '@/lib/utils/types';
@@ -22,11 +22,21 @@ export async function resolveBlock(id: number, signal?: AbortSignal, queryClient
   } catch {
     // Recoverable: WASM DB not initialized or query failed — fall through to remote fetch
   }
-  const block = await fetchGalleryBlockHtmlById(id, signal);
-  if (block.type === GalleryBlockType.NOT_DETAILED || block.type === GalleryBlockType.DETAILED) {
-    saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
+  try {
+    const block = await fetchGalleryBlockHtmlById(id, signal);
+    if (block.type === GalleryBlockType.NOT_DETAILED || block.type === GalleryBlockType.DETAILED) {
+      saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
+    }
+    return block;
+  } catch (e) {
+    // Offline with no cached block (e.g. History of a gallery never fetched): show
+    // a graceful FAILED placeholder instead of an endless LOADING skeleton. When
+    // online, rethrow so React Query retries a transient failure as before.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return createFailedBlock(id);
+    }
+    throw e;
   }
-  return block;
 }
 
 function isStale(block: GalleryBlock): boolean {

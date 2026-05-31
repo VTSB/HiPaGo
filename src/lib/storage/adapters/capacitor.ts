@@ -125,6 +125,27 @@ export class CapacitorDownloadStore implements DownloadStore {
     }
   }
 
+  async coverUrl(galleryId: number): Promise<string | null> {
+    try {
+      const dir = this.galleryPath(galleryId);
+      const res = await this.Filesystem.readdir({ path: dir, directory: this.Directory.Data });
+      const names: string[] = res.files.map((f: unknown) =>
+        typeof f === 'string' ? f : (f as { name: string }).name,
+      );
+      // First page is "0001.<ext>" (imageFileName(0, ext)).
+      const first = names.filter((n) => /^0001\./.test(n)).sort()[0];
+      if (!first) return null;
+      const { uri } = await this.Filesystem.getUri({
+        path: `${dir}/${first}`,
+        directory: this.Directory.Data,
+      });
+      const { Capacitor } = await import('@capacitor/core');
+      return Capacitor.convertFileSrc(uri);
+    } catch {
+      return null;
+    }
+  }
+
   async listGalleries(): Promise<number[]> {
     try {
       const result = await this.Filesystem.readdir({
