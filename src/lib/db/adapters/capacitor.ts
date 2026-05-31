@@ -1,3 +1,4 @@
+import { registerPlugin } from '@capacitor/core';
 import type { DbAdapter, QueryResult } from '../adapter';
 import type { SQLiteConnection as SQLiteConnectionInstance } from '@capacitor-community/sqlite';
 
@@ -32,7 +33,14 @@ export class CapacitorAdapter implements DbAdapter {
     // exports can land under `.default` via CJS interop, which made the bare
     // `new SQLiteConnection(...)` throw the opaque "r is not a constructor".
     // Prefer the namespace binding, fall back to `.default`.
-    const CapacitorSQLite = mod.CapacitorSQLite ?? mod.default?.CapacitorSQLite;
+    // CapacitorSQLite (the registerPlugin proxy) is also tree-shaken to undefined
+    // in the minified bundle. Register it directly as a last resort: on native
+    // this proxy binds to the native plugin, and `registerPlugin` is a used
+    // import so it cannot be tree-shaken. Passing an undefined plugin to
+    // `new SQLiteConnection(...)` is what caused
+    // "createConnection failed: Cannot read properties of undefined".
+    const CapacitorSQLite =
+      mod.CapacitorSQLite ?? mod.default?.CapacitorSQLite ?? registerPlugin('CapacitorSQLite');
     let SQLiteConnectionCtor = mod.SQLiteConnection ?? mod.default?.SQLiteConnection;
 
     // The package's entry only exposes SQLiteConnection via `export * from

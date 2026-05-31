@@ -7,6 +7,10 @@
 // These tests pin the three module shapes.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// registerPlugin is the last-resort fallback for a tree-shaken CapacitorSQLite.
+const REGISTERED_PLUGIN = { __registered: 'CapacitorSQLite' };
+vi.mock('@capacitor/core', () => ({ registerPlugin: vi.fn(() => REGISTERED_PLUGIN) }));
+
 const fakeDb = {
   open: vi.fn(async () => {}),
   execute: vi.fn(async () => {}),
@@ -15,8 +19,15 @@ const fakeDb = {
   close: vi.fn(async () => {}),
 };
 
+// Records the plugin handed to `new SQLiteConnection(plugin)` so a test can
+// assert it is never undefined (the cause of "reading 'createConnection'").
+let lastConstructorArg: unknown = 'unset';
+
 function makeConnectionClass() {
   return class {
+    constructor(sqlite: unknown) {
+      lastConstructorArg = sqlite;
+    }
     checkConnectionsConsistency = vi.fn(async () => ({ result: false }));
     isConnection = vi.fn(async () => ({ result: false }));
     createConnection = vi.fn(async () => fakeDb);
@@ -58,6 +69,20 @@ describe('CapacitorAdapter — defensive SQLiteConnection resolution', () => {
     });
     await expect(A.create('hipago')).resolves.toBeDefined();
     expect(fakeDb.open).toHaveBeenCalled();
+  });
+
+  it('registers CapacitorSQLite directly when its entry export is tree-shaken (undefined)', async () => {
+    lastConstructorArg = 'unset';
+    const A = await loadAdapterWith({
+      CapacitorSQLite: undefined, // tree-shaken to undefined
+      SQLiteConnection: makeConnectionClass(),
+      default: undefined,
+    });
+    await expect(A.create('hipago')).resolves.toBeDefined();
+    // The SQLiteConnection must be built with the registerPlugin proxy, never the
+    // undefined export — otherwise this.sqlite is undefined and createConnection
+    // throws "Cannot read properties of undefined (reading 'createConnection')".
+    expect(lastConstructorArg).toBe(REGISTERED_PLUGIN);
   });
 
   it('constructs when the exports are nested under .default (CJS interop)', async () => {
