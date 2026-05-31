@@ -1,4 +1,5 @@
 import type { DbAdapter, QueryResult } from '../adapter';
+import type { SQLiteConnection as SQLiteConnectionInstance } from '@capacitor-community/sqlite';
 
 /**
  * SQLite adapter for Capacitor mobile using @capacitor-community/sqlite.
@@ -21,11 +22,31 @@ export class CapacitorAdapter implements DbAdapter {
       }
     };
 
-    const { CapacitorSQLite, SQLiteConnection } = await step(
-      'import plugin',
-      () => import('@capacitor-community/sqlite'),
-    );
-    const sqlite = new SQLiteConnection(CapacitorSQLite);
+    const mod = (await step('import plugin', () => import('@capacitor-community/sqlite'))) as {
+      CapacitorSQLite?: unknown;
+      SQLiteConnection?: unknown;
+      default?: { CapacitorSQLite?: unknown; SQLiteConnection?: unknown };
+    };
+
+    // Resolve defensively. In the minified static-export bundle the named
+    // exports can land under `.default` via CJS interop, which made the bare
+    // `new SQLiteConnection(...)` throw the opaque "r is not a constructor".
+    // Prefer the namespace binding, fall back to `.default`.
+    const CapacitorSQLite = mod.CapacitorSQLite ?? mod.default?.CapacitorSQLite;
+    const SQLiteConnectionCtor = mod.SQLiteConnection ?? mod.default?.SQLiteConnection;
+
+    const sqlite = await step('construct SQLiteConnection', async () => {
+      if (typeof SQLiteConnectionCtor !== 'function') {
+        // Actionable message instead of "r is not a constructor": name what we
+        // actually got so a device log points at the real bundling problem.
+        throw new Error(
+          `SQLiteConnection export is not a constructor (got ${typeof SQLiteConnectionCtor}); ` +
+            `module keys: [${Object.keys(mod).join(', ')}]`,
+        );
+      }
+      const Ctor = SQLiteConnectionCtor as new (plugin: unknown) => SQLiteConnectionInstance;
+      return new Ctor(CapacitorSQLite);
+    });
 
     // Acquire the connection resiliently. After an app reload the JS bridge may
     // still hold a connection of this name; a blind createConnection throws
