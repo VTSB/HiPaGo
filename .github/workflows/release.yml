@@ -15,6 +15,12 @@ permissions:
 env:
   NODE_VERSION: '22'
   IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+  # Run Node-based actions (actions/cache@v4 and the apt-cache action's
+  # internal cache/restore+save) on Node 24. actions/cache@v4 is still a Node 20
+  # action with no newer release yet; this is GitHub's documented bridge until
+  # those actions ship Node 24 support, after which this line can be removed.
+  # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 concurrency:
   group: release-${{ github.ref }}
