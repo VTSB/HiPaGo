@@ -29,6 +29,9 @@ function fakeBackend(initial: ImageCacheIndexEntry[] = []) {
     async fileUrl(key) {
       return `file://cache/${key}`;
     },
+    async filePath(key) {
+      return `/cache/${key}`;
+    },
     async remove(key) {
       files.delete(key);
     },
@@ -117,6 +120,18 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
     await s.ensureCached('c', url(10_000), {}); // no eviction under unlimited
     expect(s.has('b')).toBe(true);
     expect(s.has('c')).toBe(true);
+  });
+
+  it('cachedFilePath returns the native fs path on a hit and null on a miss/reclaimed file', async () => {
+    const { backend, files } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    expect(await s.cachedFilePath('a')).toBeNull(); // miss
+    await s.ensureCached('a', url(100), {});
+    expect(await s.cachedFilePath('a')).toBe('/cache/a'); // hit → raw fs path
+    files.delete('a'); // OS reclaimed
+    expect(await s.cachedFilePath('a')).toBeNull();
+    expect(s.has('a')).toBe(false);
   });
 
   it('fileUrl drops a stale entry when the file was reclaimed by the OS', async () => {

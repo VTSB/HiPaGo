@@ -86,6 +86,29 @@ export class CapacitorDownloadStore implements DownloadStore {
     });
   }
 
+  async putImageFromFile(
+    galleryId: number,
+    index: number,
+    srcPath: string,
+    ext: string,
+  ): Promise<number> {
+    await this.Filesystem.mkdir({
+      path: this.galleryPath(galleryId),
+      directory: this.Directory.Data,
+      recursive: true,
+    });
+    const to = this.imagePath(galleryId, index, ext);
+    // Native file→file copy: `from` is an absolute file:// uri (no `directory`),
+    // `to` is relative to Data. No image bytes pass through the JS heap.
+    await this.Filesystem.copy({
+      from: srcPath,
+      to,
+      toDirectory: this.Directory.Data,
+    });
+    const stat = await this.Filesystem.stat({ path: to, directory: this.Directory.Data });
+    return stat.size ?? 0;
+  }
+
   async getImage(
     galleryId: number,
     index: number,

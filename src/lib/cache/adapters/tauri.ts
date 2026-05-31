@@ -56,6 +56,10 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
     async fileUrl(key) {
       return convertFileSrc(await absPath(key));
     },
+    async filePath(key) {
+      // Absolute fs path for a native fs.copyFile (download reuse).
+      return absPath(key);
+    },
     async remove(key) {
       try {
         await fs.remove(`${DIR}/${safeKey(key)}`, { baseDir });

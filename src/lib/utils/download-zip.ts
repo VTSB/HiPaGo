@@ -3,6 +3,7 @@ import { getImageUrl } from './image-url';
 import { apiClient } from '@/lib/api/client';
 import type { GalleryFile, GgConfig } from './types';
 import { createDownloadStore } from '@/lib/storage/download-store';
+import { getImageCache } from '@/lib/cache/image-cache';
 import { upsertDownload, updateDownloadStatus, serializeTags } from '@/lib/db/download';
 
 function sanitizeFilename(name: string): string {
@@ -128,6 +129,11 @@ export async function downloadGalleryToLibrary(
   });
 
   const store = await createDownloadStore();
+  // If the platform can copy files natively (Capacitor/Tauri), reuse images
+  // already in the persistent cache instead of re-fetching them — a native
+  // file→file copy, no image bytes through the JS heap. Web omits
+  // putImageFromFile (and its cache is a no-op), so it always fetches.
+  const imageCache = store.putImageFromFile ? await getImageCache().catch(() => null) : null;
   const pageExts: string[] = [];
   let totalBytes = 0;
 
@@ -137,6 +143,18 @@ export async function downloadGalleryToLibrary(
 
       const file = files[i];
       const url = getImageUrl(file, ggConfig, 'webp');
+
+      // Cache reuse: if this exact webp image is already cached, copy the cache
+      // file into the gallery folder natively and skip the network entirely.
+      const cachedPath = imageCache ? await imageCache.cachedFilePath(url).catch(() => null) : null;
+      if (cachedPath && store.putImageFromFile) {
+        const size = await store.putImageFromFile(galleryId, i, cachedPath, 'webp');
+        pageExts.push('webp');
+        totalBytes += size;
+        onProgress?.({ current: i + 1, total });
+        continue;
+      }
+
       const res = await apiClient.fetchUrl(url, { signal });
       const buf = await res.arrayBuffer();
       const ext = deriveExt(res, file);

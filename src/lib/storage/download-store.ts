@@ -29,6 +29,20 @@ export interface DownloadStore {
   ): Promise<void>;
 
   /**
+   * Copy an existing file (e.g. a persistent image-cache file) into the gallery
+   * folder natively — no image bytes pass through the JS heap. Returns the bytes
+   * written. Optional: adapters without a native file copy (web) omit it, and
+   * callers must feature-detect before using it.
+   * @param srcPath  Native fs path/uri of the source file (from the image cache).
+   */
+  putImageFromFile?(
+    galleryId: number,
+    index: number,
+    srcPath: string,
+    ext: string,
+  ): Promise<number>;
+
+  /**
    * Read one image from the gallery folder.
    * Returns null when the file does not exist.
    */

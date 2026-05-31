@@ -36,6 +36,9 @@ export interface ImageCacheBackend {
   download(key: string, url: string, headers: Record<string, string>): Promise<number>;
   /** A WebView-loadable URL for `key`'s file (convertFileSrc). Caller ensures it exists. */
   fileUrl(key: string): Promise<string>;
+  /** The raw native fs path/uri of `key`'s file (for a native file→file copy, e.g.
+   *  the download flow reusing a cached image). Distinct from `fileUrl`. */
+  filePath(key: string): Promise<string>;
   remove(key: string): Promise<void>;
   loadIndex(): Promise<ImageCacheIndexEntry[]>;
   saveIndex(entries: ImageCacheIndexEntry[]): Promise<void>;
@@ -93,23 +96,36 @@ export class ImageCacheStore {
   }
 
   /**
-   * Serve the cached file URL for `key`, bumping recency, or null on a miss. If
-   * the index lists the key but the file is gone (cache dir reclaimed by the OS),
-   * the stale entry is dropped and null is returned.
+   * Touch `key`: if it is a live cache hit (file present), bump its recency and
+   * return true; if the index lists it but the file is gone (cache dir reclaimed
+   * by the OS), drop the stale entry and return false. Shared by fileUrl /
+   * cachedFilePath.
    */
-  async fileUrl(key: string): Promise<string | null> {
+  private async touch(key: string): Promise<boolean> {
     const entry = this.entries.get(key);
-    if (!entry) return null;
+    if (!entry) return false;
     const size = await this.backend.statSize(key);
     if (size == null) {
       this.totalBytes -= entry.size;
       this.entries.delete(key);
       await this.flushIndex();
-      return null;
+      return false;
     }
     entry.lastAccess = this.nextTick();
     await this.flushIndex();
-    return this.backend.fileUrl(key);
+    return true;
+  }
+
+  /** Serve the cached file URL (convertFileSrc) for `key`, bumping recency, or
+   *  null on a miss / reclaimed file. */
+  async fileUrl(key: string): Promise<string | null> {
+    return (await this.touch(key)) ? this.backend.fileUrl(key) : null;
+  }
+
+  /** The raw native fs path/uri of `key`'s cached file (for a native file copy,
+   *  e.g. the download flow), bumping recency, or null on a miss / reclaimed file. */
+  async cachedFilePath(key: string): Promise<string | null> {
+    return (await this.touch(key)) ? this.backend.filePath(key) : null;
   }
 
   /**

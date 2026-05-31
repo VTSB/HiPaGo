@@ -58,6 +58,24 @@ export class TauriDownloadStore implements DownloadStore {
     });
   }
 
+  async putImageFromFile(
+    galleryId: number,
+    index: number,
+    srcPath: string,
+    ext: string,
+  ): Promise<number> {
+    await this.fs.mkdir(this.galleryPath(galleryId), {
+      baseDir: this.BaseDirectory.AppData,
+      recursive: true,
+    });
+    const to = this.imagePath(galleryId, index, ext);
+    // Native file→file copy: `srcPath` is an absolute fs path (image cache),
+    // `to` is relative to AppData. No image bytes pass through the JS heap.
+    await this.fs.copyFile(srcPath, to, { toPathBaseDir: this.BaseDirectory.AppData });
+    const stat = await this.fs.stat(to, { baseDir: this.BaseDirectory.AppData });
+    return (stat?.size as number) ?? 0;
+  }
+
   async getImage(
     galleryId: number,
     index: number,

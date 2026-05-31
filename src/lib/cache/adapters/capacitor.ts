@@ -60,6 +60,10 @@ export async function createCapacitorImageCacheBackend(): Promise<ImageCacheBack
     async fileUrl(key) {
       return Capacitor.convertFileSrc(await fileUri(key));
     },
+    async filePath(key) {
+      // Raw file:// uri for a native Filesystem.copy (download reuse).
+      return fileUri(key);
+    },
     async remove(key) {
       try {
         await Filesystem.deleteFile({ path: `${DIR}/${safeKey(key)}`, directory });

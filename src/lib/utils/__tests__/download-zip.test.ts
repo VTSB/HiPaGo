@@ -35,6 +35,13 @@ vi.mock('@/lib/storage/download-store', () => ({
   galleryFolderName: (id: number) => String(id),
 }));
 
+// Mock the image cache singleton (stage-4 download reuse). cachedFilePath is
+// controlled per test; only exercised when the store exposes putImageFromFile.
+const { cachedFilePath } = vi.hoisted(() => ({ cachedFilePath: vi.fn() }));
+vi.mock('@/lib/cache/image-cache', () => ({
+  getImageCache: vi.fn(async () => ({ cachedFilePath })),
+}));
+
 import {
   downloadGalleryAsZip,
   downloadGalleryToLibrary,
@@ -115,6 +122,23 @@ function makeMemoryStore(): DownloadStore & { store: Map<string, Uint8Array> } {
       return total;
     },
   };
+}
+
+/** Memory store that also supports the stage-4 native file copy. */
+function makeMemoryStoreWithCopy() {
+  const base = makeMemoryStore();
+  const copies: Array<{ galleryId: number; index: number; srcPath: string; ext: string }> = [];
+  return Object.assign(base, {
+    copies,
+    async putImageFromFile(galleryId: number, index: number, srcPath: string, ext: string) {
+      copies.push({ galleryId, index, srcPath, ext });
+      base.store.set(
+        `${galleryId}/${String(index + 1).padStart(4, '0')}.${ext}`,
+        new Uint8Array([7, 7, 7, 7]),
+      );
+      return 4; // bytes copied
+    },
+  });
 }
 
 // ── downloadGalleryAsZip (legacy behaviour unchanged) ─────────────────────────
@@ -437,6 +461,74 @@ describe('downloadGalleryToLibrary', () => {
 
     const lastUpsert = vi.mocked(upsertDownload).mock.calls.at(-1)![0];
     expect(lastUpsert.totalBytes).toBe(10); // 5 × 2
+  });
+});
+
+// ── downloadGalleryToLibrary cache reuse (stage 4) ────────────────────────────
+
+describe('downloadGalleryToLibrary — cache reuse', () => {
+  let memStore: ReturnType<typeof makeMemoryStoreWithCopy>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    memStore = makeMemoryStoreWithCopy();
+    vi.mocked(createDownloadStore).mockResolvedValue(memStore);
+    vi.mocked(getImageUrl).mockReturnValue('https://example.com/image.webp');
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([1, 2, 3])),
+    );
+    vi.mocked(upsertDownload).mockResolvedValue(undefined);
+    cachedFilePath.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('copies a cached page from the cache file and skips the network', async () => {
+    cachedFilePath.mockResolvedValue('file:///cache/image-cache/key');
+
+    await downloadGalleryToLibrary(1, 'G', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
+
+    expect(apiClient.fetchUrl).not.toHaveBeenCalled();
+    expect(cachedFilePath).toHaveBeenCalledWith('https://example.com/image.webp');
+    expect(memStore.copies).toEqual([
+      { galleryId: 1, index: 0, srcPath: 'file:///cache/image-cache/key', ext: 'webp' },
+    ]);
+    const manifest = await memStore.getImage(1, -1, 'json');
+    expect(JSON.parse(new TextDecoder().decode(manifest!))).toEqual(['webp']);
+  });
+
+  it('falls back to fetch + putImage when the page is not cached', async () => {
+    cachedFilePath.mockResolvedValue(null);
+
+    await downloadGalleryToLibrary(2, 'G', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
+
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1);
+    expect(memStore.copies).toHaveLength(0);
+    expect(await memStore.getImage(2, 0, 'webp')).toBeInstanceOf(Uint8Array);
+  });
+
+  it('mixes copy + fetch and accounts totalBytes from both paths', async () => {
+    cachedFilePath.mockResolvedValueOnce('file:///cache/key0').mockResolvedValueOnce(null);
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([9, 9, 9, 9, 9])), // 5 bytes
+    );
+
+    await downloadGalleryToLibrary(
+      3,
+      'G',
+      'thumb.jpg',
+      [makeFile('a.jpg'), makeFile('b.jpg')],
+      makeGgConfig(),
+      {},
+    );
+
+    expect(memStore.copies).toHaveLength(1); // page 0 copied from cache
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1); // page 1 fetched
+    const lastUpsert = vi.mocked(upsertDownload).mock.calls.at(-1)![0];
+    expect(lastUpsert.totalBytes).toBe(4 + 5); // copy 4 + fetch 5
+    expect(lastUpsert.pageCount).toBe(2);
   });
 });
 

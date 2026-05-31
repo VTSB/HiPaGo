@@ -22,6 +22,9 @@ export async function createWebImageCacheBackend(): Promise<ImageCacheBackend> {
     async fileUrl() {
       throw new Error('image cache is not supported on web');
     },
+    async filePath() {
+      throw new Error('image cache is not supported on web');
+    },
     async remove() {
       // no-op
     },
