@@ -9,7 +9,7 @@ import { useCallback } from 'react';
  * are not reflected in the URL — the reader's own reading-progress save
  * handles resume across sessions.
  */
-export function useReaderHistory(_galleryId: number) {
+export function useReaderHistory() {
   const goBack = useCallback(() => {
     window.history.back();
   }, []);

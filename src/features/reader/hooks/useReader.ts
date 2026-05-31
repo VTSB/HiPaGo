@@ -49,7 +49,7 @@ export function useReader(galleryId: number, initialPage?: number) {
     }
   }, [galleryImages, galleryId, initialPage, setGallery, setCurrentPage, setMode]);
 
-  const { goBack } = useReaderHistory(galleryId);
+  const { goBack } = useReaderHistory();
   useReaderPersistence();
 
   // Keyboard navigation is handled in ReaderView to support both page and scroll modes
