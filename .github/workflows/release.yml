@@ -302,17 +302,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Persist Next.js's webpack/SWC compile cache so `next build` (inside
-      # build-static.mjs) reuses module work across runs. restore-keys gives an
-      # incremental warm start even when source changes invalidate the exact key.
-      - name: Cache Next.js build
-        uses: actions/cache@v4
-        with:
-          path: .next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx', 'next.config.*') }}
-          restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
-            nextjs-${{ runner.os }}-
+      # NOTE: no .next cache for the native static-export builds. A restored
+      # .next/cache can leave the @capacitor-community/sqlite vendor chunk in a
+      # previously tree-shaken state while only app chunks rebuild, which dropped
+      # the SQLiteConnection class on a release build ("r is not a constructor").
+      # Native release builds compile Next from clean for determinism.
 
       - name: Build static export
         run: node scripts/build-static.mjs
@@ -427,17 +421,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Persist Next.js's webpack/SWC compile cache so `next build` (inside
-      # build-static.mjs) reuses module work across runs. restore-keys gives an
-      # incremental warm start even when source changes invalidate the exact key.
-      - name: Cache Next.js build
-        uses: actions/cache@v4
-        with:
-          path: .next/cache
-          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx', 'next.config.*') }}
-          restore-keys: |
-            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
-            nextjs-${{ runner.os }}-
+      # NOTE: no .next cache for the native static-export builds. A restored
+      # .next/cache can leave the @capacitor-community/sqlite vendor chunk in a
+      # previously tree-shaken state while only app chunks rebuild, which dropped
+      # the SQLiteConnection class on a release build ("r is not a constructor").
+      # Native release builds compile Next from clean for determinism.
 
       - name: Build static export
         run: node scripts/build-static.mjs
