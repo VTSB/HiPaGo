@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { isAndroid, isCapacitor, isTauri } from '@/lib/utils/platform';
+import { useScheduledImageLoad } from './useScheduledImageLoad';
 import { Spinner } from '@/shared/components/Spinner';
 
 interface AbortableImageProps {
@@ -213,6 +214,22 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   const [loaded, setLoaded] = useState(() => loadedSrcCache.has(src));
   const [failed, setFailed] = useState(false);
 
+  // Order the network <img> load through the viewport-first scheduler. Skip it
+  // for cached / eager / preload / explicit-high / native-fetch images, which
+  // must never be queued behind the grid.
+  const shouldSchedule =
+    !needsNativeImageFetch &&
+    loading !== 'eager' &&
+    !preload &&
+    fetchPriority !== 'high' &&
+    !loadedSrcCache.has(src);
+  const { granted, onSettled } = useScheduledImageLoad({
+    shouldSchedule,
+    wantsToLoad: visible && !!effectiveSrc,
+    loadKey: shouldSchedule ? effectiveSrc : null,
+    imgRef,
+  });
+
   // Keep the latest onPermanentError in a ref so callbacks always call the
   // current version without re-subscribing effects (react-hooks/refs).
   const onPermanentErrorRef = useRef(onPermanentError);
@@ -275,7 +292,8 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     loadedSrcCache.add(src);
     if (effectiveSrc) loadedSrcCache.add(effectiveSrc);
     setLoaded(true);
-  }, [effectiveSrc, src]);
+    onSettled(true);
+  }, [effectiveSrc, src, onSettled]);
 
   // Retry on error (up to 3 times with exponential backoff).
   // Fast consecutive errors (< 2s apart) indicate a permanent failure (404/gone)
@@ -285,6 +303,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     if (loadedRef.current) return;
     if (retryCountRef.current >= 3) {
       setFailed(true);
+      onSettled(false);
       onPermanentErrorRef.current?.();
       return;
     }
@@ -292,6 +311,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     if (retryCountRef.current > 0 && now - lastErrorTimeRef.current < 2000) {
       // Two fast failures in a row → likely 404, stop retrying
       setFailed(true);
+      onSettled(false);
       onPermanentErrorRef.current?.();
       return;
     }
@@ -306,7 +326,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
         img.src = cur;
       }
     }, delay);
-  }, []);
+  }, [onSettled]);
 
   // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded).
   // The sync viewport check (already-in-view on mount) is deferred via requestAnimationFrame
@@ -377,7 +397,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       // eslint-disable-next-line @next/next/no-img-element
       <img
         ref={imgRef}
-        src={visible ? effectiveSrc ?? undefined : undefined}
+        src={visible && granted ? effectiveSrc ?? undefined : undefined}
         alt=""
         data-preload="true"
         fetchPriority="low"
@@ -406,7 +426,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         ref={imgRef}
-        src={visible ? effectiveSrc ?? undefined : undefined}
+        src={visible && granted ? effectiveSrc ?? undefined : undefined}
         alt={alt}
         className={className}
         loading={loading === 'eager' ? 'eager' : undefined}
