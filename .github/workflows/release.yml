@@ -48,7 +48,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Run Rust tests
         run: cargo test -p bypass-core
@@ -102,7 +102,7 @@ jobs:
           workspaces: |
             . -> target
             src-tauri -> target
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Install Linux dependencies
         if: matrix.target == 'linux'
@@ -234,6 +234,17 @@ jobs:
           # Android Emulator package even though release builds do not need it.
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
+      # Caches ~/.gradle (dependencies + wrapper) and the Gradle build cache,
+      # with built-in cache cleanup to avoid unbounded growth. Big Android win:
+      # without it Gradle re-downloads + recompiles every run.
+      - name: Setup Gradle (dependency + build cache)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # Default is read-only off the repo's default branch; releases run on
+          # tags / the release branch, so write the cache there too — otherwise
+          # it never persists across releases.
+          cache-read-only: false
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -246,7 +257,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2
@@ -289,7 +300,7 @@ jobs:
           ORG_GRADLE_PROJECT_HIPAGO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease --build-cache
 
       - name: Verify APK is installable
         run: |
@@ -359,7 +370,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Build bypass-uniffi for iOS
         run: node scripts/build-ios.mjs
@@ -368,6 +379,19 @@ jobs:
 
       - name: Build static export
         run: node scripts/build-static.mjs
+
+      # Reuse downloaded pods + the local CocoaPods spec cache across runs so
+      # `cap sync ios` (which runs `pod install`) doesn't re-fetch every time.
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods
+            ios/App/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('ios/App/Podfile.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
 
       - name: Install CocoaPods
         run: command -v pod || sudo gem install cocoapods
