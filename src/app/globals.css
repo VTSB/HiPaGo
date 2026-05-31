@@ -56,4 +56,13 @@ body {
   textarea {
     -webkit-tap-highlight-color: transparent;
   }
+
+  /* Suppress the native long-press link/image drag (and callout) that grabbed
+     the touch stream and froze the UI on Android WebView. A browsing app never
+     needs to drag links or images. */
+  a,
+  img {
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+  }
 }

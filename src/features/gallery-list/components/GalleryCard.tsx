@@ -108,6 +108,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     <Link
       href={galleryHref(block.id)}
       className="group block touch-manipulation"
+      draggable={false}
       onClick={(event) => {
         try {
           const url = window.location.pathname + window.location.search;
@@ -131,6 +132,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
           <AbortableImage
             src={resolveThumbnailUrl(block.thumbnail)}
             alt={block.title}
+            draggable={false}
             className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`}
             loading="lazy"
             onPermanentError={() => {
