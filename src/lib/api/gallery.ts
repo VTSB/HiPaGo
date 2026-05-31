@@ -81,15 +81,23 @@ export function filesToGalleryImages(id: number, files: GalleryFile[]): GalleryI
 }
 
 export async function fetchGalleryImagesCached(id: number): Promise<GalleryImages> {
-  // Try DB cache first
-  const cached = await getGalleryImagesFromDb(id);
-  if (cached) {
-    return filesToGalleryImages(id, cached);
+  // Try DB cache first — a dead/uninitialized DB is a cache MISS, not a failure.
+  // Without this guard an unavailable local DB makes image loading throw.
+  try {
+    const cached = await getGalleryImagesFromDb(id);
+    if (cached) {
+      return filesToGalleryImages(id, cached);
+    }
+  } catch {
+    // Recoverable: DB unavailable — fall through to the network fetch.
   }
 
-  // Fetch from API and cache
+  // Fetch from API; caching the result is best-effort and must never block
+  // returning the images (a dead DB must not fail the load).
   const info = await fetchGalleryInfo(id);
-  await saveGalleryImages(id, info.files);
+  saveGalleryImages(id, info.files).catch((e) =>
+    console.warn('[gallery] images cache save failed:', e),
+  );
   return galleryInfoToImages(info);
 }
 

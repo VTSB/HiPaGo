@@ -30,7 +30,12 @@ import { getGalleryImages as getGalleryImagesFromDb, saveGalleryImages } from '@
 import { fetchGalleryImagesCached } from '../gallery';
 
 describe('fetchGalleryImagesCached', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // saveGalleryImages is async in production — default the mock to a resolved
+    // promise so the best-effort `.catch` has a thenable to attach to.
+    vi.mocked(saveGalleryImages).mockResolvedValue(undefined);
+  });
 
   it('returns cached images from DB when available', async () => {
     const cachedFiles: GalleryFile[] = [
@@ -83,6 +88,52 @@ describe('fetchGalleryImagesCached', () => {
 
     expect(saveGalleryImages).toHaveBeenCalledWith(456, mockInfo.files);
     expect(result).toEqual(mockImages);
+  });
+
+  const networkInfo = {
+    id: 999,
+    files: [{ name: '001.jpg', hash: 'h1', width: 800, height: 1200, haswebp: 1, hasavif: 1, hasavifsmalltn: 1 }],
+    language: 'japanese',
+    languageLocalName: '日本語',
+    date: '2024-01-01',
+    tags: [],
+    title: 'Test',
+    japaneseTitle: '',
+    type: 'doujinshi',
+    related: [],
+    artists: [],
+    groups: [],
+    characters: [],
+    parodys: [],
+  };
+  const networkImages = {
+    id: 999,
+    images: [{ name: '001.jpg', hash: 'h1', width: 800, height: 1200, types: new Set([ImageType.ORIGINAL]) }],
+  };
+
+  it('treats a dead DB as a cache miss and falls through to the network', async () => {
+    // Simulate an unavailable/uninitialized DB: the cache read throws.
+    vi.mocked(getGalleryImagesFromDb).mockRejectedValue(new Error('Database not initialized.'));
+    vi.mocked(apiClient.fetchLtnText).mockResolvedValue('var galleryinfo = {}');
+    vi.mocked(parseGalleryJson).mockReturnValue(networkInfo);
+    vi.mocked(galleryInfoToImages).mockReturnValue(networkImages);
+
+    const result = await fetchGalleryImagesCached(999);
+
+    expect(apiClient.fetchLtnText).toHaveBeenCalled();
+    expect(result).toEqual(networkImages);
+  });
+
+  it('still returns images when the DB cache save fails (best-effort save)', async () => {
+    vi.mocked(getGalleryImagesFromDb).mockResolvedValue(null);
+    vi.mocked(saveGalleryImages).mockRejectedValue(new Error('Database not initialized.'));
+    vi.mocked(apiClient.fetchLtnText).mockResolvedValue('var galleryinfo = {}');
+    vi.mocked(parseGalleryJson).mockReturnValue(networkInfo);
+    vi.mocked(galleryInfoToImages).mockReturnValue(networkImages);
+
+    const result = await fetchGalleryImagesCached(999);
+
+    expect(result).toEqual(networkImages);
   });
 
   it('includes all image types based on flags', async () => {

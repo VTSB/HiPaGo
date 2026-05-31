@@ -38,13 +38,18 @@ export function useReader(galleryId: number, initialPage?: number) {
         setCurrentPage(Math.min(initialPage - 1, galleryImages.images.length - 1));
       } else {
         const capturedId = galleryId;
-        getReadingProgress(galleryId).then((p) => {
-          // History overrides settings when available
-          if (p && useReaderStore.getState().galleryId === capturedId && !userNavigatedRef.current) {
-            setCurrentPage(p.lastPage);
-            setMode(p.readerMode as 'page' | 'scroll');
-          }
-        });
+        getReadingProgress(galleryId)
+          .then((p) => {
+            // History overrides settings when available
+            if (p && useReaderStore.getState().galleryId === capturedId && !userNavigatedRef.current) {
+              setCurrentPage(p.lastPage);
+              setMode(p.readerMode as 'page' | 'scroll');
+            }
+          })
+          .catch(() => {
+            // Recoverable: DB unavailable — reader opens at the default
+            // page/mode. A dead DB must not break opening the reader.
+          });
       }
     }
   }, [galleryImages, galleryId, initialPage, setGallery, setCurrentPage, setMode]);

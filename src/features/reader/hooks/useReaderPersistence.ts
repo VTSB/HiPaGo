@@ -29,7 +29,8 @@ export function useReaderPersistence() {
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       const { storeGalleryId: id, currentPage: p, totalPages: t, mode: m } = latestState.current;
-      if (id) recordHistory(id, p, t, m);
+      // Fire-and-forget: a dead DB must not raise an unhandled rejection.
+      if (id) recordHistory(id, p, t, m).catch(() => {});
     }, 2000);
     return () => clearTimeout(saveTimer.current);
   }, [currentPage, storeGalleryId]);
@@ -39,7 +40,8 @@ export function useReaderPersistence() {
     return () => {
       clearTimeout(saveTimer.current);
       const { storeGalleryId: id, currentPage: p, totalPages: t, mode: m } = latestState.current;
-      if (id) recordHistory(id, p, t, m);
+      // Fire-and-forget: a dead DB must not raise an unhandled rejection.
+      if (id) recordHistory(id, p, t, m).catch(() => {});
     };
   }, []);
 }
