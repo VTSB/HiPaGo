@@ -49,6 +49,11 @@ jobs:
         with:
           workspaces: '. -> target'
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
+          # Save the compiled target even when a later step fails (flaky pod
+          # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
+          # is discarded and recompiled from scratch on the retry. The cache is
+          # keyed on Cargo.lock + rustc, so stale entries self-evict.
+          cache-on-failure: true
 
       - name: Run Rust tests
         run: cargo test -p bypass-core
@@ -103,6 +108,11 @@ jobs:
             . -> target
             src-tauri -> target
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
+          # Save the compiled target even when a later step fails (flaky pod
+          # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
+          # is discarded and recompiled from scratch on the retry. The cache is
+          # keyed on Cargo.lock + rustc, so stale entries self-evict.
+          cache-on-failure: true
 
       - name: Install Linux dependencies
         if: matrix.target == 'linux'
@@ -115,6 +125,18 @@ jobs:
             patchelf
 
       - run: pnpm install --frozen-lockfile
+
+      # Tauri's beforeBuildCommand runs `next build`; persist its webpack/SWC
+      # compile cache so the frontend half of the desktop build warms across
+      # runs. Keyed per-OS (matrix), restore-keys for incremental warm starts.
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx', 'next.config.*') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            nextjs-${{ runner.os }}-
 
       # Build with Tauri — no release flags. The matrix runs three jobs
       # (linux/windows/macos) in parallel; letting tauri-action create
@@ -258,6 +280,11 @@ jobs:
         with:
           workspaces: '. -> target'
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
+          # Save the compiled target even when a later step fails (flaky pod
+          # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
+          # is discarded and recompiled from scratch on the retry. The cache is
+          # keyed on Cargo.lock + rustc, so stale entries self-evict.
+          cache-on-failure: true
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2
@@ -268,6 +295,18 @@ jobs:
         run: node scripts/build-android.mjs
 
       - run: pnpm install --frozen-lockfile
+
+      # Persist Next.js's webpack/SWC compile cache so `next build` (inside
+      # build-static.mjs) reuses module work across runs. restore-keys gives an
+      # incremental warm start even when source changes invalidate the exact key.
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx', 'next.config.*') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            nextjs-${{ runner.os }}-
 
       - name: Build static export
         run: node scripts/build-static.mjs
@@ -371,11 +410,28 @@ jobs:
         with:
           workspaces: '. -> target'
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
+          # Save the compiled target even when a later step fails (flaky pod
+          # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
+          # is discarded and recompiled from scratch on the retry. The cache is
+          # keyed on Cargo.lock + rustc, so stale entries self-evict.
+          cache-on-failure: true
 
       - name: Build bypass-uniffi for iOS
         run: node scripts/build-ios.mjs
 
       - run: pnpm install --frozen-lockfile
+
+      # Persist Next.js's webpack/SWC compile cache so `next build` (inside
+      # build-static.mjs) reuses module work across runs. restore-keys gives an
+      # incremental warm start even when source changes invalidate the exact key.
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx', 'next.config.*') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            nextjs-${{ runner.os }}-
 
       - name: Build static export
         run: node scripts/build-static.mjs
