@@ -26,6 +26,31 @@ interface SettingsStoreState {
   removeBlurTag: (tag: string) => void;
 }
 
+// furry/snuff/guro/scat each appear under BOTH the female: and male: hitomi
+// namespaces, so both forms are listed to catch a gallery tagged under either.
+const SAFETY_BLUR_TAGS = [
+  'female:furry', 'male:furry',
+  'female:snuff', 'male:snuff',
+  'female:guro', 'male:guro',
+  'female:scat', 'male:scat',
+];
+export const DEFAULT_BLUR_TAGS = ['male:yaoi', ...SAFETY_BLUR_TAGS];
+// Safety tags added to the default blur filter in settings v1; merged once into
+// an existing user's blurTags via the persist migration below.
+const V1_ADDED_BLUR_TAGS = SAFETY_BLUR_TAGS;
+
+/** Persist migration: union the v1 default safety tags into an existing user's
+ *  blurTags (once, on the 0->1 bump). A tag the user later removes stays removed.
+ *  Exported for unit tests. */
+export function migrateSettings(persisted: unknown, version: number): unknown {
+  if (version < 1 && persisted && typeof persisted === 'object') {
+    const s = persisted as { blurTags?: string[] };
+    const existing = Array.isArray(s.blurTags) ? s.blurTags : [];
+    return { ...s, blurTags: Array.from(new Set([...existing, ...V1_ADDED_BLUR_TAGS])) };
+  }
+  return persisted;
+}
+
 export const useSettingsStore = create<SettingsStoreState>()(
   persist(
     (set) => ({
@@ -34,7 +59,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       theme: 'dark',
       readerMode: 'page',
       imageFormat: 'auto',
-      blurTags: ['male:yaoi'],
+      blurTags: DEFAULT_BLUR_TAGS,
       dualPage: false,
       gridColumns: 0,
       scrollZoom: 1,
@@ -49,7 +74,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings' },
+    { name: 'hipago-settings', version: 1, migrate: migrateSettings },
   ),
 );
 
