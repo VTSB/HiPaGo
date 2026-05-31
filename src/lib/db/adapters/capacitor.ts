@@ -134,7 +134,11 @@ export class CapacitorAdapter implements DbAdapter {
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
-    const result = await this.db.run(sql, params);
+    // transaction=false: the plugin's run() defaults to wrapping each call in its
+    // own BEGIN/COMMIT. Transactions are managed one level up (runMigrations,
+    // withTransaction) with explicit BEGIN/COMMIT, so the implicit wrap would
+    // nest and fail ("cannot start a transaction within a transaction").
+    const result = await this.db.run(sql, params, false);
     return {
       changes: result.changes?.changes ?? 0,
       lastInsertRowId: result.changes?.lastId ?? 0,
@@ -152,7 +156,10 @@ export class CapacitorAdapter implements DbAdapter {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     for (const stmt of statements) {
-      await this.db.execute(stmt);
+      // transaction=false — see execute() above. Lets the explicit BEGIN/COMMIT
+      // issued by runMigrations actually open/close the transaction instead of
+      // nesting inside the plugin's implicit one.
+      await this.db.execute(stmt, false);
     }
   }
 
