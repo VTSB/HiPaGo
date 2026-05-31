@@ -396,8 +396,24 @@ jobs:
       - name: Install CocoaPods
         run: command -v pod || sudo gem install cocoapods
 
+      # `cap sync ios` runs `pod install`, which clones pod sources (e.g.
+      # SQLCipher) from GitHub. Those clones intermittently fail with a
+      # transient "curl 56 Connection reset by peer" / early-EOF. Retry the
+      # whole sync (idempotent) a few times before failing the build.
       - name: Sync Capacitor
-        run: node node_modules/@capacitor/cli/bin/capacitor sync ios
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::cap sync ios (attempt $attempt)"
+            if node node_modules/@capacitor/cli/bin/capacitor sync ios; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "cap sync ios failed (attempt $attempt); retrying in 15s..."
+            sleep 15
+          done
+          echo "cap sync ios failed after 3 attempts" >&2
+          exit 1
 
       - name: Build iOS archive
         working-directory: ios/App
