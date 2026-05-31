@@ -16,6 +16,12 @@ import { AbortableImage, preloadImageSource } from '@/shared/components/Abortabl
 // released the moment the user navigates again.
 const PRELOAD_AHEAD = 15;
 const PRELOAD_BEHIND = 5;
+// Page-turn slide duration (ms). The turn animates the track's `transform`
+// (compositor thread) instead of `scrollLeft` (main thread), so it's smooth and
+// never churns the virtualizer mid-animation — ~half the browser's native
+// smooth-scroll for a snappier flip. Tune here.
+const PAGE_TURN_MS = 150;
+const PAGE_TURN_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
 export function PageReader({
   images,
@@ -35,6 +41,10 @@ export function PageReader({
   const step = dualPage ? 2 : 1;
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // The virtualized track (spacer) whose `transform` we animate for a page turn.
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  // In-flight transform slide, so a rapid second turn can land the first instantly.
+  const slideAnimRef = useRef<{ to: number; onEnd: () => void; timer: ReturnType<typeof setTimeout> } | null>(null);
   const [width, setWidth] = useState(0);
   // Mirror `width` so the once-attached scroll listener reads the current value
   // (and the SAME value the slides are sized with) without re-subscribing.
@@ -209,10 +219,76 @@ export function PageReader({
   // the same main thread that was drawing the scroll. Snap is turned off for the
   // duration (the target is an exact page boundary, so it lands without snap)
   // and restored on `scrollend` / the settle timer so swipes keep snapping.
-  const animateScrollTo = useCallback((el: HTMLDivElement, to: number) => {
-    el.style.scrollSnapType = 'none';
-    el.scrollTo({ left: to, behavior: 'smooth' });
+  // Land any in-flight transform slide immediately (commit its scroll position
+  // and clear the transform) — used before starting a new turn on rapid taps.
+  const finishSlide = useCallback((el: HTMLDivElement, track: HTMLDivElement) => {
+    const anim = slideAnimRef.current;
+    if (!anim) return;
+    track.removeEventListener('transitionend', anim.onEnd);
+    clearTimeout(anim.timer);
+    slideAnimRef.current = null;
+    track.style.transition = 'none';
+    track.style.transform = '';
+    el.scrollLeft = anim.to;
+    el.style.scrollSnapType = 'x mandatory';
+    programmaticRef.current = false;
   }, []);
+
+  // Page turn. Animate the track's `transform` on the COMPOSITOR (smooth, off the
+  // main thread) and keep `scrollLeft` fixed during the motion, so the virtualizer
+  // never re-renders mid-turn (the per-frame `scrollLeft` write was what made a JS
+  // tween stutter). At the end we commit in one frame: clear the transform and set
+  // `scrollLeft` to the target — net-zero visual change, one virtualizer update.
+  // A jump beyond the mounted overscan window (target not rendered → would slide
+  // to blank) falls back to the browser's native smooth scroll.
+  const animateScrollTo = useCallback((el: HTMLDivElement, to: number) => {
+    const track = trackRef.current;
+    const w = widthRef.current || 1;
+    finishSlide(el, track ?? el);
+    const from = el.scrollLeft;
+    const delta = to - from;
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    const commit = () => {
+      if (track) {
+        track.style.transition = 'none';
+        track.style.transform = '';
+      }
+      el.scrollLeft = to;
+      el.style.scrollSnapType = 'x mandatory';
+      programmaticRef.current = false;
+    };
+
+    if (Math.abs(delta) < 1) { commit(); return; }
+    // Target outside the mounted window (overscan 2) — can't slide to an unmounted
+    // slide. Use the native smooth scroll; onScrollEnd restores snap.
+    if (!track || reduce || Math.abs(delta) > 2 * w + 1) {
+      el.style.scrollSnapType = 'none';
+      el.scrollTo({ left: to, behavior: reduce ? 'auto' : 'smooth' });
+      return;
+    }
+
+    el.style.scrollSnapType = 'none';
+    // Start showing `from` (translateX 0), animate to showing `to` (translateX -delta).
+    track.style.transition = 'none';
+    track.style.transform = 'translateX(0px)';
+    void track.offsetWidth; // reflow so the transition starts from 0
+    track.style.transition = `transform ${PAGE_TURN_MS}ms ${PAGE_TURN_EASING}`;
+    track.style.transform = `translateX(${-delta}px)`;
+
+    const onEnd = () => {
+      const anim = slideAnimRef.current;
+      if (!anim) return;
+      track.removeEventListener('transitionend', anim.onEnd);
+      clearTimeout(anim.timer);
+      slideAnimRef.current = null;
+      commit();
+    };
+    // Safety net in case `transitionend` is missed (interrupted compositor commit).
+    const timer = setTimeout(onEnd, PAGE_TURN_MS + 80);
+    slideAnimRef.current = { to, onEnd, timer };
+    track.addEventListener('transitionend', onEnd);
+  }, [finishSlide]);
 
   // Drive the scroll when the logical page changes from outside (buttons, arrow
   // keys, tap zones, jump modal).
@@ -258,6 +334,8 @@ export function PageReader({
 
   useEffect(() => () => {
     clearTimeout(programmaticTimerRef.current);
+    const anim = slideAnimRef.current;
+    if (anim) { clearTimeout(anim.timer); slideAnimRef.current = null; }
   }, []);
 
   const navigate = useCallback((target: number) => {
@@ -366,7 +444,7 @@ export function PageReader({
     >
       {/* Virtualized track — only a small window of viewport-wide, snap-aligned
           slides is mounted; the spacer width keeps scrollLeft mapped to pages. */}
-      <div style={{ width: virtualizer.getTotalSize(), height: '100%', position: 'relative' }}>
+      <div ref={trackRef} style={{ width: virtualizer.getTotalSize(), height: '100%', position: 'relative' }}>
         {virtualizer.getVirtualItems().map((vi) => (
           <div
             key={vi.key}

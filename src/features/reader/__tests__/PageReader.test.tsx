@@ -406,7 +406,30 @@ describe('PageReader open-at-page positioning', () => {
     expect(onPageChange).not.toHaveBeenCalledWith(3);
   });
 
-  it('drives a post-init page turn with native smooth scrollTo (compositor), not a JS tween', async () => {
+  it('drives an adjacent post-init page turn with a compositor transform slide (no native scrollTo, no scrollLeft tween)', async () => {
+    const imgs = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const onPageChange = vi.fn();
+    const { container, rerender } = render(
+      <PageReader images={imgs} currentPage={1} onPageChange={onPageChange} />,
+    );
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const scroller = container.firstElementChild as HTMLElement;
+    const track = scroller.firstElementChild as HTMLElement;
+    const scrollToSpy = vi.fn();
+    scroller.scrollTo = scrollToSpy as unknown as typeof scroller.scrollTo;
+    // Page 1 was the initial positioning (didInit). An adjacent turn now slides the
+    // track via a compositor `transform` (off the main thread, leaving scrollLeft
+    // fixed so the virtualizer doesn't churn mid-turn) — not a native smooth
+    // scrollTo and not a per-frame scrollLeft write.
+    await act(async () => {
+      rerender(<PageReader images={imgs} currentPage={2} onPageChange={onPageChange} />);
+      await Promise.resolve();
+    });
+    expect(track.style.transform).toContain(`translateX(${-W}px)`);
+    expect(scrollToSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses native smooth scroll for a far jump (target outside the mounted window)', async () => {
     const imgs = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const onPageChange = vi.fn();
     const { container, rerender } = render(
@@ -416,14 +439,12 @@ describe('PageReader open-at-page positioning', () => {
     const scroller = container.firstElementChild as HTMLElement;
     const scrollToSpy = vi.fn();
     scroller.scrollTo = scrollToSpy as unknown as typeof scroller.scrollTo;
-    // Page 1 was the initial positioning (didInit). A real page turn now drives
-    // the scroll natively so the motion runs on the compositor, not a per-frame
-    // main-thread JS loop.
+    // A multi-page jump can't transform-slide to an unmounted slide → native scroll.
     await act(async () => {
-      rerender(<PageReader images={imgs} currentPage={2} onPageChange={onPageChange} />);
+      rerender(<PageReader images={imgs} currentPage={20} onPageChange={onPageChange} />);
       await Promise.resolve();
     });
-    expect(scrollToSpy).toHaveBeenCalledWith({ left: 2 * W, behavior: 'smooth' });
+    expect(scrollToSpy).toHaveBeenCalledWith({ left: 20 * W, behavior: 'smooth' });
   });
 
   it('rounds the measured slide width up so a fractional viewport cannot leak the next page', async () => {
