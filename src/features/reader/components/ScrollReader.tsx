@@ -59,14 +59,38 @@ export function ScrollReader({
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
   }, [offlineUrls, images, ggConfig, imageFormat]);
 
-  // Auto-scroll to initial page
+  // Auto-scroll to the initial page. The page rows reserve their height via
+  // aspect-ratio (see the wrapper below), so the target offset is correct
+  // without waiting for images to load. Re-assert across frames until the
+  // offset is stable, then lock: a single scrollIntoView that locked
+  // `scrolledRef` on the first frame landed near the top on WebViews that had
+  // not applied row heights yet (the "opens at the top instead of the requested
+  // page" bug).
   useEffect(() => {
-    if (!urls.length || !localRef.current || scrolledRef.current || !initialPage || initialPage <= 0) return;
-    const targetEl = localRef.current.querySelector(`[data-page-index="${initialPage}"]`);
-    if (targetEl) {
-      targetEl.scrollIntoView({ behavior: 'instant' });
-      scrolledRef.current = true;
-    }
+    if (!urls.length || scrolledRef.current || !initialPage || initialPage <= 0) return;
+    let rafId = 0;
+    let attempts = 0;
+    let lastTop = -1;
+    const align = () => {
+      const node = localRef.current;
+      if (!node) return;
+      const targetEl = node.querySelector<HTMLElement>(`[data-page-index="${initialPage}"]`);
+      if (!targetEl) {
+        if (++attempts < 30) rafId = requestAnimationFrame(align);
+        return;
+      }
+      const top = node.scrollTop + targetEl.getBoundingClientRect().top - node.getBoundingClientRect().top;
+      if (Math.abs(top - lastTop) <= 1) {
+        scrolledRef.current = true; // offset settled — lock
+        return;
+      }
+      node.scrollTop = top;
+      lastTop = top;
+      if (++attempts < 30) rafId = requestAnimationFrame(align);
+      else scrolledRef.current = true;
+    };
+    rafId = requestAnimationFrame(align);
+    return () => cancelAnimationFrame(rafId);
   }, [urls.length, initialPage]);
 
   useEffect(() => {
@@ -200,7 +224,7 @@ export function ScrollReader({
     <div ref={setRef} className="h-screen overflow-auto cursor-grab active:cursor-grabbing">
       <div className="mx-auto" style={{ width: `${scrollZoom * 100}%` }}>
         {images.map((img, i) => (
-          <div key={`${img.hash}-${i}`} data-page-index={i}>
+          <div key={`${img.hash}-${i}`} data-page-index={i} style={{ aspectRatio: `${img.width} / ${img.height}` }}>
             <AbortableImage src={urls[i]} alt={`Page ${i + 1}`} className="w-full select-none" loading="lazy" draggable={false} style={{ aspectRatio: `${img.width} / ${img.height}` }} />
           </div>
         ))}

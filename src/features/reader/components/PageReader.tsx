@@ -59,6 +59,10 @@ export function PageReader({
   const animatorRef = useRef<ReturnType<typeof createScrollAnimator> | null>(null);
   if (!animatorRef.current) animatorRef.current = createScrollAnimator(SCROLL_DURATION_MS);
   const didInitRef = useRef(false);
+  // Held while the first programmatic positioning (open-at-page / restoration)
+  // is still settling, so onScrollEnd does not release the echo suppression at
+  // an intermediate scroll position.
+  const initPendingRef = useRef(false);
   const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
 
@@ -180,7 +184,7 @@ export function PageReader({
         }
       });
     };
-    const onScrollEnd = () => { programmaticRef.current = false; };
+    const onScrollEnd = () => { if (!initPendingRef.current) programmaticRef.current = false; };
     el.addEventListener('scroll', onScroll, { passive: true });
     el.addEventListener('scrollend', onScrollEnd);
     return () => {
@@ -213,14 +217,26 @@ export function PageReader({
     if (didInitRef.current) {
       animateScrollTo(el, targetSlide * width);
     } else {
-      // First positioning (scroll restoration): jump instantly, no animation.
-      el.scrollLeft = targetSlide * width;
-      programmaticRef.current = false;
+      // First positioning (open-at-page / scroll restoration). Drive it through
+      // the virtualizer's scrollToIndex, not a raw `el.scrollLeft =`: a far jump
+      // assigned directly lands short while the virtual window is still small,
+      // and the scroll listener then echoes that clamped position back as
+      // currentPage — the "every page past the initial window opens on page 3"
+      // bug. scrollToIndex re-runs across measure passes so it lands precisely.
+      // Keep programmaticRef HELD (no synchronous release) until the jump
+      // settles via the timer below, so the echo can't commit an intermediate
+      // page.
+      initPendingRef.current = true;
+      virtualizer.scrollToIndex(targetSlide, { align: 'start' });
     }
     didInitRef.current = true;
-    // Safety net: clear the programmatic flag even if the tween is interrupted.
-    programmaticTimerRef.current = setTimeout(() => { programmaticRef.current = false; }, 600);
-  }, [currentPage, width, step, animateScrollTo]);
+    // Safety net: clear the programmatic flag (and the init guard) even if the
+    // tween or the measure settle is interrupted.
+    programmaticTimerRef.current = setTimeout(() => {
+      programmaticRef.current = false;
+      initPendingRef.current = false;
+    }, 600);
+  }, [currentPage, width, step, animateScrollTo, virtualizer]);
 
   useEffect(() => () => {
     clearTimeout(programmaticTimerRef.current);

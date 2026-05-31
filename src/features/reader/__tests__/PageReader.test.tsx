@@ -24,6 +24,11 @@ vi.mock('@/lib/utils/image-url', () => ({
   galleryImageToFile: (img: { name: string; hash: string }) => ({ name: img.name, hash: img.hash }),
 }));
 
+// Spy on the virtualizer's scrollToIndex so the open-at-page regression test can
+// assert the initial positioning routes through the library API (not a raw
+// scrollLeft assignment that clamps short on device).
+const { scrollToIndexSpy } = vi.hoisted(() => ({ scrollToIndexSpy: vi.fn() }));
+
 // Deterministic virtualizer: render a windowed slice (≤5) so jsdom (which has no
 // layout/scroll) still mounts slides. Mirrors the VirtualGalleryGrid test mock.
 vi.mock('@tanstack/react-virtual', () => ({
@@ -34,7 +39,7 @@ vi.mock('@tanstack/react-virtual', () => ({
         Array.from({ length: Math.min(count, 5) }, (_, i) => ({ key: i, index: i, start: i * sz, size: sz })),
       getTotalSize: () => count * sz,
       measure: () => {},
-      scrollToIndex: () => {},
+      scrollToIndex: scrollToIndexSpy,
     };
   },
 }));
@@ -331,6 +336,58 @@ describe('PageReader preload concurrency cap', () => {
 // ---------------------------------------------------------------------------
 // Page-turn easing — ease-out (fast→slow), replacing native ease-in-out.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Open-at-page positioning — opening a long gallery at a far page must route the
+// initial jump through virtualizer.scrollToIndex (survives the measurement race)
+// and must NOT let the scroll listener echo a clamped/short position back as the
+// page (the device-only "every page past the window opens on page 3" bug).
+// ---------------------------------------------------------------------------
+describe('PageReader open-at-page positioning', () => {
+  const W = 400;
+  let clientWidthSpy: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    scrollToIndexSpy.mockClear();
+    // jsdom reports clientWidth 0; give the scroller a real width so the
+    // width-gated initial-positioning effect actually runs.
+    clientWidthSpy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => W });
+    // Run rAF callbacks synchronously so a dispatched scroll event resolves its
+    // throttled handler within the test.
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { cb(0); return 1; });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+  });
+
+  afterEach(() => {
+    if (clientWidthSpy) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthSpy);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+  });
+
+  async function mountAt(currentPage: number) {
+    const onPageChange = vi.fn();
+    const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const utils = render(<PageReader images={images50} currentPage={currentPage} onPageChange={onPageChange} />);
+    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const scroller = utils.container.firstElementChild as HTMLElement;
+    return { ...utils, onPageChange, scroller };
+  }
+
+  it('routes the initial open-at-page jump through virtualizer.scrollToIndex with the target slide', async () => {
+    await mountAt(20);
+    expect(scrollToIndexSpy).toHaveBeenCalledWith(20, { align: 'start' });
+  });
+
+  it('does not echo a clamped scroll position back as the page during the initial jump', async () => {
+    const { scroller, onPageChange } = await mountAt(20);
+    // Simulate the device failure: the programmatic jump settles short (the
+    // virtual window was still small), so the scroll fires at a low position.
+    scroller.scrollLeft = 3 * W;
+    await act(async () => { fireEvent.scroll(scroller); await Promise.resolve(); });
+    // Suppression must be held: currentPage is NOT overwritten with page 3.
+    expect(onPageChange).not.toHaveBeenCalledWith(3);
+  });
+});
+
 describe('easeOutCubic', () => {
   it('is a decelerating curve: anchored at 0/1 and ahead of linear early on', () => {
     expect(easeOutCubic(0)).toBe(0);
