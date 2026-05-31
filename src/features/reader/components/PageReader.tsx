@@ -36,6 +36,9 @@ export function PageReader({
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
+  // Mirror `width` so the once-attached scroll listener reads the current value
+  // (and the SAME value the slides are sized with) without re-subscribing.
+  const widthRef = useRef(0);
   // Keep latest props in refs so the (once-attached) scroll listener reads
   // current values without re-subscribing on every page change.
   const currentPageRef = useRef(currentPage);
@@ -75,7 +78,17 @@ export function PageReader({
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const update = () => setWidth(el.clientWidth);
+    // Round the fractional measured width UP so each slide is at least as wide
+    // as the clip viewport. On fractional-DPR screens the compositor rounds the
+    // slide edge and the clip edge independently; if a slide is even a fraction
+    // narrower than the viewport, a 1-3 device-px strip of the next page leaks
+    // at the edge. Ceil keeps it an integer (crisp) and guarantees full cover;
+    // on DPR 1 the value is already integer, so desktop is unchanged.
+    const update = () => {
+      const w = Math.ceil(el.getBoundingClientRect().width);
+      widthRef.current = w;
+      setWidth(w);
+    };
     update();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(update);
@@ -165,7 +178,7 @@ export function PageReader({
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        const w = el.clientWidth;
+        const w = widthRef.current;
         if (programmaticRef.current || !w) return;
         const page = Math.round(el.scrollLeft / w) * step;
         if (page !== currentPageRef.current && page >= 0 && page < images.length) {

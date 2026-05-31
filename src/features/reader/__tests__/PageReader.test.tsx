@@ -334,24 +334,33 @@ describe('PageReader preload concurrency cap', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Page-turn easing — ease-out (fast→slow), replacing native ease-in-out.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // Open-at-page positioning — opening a long gallery at a far page must route the
 // initial jump through virtualizer.scrollToIndex (survives the measurement race)
 // and must NOT let the scroll listener echo a clamped/short position back as the
-// page (the device-only "every page past the window opens on page 3" bug).
+// page (the device-only "every page past the window opens on page 3" bug). Also
+// covers the slide-width measurement (ceil) that prevents the adjacent-page
+// sliver on fractional-DPR screens.
 // ---------------------------------------------------------------------------
 describe('PageReader open-at-page positioning', () => {
   const W = 400;
-  let clientWidthSpy: PropertyDescriptor | undefined;
+  let rectSpy: PropertyDescriptor | undefined;
+  let mockBoundingWidth = W;
 
   beforeEach(() => {
     scrollToIndexSpy.mockClear();
-    // jsdom reports clientWidth 0; give the scroller a real width so the
-    // width-gated initial-positioning effect actually runs.
-    clientWidthSpy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => W });
+    mockBoundingWidth = W;
+    // jsdom reports a 0 bounding box; give the scroller a real width so the
+    // width-gated effects run. Slide width is measured from getBoundingClientRect.
+    rectSpy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getBoundingClientRect');
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: HTMLElement) {
+        return {
+          width: mockBoundingWidth, height: 800,
+          top: 0, left: 0, right: mockBoundingWidth, bottom: 800, x: 0, y: 0, toJSON() {},
+        } as DOMRect;
+      },
+    });
     // Run rAF callbacks synchronously so a dispatched scroll event resolves its
     // throttled handler within the test.
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { cb(0); return 1; });
@@ -359,8 +368,8 @@ describe('PageReader open-at-page positioning', () => {
   });
 
   afterEach(() => {
-    if (clientWidthSpy) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidthSpy);
-    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+    if (rectSpy) Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', rectSpy);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).getBoundingClientRect;
   });
 
   async function mountAt(currentPage: number) {
@@ -415,5 +424,15 @@ describe('PageReader open-at-page positioning', () => {
       await Promise.resolve();
     });
     expect(scrollToSpy).toHaveBeenCalledWith({ left: 2 * W, behavior: 'smooth' });
+  });
+
+  it('rounds the measured slide width up so a fractional viewport cannot leak the next page', async () => {
+    // Fractional viewport (high-DPR screen). The slide must be sized to the
+    // ceil'd integer so it fully covers the clip and no adjacent-page strip
+    // leaks at the edge — never the truncated/fractional width.
+    mockBoundingWidth = 399.2;
+    const { container } = await mountAt(0);
+    const slide = container.querySelector('[data-slide-index]') as HTMLElement;
+    expect(slide.style.width).toBe('400px');
   });
 });
