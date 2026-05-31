@@ -7,6 +7,9 @@ import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
+import { createScrollAnimator } from '@/features/reader/utils/scrollAnimator';
+// Re-export so existing importers (and tests) keep resolving easeOutCubic here.
+export { easeOutCubic } from '@/features/reader/utils/scrollAnimator';
 
 // High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
 // tags still get decoded by the browser, so a large mounted window pins
@@ -22,9 +25,6 @@ const PRELOAD_BEHIND = 5;
 // ~200ms (≈2× faster) + easeOutCubic gives a snappier, decelerating (fast→slow)
 // turn.
 const SCROLL_DURATION_MS = 200;
-export function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
 
 export function PageReader({
   images,
@@ -56,7 +56,8 @@ export function PageReader({
   // scroll listener doesn't echo a redundant onPageChange back.
   const programmaticRef = useRef(false);
   const programmaticTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const scrollAnimRef = useRef(0);
+  const animatorRef = useRef<ReturnType<typeof createScrollAnimator> | null>(null);
+  if (!animatorRef.current) animatorRef.current = createScrollAnimator(SCROLL_DURATION_MS);
   const didInitRef = useRef(false);
   const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
@@ -194,29 +195,9 @@ export function PageReader({
   // scroll-snap is turned off for the duration so `mandatory` snapping doesn't
   // jump straight to the target and skip the easing.
   const animateScrollTo = useCallback((el: HTMLDivElement, to: number) => {
-    cancelAnimationFrame(scrollAnimRef.current);
-    const from = el.scrollLeft;
-    const dist = to - from;
-    if (Math.abs(dist) < 1) {
-      el.scrollLeft = to;
+    animatorRef.current!.to(el, to, () => {
       programmaticRef.current = false;
-      return;
-    }
-    const prevSnap = el.style.scrollSnapType;
-    el.style.scrollSnapType = 'none';
-    const start = performance.now();
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / SCROLL_DURATION_MS);
-      el.scrollLeft = from + dist * easeOutCubic(t);
-      if (t < 1) {
-        scrollAnimRef.current = requestAnimationFrame(tick);
-      } else {
-        el.scrollLeft = to;
-        el.style.scrollSnapType = prevSnap || 'x mandatory';
-        programmaticRef.current = false;
-      }
-    };
-    scrollAnimRef.current = requestAnimationFrame(tick);
+    });
   }, []);
 
   // Drive the scroll when the logical page changes from outside (buttons, arrow
@@ -243,7 +224,7 @@ export function PageReader({
 
   useEffect(() => () => {
     clearTimeout(programmaticTimerRef.current);
-    cancelAnimationFrame(scrollAnimRef.current);
+    animatorRef.current?.cancel();
   }, []);
 
   const navigate = useCallback((target: number) => {
