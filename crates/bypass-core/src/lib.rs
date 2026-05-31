@@ -84,6 +84,18 @@ impl BypassClient {
         self.inner.fetch_streaming(url, headers).await
     }
 
+    /// Stream a URL's body straight to `dest_path` (one chunk at a time, bounded
+    /// memory). Returns total bytes written. Used by the persistent image cache so
+    /// big images are never materialised in memory.
+    pub async fn download_to_file(
+        &self,
+        url: &str,
+        headers: Option<HashMap<String, String>>,
+        dest_path: &str,
+    ) -> Result<u64, BypassError> {
+        self.inner.download_to_file(url, headers, dest_path).await
+    }
+
     /// Shut down the SOCKS5 proxy.
     pub async fn shutdown(&self) {
         self.proxy_handle.shutdown().await;

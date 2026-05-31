@@ -74,4 +74,50 @@ public class BypassPlugin extends Plugin {
             }
         }).start();
     }
+
+    /**
+     * Stream a URL's body straight to an absolute file path (one chunk at a time
+     * in native code — the image never enters the JS heap). Used by the persistent
+     * image cache; the JS adapter then serves the file via Capacitor.convertFileSrc.
+     * Resolves { size } = total bytes written.
+     */
+    @PluginMethod
+    public void downloadToFile(PluginCall call) {
+        String url = call.getString("url");
+        String path = call.getString("path");
+        if (url == null || url.isEmpty()) {
+            call.reject("URL is required");
+            return;
+        }
+        if (path == null || path.isEmpty()) {
+            call.reject("path is required");
+            return;
+        }
+
+        Map<String, String> headers = null;
+        JSObject headersObj = call.getObject("headers", null);
+        if (headersObj != null) {
+            headers = new HashMap<>();
+            Iterator<String> keys = headersObj.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                headers.put(key, headersObj.optString(key, ""));
+            }
+        }
+
+        final Map<String, String> finalHeaders = headers;
+        final String finalUrl = url;
+        final String finalPath = path;
+
+        new Thread(() -> {
+            try {
+                long size = BypassKt.bypassDownloadToFile(finalUrl, finalHeaders, finalPath);
+                JSObject result = new JSObject();
+                result.put("size", size);
+                call.resolve(result);
+            } catch (Exception e) {
+                call.reject("Bypass download failed: " + e.getMessage(), e);
+            }
+        }).start();
+    }
 }

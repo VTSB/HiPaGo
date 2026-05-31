@@ -125,6 +125,67 @@ impl Client {
             body_rx: rx,
         })
     }
+
+    /// Stream a URL's body directly to `dest_path`, one chunk at a time, so the
+    /// full payload never lives in memory (used by the image cache so big reader
+    /// images are never materialised in the JS heap). Returns total bytes written.
+    ///
+    /// Writes to a `<dest_path>.part` temp file and renames on success, so an
+    /// interrupted download never leaves a truncated file that later reads as a
+    /// valid cache hit. On a non-2xx response (or read error) the partial file is
+    /// removed and an error returned.
+    pub async fn download_to_file(
+        &self,
+        url: &str,
+        headers: Option<HashMap<String, String>>,
+        dest_path: &str,
+    ) -> Result<u64, BypassError> {
+        use tokio::io::AsyncWriteExt;
+
+        let mut request = self.inner.get(url);
+        if let Some(hdrs) = headers {
+            for (key, value) in hdrs {
+                request = request.header(&key, &value);
+            }
+        }
+
+        let mut response = request
+            .send()
+            .await
+            .map_err(|e| BypassError::HttpError(format!("Request failed: {e}")))?;
+
+        let status = response.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(BypassError::HttpError(format!(
+                "Image fetch failed with HTTP {status}"
+            )));
+        }
+
+        if let Some(parent) = std::path::Path::new(dest_path).parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let tmp_path = format!("{dest_path}.part");
+        let mut file = tokio::fs::File::create(&tmp_path).await?;
+        let mut total: u64 = 0;
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => {
+                    file.write_all(&chunk).await?;
+                    total += chunk.len() as u64;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    drop(file);
+                    let _ = tokio::fs::remove_file(&tmp_path).await;
+                    return Err(BypassError::HttpError(format!("Body read failed: {e}")));
+                }
+            }
+        }
+        file.flush().await?;
+        drop(file);
+        tokio::fs::rename(&tmp_path, dest_path).await?;
+        Ok(total)
+    }
 }
 
 /// Response with streaming body via channel.

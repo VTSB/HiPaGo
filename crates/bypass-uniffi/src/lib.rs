@@ -81,3 +81,26 @@ pub fn bypass_fetch(
         })
     })
 }
+
+/// Stream a URL's body straight to `dest_path` (one chunk at a time, bounded
+/// memory). Returns total bytes written. Used by the persistent image cache so
+/// big images are never materialised in the JS heap. `size` is i64 for the same
+/// JVM-getter reason `status` is i32 (UniFFI maps u64 → ULong → mangled getters).
+#[uniffi::export]
+pub fn bypass_download_to_file(
+    url: String,
+    headers: Option<HashMap<String, String>>,
+    dest_path: String,
+) -> Result<i64, BypassError> {
+    let rt = runtime();
+    rt.block_on(async {
+        let client = CLIENT
+            .get_or_try_init(|| async {
+                BypassClient::new().await.map_err(BypassError::from)
+            })
+            .await?;
+
+        let written = client.download_to_file(&url, headers, &dest_path).await?;
+        Ok(written as i64)
+    })
+}

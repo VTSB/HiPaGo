@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { isAndroid, isCapacitor, isTauri } from '@/lib/utils/platform';
+import { getImageCache } from '@/lib/cache/image-cache';
 import { useScheduledImageLoad } from './useScheduledImageLoad';
 import { Spinner } from '@/shared/components/Spinner';
 
@@ -36,16 +37,32 @@ interface AbortableImageProps {
 
 const CDN_HOST_SUFFIX = '.gold-usergeneratedcontent.net';
 const loadedSrcCache = new Set<string>();
-const nativeObjectUrlCache = new Map<string, string>();
-const nativeFetchCache = new Map<string, Promise<string>>();
-const MAX_NATIVE_OBJECT_URLS = 80;
+// Cache file URLs (convertFileSrc) resolved this session, keyed by the original
+// CDN src — lets a re-mount paint from disk instantly without re-checking.
+const resolvedFileUrlCache = new Map<string, string>();
+// srcs already warmed into the persistent cache (Android background warm dedupe).
+const warmedSrcCache = new Set<string>();
 
-function shouldUseNativeImageFetch(src: string): boolean {
-  // Android loads CDN images via the WebView interceptor (BypassWebViewClient),
-  // so a plain <img src={realUrl}> works — no JS fetch/objectURL needed. iOS and
-  // Tauri still need the manual native fetch until their interceptors land.
+/**
+ * Whether this platform must serve a CDN image from the persistent cache file
+ * (it cannot display the CDN URL directly): iOS + Tauri load CDN images through
+ * the bypass, which now streams to a cache file served via convertFileSrc.
+ * Android uses the WebView interceptor (plain <img src> works) and web loads the
+ * CDN directly, so for them the cache is an optional accelerator, not required.
+ */
+function mustServeFromCache(src: string): boolean {
   if (isAndroid()) return false;
   if (!isTauri() && !isCapacitor()) return false;
+  try {
+    const url = new URL(src);
+    return url.protocol === 'https:' && url.hostname.endsWith(CDN_HOST_SUFFIX);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a CDN src is eligible for the persistent cache at all (any platform). */
+function isCacheableCdn(src: string): boolean {
   try {
     const url = new URL(src);
     return url.protocol === 'https:' && url.hostname.endsWith(CDN_HOST_SUFFIX);
@@ -62,73 +79,52 @@ function getImageHeaders(): Record<string, string> {
   };
 }
 
-async function fetchNativeImageObjectUrlUncached(src: string): Promise<string> {
-  let resp: { status: number; headers: Record<string, string>; body: string | number[] };
-
-  if (isCapacitor()) {
-    const { Bypass } = await import('@/lib/plugins/bypass');
-    resp = await Bypass.fetch({
-      url: src,
-      headers: getImageHeaders(),
-    });
-  } else {
-    const { invoke } = await import('@tauri-apps/api/core');
-    resp = (await invoke('bypass_fetch', {
-      url: src,
-      headers: getImageHeaders(),
-    })) as { status: number; headers: Record<string, string>; body: string };
+/** Cache-hit lookup: a disk file URL for `src`, or null on a miss. Never downloads. */
+async function cacheFileUrl(src: string): Promise<string | null> {
+  const mem = resolvedFileUrlCache.get(src);
+  if (mem) return mem;
+  try {
+    const cache = await getImageCache();
+    const url = await cache.fileUrl(src);
+    if (url) resolvedFileUrlCache.set(src, url);
+    return url;
+  } catch {
+    return null;
   }
-
-  if (resp.status < 200 || resp.status >= 300) {
-    throw new Error(`Image fetch failed with HTTP ${resp.status}`);
-  }
-
-  const bytes = Array.isArray(resp.body)
-    ? Uint8Array.from(resp.body)
-    : Uint8Array.from(atob(resp.body), (c) => c.charCodeAt(0));
-  const contentType = Object.entries(resp.headers).find(([key]) => key.toLowerCase() === 'content-type')?.[1] || 'application/octet-stream';
-  return URL.createObjectURL(new Blob([bytes], { type: contentType }));
 }
 
-async function fetchNativeImageObjectUrl(src: string): Promise<string> {
-  const cached = nativeObjectUrlCache.get(src);
-  if (cached) return cached;
-
-  let promise = nativeFetchCache.get(src);
-  if (!promise) {
-    promise = fetchNativeImageObjectUrlUncached(src).then((url) => {
-      nativeObjectUrlCache.set(src, url);
+/**
+ * Ensure `src` is in the persistent cache (native streaming download on a miss)
+ * and return its disk file URL, or null on failure. Used to SERVE on the
+ * bypass-served platforms and to background-WARM on Android.
+ */
+async function ensureCachedFileUrl(src: string): Promise<string | null> {
+  try {
+    const cache = await getImageCache();
+    const url = await cache.ensureCached(src, src, getImageHeaders());
+    if (url) {
+      resolvedFileUrlCache.set(src, url);
       loadedSrcCache.add(src);
-      nativeFetchCache.delete(src);
-      while (nativeObjectUrlCache.size > MAX_NATIVE_OBJECT_URLS) {
-        const oldest = nativeObjectUrlCache.keys().next().value as string | undefined;
-        if (!oldest) break;
-        const oldUrl = nativeObjectUrlCache.get(oldest);
-        nativeObjectUrlCache.delete(oldest);
-        if (oldUrl) URL.revokeObjectURL(oldUrl);
-      }
-      return url;
-    }).catch((err) => {
-      nativeFetchCache.delete(src);
-      throw err;
-    });
-    nativeFetchCache.set(src, promise);
+    }
+    return url;
+  } catch {
+    return null;
   }
-  return promise;
 }
 
 export function preloadImageSource(src: string, signal?: AbortSignal): Promise<void> {
   if (loadedSrcCache.has(src)) return Promise.resolve();
   if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-  if (shouldUseNativeImageFetch(src)) {
-    // The native bridge fetch isn't backed by the browser connection pool, so a
-    // hard cancel isn't needed for slot-starvation; just short-circuit the JS
-    // waiter when navigation aborts so the caller's queue can advance.
-    if (!signal) return fetchNativeImageObjectUrl(src).then(() => undefined);
+  if (mustServeFromCache(src)) {
+    // The native streaming download isn't backed by the browser connection pool,
+    // so a hard cancel isn't needed for slot-starvation; just short-circuit the
+    // JS waiter when navigation aborts so the caller's queue can advance.
+    const run = ensureCachedFileUrl(src).then(() => undefined);
+    if (!signal) return run;
     return new Promise((resolve, reject) => {
       const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
       signal.addEventListener('abort', onAbort, { once: true });
-      fetchNativeImageObjectUrl(src)
+      run
         .then(() => {
           signal.removeEventListener('abort', onAbort);
           resolve();
@@ -171,9 +167,8 @@ export function preloadImageSource(src: string, signal?: AbortSignal): Promise<v
 
 export function __resetAbortableImageCacheForTests() {
   loadedSrcCache.clear();
-  nativeFetchCache.clear();
-  for (const url of nativeObjectUrlCache.values()) URL.revokeObjectURL(url);
-  nativeObjectUrlCache.clear();
+  resolvedFileUrlCache.clear();
+  warmedSrcCache.clear();
 }
 
 /**
@@ -185,6 +180,10 @@ export function __resetAbortableImageCacheForTests() {
  *   actually see.
  * - Once an image has fully loaded it is never cleared (even if scrolled away).
  * - `loading="eager"` bypasses the observer and loads immediately.
+ * - Serves from the persistent, file-backed LRU cache: a cache hit is streamed
+ *   from disk via a file URL (no image bytes in the JS heap, works offline).
+ *   Shared by reader, gallery-detail, and gallery-list/library — they all get
+ *   caching for free through this one component.
  */
 export function AbortableImage({ src, alt, className, loading = 'lazy', style, draggable, onPermanentError, preload = false, spinner = false, fetchPriority }: AbortableImageProps) {
   const imgRef = useRef<HTMLImageElement>(null);
@@ -193,14 +192,18 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   // never treated as an abortable in-flight request on re-mount.
   const loadedRef = useRef(loadedSrcCache.has(src));
   const retryCountRef = useRef(0);
-  const needsNativeImageFetch = shouldUseNativeImageFetch(src);
-  const [tauriObjectUrl, setTauriObjectUrl] = useState<{ src: string; url: string } | null>(() => {
-    const url = nativeObjectUrlCache.get(src);
+  const fromCache = mustServeFromCache(src);
+  // The resolved cache file URL for this src (convertFileSrc), if any. Seeded
+  // synchronously from the in-memory map so a re-mount paints from disk instantly.
+  const [cacheUrlState, setCacheUrlState] = useState<{ src: string; url: string } | null>(() => {
+    const url = resolvedFileUrlCache.get(src);
     return url ? { src, url } : null;
   });
-  const effectiveSrc = needsNativeImageFetch
-    ? tauriObjectUrl?.src === src ? tauriObjectUrl.url : null
-    : src;
+  const cacheUrl = cacheUrlState?.src === src ? cacheUrlState.url : null;
+  // Bypass-served platforms MUST have a cache file URL to display (no plain-src
+  // fallback). Others display the plain src, but a cache-hit file URL takes
+  // precedence (instant + offline).
+  const effectiveSrc = fromCache ? cacheUrl : (cacheUrl ?? src);
   // When the URL is already in loadedSrcCache, treat it as authoritative: the
   // browser has the bytes and the <img> can paint synchronously. Without this,
   // a re-mount (e.g. list ↔ detail navigation) makes every cached card wait
@@ -213,12 +216,15 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   );
   const [loaded, setLoaded] = useState(() => loadedSrcCache.has(src));
   const [failed, setFailed] = useState(false);
+  // Set when this src is a non-bypass cache miss: the plain <img src> displays
+  // as today and its bytes are warmed into the cache once it has loaded.
+  const shouldWarmRef = useRef(false);
 
   // Order the network <img> load through the viewport-first scheduler. Skip it
-  // for cached / eager / preload / explicit-high / native-fetch images, which
+  // for cached / eager / preload / explicit-high / bypass-served images, which
   // must never be queued behind the grid.
   const shouldSchedule =
-    !needsNativeImageFetch &&
+    !fromCache &&
     loading !== 'eager' &&
     !preload &&
     fetchPriority !== 'high' &&
@@ -237,27 +243,42 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     onPermanentErrorRef.current = onPermanentError;
   });
 
+  // Resolve the display source from the file-backed cache. Runs once per src; the
+  // top guard short-circuits when a file URL is already in hand (seeded).
   useEffect(() => {
-    if (!needsNativeImageFetch) return;
+    if (cacheUrlState?.src === src) return;
     let cancelled = false;
-    fetchNativeImageObjectUrl(src)
-      .then((url) => {
-        if (cancelled) {
-          return;
-        }
-        setTauriObjectUrl({ src, url });
-      })
-      .catch(() => {
-        if (!cancelled) {
+    shouldWarmRef.current = false;
+    (async () => {
+      if (fromCache) {
+        // iOS/Tauri: the WebView can only show the CDN image from a local file,
+        // so serve from the cache (streaming download on a miss).
+        const url = await ensureCachedFileUrl(src);
+        if (cancelled) return;
+        if (url) setCacheUrlState({ src, url });
+        else {
           setFailed(true);
           onPermanentErrorRef.current?.();
         }
-      });
+        return;
+      }
+      // Android/web: serve from disk if already cached (offline + instant); else
+      // keep the plain <img src> and warm in the background after it displays.
+      if (isCacheableCdn(src)) {
+        const url = await cacheFileUrl(src);
+        if (cancelled) return;
+        if (url && !loadedRef.current) {
+          setCacheUrlState({ src, url });
+          return;
+        }
+        shouldWarmRef.current = true;
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [needsNativeImageFetch, src]);
+  }, [fromCache, src, cacheUrlState]);
 
   // Reset state when src/loading/preload changes using render-phase setState
   // (the React-documented derived-state pattern — react-hooks/set-state-in-effect safe).
@@ -293,6 +314,23 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     if (effectiveSrc) loadedSrcCache.add(effectiveSrc);
     setLoaded(true);
     onSettled(true);
+    // Warm the persistent cache from a displayed Android image (the interceptor
+    // never exposes the bytes to JS, so re-fetch them natively into the cache
+    // file once shown). Only when showing the plain src, not already warmed, and
+    // only where a native download exists (Android; not web).
+    if (
+      shouldWarmRef.current &&
+      effectiveSrc === src &&
+      !warmedSrcCache.has(src) &&
+      (isCapacitor() || isTauri())
+    ) {
+      warmedSrcCache.add(src);
+      void (async () => {
+        const cache = await getImageCache().catch(() => null);
+        if (!cache || cache.getMaxBytes() === 0) return; // caching off → skip warm
+        await ensureCachedFileUrl(src);
+      })();
+    }
   }, [effectiveSrc, src, onSettled]);
 
   // Retry on error (up to 3 times with exponential backoff).

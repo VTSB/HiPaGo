@@ -1,10 +1,13 @@
 /**
- * Persistent LRU image cache (big = full reader image). Blobs live in the
- * platform CACHE directory (see adapters), not the persistent download/data
- * area. See doc/common/ADR__image-cache.md.
+ * Persistent LRU image cache (big = full reader image / small = thumbnail).
+ * Files live in the platform CACHE directory (see adapters), not the persistent
+ * download/data area. See doc/common/ADR__image-cache.md.
  *
- * This module is the platform-agnostic LRU core. Per-platform byte + index
- * persistence is supplied by an ImageCacheBackend (cache-dir adapters).
+ * This module is the platform-agnostic LRU core. It is **file-backed and
+ * streamed**: the WebView serves images straight from disk via a file URL
+ * (`convertFileSrc`) and downloads stream URL→file natively, so full image bytes
+ * never pass through the JS heap. Per-platform file + index persistence is
+ * supplied by an ImageCacheBackend (cache-dir adapters).
  */
 import { isTauri, isCapacitor } from '@/lib/utils/platform';
 
@@ -19,13 +22,20 @@ export interface ImageCacheIndexEntry {
 }
 
 /**
- * Storage backend: raw blob bytes by key plus a small recency index. Adapters
- * target each platform's cache directory. `read` returning null is a normal
- * cache miss (the OS may reclaim the cache dir at any time).
+ * Storage backend: image files on disk plus a small recency index. Adapters
+ * target each platform's cache directory and stream downloads natively (no bytes
+ * in JS). `statSize` returning null is a normal cache miss (the OS may reclaim
+ * the cache dir at any time). The web adapter is intentionally a no-op (no native
+ * file URL, and a CDN fetch is CORS-blocked) — web display already works via the
+ * plain <img src> + the browser HTTP cache.
  */
 export interface ImageCacheBackend {
-  read(key: string): Promise<Uint8Array | null>;
-  write(key: string, bytes: Uint8Array): Promise<void>;
+  /** Bytes on disk for `key`, or null if the file is absent. */
+  statSize(key: string): Promise<number | null>;
+  /** Stream `url` into `key`'s file natively. Returns bytes written. Throws on failure. */
+  download(key: string, url: string, headers: Record<string, string>): Promise<number>;
+  /** A WebView-loadable URL for `key`'s file (convertFileSrc). Caller ensures it exists. */
+  fileUrl(key: string): Promise<string>;
   remove(key: string): Promise<void>;
   loadIndex(): Promise<ImageCacheIndexEntry[]>;
   saveIndex(entries: ImageCacheIndexEntry[]): Promise<void>;
@@ -83,15 +93,15 @@ export class ImageCacheStore {
   }
 
   /**
-   * Return the cached bytes for `key`, or null on a miss. A hit bumps the
-   * entry's recency. If the index lists the key but the blob is gone (cache dir
-   * reclaimed by the OS), the stale entry is dropped and null is returned.
+   * Serve the cached file URL for `key`, bumping recency, or null on a miss. If
+   * the index lists the key but the file is gone (cache dir reclaimed by the OS),
+   * the stale entry is dropped and null is returned.
    */
-  async get(key: string): Promise<Uint8Array | null> {
+  async fileUrl(key: string): Promise<string | null> {
     const entry = this.entries.get(key);
     if (!entry) return null;
-    const bytes = await this.backend.read(key);
-    if (!bytes) {
+    const size = await this.backend.statSize(key);
+    if (size == null) {
       this.totalBytes -= entry.size;
       this.entries.delete(key);
       await this.flushIndex();
@@ -99,24 +109,38 @@ export class ImageCacheStore {
     }
     entry.lastAccess = this.nextTick();
     await this.flushIndex();
-    return bytes;
+    return this.backend.fileUrl(key);
   }
 
   /**
-   * Store `bytes` under `key`, then evict least-recently-used entries until the
-   * cap is satisfied. A single blob larger than a finite cap is not stored
-   * (storing it would evict everything and still overflow).
+   * Ensure `key` is cached and return its file URL, or null on failure. A hit
+   * just bumps recency; a miss streams the download to disk natively, records its
+   * size, and evicts LRU down to the cap — but NEVER the file just downloaded.
+   *
+   * The download always happens on a miss (it is not gated by the cap), because
+   * on platforms whose WebView can only load a CDN image from a local file (the
+   * bypass-served platforms), display itself depends on this file existing. The
+   * cap therefore governs how much we RETAIN across other entries, not whether
+   * the in-view image can be shown. Callers that only want opportunistic caching
+   * (e.g. the Android background warm, where display does not need the file)
+   * should skip this when `getMaxBytes() === 0`.
    */
-  async put(key: string, bytes: Uint8Array): Promise<void> {
-    const size = bytes.byteLength;
-    if (this.maxBytes != null && size > this.maxBytes) return;
+  async ensureCached(key: string, url: string, headers: Record<string, string>): Promise<string | null> {
+    const hit = await this.fileUrl(key);
+    if (hit) return hit;
+    let size: number;
+    try {
+      size = await this.backend.download(key, url, headers);
+    } catch {
+      return null;
+    }
     const existing = this.entries.get(key);
     if (existing) this.totalBytes -= existing.size;
-    await this.backend.write(key, bytes);
     this.entries.set(key, { size, lastAccess: this.nextTick() });
     this.totalBytes += size;
     await this.flushIndex();
-    await this.evictIfNeeded();
+    await this.evictIfNeeded(key);
+    return this.backend.fileUrl(key);
   }
 
   /** Set the byte cap (`null` = unlimited) and evict down to it if needed. */
@@ -132,13 +156,16 @@ export class ImageCacheStore {
     this.totalBytes = 0;
   }
 
-  private async evictIfNeeded(): Promise<void> {
+  /** Evict LRU entries until under the cap. `keepKey`, if given, is never evicted
+   *  (the file a caller is about to serve must survive even at cap 0). */
+  private async evictIfNeeded(keepKey?: string): Promise<void> {
     if (this.maxBytes == null || this.totalBytes <= this.maxBytes) return;
     // Least-recently-accessed first.
     const order = [...this.entries.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
     let changed = false;
     for (const [key, entry] of order) {
       if (this.totalBytes <= this.maxBytes) break;
+      if (key === keepKey) continue;
       await this.backend.remove(key);
       this.entries.delete(key);
       this.totalBytes -= entry.size;

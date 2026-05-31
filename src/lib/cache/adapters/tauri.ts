@@ -1,7 +1,11 @@
 /**
- * Tauri ImageCacheBackend — blobs in the OS app CACHE directory
+ * Tauri ImageCacheBackend — image files in the OS app CACHE directory
  * (`BaseDirectory.AppCache`), NOT the persistent `AppData` used by downloads.
  * Layout: <AppCache>/image-cache/<safeKey>, index at .../image-cache/index.json
+ *
+ * Downloads stream URL→file natively via the `bypass_download_to_file` command
+ * (one chunk at a time, no bytes in JS); serving returns `convertFileSrc(path)`
+ * (asset protocol) so the WebView streams the image straight from disk.
  */
 import type { ImageCacheBackend, ImageCacheIndexEntry } from '../image-cache-store';
 
@@ -19,7 +23,12 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
   const pkg = '@tauri-apps/plugin-fs';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fs: any = await import(/* webpackIgnore: true */ pkg);
+  const { invoke, convertFileSrc } = await import('@tauri-apps/api/core');
+  const { appCacheDir, join } = await import('@tauri-apps/api/path');
   const baseDir = fs.BaseDirectory.AppCache;
+  const appCache = await appCacheDir();
+
+  const absPath = (key: string): Promise<string> => join(appCache, DIR, safeKey(key));
 
   const ensureDir = async (): Promise<void> => {
     try {
@@ -30,16 +39,22 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
   };
 
   return {
-    async read(key) {
+    async statSize(key) {
       try {
-        return (await fs.readFile(`${DIR}/${safeKey(key)}`, { baseDir })) as Uint8Array;
+        const info = await fs.stat(`${DIR}/${safeKey(key)}`, { baseDir });
+        return info.size as number;
       } catch {
         return null;
       }
     },
-    async write(key, bytes) {
+    async download(key, url, headers) {
       await ensureDir();
-      await fs.writeFile(`${DIR}/${safeKey(key)}`, bytes, { baseDir });
+      const destPath = await absPath(key);
+      const size = await invoke<number>('bypass_download_to_file', { url, headers, destPath });
+      return size;
+    },
+    async fileUrl(key) {
+      return convertFileSrc(await absPath(key));
     },
     async remove(key) {
       try {

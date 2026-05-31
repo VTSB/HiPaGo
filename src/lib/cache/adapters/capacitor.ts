@@ -1,7 +1,11 @@
 /**
- * Capacitor ImageCacheBackend — blobs in the OS CACHE directory
+ * Capacitor ImageCacheBackend — image files in the OS CACHE directory
  * (`Directory.Cache`), NOT the persistent `Directory.Data` used by downloads.
  * Layout: <Cache>/image-cache/<safeKey>, index at <Cache>/image-cache/index.json
+ *
+ * Downloads stream URL→file natively via `Bypass.downloadToFile` (one chunk at a
+ * time, no bytes in JS); serving returns `Capacitor.convertFileSrc(fileUri)` so
+ * the WebView streams the image straight from disk.
  */
 import type { ImageCacheBackend, ImageCacheIndexEntry } from '../image-cache-store';
 
@@ -15,22 +19,13 @@ function safeKey(key: string): string {
 
 export async function createCapacitorImageCacheBackend(): Promise<ImageCacheBackend> {
   const mod = await import('@capacitor/filesystem');
+  const { Capacitor } = await import('@capacitor/core');
+  const { Bypass } = await import('@/lib/plugins/bypass');
   const Filesystem = mod.Filesystem;
   const Directory = mod.Directory;
   const Encoding = mod.Encoding;
   const directory = Directory.Cache;
 
-  const toB64 = (bytes: Uint8Array): string => {
-    let s = '';
-    for (let i = 0; i < bytes.byteLength; i++) s += String.fromCharCode(bytes[i]);
-    return btoa(s);
-  };
-  const fromB64 = (b64: string): Uint8Array => {
-    const bin = atob(b64);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  };
   const ensureDir = async (): Promise<void> => {
     try {
       await Filesystem.mkdir({ path: DIR, directory, recursive: true });
@@ -39,18 +34,31 @@ export async function createCapacitorImageCacheBackend(): Promise<ImageCacheBack
     }
   };
 
+  /** The `file://` URI of a key's blob (used both for the native path and convertFileSrc). */
+  const fileUri = async (key: string): Promise<string> => {
+    const { uri } = await Filesystem.getUri({ path: `${DIR}/${safeKey(key)}`, directory });
+    return uri;
+  };
+
   return {
-    async read(key) {
+    async statSize(key) {
       try {
-        const res = await Filesystem.readFile({ path: `${DIR}/${safeKey(key)}`, directory });
-        return fromB64(res.data as string);
+        const st = await Filesystem.stat({ path: `${DIR}/${safeKey(key)}`, directory });
+        return st.size;
       } catch {
         return null;
       }
     },
-    async write(key, bytes) {
+    async download(key, url, headers) {
       await ensureDir();
-      await Filesystem.writeFile({ path: `${DIR}/${safeKey(key)}`, data: toB64(bytes), directory });
+      const uri = await fileUri(key);
+      // Bypass writes to a real filesystem path; strip the file:// scheme.
+      const path = uri.replace(/^file:\/\//, '');
+      const { size } = await Bypass.downloadToFile({ url, headers, path });
+      return size;
+    },
+    async fileUrl(key) {
+      return Capacitor.convertFileSrc(await fileUri(key));
     },
     async remove(key) {
       try {
