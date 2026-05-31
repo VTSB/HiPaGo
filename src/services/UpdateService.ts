@@ -13,7 +13,7 @@
  * The service is intentionally side-effect-light: `checkForUpdate()` only
  * reads remote state; mutation happens inside the returned `applyFn`.
  */
-import { registerPlugin } from '@capacitor/core';
+import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import packageJson from '../../package.json';
 
 const OWNER = 'VTSB';
@@ -33,8 +33,8 @@ export type CheckResult = {
   version?: string;
   notes?: string;
   /** Present when the platform can install in-place. UI calls this on
-   *  "Install" and may pass a progress callback (0-100). Currently only
-   *  the Tauri backend reports progress; Android no-ops the callback. */
+   *  "Install" and may pass a progress callback (0-100). Both the Tauri
+   *  backend and Android (via DownloadManager polling) report progress. */
   applyFn?: (onProgress?: ProgressCallback) => Promise<ApplyResult>;
   /** Present when the platform cannot install in-place (iOS). UI deep-links. */
   releaseUrl?: string;
@@ -48,6 +48,10 @@ interface AndroidUpdaterPlugin {
     apkUrl?: string;
   }>;
   install(opts: { apkUrl: string }): Promise<ApplyResult>;
+  addListener(
+    eventName: 'downloadProgress',
+    listenerFunc: (event: { percent: number }) => void,
+  ): Promise<PluginListenerHandle>;
 }
 
 // `registerPlugin` returns a proxy even when the native plugin is absent —
@@ -105,12 +109,23 @@ async function checkAndroid(): Promise<CheckResult> {
     available: true,
     version: res.version,
     notes: res.notes,
-    applyFn: async () => {
+    applyFn: async (onProgress) => {
       // Native side: DownloadManager → ACTION_DOWNLOAD_COMPLETE →
       // install intent via FileProvider. Opening the system installer is
       // not the same thing as a completed install, so the native result is
       // surfaced to let the UI recover if the user cancels.
-      return await AndroidUpdater.install({ apkUrl });
+      //
+      // DownloadManager has no progress callback, so the native plugin polls it
+      // and emits `downloadProgress` events; forward them to the UI's progress
+      // callback. The listener is always removed once install settles.
+      const handle = await AndroidUpdater.addListener('downloadProgress', (e) => {
+        onProgress?.(Math.max(0, Math.min(100, e.percent)));
+      });
+      try {
+        return await AndroidUpdater.install({ apkUrl });
+      } finally {
+        await handle.remove();
+      }
     },
   };
 }

@@ -165,6 +165,11 @@ public class UpdaterPlugin extends Plugin {
             }
             final long downloadId = dm.enqueue(req);
 
+            // Surface download progress to the JS layer so the in-app banner /
+            // settings card show a moving bar instead of a frozen 0%.
+            // DownloadManager has no progress callback, so poll it.
+            startProgressPolling(dm, downloadId);
+
             final BroadcastReceiver onComplete = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context c, Intent i) {
@@ -215,6 +220,64 @@ public class UpdaterPlugin extends Plugin {
         } catch (Exception e) {
             call.reject("install failed: " + (e.getMessage() != null ? e.getMessage() : e.toString()), e);
         }
+    }
+
+    /**
+     * Poll DownloadManager for the running download and emit `downloadProgress`
+     * events (percent 0-100) until the download reaches a terminal state.
+     * DownloadManager exposes no progress callback, so a short poll loop is the
+     * only way to drive the in-app progress bar. The thread ends on its own when
+     * the download succeeds, fails, or its row disappears — no cancel plumbing.
+     */
+    private void startProgressPolling(final DownloadManager dm, final long downloadId) {
+        new Thread(() -> {
+            while (true) {
+                int status = -1;
+                long soFar = -1;
+                long total = -1;
+                DownloadManager.Query q = new DownloadManager.Query().setFilterById(downloadId);
+                try (Cursor c = dm.query(q)) {
+                    if (c == null || !c.moveToFirst()) {
+                        return; // row gone — nothing left to report
+                    }
+                    int si = c.getColumnIndex(DownloadManager.COLUMN_STATUS);
+                    int bi = c.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
+                    int ti = c.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
+                    if (si >= 0) status = c.getInt(si);
+                    if (bi >= 0) soFar = c.getLong(bi);
+                    if (ti >= 0) total = c.getLong(ti);
+                } catch (Exception e) {
+                    return;
+                }
+
+                if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                    emitProgress(100);
+                    return;
+                }
+                if (status == DownloadManager.STATUS_FAILED) {
+                    return;
+                }
+                // Only report a real percentage when the server gave a total
+                // length; otherwise leave the UI in its indeterminate state
+                // instead of showing a false number.
+                if (total > 0 && soFar >= 0) {
+                    long pct = (soFar * 100L) / total;
+                    emitProgress((int) Math.max(0, Math.min(100, pct)));
+                }
+
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }).start();
+    }
+
+    private void emitProgress(int percent) {
+        JSObject ev = new JSObject();
+        ev.put("percent", percent);
+        notifyListeners("downloadProgress", ev);
     }
 
     private static void openUnknownSourcesSettings(Context ctx) {

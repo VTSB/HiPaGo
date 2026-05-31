@@ -8,9 +8,9 @@
  *   auto-update path (plain web), or the user dismissed this version
  *   for the current session.
  * - When the platform supports in-place install (Tauri / Android), the
- *   primary action triggers `applyFn` with a progress callback (Tauri
- *   side) so the banner can render a thin progress bar while the
- *   bundle downloads.
+ *   primary action triggers `applyFn` with a progress callback (both Tauri
+ *   and Android report download %) so the banner can render a thin progress
+ *   bar while the bundle downloads.
  * - When the platform can only deep-link (iOS), the primary action
  *   opens the GitHub Release page in the system browser.
  */
@@ -159,7 +159,7 @@ export function UpdateBanner() {
         </button>
       </div>
 
-      {/* Thin progress bar (Tauri provides %; Android stays at 0) */}
+      {/* Thin progress bar (Tauri and Android both report download %) */}
       {installing && (
         <div className="h-0.5 w-full bg-zinc-800 dark:bg-zinc-200">
           <div
