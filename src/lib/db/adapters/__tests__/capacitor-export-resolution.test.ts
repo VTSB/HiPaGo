@@ -25,9 +25,15 @@ function makeConnectionClass() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function loadAdapterWith(moduleShape: any) {
+async function loadAdapterWith(moduleShape: any, defsShape?: any) {
   vi.resetModules();
   vi.doMock('@capacitor-community/sqlite', () => moduleShape);
+  // Mock the definitions subpath used by the tree-shake fallback. Default to a
+  // shape with no class so tests that don't opt in don't accidentally recover
+  // via the real definitions module.
+  vi.doMock('@capacitor-community/sqlite/dist/esm/definitions', () =>
+    defsShape ?? { SQLiteConnection: undefined, default: undefined },
+  );
   const { CapacitorAdapter } = await import('../capacitor');
   return CapacitorAdapter;
 }
@@ -60,6 +66,17 @@ describe('CapacitorAdapter — defensive SQLiteConnection resolution', () => {
       SQLiteConnection: undefined,
       default: { CapacitorSQLite: {}, SQLiteConnection: makeConnectionClass() },
     });
+    await expect(A.create('hipago')).resolves.toBeDefined();
+    expect(fakeDb.open).toHaveBeenCalled();
+  });
+
+  it('falls back to the definitions subpath when the entry export is tree-shaken', async () => {
+    // Entry exposes the binding but it is undefined (tree-shaken re-export);
+    // the class is recovered from its defining module.
+    const A = await loadAdapterWith(
+      { CapacitorSQLite: {}, SQLiteConnection: undefined, default: undefined },
+      { SQLiteConnection: makeConnectionClass(), default: undefined },
+    );
     await expect(A.create('hipago')).resolves.toBeDefined();
     expect(fakeDb.open).toHaveBeenCalled();
   });

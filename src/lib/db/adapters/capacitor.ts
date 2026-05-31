@@ -33,7 +33,21 @@ export class CapacitorAdapter implements DbAdapter {
     // `new SQLiteConnection(...)` throw the opaque "r is not a constructor".
     // Prefer the namespace binding, fall back to `.default`.
     const CapacitorSQLite = mod.CapacitorSQLite ?? mod.default?.CapacitorSQLite;
-    const SQLiteConnectionCtor = mod.SQLiteConnection ?? mod.default?.SQLiteConnection;
+    let SQLiteConnectionCtor = mod.SQLiteConnection ?? mod.default?.SQLiteConnection;
+
+    // The package's entry only exposes SQLiteConnection via `export * from
+    // './definitions'`. The production minifier (Android static-export build)
+    // can tree-shake that re-exported binding to undefined -> "r is not a
+    // constructor". When that happens, import the class DIRECTLY from its
+    // defining module, which has no re-export indirection for the tree-shaker
+    // to mishandle, so the class survives.
+    if (typeof SQLiteConnectionCtor !== 'function') {
+      const defs = (await step(
+        'import plugin definitions (fallback)',
+        () => import('@capacitor-community/sqlite/dist/esm/definitions'),
+      )) as { SQLiteConnection?: unknown; default?: { SQLiteConnection?: unknown } };
+      SQLiteConnectionCtor = defs.SQLiteConnection ?? defs.default?.SQLiteConnection;
+    }
 
     const sqlite = await step('construct SQLiteConnection', async () => {
       if (typeof SQLiteConnectionCtor !== 'function') {

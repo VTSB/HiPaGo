@@ -77,6 +77,13 @@ declare module '@capacitor-community/sqlite' {
   }
 }
 
+// Direct subpath to the class-defining module — used as a tree-shake-proof
+// fallback when the package entry's `export *`-re-exported SQLiteConnection is
+// minified to undefined. Mirrors the SQLiteConnection export above.
+declare module '@capacitor-community/sqlite/dist/esm/definitions' {
+  export { SQLiteConnection } from '@capacitor-community/sqlite';
+}
+
 // sql.js — WASM SQLite (used in browser + tests)
 declare module 'sql.js' {
   interface Database {
