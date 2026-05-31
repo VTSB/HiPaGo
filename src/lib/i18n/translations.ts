@@ -146,6 +146,13 @@ const translations = {
   'settings.reader.scroll': { en: 'Scroll', ko: '스크롤' },
   'settings.imageFormat': { en: 'Image Format', ko: '이미지 형식' },
   'settings.imageFormat.desc': { en: 'Preferred image format for loading', ko: '이미지 로딩 형식' },
+  'settings.imageCache': { en: 'Image Cache', ko: '이미지 캐시' },
+  'settings.imageCache.desc': { en: 'Cache full-size images so they load instantly next time', ko: '원본 이미지를 캐시해 다음엔 즉시 로딩' },
+  'settings.imageCache.used': { en: 'used', ko: '사용 중' },
+  'settings.imageCache.max': { en: 'Max size (MB)', ko: '최대 크기 (MB)' },
+  'settings.imageCache.unlimited': { en: 'Unlimited', ko: '무제한' },
+  'settings.imageCache.off': { en: '0 = off', ko: '0 = 끔' },
+  'settings.imageCache.clear': { en: 'Clear cache', ko: '캐시 비우기' },
   'settings.blurTags': { en: 'Blur Tags', ko: '블러 태그' },
   'settings.blurTags.desc': {
     en: 'Galleries with these tags will be blurred',

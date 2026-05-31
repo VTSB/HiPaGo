@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { TagChip } from '@/shared/components/TagChip';
 import { Select } from '@/shared/components/Select';
 import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
+import { ImageCacheCard } from '@/shared/components/ImageCacheCard';
 
 function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   const [input, setInput] = useState('');
@@ -208,6 +209,9 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Image cache */}
+      <ImageCacheCard />
 
       {/* About / Updates */}
       <UpdateCheckCard />

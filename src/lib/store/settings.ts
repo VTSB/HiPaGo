@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { DEFAULT_IMAGE_CACHE_MAX_BYTES } from '@/lib/cache/image-cache-store';
 
 export type Locale = 'en' | 'ko';
 
@@ -14,6 +15,8 @@ interface SettingsStoreState {
   gridColumns: number;
   /** Scroll-mode zoom scale. 1 = fit container width; >1 enlarges (pan), <1 shrinks. */
   scrollZoom: number;
+  /** Max image-cache size in bytes. null = unlimited, 0 = off (no caching). */
+  imageCacheMaxBytes: number | null;
   setLocale: (locale: Locale) => void;
   setLanguage: (language: string) => void;
   setTheme: (theme: 'light' | 'dark') => void;
@@ -22,6 +25,7 @@ interface SettingsStoreState {
   setDualPage: (dual: boolean) => void;
   setGridColumns: (cols: number) => void;
   setScrollZoom: (z: number) => void;
+  setImageCacheMaxBytes: (bytes: number | null) => void;
   addBlurTag: (tag: string) => void;
   removeBlurTag: (tag: string) => void;
 }
@@ -43,12 +47,18 @@ const V1_ADDED_BLUR_TAGS = SAFETY_BLUR_TAGS;
  *  blurTags (once, on the 0->1 bump). A tag the user later removes stays removed.
  *  Exported for unit tests. */
 export function migrateSettings(persisted: unknown, version: number): unknown {
-  if (version < 1 && persisted && typeof persisted === 'object') {
-    const s = persisted as { blurTags?: string[] };
+  if (!persisted || typeof persisted !== 'object') return persisted;
+  let s = persisted as { blurTags?: string[]; imageCacheMaxBytes?: number | null };
+  // v1: union the safety blur tags once.
+  if (version < 1) {
     const existing = Array.isArray(s.blurTags) ? s.blurTags : [];
-    return { ...s, blurTags: Array.from(new Set([...existing, ...V1_ADDED_BLUR_TAGS])) };
+    s = { ...s, blurTags: Array.from(new Set([...existing, ...V1_ADDED_BLUR_TAGS])) };
   }
-  return persisted;
+  // v2: default the image-cache cap for existing users (additive).
+  if (version < 2 && s.imageCacheMaxBytes === undefined) {
+    s = { ...s, imageCacheMaxBytes: DEFAULT_IMAGE_CACHE_MAX_BYTES };
+  }
+  return s;
 }
 
 export const useSettingsStore = create<SettingsStoreState>()(
@@ -63,6 +73,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       dualPage: false,
       gridColumns: 0,
       scrollZoom: 1,
+      imageCacheMaxBytes: DEFAULT_IMAGE_CACHE_MAX_BYTES,
       setLocale: (locale) => set({ locale }),
       setLanguage: (language) => set({ language }),
       setTheme: (theme) => set({ theme }),
@@ -71,10 +82,11 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setDualPage: (dual) => set({ dualPage: dual }),
       setGridColumns: (cols) => set({ gridColumns: cols }),
       setScrollZoom: (z) => set({ scrollZoom: z }),
+      setImageCacheMaxBytes: (bytes) => set({ imageCacheMaxBytes: bytes }),
       addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings', version: 1, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 2, migrate: migrateSettings },
   ),
 );
 

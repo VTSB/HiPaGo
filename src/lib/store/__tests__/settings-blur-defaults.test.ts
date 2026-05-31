@@ -32,9 +32,16 @@ describe('default blur tags + v1 migration', () => {
     expect(out.blurTags).toEqual(expect.arrayContaining(['male:yaoi', ...SAFETY]));
   });
 
-  it('is a no-op at version >= 1 (a later user removal stays removed)', () => {
+  it('is a no-op at version >= 2 (a later user removal stays removed)', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0 };
+    expect(migrateSettings(state, 2)).toBe(state);
+  });
+
+  it('v1 -> v2 adds the default image-cache cap without touching blurTags', () => {
     const state = { blurTags: ['male:yaoi'] };
-    expect(migrateSettings(state, 1)).toBe(state);
+    const out = migrateSettings(state, 1) as { blurTags: string[]; imageCacheMaxBytes: number | null };
+    expect(out.blurTags).toEqual(['male:yaoi']); // v>=1: no blur re-union
+    expect(out.imageCacheMaxBytes).toBe(250 * 1024 * 1024);
   });
 
   it('handles a persisted state with no blurTags', () => {
