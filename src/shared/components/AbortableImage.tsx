@@ -165,10 +165,23 @@ export function preloadImageSource(src: string, signal?: AbortSignal): Promise<v
   });
 }
 
-export function __resetAbortableImageCacheForTests() {
+/**
+ * Drop the in-memory image-display memos (resolved `convertFileSrc` URLs,
+ * loaded-src set, Android warm dedupe). MUST be called whenever the persistent
+ * cache is cleared: otherwise these memos keep serving file URLs that point at
+ * now-deleted cache files, and every image list comes back blank after a clear
+ * (the resolve effect short-circuits on the seeded stale URL and never
+ * re-downloads). After a reset the next mount re-resolves from the (empty)
+ * cache and re-downloads / falls back to the plain CDN source.
+ */
+export function resetImageDisplayCaches() {
   loadedSrcCache.clear();
   resolvedFileUrlCache.clear();
   warmedSrcCache.clear();
+}
+
+export function __resetAbortableImageCacheForTests() {
+  resetImageDisplayCaches();
 }
 
 /**

@@ -13,6 +13,7 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { getImageCache, bytesToMb, mbToBytes, formatBytes } from '@/lib/cache/image-cache';
 import type { ImageCacheStore } from '@/lib/cache/image-cache-store';
+import { resetImageDisplayCaches } from '@/shared/components/AbortableImage';
 
 export function ImageCacheCard() {
   const t = useT();
@@ -70,6 +71,11 @@ export function ImageCacheCard() {
   const onClear = async () => {
     if (!store) return;
     await store.clear();
+    // store.clear() deletes the on-disk cache files; without this the
+    // AbortableImage memos keep serving now-dead convertFileSrc URLs and every
+    // image list comes back blank. Drop them so views re-resolve from the
+    // emptied cache.
+    resetImageDisplayCaches();
     setUsage(store.usage());
   };
 

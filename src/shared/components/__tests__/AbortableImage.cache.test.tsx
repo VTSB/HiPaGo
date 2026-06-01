@@ -28,7 +28,11 @@ function MockIntersectionObserver(this: IntersectionObserver) {
   (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;
 }
 
-import { AbortableImage, __resetAbortableImageCacheForTests } from '../AbortableImage';
+import {
+  AbortableImage,
+  __resetAbortableImageCacheForTests,
+  resetImageDisplayCaches,
+} from '../AbortableImage';
 import * as platform from '@/lib/utils/platform';
 
 const CDN = 'https://aa.gold-usergeneratedcontent.net/img/0001.webp';
@@ -112,5 +116,56 @@ describe('AbortableImage file-backed cache serving (AC-04)', () => {
       expect(img.getAttribute('src')).toBe('capacitor://localhost/_capacitor_file_/cache/x'),
     );
     expect(ensureCached).toHaveBeenCalledWith(CDN, CDN, expect.any(Object));
+  });
+});
+
+// Regression: clearing the persistent cache must invalidate the in-memory
+// resolved-URL memos, or the next list mount serves convertFileSrc URLs that
+// point at now-deleted files → blank list. resetImageDisplayCaches() (called by
+// the Settings Clear action) is what prevents that.
+describe('AbortableImage cache-clear invalidation (blank-list-after-clear)', () => {
+  const FILEURL = 'capacitor://localhost/_capacitor_file_/cache/x';
+
+  it('serves the plain CDN src after a cache clear (no stale file URL)', async () => {
+    (platform.isAndroid as Mock).mockReturnValue(true);
+    (platform.isCapacitor as Mock).mockReturnValue(true);
+
+    // 1) First visit: cache HIT → file URL served, the in-memory memo is populated.
+    fileUrl.mockResolvedValue(FILEURL);
+    const first = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img1 = first.container.querySelector('img') as HTMLImageElement;
+    await waitFor(() => expect(img1.getAttribute('src')).toBe(FILEURL));
+    first.unmount();
+
+    // 2) User clears the cache: on-disk files are gone (fileUrl now misses) AND
+    //    the display memos are invalidated (what the fix adds).
+    fileUrl.mockResolvedValue(null);
+    resetImageDisplayCaches();
+
+    // 3) Return to the list: re-resolves from the empty cache → plain CDN src,
+    //    never the deleted file URL.
+    const second = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img2 = second.container.querySelector('img') as HTMLImageElement;
+    expect(img2.getAttribute('src')).toBe(CDN);
+    await flush();
+    expect(img2.getAttribute('src')).toBe(CDN);
+  });
+
+  it('WITHOUT the reset, the stale file URL persists across remounts (documents the bug)', async () => {
+    (platform.isAndroid as Mock).mockReturnValue(true);
+    (platform.isCapacitor as Mock).mockReturnValue(true);
+
+    fileUrl.mockResolvedValue(FILEURL);
+    const first = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img1 = first.container.querySelector('img') as HTMLImageElement;
+    await waitFor(() => expect(img1.getAttribute('src')).toBe(FILEURL));
+    first.unmount();
+
+    // Disk files deleted (miss) but memo NOT reset → the seeded stale URL is
+    // served on remount. This is exactly the blank-list-after-clear bug.
+    fileUrl.mockResolvedValue(null);
+    const second = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img2 = second.container.querySelector('img') as HTMLImageElement;
+    expect(img2.getAttribute('src')).toBe(FILEURL);
   });
 });
