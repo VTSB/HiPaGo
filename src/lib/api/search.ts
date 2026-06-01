@@ -10,7 +10,7 @@ import {
 import type { IndexData, IndexNode, Suggestion, SortOrder } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
 import { tagFromSearch } from '@/lib/utils/hitomi-tag';
-import { KOREAN_LABEL_TO_TYPE, normalizeQueryToEnglish } from '@/lib/utils/tag-query';
+import { KOREAN_LABEL_TO_TYPE, normalizeQueryTerms } from '@/lib/utils/tag-query';
 import { fetchIndexVersion } from './gallery';
 import { fetchNozomiSearch } from './nozomi';
 import { resolveTagIndexUrl } from './url-resolver';
@@ -331,10 +331,10 @@ async function getGalleryIdsForSingleTerm(
 }
 
 /**
- * Get gallery IDs for a (potentially compound) search query.
+ * Execute an already-normalized term list against hitomi's indexes.
  *
  * Matches hitomi.la's do_search() algorithm (results.js):
- *   1. Split query into terms, categorize as positive or negative (- prefix)
+ *   1. Categorize terms as positive or negative (- prefix)
  *   2. Sort positive terms: typed (field:value) terms first (optimization)
  *   3. Fetch ALL positive terms via getGalleryIdsForSingleTerm and intersect (AND)
  *   4. Fetch negative terms and exclude from results
@@ -342,14 +342,11 @@ async function getGalleryIdsForSingleTerm(
  * Sort order is only meaningful for single-term queries (nozomi files support
  * sort; B-tree galleriesindex does not). Multi-term queries ignore sort.
  */
-export async function getGalleryIdsForQuery(
-  query: string,
+async function executeTerms(
+  terms: string[],
   language: string,
   sort?: SortOrder,
 ): Promise<number[]> {
-  // Single choke point: translate any Korean type-qualified tokens to canonical
-  // English before nozomi execution. English queries pass through unchanged.
-  const terms = parseCompoundQuery(normalizeQueryToEnglish(query));
   if (terms.length === 0) return [];
 
   // Single term: pass sort through
@@ -404,6 +401,42 @@ export async function getGalleryIdsForQuery(
   }
 
   return results;
+}
+
+/**
+ * Get gallery IDs for a (potentially compound) search query.
+ *
+ * Primary pass: translate Korean type-qualified tokens to canonical English,
+ * then execute (tag nozomi for typed terms, galleries title index for typeless).
+ *
+ * Title fallback: a bare localized word that exactly matches a tag's localized
+ * name is auto-rewritten into a tag search (the desired primary behavior). When
+ * that leaves the WHOLE query empty and at least one POSITIVE term was
+ * auto-substituted, retry once with the raw word(s) so they hit the galleries
+ * title index instead of the tag nozomi. Negatives and explicit `type:value`
+ * terms are never reverted — they are user intent. This is hitomi's own btree
+ * title index, not a galleryblock scan.
+ */
+export async function getGalleryIdsForQuery(
+  query: string,
+  language: string,
+  sort?: SortOrder,
+): Promise<number[]> {
+  const detailed = normalizeQueryTerms(query);
+  const terms = detailed.map((d) => d.normalized).filter((t) => t.length > 0);
+  if (terms.length === 0) return [];
+
+  const results = await executeTerms(terms, language, sort);
+  if (results.length > 0) return results;
+
+  // Tag-first, title-on-empty fallback (positive auto-substituted terms only).
+  const hasAutoPositive = detailed.some((d) => d.autoSubstituted && !d.negative);
+  if (!hasAutoPositive) return results;
+
+  const fallbackTerms = detailed
+    .map((d) => (d.autoSubstituted && !d.negative ? d.raw : d.normalized))
+    .filter((t) => t.length > 0);
+  return executeTerms(fallbackTerms, language, sort);
 }
 
 /**

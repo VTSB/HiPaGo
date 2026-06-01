@@ -587,6 +587,131 @@ describe('getGalleryIdsForQuery — Korean query normalization', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Tag→title fallback: a bare localized word that collides with a tag name is
+// searched as a tag first, then falls back to the galleries title index when
+// the tag-substituted query returns nothing.
+// ---------------------------------------------------------------------------
+describe('getGalleryIdsForQuery — tag→title fallback', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await useTagI18nStore.getState().loadLocale('ko');
+  });
+
+  it('falls back to the title index when an auto-substituted bare KO word yields no tag results', async () => {
+    // "로리" maps to female:loli (auto-substituted). Tag pass is empty → the raw
+    // word is re-run against the galleries index.
+    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([]); // female:loli → empty
+
+    const hash = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('로리')),
+    ).slice(0, 4);
+    vi.mocked(fetchIndexVersion).mockResolvedValueOnce('v1');
+    vi.mocked(apiClient.fetchLtnBinary)
+      .mockResolvedValueOnce(buildNodeWithKeyAndData(hash, { offset: 0, length: 12 }))
+      .mockResolvedValueOnce(buildGalleryIdBuffer([11, 22, 33]));
+
+    const result = await getGalleryIdsForQuery('로리', 'all');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'all', undefined);
+    expect(result).toEqual([11, 22, 33]);
+  });
+
+  it('reverts only positive auto-substituted terms; a negative auto-sub stays a tag exclusion', async () => {
+    // "로리 -얌": 로리 (positive, auto-sub) reverts to a title lookup; -얌 (negative,
+    // auto-sub) must remain an artist:yam exclusion in the fallback pass.
+    vi.mocked(fetchNozomiSearch).mockImplementation(async (_area, tag) => {
+      if (tag === 'female:loli') return []; // primary tag pass empty → fallback
+      if (tag === 'yam') return [22];        // -얌 exclusion still applied in fallback
+      return [];
+    });
+
+    const hash = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('로리')),
+    ).slice(0, 4);
+    vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
+    vi.mocked(apiClient.fetchLtnBinary)
+      .mockResolvedValueOnce(buildNodeWithKeyAndData(hash, { offset: 0, length: 12 }))
+      .mockResolvedValueOnce(buildGalleryIdBuffer([11, 22, 33]));
+
+    const result = await getGalleryIdsForQuery('로리 -얌', 'all');
+
+    // 로리 → title index [11,22,33]; -얌 stayed artist:yam exclusion {22} → [11,33]
+    expect(result).toEqual([11, 33]);
+    expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'yam', 'all', undefined);
+  });
+
+  it('uses the tag result and skips the fallback when the primary query is non-empty', async () => {
+    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([100, 200]); // female:loli → hits
+
+    const result = await getGalleryIdsForQuery('로리', 'all');
+
+    expect(result).toEqual([100, 200]);
+    expect(fetchIndexVersion).not.toHaveBeenCalled();
+    expect(apiClient.fetchLtnBinary).not.toHaveBeenCalled();
+  });
+
+  it('does not run a second pass when no term was auto-substituted', async () => {
+    // English free-text: galleries index empty, no tag substitution → no fallback.
+    vi.mocked(fetchIndexVersion).mockResolvedValueOnce('v1');
+    vi.mocked(apiClient.fetchLtnBinary).mockResolvedValueOnce(
+      buildNodeWithKeyAndData(new Uint8Array([0xff, 0xff, 0xff, 0xff]), { offset: 0, length: 4 }),
+    );
+
+    const result = await getGalleryIdsForQuery('hello', 'all');
+
+    expect(result).toEqual([]);
+    expect(fetchIndexVersion).toHaveBeenCalledTimes(1); // primary only, no fallback re-fetch
+  });
+
+  it('does not fall back for an explicit Korean type:value query', async () => {
+    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([]); // female:loli → empty
+
+    const result = await getGalleryIdsForQuery('여자:로리', 'all');
+
+    expect(result).toEqual([]);
+    expect(fetchIndexVersion).not.toHaveBeenCalled(); // explicit typed never reverts to title
+  });
+
+  it('reverts an auto-sub positive while keeping a plain passthrough positive — both via the title index (headline "수영복 그녀" shape)', async () => {
+    // "로리 그녀": 로리 auto-subs to female:loli; 그녀 has no tag mapping (passthrough).
+    // Primary intersects tag female:loli (empty) with title 그녀 → empty → fallback
+    // re-runs 로리 as a raw title word; both 로리 and 그녀 hit the galleries index.
+    vi.mocked(fetchNozomiSearch).mockResolvedValue([]); // female:loli (primary) → empty
+    vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
+
+    const cmp = (a: Uint8Array, b: Uint8Array) => {
+      for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
+      return a.length - b.length;
+    };
+    const sha4 = async (s: string) =>
+      new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))).slice(0, 4);
+
+    const entries = [
+      { hash: await sha4('로리'), off: 0, len: 12, ids: [11, 22, 33] },
+      { hash: await sha4('그녀'), off: 100, len: 12, ids: [22, 33, 44] },
+    ].sort((a, b) => cmp(a.hash, b.hash));
+
+    const node = buildMultiKeyNode(
+      entries.map((e) => e.hash),
+      entries.map((e) => ({ offset: e.off, length: e.len })),
+    );
+
+    vi.mocked(apiClient.fetchLtnBinary).mockImplementation(async (_path: string, range?: string) => {
+      if (range === 'bytes=0-463') return node; // root node at address 0 (MAX_NODE_SIZE 464)
+      for (const e of entries) {
+        if (range === `bytes=${e.off}-${e.off + e.len - 1}`) return buildGalleryIdBuffer(e.ids);
+      }
+      throw new Error(`unexpected range ${range}`);
+    });
+
+    const result = await getGalleryIdsForQuery('로리 그녀', 'all');
+
+    // title index: 로리→[11,22,33] ∩ 그녀→[22,33,44] = [22,33]
+    expect(result).toEqual([22, 33]);
+  });
+});
+
 // --- Helpers ---
 
 function buildNodeWithKeyAndData(

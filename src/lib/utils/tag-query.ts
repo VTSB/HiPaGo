@@ -64,8 +64,25 @@ export function buildKoreanToken(type: TagType, koreanName: string): string {
   return `${label}:${name}`;
 }
 
+/** One query term plus the metadata search execution needs for tag→title fallback. */
+export interface NormalizedTerm {
+  /** The original whitespace term, verbatim (includes any leading '-'). */
+  raw: string;
+  /** The canonical-English term used for execution. */
+  normalized: string;
+  /**
+   * True only for a BARE typeless term that was rewritten into a tag token via
+   * the localized-name reverse lookup. False for explicit `type:value` terms
+   * (user intent) and for plain passthrough terms. The fallback in
+   * `getGalleryIdsForQuery` reverts only positive auto-substituted terms.
+   */
+  autoSubstituted: boolean;
+  /** True when the term carried a leading '-' (negative / exclude). */
+  negative: boolean;
+}
+
 /**
- * Convert a (possibly compound) query into a canonical English query.
+ * Convert a (possibly compound) query into per-term canonical-English metadata.
  *
  * Per whitespace-separated term:
  *  - split on the first `:` into a type part and a name part;
@@ -76,16 +93,17 @@ export function buildKoreanToken(type: TagType, koreanName: string): string {
  *
  * English terms pass through byte-identical. An unknown type prefix is treated
  * as a plain (typeless) term — the term is returned unchanged, matching the
- * current `parseQuery` behavior.
+ * current `parseQuery` behavior. `autoSubstituted` flags the one case that the
+ * title-search fallback can revert: a bare localized word rewritten to a tag.
  */
-export function normalizeQueryToEnglish(query: string): string {
+export function normalizeQueryTerms(query: string): NormalizedTerm[] {
   const trimmed = query.trim();
-  if (!trimmed) return query;
+  if (!trimmed) return [];
 
   const i18n = useTagI18nStore.getState();
 
   const terms = trimmed.split(/\s+/).filter((t) => t.length > 0);
-  const normalized = terms.map((term) => {
+  return terms.map((term): NormalizedTerm => {
     // Preserve a leading '-' (negative term) and re-attach it after.
     const negative = term.startsWith('-') && term.length > 1;
     const body = negative ? term.slice(1) : term;
@@ -101,10 +119,10 @@ export function normalizeQueryToEnglish(query: string): string {
           const eng = matches
             .map((m) => `${m.type}:${tagFromDisplay(m.name, m.type as TagType).searchForm}`)
             .join('|');
-          return negative ? `-${eng}` : eng;
+          return { raw: term, normalized: negative ? `-${eng}` : eng, autoSubstituted: true, negative };
         }
       }
-      return term;
+      return { raw: term, normalized: term, autoSubstituted: false, negative };
     }
 
     const typePart = body.slice(0, colonIdx);
@@ -119,12 +137,12 @@ export function normalizeQueryToEnglish(query: string): string {
     }
 
     // Unknown type prefix → plain term, unchanged.
-    if (!resolvedType) return term;
+    if (!resolvedType) return { raw: term, normalized: term, autoSubstituted: false, negative };
 
     // English name → pass through byte-identical (rebuild canonical type:name).
     if (!isHangul(namePart)) {
       const eng = `${resolvedType}:${namePart}`;
-      return negative ? `-${eng}` : eng;
+      return { raw: term, normalized: negative ? `-${eng}` : eng, autoSubstituted: false, negative };
     }
 
     // Korean name → reverse-resolve (type-scoped) to the English searchForm.
@@ -132,13 +150,22 @@ export function normalizeQueryToEnglish(query: string): string {
     const matches = i18n.reverseLookupAll(namePart.replace(/_/g, ' '), { type: resolvedType });
     if (matches.length === 0) {
       // No translation found — leave the term as-is (nozomi returns empty).
-      return term;
+      return { raw: term, normalized: term, autoSubstituted: false, negative };
     }
     const eng = matches
       .map((m) => `${m.type}:${tagFromDisplay(m.name, m.type as TagType).searchForm}`)
       .join('|');
-    return negative ? `-${eng}` : eng;
+    return { raw: term, normalized: negative ? `-${eng}` : eng, autoSubstituted: false, negative };
   });
+}
 
-  return normalized.join(' ');
+/**
+ * Convert a (possibly compound) query into a canonical English query string.
+ * Thin wrapper over {@link normalizeQueryTerms}; output is byte-identical to the
+ * prior implementation (joins normalized terms with single spaces).
+ */
+export function normalizeQueryToEnglish(query: string): string {
+  const trimmed = query.trim();
+  if (!trimmed) return query;
+  return normalizeQueryTerms(query).map((t) => t.normalized).join(' ');
 }

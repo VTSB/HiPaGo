@@ -23,6 +23,7 @@ import {
   isHangul,
   buildKoreanToken,
   normalizeQueryToEnglish,
+  normalizeQueryTerms,
 } from '../tag-query';
 
 const SAMPLE_KO_JSON = {
@@ -201,5 +202,64 @@ describe('tag-query — duplicate-translation OR-group expansion', () => {
       .map((m) => `${m.type}:${m.name}`)
       .sort();
     expect(all).toEqual(['tag:gokan', 'tag:goukan']);
+  });
+});
+
+describe('tag-query — normalizeQueryTerms metadata', () => {
+  beforeEach(async () => {
+    mockKoJson.default = SAMPLE_KO_JSON;
+    mockKoAiJson.default = {};
+    await useTagI18nStore.getState().loadLocale('ko');
+  });
+
+  it('flags a bare localized word rewritten to a tag as autoSubstituted', () => {
+    expect(normalizeQueryTerms('로리')).toEqual([
+      { raw: '로리', normalized: 'female:loli', autoSubstituted: true, negative: false },
+    ]);
+  });
+
+  it('does not auto-substitute a bare localized word with no tag mapping', () => {
+    expect(normalizeQueryTerms('존재하지않음')).toEqual([
+      { raw: '존재하지않음', normalized: '존재하지않음', autoSubstituted: false, negative: false },
+    ]);
+  });
+
+  it('does not flag an explicit type:value term as autoSubstituted (user intent)', () => {
+    expect(normalizeQueryTerms('여자:로리')).toEqual([
+      { raw: '여자:로리', normalized: 'female:loli', autoSubstituted: false, negative: false },
+    ]);
+  });
+
+  it('passes an English free-text term through without auto-substitution', () => {
+    expect(normalizeQueryTerms('hello')).toEqual([
+      { raw: 'hello', normalized: 'hello', autoSubstituted: false, negative: false },
+    ]);
+  });
+
+  it('marks a negative bare localized word both autoSubstituted and negative', () => {
+    expect(normalizeQueryTerms('-로리')).toEqual([
+      { raw: '-로리', normalized: '-female:loli', autoSubstituted: true, negative: true },
+    ]);
+  });
+
+  it('returns one entry per whitespace term with per-term flags', () => {
+    expect(normalizeQueryTerms('로리 hello 여자:안경')).toEqual([
+      { raw: '로리', normalized: 'female:loli', autoSubstituted: true, negative: false },
+      { raw: 'hello', normalized: 'hello', autoSubstituted: false, negative: false },
+      { raw: '여자:안경', normalized: 'female:glasses', autoSubstituted: false, negative: false },
+    ]);
+  });
+
+  it('returns [] for an empty query', () => {
+    expect(normalizeQueryTerms('')).toEqual([]);
+    expect(normalizeQueryTerms('   ')).toEqual([]);
+  });
+
+  it('normalizeQueryToEnglish equals the joined normalized terms (wrapper parity)', () => {
+    for (const q of ['로리', '여자:로리 artist:yam', 'hello world', '-로리 그녀', 'female:loli']) {
+      expect(normalizeQueryToEnglish(q)).toBe(
+        normalizeQueryTerms(q).map((t) => t.normalized).join(' '),
+      );
+    }
   });
 });
