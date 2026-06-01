@@ -5,12 +5,11 @@ import type { RefObject } from 'react';
 
 /**
  * Gesture-coupled reveal for a floating chrome surface (the reader's page
- * indicator + back button). Unlike `useHideOnScroll` — which returns a *binary*
- * hidden flag that fully snaps the bar back on any upward scroll past an 8px
- * threshold — this hook tracks the scroll 1:1 like a native iOS toolbar: scroll
- * down pushes the chrome off-screen, scroll up brings it back **by the same
- * amount you scrolled** ("스크롤 위로 한 만큼만 올라온다"), so it can rest partially
- * shown.
+ * indicator + back button, the list Header, the FloatingPageNav pill). Instead
+ * of a *binary* hidden flag that fully snaps the bar back on any small upward
+ * scroll, this hook tracks the scroll 1:1 like a native iOS toolbar: scroll down
+ * pushes the chrome off-screen, scroll up brings it back **by the same amount you
+ * scrolled** ("스크롤 위로 한 만큼만 올라온다"), so it can rest partially shown.
  *
  * It writes a single CSS custom property (`varName`, 0 = fully visible, 1 =
  * fully hidden) onto `targetRef`'s node **imperatively** — never through React
