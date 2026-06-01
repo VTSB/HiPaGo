@@ -1,123 +1,2247 @@
 {
-  "series:animal yokochou": {
-    "tried": "2026-05-26",
-    "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "Empty translation with confidence none"
-  },
-  "series:anothereidos of dragon vein r": {
-    "tried": "2026-05-26",
+  "series:009-1": {
+    "tried": "2026-06-01",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
-    "reason": "empty translation with confidence: none"
+    "reason": "confidence is none; translation retains original alphanumeric tag with no Korean characters — needs human review to confirm whether a Korean localized title exists"
   },
-  "series:arakusa ninpouchou": {
-    "tried": "2026-05-26",
+  "series:1 plus 2 equals paradise": {
+    "tried": "2026-06-01",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
-    "reason": "empty translation with confidence none"
+    "reason": "empty translation, confidence none"
   },
-  "series:backbeard-sama ga miteru": {
-    "tried": "2026-05-26",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "empty translation, confidence is none"
-  },
-  "series:bakunyuu maid kari": {
-    "tried": "2026-05-26",
+  "series:1000-chan": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "Empty translation"
   },
+  "series:2 shot diary": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:6teen": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation retains English title unchanged — needs human review to confirm correct Korean title"
+  },
+  "series:a hat in time": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation contains no Korean characters — English-only title does not satisfy target language requirement"
+  },
+  "series:a-ga": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:abarenbou princess": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:abunai tengu densetsu - yomigaetta tengu ga yozora o mau": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ace force": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:after...": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:ai shimai": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:ai shite knight": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:aisai nikki": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:ajisai no chiru koro ni": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:akadon miyabi": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:akazukin to mayoi no mori": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:akiba kei kanojo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:akiiro bousou biyori": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:akita land gothic": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:akuma gari": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:akuma jiten": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:akumu": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:alice tantei kyoku": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:all you need is kill": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation contains no Korean characters (English only). Official Korean publications retain the English title, so this may need human review to decide if transliteration is required."
+  },
+  "series:amaizo dango": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:amazing nurse nanako": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:amesarasa": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:anata no shiranai kangofu": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:ane doki": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:ane haramix": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:angels with scaly wings": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is still in English with no Korean characters; confidence is none"
+  },
+  "series:animagear": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:animal yokochou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:anmitsu hime": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:anna millers": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:anne happy": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ano hito no i ni wa boku ga tarinai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ano machi no koi no uta": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ano natsu no fukakutei na kanojo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:anothereidos of dragon vein r": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:ao don hanabi no kiwami": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:aoharu tetsudo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:arakusa ninpouchou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation with confidence none"
+  },
+  "series:archaic sealed heat": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation 'ASH: Archaic Sealed Heat' contains no Korean characters — it is the English official title, not a Korean translation. Should use a Korean transliteration such as '아케익 실드 히트' or keep the English acronym with a Korean note."
+  },
+  "series:asatte no houkou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:assemble borg": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:assembler ox": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:astra superstars": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:astralair no shiroki towa": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:at lady": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ayakashi no yoru ie": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:azfareo no sobayounin": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:azuki-chan": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:b.b.idol": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:babel no tou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:backbeard-sama ga miteru": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 2,
+    "reason": "empty translation with confidence none"
+  },
+  "series:bakkotsu shoujo giri giri purin": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bakumatsu jinchuu houkoku resshiden miburo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bakumatsu rock": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bakumatsu shishi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bakunyuu maid kari": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:bijo de yajuu": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:brave sword x blaze soul": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:briganty the roots of darkness": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation is phonetic transliteration of English title — needs human verification for obscure PC-98 title"
+  },
+  "series:brok the investigator": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation 'BROK the InvestiGator' contains no Korean characters — still in English"
+  },
+  "series:bubsy": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bug fables": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bulk slash": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bullet butlers": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:bunny suit planning": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:burn up scramble": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:burn up w": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:buta no gotoki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:butterfly affection": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cafe junkie": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cafe sourire": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:can can bunny": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:candy pop nightmare": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:capricorn": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:carla": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:casual romance club": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:cat busters": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cavewoman": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:celestial silfade story": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:challenge first-year-student": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cheer danshi": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:cheerism": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:chicchana moko-chan": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:chii-chan no oshinagaki": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
-  "series:dokkin minako-sensei": {
-    "tried": "2026-05-26",
+  "series:chiisana kyojin microman": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chikn nuggit": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chikyu misaki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chim chim cherry": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chin chin devil o oe": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chip chan kick": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chocolate melancholy": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chogattai majutsu robot ginguiser": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chokotto hime": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chotto ippai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:chotto kawaii iron maiden": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:choukou shinki ixseal": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation and confidence is none"
   },
-  "series:fun fun pharmacy": {
-    "tried": "2026-05-26",
+  "series:ciel nosurge": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is English only with no Korean characters; no official Korean localization exists but common Korean rendering would be 시엘 노서지 or 셸 노서지"
+  },
+  "series:cinderella blade": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
+  "series:claires quest": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:classroom crisis": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation contains no Korean characters — full English title used instead of Korean localization"
+  },
+  "series:cloud meadow": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:clover point": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cluster edge": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Confidence is 'none'; translation '클러스터 에지' is a plausible phonetic rendering but requires human verification against official sources"
+  },
+  "series:coco": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Confidence is 'none'; translation '코코' is a phonetic rendering but 'coco' is ambiguous (multiple series) and requires human verification"
+  },
+  "series:cocoro restarter": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation 'こころリスタ！' is in Japanese, not Korean — target language characters are absent"
+  },
+  "series:cocoro-navi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation 'こころナビ' is in Japanese, not Korean — target language characters are absent"
+  },
+  "series:code of joker": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation 코드 오브 조커 is consistent with the known SEGA arcade game title but requires human confirmation"
+  },
+  "series:collar x malice": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is in English/Latin characters only — no Korean characters present. The game title should be transliterated or kept with at least a Korean-script annotation; as-is it fails the target language requirement."
+  },
+  "series:concerto note": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:concon-collector": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:condorito": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:corruption of champions": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cr ginga otome": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:crescent moon girl": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:crimson tears": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:crusade heart karen": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:crush crush": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none; game uses English title in Korean markets, needs human review"
+  },
+  "series:crystal maidens": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cucumber quest": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cult of the lamb": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "Translation is still in English — no Korean characters present. Official Korean name is 컬트 오브 더 램"
+  },
+  "series:cutie suzuki no ringside angel": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:cybersix": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:d.p.s.": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:da erduo tutu": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; phonetic transliteration of Chinese title with no confirmed official Korean name found"
+  },
+  "series:daihanjou manpuku marche": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:daikaijuu monogatari": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dainihon samurai girl": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dalk": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dalk gaiden": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:danchi tomoo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:danshaku kouchou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:darcrows": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:dark judgement": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:darkwatch": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dave the barbarian": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:de-ja": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dead estate": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:deception": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
+  },
+  "series:demimen": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:denkigai no honya-san": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation may be incomplete (full title possibly '덴키가이의 서점 아가씨')"
+  },
+  "series:denshi yousei abatamo ekubo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dero dero": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:deru toko demasho": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:desert punk": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:desert rose": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:destiny": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:destripando la historia": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is identical to the tag name with no Korean characters — no translation was applied. Confidence was also 'none'."
+  },
+  "series:devil and devil": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:devil connection": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:devil x devil": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dispatch": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "Translation is still in English with no Korean characters; confidence is 'none'"
+  },
+  "series:divine sealing": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dog x bloods": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:doki doki poyatchio": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:doki doki pretty league": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:dokkin minako-sensei": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 2,
+    "reason": "empty translation with confidence none"
+  },
+  "series:dokkoida": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:domina no do": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dongfang shen wa": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dont starve": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation is English-only, no Korean characters present"
+  },
+  "series:doteraman": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dra plus koi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dragon master silk": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:drakuun": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dreaming": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is still the English word 'dreaming' with no Korean characters; confidence is 'none'"
+  },
+  "series:dungeon shoutenkai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:dungeons and princess": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:earnest evans": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is still in English only with no Korean characters; confidence is none"
+  },
+  "series:ef a tale of memories": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation contains no Korean characters — the series has no localized Korean title and the current value is pure English/Latin script"
+  },
+  "series:el viento": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:eleven soul": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:elf 17": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:elfquest": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:elinor wonders why": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:ellark": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:emerald dragon": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:emperors saga": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ena": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation contains no Korean characters — 'ENA' is Latin only; expected phonetic Korean transcription e.g. '에나'"
+  },
+  "series:energy kyouka": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:enjou genmu tan": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:enzai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:eonbound": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:erma": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:erophone re": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:esurance": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:et cetera": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:eternal city": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:eternal melody": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:etsuraku hyakka alegria": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:everlasting summer": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is still in English ('Everlasting Summer') with no Korean characters. Should be a Korean transliteration such as '에버라스팅 서머'."
+  },
+  "series:exalted": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:exaxxion": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:extreme dinosaurs": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fairly life": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation plausible but unverified"
+  },
+  "series:famicom rocky": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:family pet sun-chan": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:fancia": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:father of the pride": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fifth aile": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fifth twin": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:final romance": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fire rabbit": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:first kiss story": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:flash hiders": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:flying ben": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:forgotten worlds": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:front line": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fudanshism": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:full ani": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fun fun pharmacy": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:funhunt": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fushigi tsuushin toilet no hanako-san": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fushoku no machi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:futari no lotte": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:fuyukara kururu.": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation looks plausible but requires human review"
+  },
+  "series:fxxx me royally": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation contains no Korean characters — only English text repeated"
+  },
+  "series:gabment": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gacha gacha family evil-kun": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gad guard": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Translation 'GAD GUARD' contains no Korean characters; no official Korean localization found. May need a Hangul transliteration (e.g. 가드가드) consistent with project style."
+  },
+  "series:gakkatsu": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gan kon": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ganbare sumeshi gigoku": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ganbarist shun": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gardnerverse": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gau gau wata": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gdgd fairies": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gdleen": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gekitotsu no hexennacht": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gene diver": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gengetsu no pandora": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:geobreeders": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:geten no hana": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:god sider": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:gokuto jihen": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:goldieblox": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gor": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gosenzo san-e": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:goshuushou-sama ninomiya-kun": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gouen no soreiyu": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:grimms echoes": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; no official Korean source found to confirm translation"
+  },
+  "series:groove on fight": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:grope yami no naka no kotori-tachi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gun": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:gunjou no sora o koete": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hagure yuusha no estetica": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:haja no fuuin": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:hajimete no aku": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
+  },
+  "series:hajimete no hitozuma": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
+  },
   "series:hajimete no oishasan": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "Empty translation"
+  },
+  "series:hajimete no otetsudai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:haken shain ogin": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hamrins": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hana no zubora-meshi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
+  },
+  "series:hanazuki full of treasures": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:handead anthem": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation is in Latin script only ('HANDEAD ANTHEM') with no Korean/Hangul characters. Style examples show romaji/English titles should be transliterated into Korean (e.g. 'accel world' → '액셀 월드'). Suggested transliteration: 한데드 앤썸"
+  },
+  "series:hanjuku hero": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hantsu x trash": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hanzasky": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:happy kappy": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:harbor light story fashion lala yori": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:harem ace": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:harukoi otome": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:haruru minamo ni": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
     "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "empty translation with confidence none"
+    "attempts": 2,
+    "reason": "empty translation"
   },
   "series:hataraku onii-san": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 2,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:hatena no tou": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:hateshinaku aoi kono sora no shita de...": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:hatsuden pandakun": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hatsukoi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:haunted junction": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hazun de catch": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:heart catch izumi-chan": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:heartful maman": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:heisei inu monogatari bow": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hellsinker.": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation is identical to the original English tag — no Korean characters present"
+  },
+  "series:hengen sennin asuka": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hentai heroes": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none, requires human review"
+  },
+  "series:heroes": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:heroes battle disk densetsu": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:heroine zetsumetsu keikaku": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hexyz force": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hhg megami no shuuen": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hiatari ryoukou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hihouden": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hima-ten": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hime to boin": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:himitsu sentai metamor v": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:himitsu series": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hirake ponkikki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hiseki shinki arcana saber": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hit o nerae": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hitozuma koukan nikki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hitsugi katsugi no kuro.": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hiyoko no kimochi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hizashi no naka no real": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:homo ni narenakute": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:honey blonde": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:honoo no mirage": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hoshi no shima no ruru-chan": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hoshikoi twinkle": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hosoude sanjouki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hp himepara": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hyakugojuunenme no mahoutsukai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:hyoui henshin extra souls": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:hyper doll": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:hyper police": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:i can": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ichibanyu no kanata": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:iczer": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:idol connect": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ii hito": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:iinari aibure-shon": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ikebukuro hatsu zensekai yuki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:ikenai luna sensei": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:ikinari happy bell": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ikinokore shachiku-chan": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ikusa otome suvia": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ikusa otome valkyrie": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:in white": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:inkya lovecome": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:inma kourin devil carnival": {
-    "tried": "2026-05-26",
-    "verdict": "_NEEDS_REVIEW",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:inuzoribu": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
     "attempts": 1,
-    "reason": "empty translation with confidence none"
+    "reason": "empty translation"
   },
   "series:irotoridori no sekai": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:itadaki seieki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:itoko no ko": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:iyashite agerun saiyuuki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:jane blonde": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
+  },
+  "series:jantei monogatari": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; phonetic transliteration unverified"
+  },
+  "series:japanese cult quiz zipang": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; phonetic transliteration unverified"
+  },
+  "series:jelly jamm": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation is still in English — no Korean characters present"
+  },
+  "series:jewel knights crusaders": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation is still in English — no Korean characters present"
+  },
+  "series:jewel princess reincarnation": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation is still in English — no Korean characters present"
+  },
+  "series:jimoto saikou": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:jinrou judgement": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 2,
+    "reason": "empty translation, confidence none"
+  },
+  "series:jinrui nekoka": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:jl8": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation retained as alphanumeric 'JL8' with no Korean characters — no official Korean title found"
+  },
+  "series:jock studio": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 2,
+    "reason": "confidence is none; translation retained as English 'Jock Studio' with no Korean characters — no official Korean title found"
+  },
+  "series:josou jinja": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:josou sanmyaku": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:jouki toshi no tantei shoujo": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
-    "reason": "Empty translation with confidence none"
+    "reason": "empty translation"
+  },
+  "series:jumping rabbit": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kabuto kuwagata": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kaerimichi wa kiken ga ippai": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kaerunyo panyorn": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kagaku chop": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kagihime monogatari eikyuu alice rondo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "series:kagura reimeiki": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:kaiser spike": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kaiserreich": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
   "series:kaiten mutenmaru": {
-    "tried": "2026-05-26",
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "empty translation"
+  },
+  "series:kanojo to natsu to boku": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kara no naka no kotori": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:keio flying squadron": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kekko kamen": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kemo coliseum": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kendo rage": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kichiku megane": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kimama ni updown": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation lacks spacing (기마마니업다운 should be 기마마니 업다운) and needs human review"
+  },
+  "series:kimi ga yobu megiddo no oka de": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:kimi no yusha": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kindergarten": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:king of races": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kirei ni shite moraemasu ka.": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kojin taxi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kokoro navi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kuon no kizuna": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:kurai mirai": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:kurukuru rinne": {
+    "tried": "2026-06-01",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "empty translation with confidence none"
+  },
+  "series:kusarihime": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "series:kuttsukiboshi": {
     "tried": "2026-05-26",
@@ -125,11 +2249,29 @@
     "attempts": 1,
     "reason": "empty translation with confidence: none"
   },
+  "series:kyuujou lovers": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
+  },
+  "series:kyuuketsu senki vjedogonia": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
   "series:kyuushu sentai danjija": {
     "tried": "2026-05-26",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "Empty translation with confidence 'none' — requires human review"
+  },
+  "series:lagoon engine": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
   },
   "series:legend of queen opala": {
     "tried": "2026-05-26",
@@ -143,8 +2285,32 @@
     "attempts": 1,
     "reason": "empty translation with confidence none"
   },
+  "series:little memole": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:lord of walkure": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:lover": {
     "tried": "2026-05-26",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:magic sword": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:magicalo magical": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
@@ -155,17 +2321,101 @@
     "attempts": 1,
     "reason": "Empty translation with confidence 'none' — requires human review"
   },
+  "series:mahou senshi symphonic knights": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:mahou shoujo celesphonia": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:mahou shoujo neko x": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:mahou shoujo no majo saiban": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:mahou shoujo sae": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:majokko a la mode": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:mamatoto": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
   "series:mamoru-kun": {
     "tried": "2026-05-26",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "empty translation, confidence is none"
   },
+  "series:mantradeva": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:marine a go go": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:maritsu loli succubus youmaen": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence 'none'"
+  },
+  "series:matou kitan zankan": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:mika ni harassment": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:misty moon metropolis": {
     "tried": "2026-05-26",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "empty translation, confidence is none"
+  },
+  "series:mokke": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:muten no kaito": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
   },
   "series:my life as a teenage robot": {
     "tried": "2026-05-26",
@@ -179,14 +2429,128 @@
     "attempts": 1,
     "reason": "empty translation"
   },
+  "series:nanami to konomi no oshiete a-b-c": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:natsu no ame": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:natural mi mo kokoro mo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:nee chanto shiyou yo": {
     "tried": "2026-05-26",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
+  "series:neko musume michikusa nikki": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:no im not a human": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:okusama wa mahou shoujo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ole tower": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:onidere": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ore no natsuyasumi": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
   "series:osana najimi wa bed yakuza": {
     "tried": "2026-05-26",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:osawari island": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:pachique next": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:pinkerton": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; phonetic transliteration may be inaccurate without a confirmed source"
+  },
+  "series:pop-up story": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:primal x hearts": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation contains no Korean characters — 'PRIMAL×HEARTS' is the Japanese logo title, not a Korean translation"
+  },
+  "series:raramagi honyarara magic": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:ring dream": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:robokko beaton": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:sakura musubi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:sasuga no sarutobi": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
@@ -196,6 +2560,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
+  },
+  "series:seirei kishi aquael": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Empty translation"
   },
   "series:seishokuki": {
     "tried": "2026-05-26",
@@ -215,11 +2585,23 @@
     "attempts": 1,
     "reason": "empty translation with confidence none"
   },
+  "series:sen no hatou tsukisome no kouki": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
   "series:sengoku bushouki muramasa": {
     "tried": "2026-05-26",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation with confidence none"
+  },
+  "series:sengoku gakuen senki nobunaga": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "series:sengoku puzzle animal daigassen": {
     "tried": "2026-05-26",
@@ -227,8 +2609,62 @@
     "attempts": 1,
     "reason": "empty translation with confidence none"
   },
+  "series:serial experiments lain": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Translation contains no Korean characters — still in English/romaji. Official Korean titles are '레인(LAIN)' or '시리얼 익스페리먼츠 레인'."
+  },
+  "series:shiin": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shikigami no shiro": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shimaizuma": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shining sword romance": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shinken zemi koukou kouza": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:shizuku": {
     "tried": "2026-05-26",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shoujo x shoujo x shoujo": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shoukan yuusha to f-kei kareshi": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:shrine of the morning mist": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
@@ -239,11 +2675,41 @@
     "attempts": 1,
     "reason": "empty translation with confidence none"
   },
+  "series:soleil": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:sora no manimani": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:sousei tenshi cross emotion": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:starless": {
     "tried": "2026-05-26",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "empty translation with confidence none"
+  },
+  "series:station memories": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; transliteration is plausible but no official Korean title confirmed"
+  },
+  "series:steam detectives": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none; translation appears accurate (Korean reading of Japanese title 快傑蒸気探偵団) but requires human review"
   },
   "series:subverse": {
     "tried": "2026-05-26",
@@ -256,6 +2722,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "empty translation with confidence: none"
+  },
+  "series:suisei tenshi prima veil zwei": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
   },
   "series:taboo charming mother": {
     "tried": "2026-05-26",
@@ -281,14 +2753,68 @@
     "attempts": 1,
     "reason": "empty translation"
   },
+  "series:the smoke room": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:the summoning": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:thunder claps": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
   "series:tonari no miko-san wa minna warau": {
     "tried": "2026-05-26",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
   },
+  "series:tottemo luckyman": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:tsukiatte yo satsuki-chan": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:tsukikagerou": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation and confidence is none"
+  },
+  "series:twinkle star sprites": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:uchuu eiyuu monogatari": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "series:various": {
     "tried": "2026-05-26",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:virtuacall": {
+    "tried": "2026-06-01",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
@@ -305,6 +2831,12 @@
     "attempts": 1,
     "reason": "empty translation"
   },
+  "series:wuqi mitu": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Could not verify Korean transliteration of Chinese title 무기미도 against official sources"
+  },
   "series:x change": {
     "tried": "2026-05-26",
     "verdict": "REJECT",
@@ -316,5 +2848,35 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "empty translation"
+  },
+  "series:yoru ga kuru": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:youjuu club": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
+  },
+  "series:your diary": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "series:zaregoto": {
+    "tried": "2026-06-01",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation with confidence none"
+  },
+  "series:zetsubou": {
+    "tried": "2026-06-01",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "empty translation, confidence none"
   }
 }
