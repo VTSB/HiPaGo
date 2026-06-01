@@ -263,6 +263,30 @@ async function getGalleryIdsForSingleTerm(
   language: string,
   sort?: SortOrder,
 ): Promise<number[]> {
+  // OR-group: one user term may expand to several tags that share a localized
+  // name (e.g. Korean "강간" → "tag:gokan|tag:goukan"). Fetch each alternative
+  // and union the gallery IDs so every matching tag contributes results.
+  if (query.includes('|')) {
+    const alts = query.split('|').filter((a) => a.length > 0);
+    if (alts.length > 1) {
+      const sets = await Promise.all(
+        alts.map((a) => getGalleryIdsForSingleTerm(a, language, sort)),
+      );
+      const seen = new Set<number>();
+      const union: number[] = [];
+      for (const set of sets) {
+        for (const id of set) {
+          if (!seen.has(id)) {
+            seen.add(id);
+            union.push(id);
+          }
+        }
+      }
+      return union;
+    }
+    if (alts.length === 1) query = alts[0];
+  }
+
   const { tagType, tag } = parseQuery(query);
 
   if (tagType) {

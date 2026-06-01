@@ -94,9 +94,13 @@ export function normalizeQueryToEnglish(query: string): string {
     if (colonIdx <= 0) {
       // Typeless term. Translate if the whole term is Hangul.
       if (isHangul(body)) {
-        const match = i18n.reverseLookup(body.replace(/_/g, ' '));
-        if (match) {
-          const eng = `${match.type}:${tagFromDisplay(match.name, match.type as TagType).searchForm}`;
+        const matches = i18n.reverseLookupAll(body.replace(/_/g, ' '));
+        if (matches.length > 0) {
+          // One Korean name may map to several English tags (variants/aliases);
+          // emit them as a '|'-joined OR-group that the executor unions.
+          const eng = matches
+            .map((m) => `${m.type}:${tagFromDisplay(m.name, m.type as TagType).searchForm}`)
+            .join('|');
           return negative ? `-${eng}` : eng;
         }
       }
@@ -124,12 +128,15 @@ export function normalizeQueryToEnglish(query: string): string {
     }
 
     // Korean name → reverse-resolve (type-scoped) to the English searchForm.
-    const match = i18n.reverseLookup(namePart.replace(/_/g, ' '), { type: resolvedType });
-    if (!match) {
+    // Several tags can share one Korean name; union them via a '|' OR-group.
+    const matches = i18n.reverseLookupAll(namePart.replace(/_/g, ' '), { type: resolvedType });
+    if (matches.length === 0) {
       // No translation found — leave the term as-is (nozomi returns empty).
       return term;
     }
-    const eng = `${match.type}:${tagFromDisplay(match.name, match.type as TagType).searchForm}`;
+    const eng = matches
+      .map((m) => `${m.type}:${tagFromDisplay(m.name, m.type as TagType).searchForm}`)
+      .join('|');
     return negative ? `-${eng}` : eng;
   });
 

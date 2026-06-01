@@ -39,6 +39,17 @@ interface TagI18nState {
     local: string,
     options?: { type?: string },
   ) => { type: string; name: string } | undefined;
+  /**
+   * Reverse lookup returning ALL English tags that share `local` (optionally
+   * type-scoped). Distinct tags can legitimately collapse to one localized
+   * string (romanization/spacing variants, aliases, synonyms); a Korean search
+   * for that string must match every one of them, so callers union the results.
+   * Returns [] when no match exists.
+   */
+  reverseLookupAll: (
+    local: string,
+    options?: { type?: string },
+  ) => Array<{ type: string; name: string }>;
 }
 
 export function getTagI18nLookupKeys(type: string, name: string): string[] {
@@ -257,10 +268,30 @@ export function createTagI18nStore() {
       // Collision resolution: the i18n store carries no gallery `count`, so a
       // type-scoped name that still maps to multiple English tags is resolved
       // deterministically to the FIRST key (i.e. the order they appear in the
-      // translation JSON). Documented limitation — see PLAN AC-003.
+      // translation JSON). Retained for callers that need a single answer;
+      // search execution uses reverseLookupAll to match every colliding tag.
       const key = candidates[0];
       const colonIdx = key.indexOf(':');
       return { type: key.slice(0, colonIdx), name: key.slice(colonIdx + 1) };
+    },
+
+    reverseLookupAll(
+      local: string,
+      options?: { type?: string },
+    ): Array<{ type: string; name: string }> {
+      const { localToNames } = get();
+      const keys = localToNames.get(local.trim());
+      if (!keys || keys.length === 0) return [];
+
+      const typeFilter = options?.type;
+      const candidates = typeFilter
+        ? keys.filter((k) => k.slice(0, k.indexOf(':')) === typeFilter)
+        : keys;
+
+      return candidates.map((key) => {
+        const colonIdx = key.indexOf(':');
+        return { type: key.slice(0, colonIdx), name: key.slice(colonIdx + 1) };
+      });
     },
   }));
 }

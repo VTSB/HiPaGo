@@ -157,3 +157,49 @@ describe('tag-query — AC-002 normalizeQueryToEnglish', () => {
     expect(normalizeQueryToEnglish('')).toBe('');
   });
 });
+
+describe('tag-query — duplicate-translation OR-group expansion', () => {
+  // Two distinct tags in the SAME type sharing one Korean string (romanization
+  // variants). A search for that string must match both, so normalization
+  // emits a '|'-joined OR-group the executor unions.
+  const COLLIDE_KO_JSON = {
+    tag: { gokan: '강간', goukan: '강간', glasses: '안경' },
+    series: { 'infinite stratos': '인피니트 스트라토스', is: '인피니트 스트라토스' },
+  };
+
+  beforeEach(async () => {
+    mockKoJson.default = COLLIDE_KO_JSON;
+    mockKoAiJson.default = {};
+    await useTagI18nStore.getState().loadLocale('ko');
+  });
+
+  it('type-scoped collision expands to a |-joined OR-group', () => {
+    // both tag:gokan and tag:goukan share 강간
+    const out = normalizeQueryToEnglish('태그:강간');
+    expect(out.split('|').sort()).toEqual(['tag:gokan', 'tag:goukan']);
+  });
+
+  it('typeless collision expands to a |-joined OR-group', () => {
+    const out = normalizeQueryToEnglish('인피니트_스트라토스');
+    expect(out.split('|').sort()).toEqual(['series:infinite_stratos', 'series:is']);
+  });
+
+  it('non-colliding Korean term stays a single term (no pipe)', () => {
+    expect(normalizeQueryToEnglish('태그:안경')).toBe('tag:glasses');
+  });
+
+  it('negative marker applies to the whole OR-group', () => {
+    const out = normalizeQueryToEnglish('-태그:강간');
+    expect(out.startsWith('-')).toBe(true);
+    expect(out.slice(1).split('|').sort()).toEqual(['tag:gokan', 'tag:goukan']);
+  });
+
+  it('reverseLookupAll returns every colliding tag (type-scoped)', () => {
+    const all = useTagI18nStore
+      .getState()
+      .reverseLookupAll('강간', { type: 'tag' })
+      .map((m) => `${m.type}:${m.name}`)
+      .sort();
+    expect(all).toEqual(['tag:gokan', 'tag:goukan']);
+  });
+});
