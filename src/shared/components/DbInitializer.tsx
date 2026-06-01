@@ -8,6 +8,7 @@ import { cleanupStaleCache } from '@/lib/db/gallery';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
+import { isAndroid } from '@/lib/utils/platform';
 
 /**
  * Invisible component that initializes the SQLite database on mount,
@@ -24,7 +25,16 @@ export function DbInitializer() {
     ran.current = true;
 
     initializeDatabase()
-      .then(() => checkDbReady())
+      .then(() => {
+        // Android-only: run one-time Data→public migration + reconciliation
+        // after DB is ready. Best-effort — never propagates errors into boot.
+        if (isAndroid()) {
+          import('@/lib/storage/migrate-downloads')
+            .then(({ migrateDownloadsToPublic }) => migrateDownloadsToPublic())
+            .catch((e) => console.warn('[migrate] Data→public migration failed:', e));
+        }
+        return checkDbReady();
+      })
       .then((ready) => {
         // Init succeeded — clear any prior error so the history/favorites
         // pages stop showing the failure banner.

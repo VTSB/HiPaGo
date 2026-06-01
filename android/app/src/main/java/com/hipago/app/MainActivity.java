@@ -13,6 +13,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BypassPlugin.class);
         registerPlugin(UpdaterPlugin.class);
         registerPlugin(ReaderZoomPlugin.class);
+        registerPlugin(StoragePermissionPlugin.class);
+        registerPlugin(PublicLibraryPlugin.class);
         super.onCreate(savedInstanceState);
         installBackButtonHandler();
         installBypassInterceptor();

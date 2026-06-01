@@ -57,6 +57,24 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    version: 4,
+    description: 'Add folderName + migratedAt to download',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+      // download table is created by migration v3; if it is somehow absent
+      // (PRAGMA returns no rows), there is nothing to alter — skip rather than
+      // fail with "no such table".
+      if (cols.length === 0) return;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has('folderName')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN folderName TEXT');
+      }
+      if (!colNames.has('migratedAt')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN migratedAt TEXT');
+      }
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

@@ -1,12 +1,20 @@
 import { zipSync } from 'fflate';
 import { getImageUrl } from './image-url';
-import { apiClient } from '@/lib/api/client';
+import { apiClient, ApiError } from '@/lib/api/client';
 import type { GalleryFile, GgConfig } from './types';
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { getImageCache } from '@/lib/cache/image-cache';
-import { upsertDownload, updateDownloadStatus, serializeTags } from '@/lib/db/download';
+import {
+  upsertDownload,
+  updateDownloadStatus,
+  updateDownloadProgress,
+  serializeTags,
+} from '@/lib/db/download';
+import { parseRetryAfter } from '@/lib/api/tag-fetcher';
+import { galleryFolderName } from '@/lib/storage/base-path-resolver';
 
-function sanitizeFilename(name: string): string {
+/** Sanitize a string for use as a filename/folder component. */
+export function sanitizeFilename(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim() || 'gallery';
 }
 
@@ -52,6 +60,87 @@ function decodeManifest(bytes: Uint8Array): string[] {
   }
 }
 
+// ── Fetch with retry/backoff (mirrors tag-fetcher.ts HttpFetcher) ─────────────
+
+const FETCH_MAX_RETRIES = 3;
+const FETCH_BACKOFF_MS = [1000, 2000, 4000];
+
+/**
+ * Fetch a URL with up to 3 retries and exponential backoff.
+ *
+ * Retry policy (mirrors HttpFetcher in tag-fetcher.ts):
+ *  - 429: honor Retry-After header, then retry
+ *  - 502 / 503 / 504: retry with backoff
+ *  - Timeout (AbortError from the per-attempt controller): retry with backoff
+ *  - AbortError from the *caller* signal: rethrow immediately (no retry)
+ *  - Other errors (4xx, network, etc.): rethrow immediately
+ */
+async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Response> {
+  let lastError: Error | undefined;
+  let retryAfterMs: number | null = null;
+
+  for (let attempt = 0; attempt <= FETCH_MAX_RETRIES; attempt++) {
+    // Propagate caller abort immediately.
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+    if (attempt > 0) {
+      const delay = retryAfterMs ?? FETCH_BACKOFF_MS[attempt - 1] ?? 4000;
+      retryAfterMs = null;
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delay);
+        signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+      });
+      // Check again after the wait.
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    }
+
+    // Per-attempt timeout controller (30 s), distinct from caller signal.
+    // Mirrors tag-fetcher.ts HttpFetcher: pass the timeout signal only;
+    // distinguish caller-abort from timeout-abort via signal?.aborted in catch.
+    const attemptController = new AbortController();
+    const timer = setTimeout(() => attemptController.abort(), 30_000);
+
+    try {
+      const res = await apiClient.fetchUrl(url, { signal: attemptController.signal });
+
+      if (res.status === 429) {
+        retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
+        lastError = new ApiError(429, `Rate limited (429) fetching image (attempt ${attempt + 1})`);
+        continue;
+      }
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        lastError = new ApiError(res.status, `Server error ${res.status} fetching image (attempt ${attempt + 1})`);
+        continue;
+      }
+
+      return res;
+    } catch (err) {
+      const e = err as Error;
+
+      // Caller-level abort: do not retry.
+      if (e.name === 'AbortError' && signal?.aborted) {
+        throw e;
+      }
+
+      // Per-attempt timeout: retry.
+      if (e.name === 'AbortError') {
+        lastError = new Error(`Timeout fetching image (attempt ${attempt + 1})`);
+        continue;
+      }
+
+      // Other errors (ApiError 4xx, network, etc.): rethrow immediately.
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  throw lastError ?? new Error('fetchWithRetry: exhausted all retries');
+}
+
 // ── Reader-facing helpers (consumed by AC-005) ─────────────────────────────────
 
 /**
@@ -89,19 +178,25 @@ export async function getDownloadedImage(
   return store.getImage(galleryId, index, ext);
 }
 
-// ── AC-003: Streaming download to the library ──────────────────────────────────
+// ── AC-006: Streaming download to the library (resilience rewrite) ─────────────
 
 /**
  * Download a gallery into the offline library.
  *
- * Fetches each image one at a time and immediately writes it to DownloadStore
- * (no whole-zip-in-RAM). Creates a `download` DB row with status 'downloading'
- * on start; updates to 'complete' (with final pageCount / totalBytes) on
- * success, or 'failed' on abort/error.
- *
- * The per-page extension list is persisted as a manifest file (0000.json) in
- * the gallery folder so the offline reader (AC-005) can retrieve each image
- * by index without knowing the ext up front.
+ * Resilience contract (AC-006):
+ *  - NO DB row is created before the first page is successfully written.
+ *  - The first successful page creates the row (status:'downloading', pageCount:1).
+ *  - Subsequent pages call updateDownloadProgress(galleryId, i+1, totalBytes).
+ *  - The manifest (0000.json) is written incrementally after each page.
+ *  - Per-page fetch uses fetchWithRetry (up to 3 retries, backoff, 429/5xx/timeout).
+ *  - If putImageFromFile (cache copy) throws, the error is caught and the page
+ *    falls through to the network fetch path — no whole-download failure.
+ *  - On success: final upsertDownload with status:'complete' and final stats.
+ *  - On abort before first page: no DB row left; AbortError rethrown.
+ *  - On abort after some pages (rowCreated): updateDownloadStatus('failed'), rethrow.
+ *  - On non-abort error before first page: no DB row left; error rethrown.
+ *  - On non-abort error after some pages (rowCreated): updateDownloadStatus('failed'),
+ *    partial pages retained; error rethrown.
  */
 export async function downloadGalleryToLibrary(
   galleryId: number,
@@ -116,26 +211,25 @@ export async function downloadGalleryToLibrary(
   const total = files.length;
   const now = new Date().toISOString();
 
-  // Register the download as in-progress immediately.
-  await upsertDownload({
-    galleryId,
-    title,
-    thumbnail,
-    tags: serializeTags(tags),
-    pageCount: 0,
-    totalBytes: 0,
-    downloadedAt: now,
-    status: 'downloading',
-  });
+  // Compute the folder name (pure string, safe on all platforms).
+  const folderName = galleryFolderName(galleryId, title);
 
   const store = await createDownloadStore();
-  // If the platform can copy files natively (Capacitor/Tauri), reuse images
-  // already in the persistent cache instead of re-fetching them — a native
-  // file→file copy, no image bytes through the JS heap. Web omits
-  // putImageFromFile (and its cache is a no-op), so it always fetches.
+
+  // Prepare the gallery folder in public storage if the adapter supports it.
+  if (store.ensureGallery) {
+    await store.ensureGallery(galleryId, title);
+  }
+
+  // If the platform can copy files natively, reuse images already in the
+  // persistent cache instead of re-fetching them — a native file→file copy,
+  // no image bytes through the JS heap. Web omits putImageFromFile (and its
+  // cache is a no-op), so it always fetches.
   const imageCache = store.putImageFromFile ? await getImageCache().catch(() => null) : null;
+
   const pageExts: string[] = [];
   let totalBytes = 0;
+  let rowCreated = false;
 
   try {
     for (let i = 0; i < total; i++) {
@@ -144,33 +238,68 @@ export async function downloadGalleryToLibrary(
       const file = files[i];
       const url = getImageUrl(file, ggConfig, 'webp');
 
-      // Cache reuse: if this exact webp image is already cached, copy the cache
-      // file into the gallery folder natively and skip the network entirely.
-      const cachedPath = imageCache ? await imageCache.cachedFilePath(url).catch(() => null) : null;
-      if (cachedPath && store.putImageFromFile) {
-        const size = await store.putImageFromFile(galleryId, i, cachedPath, 'webp');
-        pageExts.push('webp');
-        totalBytes += size;
-        onProgress?.({ current: i + 1, total });
-        continue;
+      let pageWritten = false;
+
+      // ── Cache-copy path ──────────────────────────────────────────────────────
+      // Try to copy from the persistent image cache natively. If this throws
+      // (permission error, file gone, etc.) we catch and fall through to the
+      // network path rather than failing the whole download.
+      if (imageCache && store.putImageFromFile) {
+        const cachedPath = await imageCache.cachedFilePath(url).catch(() => null);
+        if (cachedPath) {
+          try {
+            const size = await store.putImageFromFile(galleryId, i, cachedPath, 'webp');
+            pageExts.push('webp');
+            totalBytes += size;
+            pageWritten = true;
+          } catch {
+            // Cache copy failed; fall through to network fetch below.
+          }
+        }
       }
 
-      const res = await apiClient.fetchUrl(url, { signal });
-      const buf = await res.arrayBuffer();
-      const ext = deriveExt(res, file);
-      const bytes = new Uint8Array(buf);
+      // ── Network fetch path ───────────────────────────────────────────────────
+      if (!pageWritten) {
+        const res = await fetchWithRetry(url, signal);
+        const buf = await res.arrayBuffer();
+        const ext = deriveExt(res, file);
+        const bytes = new Uint8Array(buf);
 
-      await store.putImage(galleryId, i, bytes, ext);
-      pageExts.push(ext);
-      totalBytes += bytes.byteLength;
+        await store.putImage(galleryId, i, bytes, ext);
+        pageExts.push(ext);
+        totalBytes += bytes.byteLength;
+      }
+
+      // ── Incremental manifest write ───────────────────────────────────────────
+      await store.putImage(
+        galleryId,
+        MANIFEST_INDEX,
+        encodeManifest(pageExts),
+        MANIFEST_EXT,
+      );
+
+      // ── DB row management ────────────────────────────────────────────────────
+      if (!rowCreated) {
+        await upsertDownload({
+          galleryId,
+          title,
+          thumbnail,
+          tags: serializeTags(tags),
+          pageCount: 1,
+          totalBytes,
+          downloadedAt: now,
+          status: 'downloading',
+          folderName,
+        });
+        rowCreated = true;
+      } else {
+        await updateDownloadProgress(galleryId, i + 1, totalBytes);
+      }
 
       onProgress?.({ current: i + 1, total });
     }
 
-    // Persist the manifest (ext array) so the reader can resolve filenames.
-    await store.putImage(galleryId, MANIFEST_INDEX, encodeManifest(pageExts), MANIFEST_EXT);
-
-    // Mark complete with final stats.
+    // ── Success: mark complete with final stats ───────────────────────────────
     await upsertDownload({
       galleryId,
       title,
@@ -180,9 +309,21 @@ export async function downloadGalleryToLibrary(
       totalBytes,
       downloadedAt: now,
       status: 'complete',
+      folderName,
     });
   } catch (err) {
-    await updateDownloadStatus(galleryId, 'failed');
+    const isAbort = (err as Error).name === 'AbortError';
+
+    if (rowCreated) {
+      // Partial pages are retained; mark failed so the UI can show the state.
+      await updateDownloadStatus(galleryId, 'failed');
+    }
+    // When no row was created (error on page 0): nothing to clean up.
+
+    if (isAbort && !rowCreated) {
+      // Aborted before any page was written: leave no trace.
+    }
+
     throw err;
   }
 }

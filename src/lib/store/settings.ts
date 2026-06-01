@@ -17,6 +17,8 @@ interface SettingsStoreState {
   scrollZoom: number;
   /** Max image-cache size in bytes. null = unlimited, 0 = off (no caching). */
   imageCacheMaxBytes: number | null;
+  /** Base path for public downloads. null = platform default (Download/HiPaGo). */
+  downloadBasePath: string | null;
   setLocale: (locale: Locale) => void;
   setLanguage: (language: string) => void;
   setTheme: (theme: 'light' | 'dark') => void;
@@ -26,6 +28,7 @@ interface SettingsStoreState {
   setGridColumns: (cols: number) => void;
   setScrollZoom: (z: number) => void;
   setImageCacheMaxBytes: (bytes: number | null) => void;
+  setDownloadBasePath: (path: string | null) => void;
   addBlurTag: (tag: string) => void;
   removeBlurTag: (tag: string) => void;
 }
@@ -48,7 +51,7 @@ const V1_ADDED_BLUR_TAGS = SAFETY_BLUR_TAGS;
  *  Exported for unit tests. */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (!persisted || typeof persisted !== 'object') return persisted;
-  let s = persisted as { blurTags?: string[]; imageCacheMaxBytes?: number | null };
+  let s = persisted as { blurTags?: string[]; imageCacheMaxBytes?: number | null; downloadBasePath?: string | null };
   // v1: union the safety blur tags once.
   if (version < 1) {
     const existing = Array.isArray(s.blurTags) ? s.blurTags : [];
@@ -57,6 +60,10 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   // v2: default the image-cache cap for existing users (additive).
   if (version < 2 && s.imageCacheMaxBytes === undefined) {
     s = { ...s, imageCacheMaxBytes: DEFAULT_IMAGE_CACHE_MAX_BYTES };
+  }
+  // v3: default the download base path for existing users (additive).
+  if (version < 3 && s.downloadBasePath === undefined) {
+    s = { ...s, downloadBasePath: null };
   }
   return s;
 }
@@ -74,6 +81,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       gridColumns: 0,
       scrollZoom: 1,
       imageCacheMaxBytes: DEFAULT_IMAGE_CACHE_MAX_BYTES,
+      downloadBasePath: null,
       setLocale: (locale) => set({ locale }),
       setLanguage: (language) => set({ language }),
       setTheme: (theme) => set({ theme }),
@@ -83,10 +91,11 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setGridColumns: (cols) => set({ gridColumns: cols }),
       setScrollZoom: (z) => set({ scrollZoom: z }),
       setImageCacheMaxBytes: (bytes) => set({ imageCacheMaxBytes: bytes }),
+      setDownloadBasePath: (path) => set({ downloadBasePath: path }),
       addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings', version: 2, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 3, migrate: migrateSettings },
   ),
 );
 

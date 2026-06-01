@@ -32,9 +32,9 @@ describe('default blur tags + v1 migration', () => {
     expect(out.blurTags).toEqual(expect.arrayContaining(['male:yaoi', ...SAFETY]));
   });
 
-  it('is a no-op at version >= 2 (a later user removal stays removed)', () => {
-    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0 };
-    expect(migrateSettings(state, 2)).toBe(state);
+  it('is a no-op at version >= 3 (a later user removal stays removed)', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: null };
+    expect(migrateSettings(state, 3)).toBe(state);
   });
 
   it('v1 -> v2 adds the default image-cache cap without touching blurTags', () => {
@@ -47,5 +47,33 @@ describe('default blur tags + v1 migration', () => {
   it('handles a persisted state with no blurTags', () => {
     const out = migrateSettings({ theme: 'dark' }, 0) as { blurTags: string[] };
     expect(out.blurTags).toEqual(SAFETY);
+  });
+});
+
+describe('v3 migration — downloadBasePath', () => {
+  it('v2 -> v3: adds downloadBasePath: null when field is missing', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0 };
+    const out = migrateSettings(state, 2) as { downloadBasePath: string | null };
+    expect(out.downloadBasePath).toBeNull();
+  });
+
+  it('v2 -> v3: does not overwrite an existing downloadBasePath value', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: '/custom/path' };
+    const out = migrateSettings(state, 2) as { downloadBasePath: string | null };
+    expect(out.downloadBasePath).toBe('/custom/path');
+  });
+
+  it('v0 -> v3: adds downloadBasePath: null (multi-version jump)', () => {
+    const state = { blurTags: ['male:yaoi'] };
+    const out = migrateSettings(state, 0) as { downloadBasePath: string | null };
+    expect(out.downloadBasePath).toBeNull();
+  });
+
+  it('v3: is a no-op for downloadBasePath (field already present)', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: null };
+    const out = migrateSettings(state, 3) as { downloadBasePath: string | null };
+    expect(out.downloadBasePath).toBeNull();
+    // Must be same reference (no spread), confirming no mutation
+    expect(out).toBe(state);
   });
 });

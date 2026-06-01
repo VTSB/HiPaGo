@@ -9,6 +9,8 @@ import {
   searchDownloads,
   serializeTags,
   deserializeTags,
+  setDownloadFolderName,
+  markDownloadMigrated,
 } from '../download';
 import type { DBDownload } from '../schema';
 
@@ -115,6 +117,40 @@ describe('upsertDownload + getDownload', () => {
       expect(row!.status).toBe(status);
     }
   });
+
+  it('stores folderName and migratedAt when provided', async () => {
+    const row = makeRow({ folderName: 'my-folder', migratedAt: '2024-07-01T00:00:00Z' });
+    await upsertDownload(row);
+    const retrieved = await getDownload(row.galleryId);
+
+    expect(retrieved).not.toBeNull();
+    expect(retrieved!.folderName).toBe('my-folder');
+    expect(retrieved!.migratedAt).toBe('2024-07-01T00:00:00Z');
+  });
+
+  it('stores NULL for folderName and migratedAt when not provided', async () => {
+    const row = makeRow();
+    await upsertDownload(row);
+    const retrieved = await getDownload(row.galleryId);
+
+    expect(retrieved).not.toBeNull();
+    // sql.js returns null for NULL columns
+    expect(retrieved!.folderName == null).toBe(true);
+    expect(retrieved!.migratedAt == null).toBe(true);
+  });
+
+  it('round-trips folderName + migratedAt through upsert + getDownload', async () => {
+    const row = makeRow({
+      galleryId: 3001,
+      folderName: 'Gallery_3001',
+      migratedAt: '2025-01-15T12:00:00Z',
+    });
+    await upsertDownload(row);
+    const retrieved = await getDownload(3001);
+
+    expect(retrieved!.folderName).toBe('Gallery_3001');
+    expect(retrieved!.migratedAt).toBe('2025-01-15T12:00:00Z');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -147,6 +183,80 @@ describe('updateDownloadStatus', () => {
 
     const other = await getDownload(1002);
     expect(other!.status).toBe('downloading');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setDownloadFolderName
+// ---------------------------------------------------------------------------
+
+describe('setDownloadFolderName', () => {
+  it('sets folderName on an existing row', async () => {
+    await upsertDownload(makeRow({ galleryId: 4001 }));
+    await setDownloadFolderName(4001, 'new-folder');
+    const row = await getDownload(4001);
+    expect(row!.folderName).toBe('new-folder');
+  });
+
+  it('overwrites an existing folderName', async () => {
+    await upsertDownload(makeRow({ galleryId: 4002, folderName: 'old-folder' }));
+    await setDownloadFolderName(4002, 'updated-folder');
+    const row = await getDownload(4002);
+    expect(row!.folderName).toBe('updated-folder');
+  });
+
+  it('is a no-op for a non-existent galleryId', async () => {
+    await expect(setDownloadFolderName(99999, 'some-folder')).resolves.not.toThrow();
+  });
+
+  it('does not change other fields', async () => {
+    const original = makeRow({ galleryId: 4003, title: 'Keep This Title' });
+    await upsertDownload(original);
+    await setDownloadFolderName(4003, 'folder-x');
+    const row = await getDownload(4003);
+    expect(row!.title).toBe('Keep This Title');
+    expect(row!.status).toBe(original.status);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// markDownloadMigrated
+// ---------------------------------------------------------------------------
+
+describe('markDownloadMigrated', () => {
+  it('sets folderName and migratedAt on an existing row', async () => {
+    await upsertDownload(makeRow({ galleryId: 5001 }));
+    await markDownloadMigrated(5001, 'migrated-folder', '2025-06-01T00:00:00Z');
+    const row = await getDownload(5001);
+    expect(row!.folderName).toBe('migrated-folder');
+    expect(row!.migratedAt).toBe('2025-06-01T00:00:00Z');
+  });
+
+  it('overwrites existing folderName and migratedAt', async () => {
+    await upsertDownload(makeRow({
+      galleryId: 5002,
+      folderName: 'old-folder',
+      migratedAt: '2024-01-01T00:00:00Z',
+    }));
+    await markDownloadMigrated(5002, 'new-folder', '2025-06-01T00:00:00Z');
+    const row = await getDownload(5002);
+    expect(row!.folderName).toBe('new-folder');
+    expect(row!.migratedAt).toBe('2025-06-01T00:00:00Z');
+  });
+
+  it('is a no-op for a non-existent galleryId', async () => {
+    await expect(
+      markDownloadMigrated(99999, 'folder', '2025-01-01T00:00:00Z'),
+    ).resolves.not.toThrow();
+  });
+
+  it('does not change status or other fields', async () => {
+    const original = makeRow({ galleryId: 5003, status: 'complete', title: 'Stable Title' });
+    await upsertDownload(original);
+    await markDownloadMigrated(5003, 'folder-y', '2025-06-01T00:00:00Z');
+    const row = await getDownload(5003);
+    expect(row!.status).toBe('complete');
+    expect(row!.title).toBe('Stable Title');
   });
 });
 
@@ -212,6 +322,18 @@ describe('listDownloads', () => {
     expect(r.totalBytes).toBe(row.totalBytes);
     expect(r.downloadedAt).toBe(row.downloadedAt);
     expect(r.status).toBe(row.status);
+  });
+
+  it('returns folderName and migratedAt in listed rows', async () => {
+    await upsertDownload(makeRow({
+      galleryId: 6001,
+      folderName: 'list-folder',
+      migratedAt: '2025-03-01T00:00:00Z',
+    }));
+    const results = await listDownloads();
+    expect(results).toHaveLength(1);
+    expect(results[0].folderName).toBe('list-folder');
+    expect(results[0].migratedAt).toBe('2025-03-01T00:00:00Z');
   });
 });
 
@@ -299,5 +421,20 @@ describe('searchDownloads', () => {
   it('empty string query returns all rows', async () => {
     const results = await searchDownloads({ query: '', tagQuery: '' });
     expect(results).toHaveLength(3);
+  });
+
+  it('returns folderName and migratedAt in search results', async () => {
+    // Add a row with folderName set
+    await upsertDownload(makeRow({
+      galleryId: 7001,
+      title: 'Searchable Folder Gallery',
+      folderName: 'search-folder',
+      migratedAt: '2025-04-01T00:00:00Z',
+      downloadedAt: '2024-06-01T00:00:00Z',
+    }));
+    const results = await searchDownloads({ query: 'Searchable' });
+    expect(results).toHaveLength(1);
+    expect(results[0].folderName).toBe('search-folder');
+    expect(results[0].migratedAt).toBe('2025-04-01T00:00:00Z');
   });
 });

@@ -103,6 +103,8 @@ export interface DBDownload {
   totalBytes: number;
   downloadedAt: string; // ISO string
   status: DownloadStatus;
+  folderName?: string | null;
+  migratedAt?: string | null;
 }
 
 // === Database Initialization ===

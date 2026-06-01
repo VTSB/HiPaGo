@@ -15,6 +15,7 @@ import { TagChip } from '@/shared/components/TagChip';
 import { Select } from '@/shared/components/Select';
 import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
 import { ImageCacheCard } from '@/shared/components/ImageCacheCard';
+import { DownloadLocationCard } from '@/shared/components/DownloadLocationCard';
 
 function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   const [input, setInput] = useState('');
@@ -212,6 +213,9 @@ export default function SettingsPage() {
 
       {/* Image cache */}
       <ImageCacheCard />
+
+      {/* Download location (Android only) */}
+      <DownloadLocationCard />
 
       {/* About / Updates */}
       <UpdateCheckCard />

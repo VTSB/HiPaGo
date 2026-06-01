@@ -273,3 +273,100 @@ describe('runMigrations: migration v2 drops tag_i18n', () => {
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Migration v4: adds folderName + migratedAt to download table
+// ---------------------------------------------------------------------------
+
+// Simulate a v3 DB: download table exists but without the new columns
+const SCHEMA_V3_DOWNLOAD = `
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading'
+);
+`;
+
+describe('runMigrations: migration v4 adds folderName + migratedAt to download', () => {
+  let adapter: PragmaTestAdapter;
+
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('adds folderName and migratedAt columns when upgrading from v3', async () => {
+    await adapter.exec(SCHEMA_V3_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('folderName')).toBe(true);
+    expect(colNames.has('migratedAt')).toBe(true);
+  });
+
+  it('sets user_version to LATEST_VERSION (4) after v4 migration', async () => {
+    await adapter.exec(SCHEMA_V3_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    await runMigrations(adapter);
+
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+    expect(LATEST_VERSION).toBe(4);
+  });
+
+  it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {
+    await adapter.exec(SCHEMA_V3_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    // Run migration once
+    await runMigrations(adapter);
+    // Run again (should be a no-op due to user_version check)
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = cols.map((c) => c.name);
+    // Each column should appear exactly once
+    expect(colNames.filter((n) => n === 'folderName')).toHaveLength(1);
+    expect(colNames.filter((n) => n === 'migratedAt')).toHaveLength(1);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+  });
+
+  it('is idempotent at the SQL level: PRAGMA table_info check prevents duplicate ALTER TABLE', async () => {
+    // Simulate a DB that already has the columns (e.g. fresh install from new schema-sql)
+    // but user_version was somehow stuck at 3 — the up() function must not error
+    await adapter.exec(`
+      CREATE TABLE IF NOT EXISTS download (
+        galleryId INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        thumbnail TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '{}',
+        pageCount INTEGER NOT NULL DEFAULT 0,
+        totalBytes INTEGER NOT NULL DEFAULT 0,
+        downloadedAt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'downloading',
+        folderName TEXT,
+        migratedAt TEXT
+      )
+    `);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    // Should not throw even though columns already exist
+    await expect(runMigrations(adapter)).resolves.toBeUndefined();
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('folderName')).toBe(true);
+    expect(colNames.has('migratedAt')).toBe(true);
+  });
+});

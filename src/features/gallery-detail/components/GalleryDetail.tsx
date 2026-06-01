@@ -147,6 +147,7 @@ export function GalleryDetail({ id }: { id: number }) {
     progress: dlProgress,
     start: handleDownload,
     cancel: handleCancelDownload,
+    error: dlError,
   } = useDownloadGallery(
     id,
     displayBlock?.title || `Gallery ${id}`,
@@ -350,6 +351,9 @@ export function GalleryDetail({ id }: { id: number }) {
                 </button>
               ))}
           </div>
+          {dlError && (
+            <p className="text-sm text-red-600 dark:text-red-400">{dlError}</p>
+          )}
         </div>
       </div>
 

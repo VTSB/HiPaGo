@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { getGgConfig } from '@/lib/api/client';
+import { getGgConfig, ApiError } from '@/lib/api/client';
 import { downloadGalleryToLibrary, type DownloadProgress } from '@/lib/utils/download-zip';
 import type { GalleryFile } from '@/lib/utils/types';
 
@@ -13,10 +13,12 @@ export function useDownloadGallery(
   tags: Record<string, string[]> = {},
 ) {
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const start = useCallback(async () => {
     if (progress || files.length === 0) return;
+    setError(null);
     try {
       const config = await getGgConfig();
       abortRef.current = new AbortController();
@@ -34,6 +36,13 @@ export function useDownloadGallery(
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') return;
       console.error('Download failed:', e);
+      if (e instanceof ApiError) {
+        setError(`Download failed (HTTP ${e.status})`);
+      } else if (e instanceof Error && e.message.toLowerCase().includes('permission')) {
+        setError('Storage permission required');
+      } else {
+        setError('Download failed');
+      }
     } finally {
       setProgress(null);
       abortRef.current = null;
@@ -44,5 +53,5 @@ export function useDownloadGallery(
     abortRef.current?.abort();
   }, []);
 
-  return { progress, start, cancel };
+  return { progress, start, cancel, error };
 }

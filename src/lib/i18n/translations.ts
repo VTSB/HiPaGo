@@ -161,6 +161,20 @@ const translations = {
   'settings.blurTags.placeholder': { en: 'Search tag to add...', ko: '추가할 태그 검색...' },
   'settings.blurTags.empty': { en: 'No blur tags set', ko: '설정된 블러 태그 없음' },
 
+  // Settings → Download location (Android only)
+  'settings.downloadLocation': { en: 'Download Location', ko: '다운로드 위치' },
+  'settings.downloadLocation.desc': {
+    en: 'Where offline galleries are saved. Visible in a file manager under Downloads/HiPaGo. Files persist after uninstall and are hidden from the Gallery app (.nomedia). Deleting or renaming folders in a file manager may remove them from the in-app library.',
+    ko: '오프라인 갤러리가 저장되는 위치입니다. 파일 관리자에서 Downloads/HiPaGo 경로로 확인할 수 있습니다. 앱 삭제 후에도 파일이 유지되며 갤러리 앱에는 표시되지 않습니다(.nomedia). 파일 관리자에서 폴더를 삭제하거나 이름을 변경하면 앱 내 라이브러리에서 해제될 수 있습니다.',
+  },
+  'settings.downloadLocation.current': { en: 'Current folder', ko: '현재 폴더' },
+  'settings.downloadLocation.default': { en: 'Downloads/HiPaGo (default)', ko: 'Downloads/HiPaGo (기본값)' },
+  'settings.downloadLocation.pathLabel': { en: 'Base path', ko: '기본 경로' },
+  'settings.downloadLocation.pathPlaceholder': { en: '/storage/emulated/0/Downloads', ko: '/storage/emulated/0/Downloads' },
+  'settings.downloadLocation.resetDefault': { en: 'Reset to default', ko: '기본값으로 초기화' },
+  'settings.downloadLocation.moving': { en: 'Moving files…', ko: '파일 이동 중…' },
+  'settings.downloadLocation.grantPermission': { en: 'Grant storage permission', ko: '저장소 권한 허용' },
+
   // Gallery list
   'list.loadMore': { en: 'More', ko: '더보기' },
 

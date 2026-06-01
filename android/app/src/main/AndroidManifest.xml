@@ -7,7 +7,8 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        android:requestLegacyExternalStorage="true">
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -42,4 +43,15 @@
          the freshly downloaded APK. User grants the permission once
          via system UI on first update attempt. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Required by StoragePermissionPlugin / PublicLibraryPlugin:
+         grants all-files access for public Downloads/HiPaGo/ storage on
+         API 30+ (Android 11+). The user is directed to the system Settings
+         screen via StoragePermission.request(). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Legacy write permission for API ≤ 29 (Android 10 and below).
+         maxSdkVersion="29" ensures it is not requested on API 30+ where
+         MANAGE_EXTERNAL_STORAGE is used instead. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
 </manifest>

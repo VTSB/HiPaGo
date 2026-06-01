@@ -92,7 +92,9 @@ CREATE TABLE IF NOT EXISTS download (
   pageCount INTEGER NOT NULL DEFAULT 0,
   totalBytes INTEGER NOT NULL DEFAULT 0,
   downloadedAt TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'downloading'
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt);
 CREATE INDEX IF NOT EXISTS idx_download_status ON download(status);

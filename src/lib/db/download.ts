@@ -26,13 +26,14 @@ export function deserializeTags(raw: string): Record<string, string[]> {
 /**
  * Insert or replace a download row.
  * Use this to record a new download or fully overwrite an existing one.
+ * folderName and migratedAt are stored as NULL when not provided.
  */
 export async function upsertDownload(row: DBDownload): Promise<void> {
   const db = await ensureDb();
   await db.execute(
     `INSERT OR REPLACE INTO download
-       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.galleryId,
       row.title,
@@ -42,6 +43,8 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
       row.totalBytes,
       row.downloadedAt,
       row.status,
+      row.folderName ?? null,
+      row.migratedAt ?? null,
     ],
   );
   await persistDb();
@@ -57,6 +60,53 @@ export async function updateDownloadStatus(
 ): Promise<void> {
   const db = await ensureDb();
   await db.execute('UPDATE download SET status = ? WHERE galleryId = ?', [status, galleryId]);
+  await persistDb();
+}
+
+/**
+ * Update pageCount and totalBytes for an in-progress download row.
+ * A no-op if the galleryId does not exist.
+ */
+export async function updateDownloadProgress(
+  galleryId: number,
+  pageCount: number,
+  totalBytes: number,
+): Promise<void> {
+  const db = await ensureDb();
+  await db.execute(
+    'UPDATE download SET pageCount = ?, totalBytes = ? WHERE galleryId = ?',
+    [pageCount, totalBytes, galleryId],
+  );
+  await persistDb();
+}
+
+/**
+ * Update the folderName of an existing download row.
+ * A no-op if the galleryId does not exist.
+ */
+export async function setDownloadFolderName(
+  galleryId: number,
+  folderName: string,
+): Promise<void> {
+  const db = await ensureDb();
+  await db.execute('UPDATE download SET folderName = ? WHERE galleryId = ?', [folderName, galleryId]);
+  await persistDb();
+}
+
+/**
+ * Mark a download as migrated by setting folderName and migratedAt.
+ * A no-op if the galleryId does not exist.
+ */
+export async function markDownloadMigrated(
+  galleryId: number,
+  folderName: string,
+  migratedAt: string,
+): Promise<void> {
+  const db = await ensureDb();
+  await db.execute(
+    'UPDATE download SET folderName = ?, migratedAt = ? WHERE galleryId = ?',
+    [folderName, migratedAt, galleryId],
+  );
   await persistDb();
 }
 
@@ -81,7 +131,7 @@ export async function deleteDownload(galleryId: number): Promise<void> {
 export async function getDownload(galleryId: number): Promise<DBDownload | null> {
   const db = await ensureDb();
   const rows = await db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status FROM download WHERE galleryId = ?',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt FROM download WHERE galleryId = ?',
     [galleryId],
   );
   return rows[0] ?? null;
@@ -93,7 +143,7 @@ export async function getDownload(galleryId: number): Promise<DBDownload | null>
 export async function listDownloads(): Promise<DBDownload[]> {
   const db = await ensureDb();
   return db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status FROM download ORDER BY downloadedAt DESC',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt FROM download ORDER BY downloadedAt DESC',
   );
 }
 
@@ -129,7 +179,7 @@ export async function searchDownloads(options: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status FROM download ${where} ORDER BY downloadedAt DESC`;
+  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt FROM download ${where} ORDER BY downloadedAt DESC`;
 
   return db.query<DBDownload>(sql, params);
 }

@@ -9,7 +9,7 @@
  * the same isTauri() / isCapacitor() checks used by src/lib/db/adapters/.
  */
 
-import { isTauri, isCapacitor } from '@/lib/utils/platform';
+import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
 // ── Interface ──────────────────────────────────────────────────────────────
 
@@ -60,6 +60,13 @@ export interface DownloadStore {
    */
   coverUrl?(galleryId: number): Promise<string | null>;
 
+  /**
+   * Prepare the gallery folder in public storage with the known title, so the
+   * folder is named `<id> <title>` from the start. Optional: adapters that use
+   * numeric-only folder names (Capacitor/web) omit it; callers feature-detect.
+   */
+  ensureGallery?(galleryId: number, title: string): Promise<void>;
+
   /** List all gallery IDs that have at least one stored image. */
   listGalleries(): Promise<number[]>;
 
@@ -78,6 +85,7 @@ export interface DownloadStore {
 /**
  * Build the file name for a page: zero-padded 4-digit index + extension.
  * e.g. index=0, ext="webp" → "0001.webp"
+ * Special case: index=-1 → "0000.<ext>" (manifest sentinel).
  */
 export function imageFileName(index: number, ext: string): string {
   return String(index + 1).padStart(4, '0') + '.' + ext;
@@ -98,6 +106,13 @@ export async function createDownloadStore(): Promise<DownloadStore> {
   if (isTauri()) {
     const { TauriDownloadStore } = await import('./adapters/tauri');
     return TauriDownloadStore.create();
+  }
+
+  // Android public storage — must come before the generic isCapacitor() branch
+  // so iOS keeps using CapacitorDownloadStore (Directory.Data).
+  if (isAndroid()) {
+    const { AndroidPublicDownloadStore } = await import('./adapters/android-public');
+    return AndroidPublicDownloadStore.create();
   }
 
   if (isCapacitor()) {

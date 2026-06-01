@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS sync_status (
   tag TEXT PRIMARY KEY,
   data TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT
+);
 `;
 
 // ---------------------------------------------------------------------------
