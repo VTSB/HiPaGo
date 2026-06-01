@@ -36,6 +36,8 @@ import {
   getStatus,
   readFailed,
   writeFailed,
+  findDuplicateTranslations,
+  pruneOrphanTranslations,
 } from './translate-tags-logic';
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
@@ -237,6 +239,57 @@ async function main() {
       break;
     }
 
+    case 'prune-orphans': {
+      const lang = requireFlag(flags, 'lang');
+      const dryRun = flags['dry-run'] === 'true';
+      // Prune both the base (ko.json) and AI (ko.ai.json) translation files by
+      // default; --file restricts to one basename.
+      const files = flags['file'] ? [flags['file']] : [`${lang}.json`, `${lang}.ai.json`];
+      const results = files.map((fileName) =>
+        pruneOrphanTranslations({ lang, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR, fileName, dryRun })
+      );
+      for (const r of results) {
+        console.error(
+          `[prune-orphans] ${dryRun ? 'DRY RUN — ' : ''}${r.removed.length} orphan(s) of ${r.total} entries${dryRun ? ' would be removed' : ' removed'} from ${r.file}`
+        );
+      }
+      console.log(
+        JSON.stringify(
+          {
+            lang,
+            dryRun,
+            files: results.map((r) => ({
+              file: r.file,
+              total: r.total,
+              removed: r.removed.length,
+              byCategory: r.byCategory,
+              keys: r.removed,
+            })),
+          },
+          null,
+          2
+        )
+      );
+      break;
+    }
+
+    case 'find-duplicates': {
+      const lang = requireFlag(flags, 'lang');
+      const aiJsonPath = path.join(I18N_DIR, `${lang}.ai.json`);
+      const groups = findDuplicateTranslations(aiJsonPath);
+      const byCategory: Record<string, number> = {};
+      for (const g of groups) byCategory[g.category] = (byCategory[g.category] ?? 0) + 1;
+      const totalTags = groups.reduce((s, g) => s + g.names.length, 0);
+      console.log(
+        JSON.stringify(
+          { lang, duplicateGroups: groups.length, tagsInvolved: totalTags, byCategory, groups },
+          null,
+          2
+        )
+      );
+      break;
+    }
+
     case 'list-failed': {
       const lang = requireFlag(flags, 'lang');
       const failed = readFailed(I18N_DIR, lang);
@@ -283,6 +336,8 @@ async function main() {
       console.error('  summary             --lang ko [--source translate|validate]');
       console.error('  apply               --lang ko');
       console.error('  status              --lang ko');
+      console.error('  find-duplicates     --lang ko');
+      console.error('  prune-orphans       --lang ko [--dry-run] [--file ko.json]  (default: prunes both ko.json + ko.ai.json)');
       console.error('  list-failed         --lang ko');
       console.error('  retry               --lang ko --id <category:name>');
       process.exit(1);

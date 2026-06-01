@@ -953,6 +953,139 @@ export async function getSummary(opts: {
   return summary;
 }
 
+// ─── Duplicate-translation detection ────────────────────────────────────────
+//
+// Within a single hitomi category a translation string should map to exactly
+// one tag. Two distinct tags sharing the same localized string (e.g. female:
+// "gender bender" and female: "gender change" both → "성전환") collapse into
+// an indistinguishable label in the UI, so we surface and gate them.
+// NOTE: aliases that legitimately share a value (e.g. "is" / "infinite
+// stratos") will also be reported — this report is advisory; the apply gate
+// only blocks *new* writes, never rewrites what is already on disk.
+
+export interface DuplicateGroup {
+  category: string;
+  translation: string;
+  names: string[];
+}
+
+/**
+ * Find translations shared by more than one distinct tag within the same
+ * category, reading `{lang}.ai.json` (flat or nested storage both accepted).
+ */
+export function findDuplicateTranslations(aiJsonPath: string): DuplicateGroup[] {
+  const flat = readTranslationsFlat(aiJsonPath);
+  const byCatVal = new Map<string, string[]>(); // `${cat} ${tr}` -> names
+  for (const [key, tr] of Object.entries(flat)) {
+    if (typeof tr !== 'string' || tr.trim() === '') continue;
+    const idx = key.indexOf(':');
+    if (idx < 0) continue;
+    const cat = key.slice(0, idx);
+    const name = key.slice(idx + 1);
+    if (!isValidCategory(cat)) continue;
+    const mk = `${cat} ${tr}`;
+    const arr = byCatVal.get(mk);
+    if (arr) arr.push(name);
+    else byCatVal.set(mk, [name]);
+  }
+  const out: DuplicateGroup[] = [];
+  for (const [mk, names] of byCatVal) {
+    if (names.length < 2) continue;
+    const sep = mk.indexOf(' ');
+    out.push({
+      category: mk.slice(0, sep),
+      translation: mk.slice(sep + 1),
+      names: names.sort(),
+    });
+  }
+  out.sort(
+    (a, b) => a.category.localeCompare(b.category) || a.translation.localeCompare(b.translation)
+  );
+  return out;
+}
+
+// ─── Orphan prune (tags with zero count / no longer in the tag list) ─────────
+//
+// A tag whose current work count drops to 0 disappears from the crawled tag
+// list entirely. Its translation in {lang}.ai.json then refers to a tag that
+// no longer exists ("count 0" / orphan). This prunes those entries.
+//
+// Scope guard: only categories that actually appear in the crawl are eligible.
+// Fixed-enum i18n categories that are never crawled as tags (e.g. `type` →
+// anime/manga/doujinshi, `language`) are preserved — their absence from the
+// tag cache is expected, not orphaning.
+
+export interface PruneResult {
+  file: string;
+  total: number;
+  removed: string[]; // "category:name" keys removed
+  byCategory: Record<string, number>;
+  dryRun: boolean;
+}
+
+export function pruneOrphanTranslations(opts: {
+  lang: string;
+  i18nDir: string;
+  outputDir: string;
+  /** Basename to prune, e.g. "ko.ai.json" (default) or "ko.json". */
+  fileName?: string;
+  dryRun?: boolean;
+}): PruneResult {
+  const { lang, i18nDir, outputDir, dryRun = false } = opts;
+  const fileName = opts.fileName ?? `${lang}.ai.json`;
+
+  const cachePath = path.join(outputDir, '_tagcache.json');
+  if (!fs.existsSync(cachePath)) {
+    throw new Error(
+      `[prune-orphans] ${cachePath} not found — run "analyze --refresh-tags" first; refusing to prune without a current tag list`
+    );
+  }
+  const raw = JSON.parse(fs.readFileSync(cachePath, 'utf-8')) as {
+    tags?: Array<{ name: string; type: string }>;
+  };
+  if (!Array.isArray(raw.tags) || raw.tags.length === 0) {
+    throw new Error('[prune-orphans] _tagcache.json has no tags — refusing to prune');
+  }
+  const live = new Set<string>();
+  const crawledTypes = new Set<string>();
+  for (const t of raw.tags) {
+    if (t && typeof t.type === 'string' && typeof t.name === 'string') {
+      live.add(`${t.type}:${t.name}`);
+      crawledTypes.add(t.type);
+    }
+  }
+
+  const aiJsonPath = path.join(i18nDir, fileName);
+  if (!fs.existsSync(aiJsonPath)) {
+    return { file: fileName, total: 0, removed: [], byCategory: {}, dryRun };
+  }
+  const flat = readTranslationsFlat(aiJsonPath);
+
+  const removed: string[] = [];
+  const byCategory: Record<string, number> = {};
+  let total = 0;
+  for (const key of Object.keys(flat)) {
+    total++;
+    const idx = key.indexOf(':');
+    if (idx < 0) continue;
+    const cat = key.slice(0, idx);
+    // Only prune categories that are crawled as tags; preserve fixed enums.
+    if (!crawledTypes.has(cat)) continue;
+    if (!live.has(key)) {
+      removed.push(key);
+      byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+    }
+  }
+
+  if (!dryRun && removed.length > 0) {
+    const pruned = { ...flat };
+    for (const key of removed) delete pruned[key];
+    writeTranslationsNested(aiJsonPath, pruned);
+  }
+
+  return { file: fileName, total, removed: removed.sort(), byCategory, dryRun };
+}
+
 // ─── applyVerdicts ────────────────────────────────────────────────────────────
 
 export async function applyVerdicts(opts: {
@@ -1035,7 +1168,49 @@ export async function applyVerdicts(opts: {
     const existing = readTranslationsFlat(aiJsonPath);
     const merged = { ...existing };
     let newPass = 0, changedPass = 0, newInaccurate = 0, changedInaccurate = 0, newOutdated = 0;
-    let rejectedCategory = 0, rejectedNotExist = 0;
+    let rejectedCategory = 0, rejectedNotExist = 0, rejectedDuplicate = 0;
+
+    // Duplicate-translation gate: within a category a translation string must
+    // belong to exactly one tag. Seed ownership from what is already on disk,
+    // then refuse any new/changed write whose value is already owned by a
+    // *different* tag in the same category. Rejected items are archived to
+    // failed.json (below) for manual reconciliation instead of silently
+    // overwriting a sibling or producing an indistinguishable duplicate.
+    // Existing on-disk duplicates are left untouched — this only blocks new
+    // collisions. valueOwner key: `${category} ${translation}` -> tag name.
+    const valueOwner = new Map<string, string>();
+    for (const [key, tr] of Object.entries(existing)) {
+      if (typeof tr !== 'string' || tr.trim() === '') continue;
+      const idx = key.indexOf(':');
+      if (idx < 0) continue;
+      const cat = key.slice(0, idx);
+      if (!isValidCategory(cat)) continue;
+      const mk = `${cat} ${tr}`;
+      if (!valueOwner.has(mk)) valueOwner.set(mk, key.slice(idx + 1));
+    }
+    const dupRejectedKeys = new Set<string>();
+    const dupRejected: Array<{ key: string; translation: string; owner: string }> = [];
+    /**
+     * Returns true if (key, translation) may be written. Returns false — and
+     * records the rejection — when a *different* tag in the same category
+     * already owns that translation. A tag re-claiming its own value passes.
+     */
+    const claimValue = (key: string, translation: string): boolean => {
+      const idx = key.indexOf(':');
+      if (idx < 0) return true;
+      const cat = key.slice(0, idx);
+      const name = key.slice(idx + 1);
+      const mk = `${cat} ${translation}`;
+      const owner = valueOwner.get(mk);
+      if (owner !== undefined && owner !== name) {
+        rejectedDuplicate++;
+        dupRejectedKeys.add(key);
+        dupRejected.push({ key, translation, owner: `${cat}:${owner}` });
+        return false;
+      }
+      valueOwner.set(mk, name);
+      return true;
+    };
 
     // acceptKey: full gate (shape + crawl-cache existence) for keys that must
     // already exist on hitomi (PASS, INACCURATE original keys).
@@ -1064,6 +1239,8 @@ export async function applyVerdicts(opts: {
       // marking a blank string as PASS is a bug elsewhere — drop here rather
       // than corrupt ai.json with empty values.
       if (typeof item.translation !== 'string' || item.translation.trim() === '') continue;
+      // Duplicate gate: reject if this value is already owned by another tag.
+      if (!claimValue(item.key, item.translation)) continue;
       const prev = merged[item.key];
       if (prev === undefined) newPass++;
       else if (prev !== item.translation) changedPass++;
@@ -1073,6 +1250,8 @@ export async function applyVerdicts(opts: {
     for (const item of inaccurateItems) {
       if (!acceptKey(item.key)) continue;
       const newTranslation = item.suggestion!.newTranslation!;
+      // Duplicate gate: reject if this value is already owned by another tag.
+      if (!claimValue(item.key, newTranslation)) continue;
       const prev = merged[item.key];
       if (prev === undefined) newInaccurate++;
       else if (prev !== newTranslation) changedInaccurate++;
@@ -1093,6 +1272,16 @@ export async function applyVerdicts(opts: {
       const translation = item.suggestion?.newTranslation ?? item.translation;
       // Skip if the resolved translation is empty/whitespace — never write blanks.
       if (typeof translation !== 'string' || translation.trim() === '') continue;
+      // A rename moves the value from old key to new key. Release the old key's
+      // ownership first so the migrated value is not seen as colliding with the
+      // very tag being renamed.
+      const oldName = item.key.slice(item.key.indexOf(':') + 1);
+      const oldVal = merged[item.key];
+      if (typeof oldVal === 'string' && valueOwner.get(`${category} ${oldVal}`) === oldName) {
+        valueOwner.delete(`${category} ${oldVal}`);
+      }
+      // Duplicate gate on the rename *target* key.
+      if (!claimValue(newKey, translation)) continue;
       if (merged[item.key] === undefined && merged[newKey] === translation) continue;
       delete merged[item.key];
       merged[newKey] = translation;
@@ -1107,6 +1296,30 @@ export async function applyVerdicts(opts: {
     if (rejectedNotExist) {
       console.error(
         `[applyVerdicts] rejected ${rejectedNotExist} verdict entries whose tag is not in _tagcache.json (refresh via "translate-tags analyze --refresh-tags" if hitomi tag list has grown)`
+      );
+    }
+    // Archive duplicate-translation rejections so they are not silently lost
+    // and don't get re-batched every run. Recorded as REJECT with a reason
+    // that names the colliding sibling, so a human can pick a distinct title.
+    if (dupRejected.length > 0) {
+      const failed = readFailed(i18nDir, lang);
+      const today = new Date().toISOString().slice(0, 10);
+      for (const d of dupRejected) {
+        if (!isValidCategory(d.key.split(':')[0])) continue;
+        const reason = `duplicate translation "${d.translation}" already used by ${d.owner} in the same category`;
+        const prev = failed[d.key];
+        if (prev) {
+          prev.tried = today;
+          prev.verdict = 'REJECT';
+          prev.attempts = (prev.attempts ?? 1) + 1;
+          prev.reason = reason;
+        } else {
+          failed[d.key] = { tried: today, verdict: 'REJECT', attempts: 1, reason };
+        }
+      }
+      writeFailed(i18nDir, lang, failed);
+      console.error(
+        `[applyVerdicts] rejected ${rejectedDuplicate} duplicate-translation verdict entries (archived to ${lang}.failed.json)`
       );
     }
 
@@ -1144,6 +1357,10 @@ export async function applyVerdicts(opts: {
               : null;
           if (!cat) { allApplied = false; break; }
           const key = `${cat}:${tag.name}`;
+          // A tag whose write was refused by the duplicate gate is "resolved"
+          // (recorded in failed.json), not pending — treat it as applied so the
+          // batch can be cleaned up rather than lingering forever.
+          if (dupRejectedKeys.has(key)) continue;
           const v = normalizeVerdict(tag.verdict!);
 
           if (v === 'PASS') {
