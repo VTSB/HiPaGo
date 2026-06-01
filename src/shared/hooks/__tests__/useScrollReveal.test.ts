@@ -98,6 +98,33 @@ describe('useScrollReveal', () => {
     expect(readVar()).toBe('0');
   });
 
+  it('supports window as the scroll source (reads window.scrollY) with a custom var name', () => {
+    const target = document.createElement('div');
+    const targetRef = { current: target } as { current: HTMLElement | null };
+    const setWinScroll = (v: number) => {
+      Object.defineProperty(window, 'scrollY', { value: v, configurable: true, writable: true });
+      window.dispatchEvent(new Event('scroll'));
+    };
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true, writable: true });
+    const readVar = () => target.style.getPropertyValue('--list-chrome');
+
+    renderHook(() =>
+      useScrollReveal({
+        scrollElement: window,
+        targetRef,
+        topThreshold: 0,
+        travelPx: 100,
+        varName: '--list-chrome',
+      }),
+    );
+
+    expect(readVar()).toBe('0');
+    setWinScroll(60); // down 60 → 60% hidden
+    expect(readVar()).toBe('0.6');
+    setWinScroll(20); // up 40 → reveals proportionally (0.6 → 0.2), not a snap
+    expect(readVar()).toBe('0.2');
+  });
+
   it('resets the var to 0 on unmount', () => {
     const { scroller, targetRef, setScrollTop, readVar } = makeEnv();
     const { unmount } = renderHook(() =>

@@ -7,7 +7,7 @@ import { SearchBar } from '@/features/search/components/SearchBar';
 import { LanguageFilter } from '@/shared/components/LanguageFilter';
 import { SyncStatusIndicator } from '@/shared/components/SyncStatusIndicator';
 import { useT } from '@/lib/i18n/useT';
-import { useHideOnScroll } from '@/shared/hooks/useHideOnScroll';
+import { useScrollReveal } from '@/shared/hooks/useScrollReveal';
 
 const NAV = [
   {
@@ -121,10 +121,18 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerMounted, setDrawerMounted] = useState(false);
   const [drawerEntered, setDrawerEntered] = useState(false);
-  // Slide the sticky header out of view when the user scrolls down, restore
-  // on scroll up. Disabled while the mobile drawer is open so the menu
-  // doesn't disappear underfoot. Threshold + delta match FloatingPageNav.
-  const hiddenOnScroll = useHideOnScroll(80, 8, menuOpen);
+  // Gesture-couple the sticky header to the window scroll: scrolling down
+  // slides it up off the top proportionally, scrolling up brings it back by
+  // the amount scrolled (native style, not a binary snap). Disabled while the
+  // mobile drawer is open so the menu doesn't disappear underfoot. Writes the
+  // `--list-chrome` var onto the header node; the header reads it below.
+  const headerRef = useRef<HTMLElement | null>(null);
+  useScrollReveal({
+    scrollElement: typeof window !== 'undefined' ? window : null,
+    targetRef: headerRef,
+    disabled: menuOpen,
+    varName: '--list-chrome',
+  });
   const animTimerRef = useRef<number>(0);
   const frameRef = useRef<number>(0);
 
@@ -173,7 +181,9 @@ export function Header() {
   return (
     <>
       <header
-        className={`sticky top-0 z-50 border-b border-zinc-200 bg-white/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm transition-transform duration-300 will-change-transform dark:border-zinc-800 dark:bg-zinc-950/90 ${hiddenOnScroll ? '-translate-y-full' : 'translate-y-0'}`}
+        ref={headerRef}
+        className="sticky top-0 z-50 border-b border-zinc-200 bg-white/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm will-change-transform dark:border-zinc-800 dark:bg-zinc-950/90"
+        style={{ transform: 'translateY(calc(var(--list-chrome, 0) * -100%))' }}
       >
         <div className="mx-auto flex min-h-16 max-w-7xl items-center gap-3 px-4 py-2 md:min-h-14 md:gap-4">
           {/* Hamburger — mobile only, left-most. Same side the drawer slides in from. */}

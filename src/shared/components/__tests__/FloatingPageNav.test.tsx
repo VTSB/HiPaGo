@@ -246,9 +246,11 @@ describe('FloatingPageNav — immediate page update', () => {
       vi.advanceTimersByTime(1650);
     });
 
-    expect(nav.className).not.toContain(
-      'translate-y-[calc(100%_+_1rem_+_env(safe-area-inset-bottom))]',
-    );
+    // The pill must be shown (not stuck hidden) after a programmatic scroll
+    // settles. Reveal is now gesture-coupled via the `--list-chrome` var
+    // (0 = fully shown); suppression ignores the scroll and re-baselines on
+    // resume, so the var stays 0.
+    expect(['', '0']).toContain(nav.style.getPropertyValue('--list-chrome'));
 
     document.body.removeChild(div);
   });

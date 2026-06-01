@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
-import { useHideOnScroll } from '@/shared/hooks/useHideOnScroll';
+import { useScrollReveal } from '@/shared/hooks/useScrollReveal';
 import { useHaptic } from '@/shared/hooks/useHaptic';
 import { PageJumpModal } from '@/shared/components/PageJumpModal';
 
@@ -96,9 +96,21 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     const [bouncing, setBouncing] = useState(false);
     const [idle, setIdle] = useState(false);
     const [programmaticScrollVisible, setProgrammaticScrollVisible] = useState(false);
-    const scrollHidden = useHideOnScroll(80, 8, programmaticScrollVisible);
 
     const inputRef = useRef<HTMLInputElement>(null);
+    // Gesture-couple the pill to the window scroll (mobile): scrolling down
+    // slides it off the bottom proportionally, scrolling up reveals it by the
+    // amount scrolled — native style, not a binary snap. Suppressed during a
+    // programmatic page-jump / button scroll and while the jump modal is open.
+    // Writes `--list-chrome` on the pill node; the pill's mobile translate-y
+    // (below) consumes it. Desktop keeps the pill put via `sm:translate-y-0`.
+    const pillRef = useRef<HTMLDivElement>(null);
+    useScrollReveal({
+      scrollElement: typeof window !== 'undefined' ? window : null,
+      targetRef: pillRef,
+      disabled: programmaticScrollVisible || showJumpModal,
+      varName: '--list-chrome',
+    });
     const bounceTimerRef = useRef<number>(0);
     const idleTimerRef = useRef<number>(0);
 
@@ -416,13 +428,13 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
     if (totalPages <= 0) return null;
 
     const effectiveCols = gridColumns || 5;
-    const hiddenByScroll = scrollHidden && !showJumpModal && !programmaticScrollVisible;
     const atFirst = viewingPage <= (firstLoadedPage ?? 1) || !!isJumping;
     const atLast = viewingPage >= totalPages || !!isJumping;
 
     return (
       <>
         <div
+          ref={pillRef}
           onTouchStart={onTouchStart}
           onTouchEnd={onTouchEnd}
           onPointerDown={resetIdle}
@@ -432,26 +444,22 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
             // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
             // property and `scale-*` to `scale:`, NOT to legacy `transform: translate(...)`.
-            // The transition list MUST name those properties directly — `transition-transform`
-            // animates the (now unused) `transform` property and lets `translate:` / `scale:`
-            // jump instantly. That mismatch made the show direction read as fade-only-pop
-            // even after the opacity-0 cue landed. Naming `translate, scale, opacity`
-            // explicitly animates D5 slide + D6 bounce-scale + D5/D8 opacity.
-            // 300ms gives both directions enough time to register; pure slide over 200ms
-            // was visually masked when the page scrolled in the same direction as the pill.
-            'transition-[translate,scale,opacity] duration-300 ease-out',
-            // D5: slide + fade hide on scroll-down (mobile). The translation needs to
-            // clear BOTH the pill's own height AND the `bottom-4` (16px = 1rem) anchor
-            // offset. `calc(100% + 1rem)` does exactly that, height-agnostic — a literal
-            // `110%` (or any flat percentage) left a thin slice visible at the viewport
-            // bottom for the actual ~52px pill (math: 110% × 52 = 57.2 px, need ≥ 52 +
-            // 16 = 68 px). Opacity-0 added back as a second cue for the restore direction.
-            // sm: reverts preserve byte-identical desktop.
-            hiddenByScroll
-              ? 'translate-y-[calc(100%_+_1rem_+_env(safe-area-inset-bottom))] opacity-0 sm:translate-y-0 sm:opacity-100'
-              : '',
-            // D8: idle fade (mobile only).
-            idle && !hiddenByScroll ? 'opacity-40 sm:opacity-100' : '',
+            // The transition list names them directly. `translate` is intentionally
+            // OMITTED so the gesture-coupled vertical slide (below) tracks the scroll
+            // 1:1 with no lag; `scale` (D6 bounce) + `opacity` (D8 idle) stay animated.
+            'transition-[scale,opacity] duration-300 ease-out',
+            // D5: gesture-coupled slide hide on scroll-down (mobile). The
+            // `--list-chrome` var (0 shown → 1 hidden) is driven by useScrollReveal;
+            // the slide clears BOTH the pill height AND the `bottom-4` (1rem) anchor
+            // via `calc(100% + 1rem + safe-area)`, scaled by the var so it follows the
+            // scroll proportionally (no binary snap, no opacity-0 fighting the var —
+            // at var=1 the pill is fully off-screen). `-translate-x-1/2` (D1) composes
+            // through Tailwind v4's single `translate:` property. `sm:translate-y-0`
+            // keeps desktop put — byte-identical to before on ≥sm.
+            'translate-y-[calc(var(--list-chrome,0)*(100%_+_1rem_+_env(safe-area-inset-bottom)))] sm:translate-y-0',
+            // D8: idle fade (mobile only). When the pill is hidden it is off-screen,
+            // so the fade only reads while it is (partially) shown.
+            idle ? 'opacity-40 sm:opacity-100' : '',
             // D6: bounce pulse at boundaries.
             bouncing ? 'scale-105' : 'scale-100',
           ]

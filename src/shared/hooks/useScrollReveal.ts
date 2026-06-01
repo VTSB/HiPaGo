@@ -28,8 +28,8 @@ export function useScrollReveal({
   travelPx = 96,
   varName = '--reader-chrome',
 }: {
-  /** The element whose vertical scroll drives the reveal. */
-  scrollElement?: HTMLElement | null;
+  /** The element (or `window`) whose vertical scroll drives the reveal. */
+  scrollElement?: HTMLElement | Window | null;
   /** The node the CSS custom property is written onto (an ancestor of the chrome). */
   targetRef: RefObject<HTMLElement | null>;
   /** When true, the chrome stays fully visible and no listener is attached. */
@@ -54,14 +54,21 @@ export function useScrollReveal({
       return;
     }
 
+    const isWindow = scrollElement === window;
+    const readY = () =>
+      isWindow ? window.scrollY : (scrollElement as HTMLElement).scrollTop;
+    // Both HTMLElement and Window are EventTargets with compatible 'scroll'
+    // listeners; widen so the union's add/removeEventListener overloads unify.
+    const target: EventTarget = scrollElement;
+
     let hiddenPx = 0;
-    let lastY = scrollElement.scrollTop;
+    let lastY = readY();
     let raf = 0;
     setVar(0);
 
     const apply = () => {
       raf = 0;
-      const y = scrollElement.scrollTop;
+      const y = readY();
       if (y < topThreshold) {
         // Near the top the chrome is always fully shown (matches the binary
         // hook's top-zone behavior, so opening a gallery never starts hidden).
@@ -79,9 +86,9 @@ export function useScrollReveal({
       raf = requestAnimationFrame(apply);
     };
 
-    scrollElement.addEventListener('scroll', onScroll, { passive: true });
+    target.addEventListener('scroll', onScroll, { passive: true });
     return () => {
-      scrollElement.removeEventListener('scroll', onScroll);
+      target.removeEventListener('scroll', onScroll);
       if (raf) cancelAnimationFrame(raf);
       setVar(0);
     };
