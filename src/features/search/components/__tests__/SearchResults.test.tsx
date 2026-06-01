@@ -175,4 +175,46 @@ describe('SearchResults — VirtualGalleryGrid integration', () => {
     const h1 = container.querySelector('h1');
     expect(h1?.textContent).toBe('search.title: female:loli artist:yam');
   });
+
+  // ---------------------------------------------------------------------------
+  // Layout: the multi-term "sort unavailable" message must be able to shrink and
+  // wrap so it can't overflow the header row sideways on narrow screens.
+  // ---------------------------------------------------------------------------
+  it('multi-term sort-unavailable message can shrink + wrap and is not inside a shrink-0 box', async () => {
+    mockQuery = 'female:loli artist:yam';
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    const { container } = render(<SearchResults />);
+
+    const msg = [...container.querySelectorAll('p')].find(
+      (p) => p.textContent === 'search.sortUnavailable',
+    );
+    expect(msg).toBeTruthy();
+    // allowed to shrink + wrap, right-aligned — not pinned to content width
+    expect(msg!.classList.contains('shrink')).toBe(true);
+    expect(msg!.classList.contains('shrink-0')).toBe(false);
+    expect(msg!.classList.contains('min-w-0')).toBe(true);
+    expect(msg!.classList.contains('break-words')).toBe(true);
+    expect(msg!.classList.contains('text-right')).toBe(true);
+    // the overflow cause was a shrink-0 ancestor — there must be none
+    expect(msg!.closest('.shrink-0')).toBeNull();
+    // the title column must also be allowed to shrink
+    const h1 = container.querySelector('h1');
+    expect(h1!.parentElement!.classList.contains('min-w-0')).toBe(true);
+  });
+
+  it('single-term header renders the SortSelector in a shrink-0 box (no regression)', async () => {
+    mockQuery = 'female:loli';
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    const { container } = render(<SearchResults />);
+    const selector = container.querySelector('[data-testid="sort-selector"]');
+    expect(selector).not.toBeNull();
+    // dropdown stays shrink-0; the message branch is not rendered
+    expect(selector!.closest('.shrink-0')).not.toBeNull();
+    const msg = [...container.querySelectorAll('p')].find(
+      (p) => p.textContent === 'search.sortUnavailable',
+    );
+    expect(msg).toBeUndefined();
+  });
 });

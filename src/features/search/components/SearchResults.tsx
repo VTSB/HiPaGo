@@ -156,21 +156,26 @@ export function SearchResults() {
   return (
     <div>
       <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{t('search.title')}: {isSingleTerm ? formatSearchHeader(query) : query}</h1>
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold text-zinc-900 dark:text-zinc-100">{t('search.title')}: {isSingleTerm ? formatSearchHeader(query) : query}</h1>
           <p className="text-sm text-zinc-500">
             {allIds
               ? `${totalCount.toLocaleString()} ${t('search.results')}`
               : isLoadingIds ? t('search.searching') : t('search.noResults')}
           </p>
         </div>
-        <div className="shrink-0">
-          {isSingleTerm ? (
+        {isSingleTerm ? (
+          <div className="shrink-0">
             <SortSelector value={sort} onChange={handleSortChange} />
-          ) : query.trim().includes(' ') ? (
-            <p className="text-xs text-zinc-400" title={t('search.sortUnavailable')}>{t('search.sortUnavailable')}</p>
-          ) : null}
-        </div>
+          </div>
+        ) : query.trim().includes(' ') ? (
+          <p
+            className="min-w-0 shrink break-words text-right text-xs text-zinc-400"
+            title={t('search.sortUnavailable')}
+          >
+            {t('search.sortUnavailable')}
+          </p>
+        ) : null}
       </div>
 
       {isFallback && (
