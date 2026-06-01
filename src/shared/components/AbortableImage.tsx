@@ -205,6 +205,8 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   // never treated as an abortable in-flight request on re-mount.
   const loadedRef = useRef(loadedSrcCache.has(src));
   const retryCountRef = useRef(0);
+  // Once-per-src guard for stale cached-file recovery (handleError below).
+  const staleRecoverRef = useRef(false);
   const fromCache = mustServeFromCache(src);
   // The resolved cache file URL for this src (convertFileSrc), if any. Seeded
   // synchronously from the in-memory map so a re-mount paints from disk instantly.
@@ -319,10 +321,20 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     retryCountRef.current = 0;
   }, [effectiveSrc, loading, preload, src]);
 
+  // Reset the stale-cached-file recovery guard only on a genuine src change (a new
+  // image in a recycled component). NOT on effectiveSrc — recovery itself swaps
+  // effectiveSrc (file URL → null → re-resolved), and resetting there would let
+  // it recover forever in a loop. A successful load (handleLoad) also clears it so
+  // a later reclaim of the same src can recover once again.
+  useEffect(() => {
+    staleRecoverRef.current = false;
+  }, [src]);
+
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
     loadedRef.current = true;
     retryCountRef.current = 0;
+    staleRecoverRef.current = false; // a real paint re-arms recovery for a later reclaim
     loadedSrcCache.add(src);
     if (effectiveSrc) loadedSrcCache.add(effectiveSrc);
     setLoaded(true);
@@ -351,6 +363,27 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   // and are not retried to avoid wasting bandwidth.
   const lastErrorTimeRef = useRef(0);
   const handleError = useCallback(() => {
+    // Stale cached-file recovery — checked BEFORE the loaded-guard, because an
+    // <img> error on a resolved cache file URL means that file failed to load
+    // regardless of the optimistic `loaded` flag (ensureCachedFileUrl marks a src
+    // loaded as soon as the URL resolves, before the WebView paints it). The file
+    // is gone (OS reclaimed the cache dir mid-session) or corrupt/partial. Retrying
+    // the same dead file URL never recovers, so purge this src's memo ONCE and
+    // re-resolve: the store re-stats on the next access (dropping the missing
+    // entry) and re-downloads on the bypass platforms, or we return to the plain
+    // CDN <img src> elsewhere. A second failure after this flows into the normal
+    // retry / permanent-fail path below.
+    if (cacheUrl && effectiveSrc === cacheUrl && !staleRecoverRef.current) {
+      staleRecoverRef.current = true;
+      resolvedFileUrlCache.delete(src);
+      loadedSrcCache.delete(src);
+      loadedSrcCache.delete(cacheUrl);
+      loadedRef.current = false;
+      retryCountRef.current = 0;
+      setFailed(false);
+      setCacheUrlState(null); // re-runs the resolve effect (guard no longer holds)
+      return;
+    }
     if (loadedRef.current) return;
     if (retryCountRef.current >= 3) {
       setFailed(true);
@@ -377,7 +410,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
         img.src = cur;
       }
     }, delay);
-  }, [onSettled]);
+  }, [onSettled, cacheUrl, effectiveSrc, src]);
 
   // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded).
   // The sync viewport check (already-in-view on mount) is deferred via requestAnimationFrame

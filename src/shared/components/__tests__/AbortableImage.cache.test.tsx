@@ -169,3 +169,58 @@ describe('AbortableImage cache-clear invalidation (blank-list-after-clear)', () 
     expect(img2.getAttribute('src')).toBe(FILEURL);
   });
 });
+
+// Recovery: a resolved cache file URL that fails to LOAD (OS reclaimed the cache
+// dir mid-session, or a corrupt/partial file) must not stay broken forever. On
+// the <img> error the src is purged once and re-resolved.
+describe('AbortableImage stale cached-file recovery (OS cache reclaim / corrupt file)', () => {
+  const FILEURL1 = 'capacitor://localhost/_capacitor_file_/cache/stale';
+  const FILEURL2 = 'capacitor://localhost/_capacitor_file_/cache/fresh';
+
+  it('iOS/Tauri: re-downloads and serves a fresh file URL after the cached file errors', async () => {
+    (platform.isCapacitor as Mock).mockReturnValue(true);
+    (platform.isAndroid as Mock).mockReturnValue(false); // bypass-served platform
+    ensureCached.mockResolvedValueOnce(FILEURL1).mockResolvedValueOnce(FILEURL2);
+
+    const { container } = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img = container.querySelector('img') as HTMLImageElement;
+    await waitFor(() => expect(img.getAttribute('src')).toBe(FILEURL1));
+
+    // The cache file is gone → the <img> errors. Recovery re-resolves.
+    await act(async () => { fireEvent.error(img); });
+    await waitFor(() => expect(img.getAttribute('src')).toBe(FILEURL2));
+    expect(ensureCached).toHaveBeenCalledTimes(2); // re-downloaded, not stuck broken
+  });
+
+  it('Android: falls back to the plain CDN src after the cached file errors', async () => {
+    (platform.isAndroid as Mock).mockReturnValue(true);
+    (platform.isCapacitor as Mock).mockReturnValue(true);
+    fileUrl.mockResolvedValueOnce(FILEURL1).mockResolvedValue(null); // hit, then reclaimed
+
+    const { container } = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img = container.querySelector('img') as HTMLImageElement;
+    await waitFor(() => expect(img.getAttribute('src')).toBe(FILEURL1));
+
+    // Cached file gone → error → recovery drops the memo and re-resolves to plain src.
+    await act(async () => { fireEvent.error(img); });
+    await waitFor(() => expect(img.getAttribute('src')).toBe(CDN));
+  });
+
+  it('does not loop: a second error after recovery flows into the normal fail path', async () => {
+    (platform.isCapacitor as Mock).mockReturnValue(true);
+    (platform.isAndroid as Mock).mockReturnValue(false);
+    // Both resolves return a (still-bad) file URL; recovery happens once, then the
+    // normal retry/permanent-fail path takes over instead of recovering forever.
+    ensureCached.mockResolvedValue(FILEURL1);
+
+    const { container } = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
+    const img = container.querySelector('img') as HTMLImageElement;
+    await waitFor(() => expect(img.getAttribute('src')).toBe(FILEURL1));
+
+    await act(async () => { fireEvent.error(img); }); // recovery (once)
+    await waitFor(() => expect(ensureCached).toHaveBeenCalledTimes(2));
+    await act(async () => { fireEvent.error(img); }); // second error → normal retry path
+    // The recovery guard is spent, so ensureCached is NOT called a third time by recovery.
+    expect(ensureCached).toHaveBeenCalledTimes(2);
+  });
+});
