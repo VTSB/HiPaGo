@@ -55,9 +55,7 @@ public class BypassWebViewClient extends BridgeWebViewClient {
             return super.shouldInterceptRequest(view, request);
         }
 
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Referer", "https://hitomi.la/");
-        headers.put("Origin", "https://hitomi.la");
+        Map<String, String> headers = buildUpstreamHeaders(request.getRequestHeaders());
 
         try {
             BypassResponse resp = BypassKt.bypassFetch(request.getUrl().toString(), headers);
@@ -102,6 +100,44 @@ public class BypassWebViewClient extends BridgeWebViewClient {
             // <img>/fetch surfaces a concrete error instead of this throwing.
             return super.shouldInterceptRequest(view, request);
         }
+    }
+
+    /**
+     * Build the header map sent upstream through bypass-core for a GET.
+     *
+     * Always spoofs {@code Referer}/{@code Origin} so hitomi serves the asset.
+     * Critically, it forwards the caller's {@code Range} request header when
+     * present: the search/index pipeline issues byte-range reads for every
+     * B-tree galleries-index node and data segment (and for nozomi pagination).
+     * bypass-core forwards whatever headers it is handed verbatim, so dropping
+     * {@code Range} here makes upstream return the full file (HTTP 200) from
+     * offset 0. The root B-tree node lives at offset 0 so it still decodes, but
+     * any sub-node fetch at a non-zero offset then re-decodes the root instead
+     * of the requested node — so untyped/title search ("스프레이") finds nothing
+     * while tag/nozomi browsing (read from offset 0) keeps working.
+     *
+     * Header lookup is case-insensitive: WebView reports request headers with
+     * varying casing across API levels. Only {@code Range} is forwarded; other
+     * WebView-supplied headers (its own Origin/Referer, Sec-* …) are dropped so
+     * they cannot override the spoofed values above.
+     *
+     * Package-private + static with no Android dependencies so it is unit
+     * testable on the local JVM without Robolectric.
+     */
+    static Map<String, String> buildUpstreamHeaders(Map<String, String> requestHeaders) {
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Referer", "https://hitomi.la/");
+        headers.put("Origin", "https://hitomi.la");
+
+        if (requestHeaders != null) {
+            for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                if ("range".equalsIgnoreCase(e.getKey())) {
+                    headers.put("Range", e.getValue());
+                }
+            }
+        }
+        return headers;
     }
 
     private static boolean isBypassHost(String host) {
