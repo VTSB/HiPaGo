@@ -105,38 +105,51 @@ public class BypassWebViewClient extends BridgeWebViewClient {
     /**
      * Build the header map sent upstream through bypass-core for a GET.
      *
-     * Always spoofs {@code Referer}/{@code Origin} so hitomi serves the asset.
-     * Critically, it forwards the caller's {@code Range} request header when
-     * present: the search/index pipeline issues byte-range reads for every
-     * B-tree galleries-index node and data segment (and for nozomi pagination).
-     * bypass-core forwards whatever headers it is handed verbatim, so dropping
-     * {@code Range} here makes upstream return the full file (HTTP 200) from
-     * offset 0. The root B-tree node lives at offset 0 so it still decodes, but
-     * any sub-node fetch at a non-zero offset then re-decodes the root instead
-     * of the requested node — so untyped/title search ("스프레이") finds nothing
-     * while tag/nozomi browsing (read from offset 0) keeps working.
+     * Strategy: forward the client's request headers as-is and overwrite only
+     * the few that the bypass transport must own. This preserves request intent
+     * the WebView set — most importantly {@code Range} (the search/index pipeline
+     * issues byte-range reads for every B-tree galleries-index node and data
+     * segment, and for nozomi pagination), plus conditional headers like
+     * {@code If-Range} and the {@code Accept} negotiation. Dropping {@code Range}
+     * was the original bug: bypass-core forwards headers verbatim, so a missing
+     * Range made upstream return the full file (HTTP 200) from offset 0; the root
+     * B-tree node lives at offset 0 so it decoded, but any non-zero-offset
+     * sub-node fetch then re-decoded the root instead of the requested node, so
+     * untyped/title search ("스프레이") found nothing while tag/nozomi browsing
+     * (read from offset 0) kept working.
      *
-     * Header lookup is case-insensitive: WebView reports request headers with
-     * varying casing across API levels. Only {@code Range} is forwarded; other
-     * WebView-supplied headers (its own Origin/Referer, Sec-* …) are dropped so
-     * they cannot override the spoofed values above.
+     * Overwritten / dropped (case-insensitive, since WebView casing varies):
+     *  - {@code Referer}/{@code Origin}: replaced with the spoofed hitomi values
+     *    so the WebView's own cross-origin values can't leak through.
+     *  - {@code Accept-Encoding}: dropped so bypass-core (rquest Chrome
+     *    impersonation) owns content negotiation and transparently decompresses.
+     *    Forwarding the WebView's Accept-Encoding would suppress that gunzip and
+     *    hand back a compressed body, corrupting the binary index reads this code
+     *    path depends on.
      *
      * Package-private + static with no Android dependencies so it is unit
      * testable on the local JVM without Robolectric.
      */
     static Map<String, String> buildUpstreamHeaders(Map<String, String> requestHeaders) {
         Map<String, String> headers = new HashMap<>();
-        headers.put("Referer", "https://hitomi.la/");
-        headers.put("Origin", "https://hitomi.la");
 
         if (requestHeaders != null) {
             for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
-                if (e.getKey() == null || e.getValue() == null) continue;
-                if ("range".equalsIgnoreCase(e.getKey())) {
-                    headers.put("Range", e.getValue());
+                String k = e.getKey();
+                if (k == null || e.getValue() == null) continue;
+                // Identity headers are set canonically below; let the bypass
+                // transport own content-encoding/decompression.
+                if (k.equalsIgnoreCase("Referer")
+                        || k.equalsIgnoreCase("Origin")
+                        || k.equalsIgnoreCase("Accept-Encoding")) {
+                    continue;
                 }
+                headers.put(k, e.getValue());
             }
         }
+
+        headers.put("Referer", "https://hitomi.la/");
+        headers.put("Origin", "https://hitomi.la");
         return headers;
     }
 
