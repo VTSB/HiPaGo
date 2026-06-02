@@ -1,9 +1,51 @@
 {
+  "character:homura": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"호무라\" already used by character:pyra in the same category"
+  },
+  "character:kris": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"크리스\" already used by character:chris in the same category"
+  },
+  "character:liko": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"리코\" already used by character:riko in the same category"
+  },
+  "character:loona": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"루나\" already used by character:luna in the same category"
+  },
+  "character:luka": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"메구리네 루카\" already used by character:luka megurine in the same category"
+  },
+  "character:pine": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"큐어 파인\" already used by character:cure pine in the same category"
+  },
   "character:rapi": {
     "tried": "2026-06-02",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"라피\" already used by character:laffey in the same category"
+  },
+  "character:sophia": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"소피아\" already used by character:sofia in the same category"
   },
   "series:009-1": {
     "tried": "2026-06-01",
@@ -2042,7 +2084,7 @@
   "series:jinrui nekoka": {
     "tried": "2026-06-02",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 6,
     "reason": "empty translation"
   },
   "series:jl8": {
