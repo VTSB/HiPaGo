@@ -1,4 +1,10 @@
 {
+  "character:rapi": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"라피\" already used by character:laffey in the same category"
+  },
   "series:009-1": {
     "tried": "2026-06-01",
     "verdict": "_NEEDS_REVIEW",
@@ -2034,9 +2040,9 @@
     "reason": "empty translation, confidence none"
   },
   "series:jinrui nekoka": {
-    "tried": "2026-06-01",
+    "tried": "2026-06-02",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 5,
     "reason": "empty translation"
   },
   "series:jl8": {
