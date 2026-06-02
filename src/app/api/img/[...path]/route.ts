@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { parseGgJs } from '@/lib/utils/image-url';
 import type { GgConfig } from '@/lib/utils/types';
 import { bypassFetch } from '@/lib/server/bypass-fetch';
+import { buildProxyUpstreamHeaders } from '@/lib/server/proxy-headers';
 import { resolveTnSubdomain } from './subdomain';
 
 // Node.js runtime required for bypass (net/tls modules). Streaming is preserved
@@ -66,11 +67,7 @@ export async function GET(
 
   try {
     const response = await bypassFetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        Referer: 'https://hitomi.la/',
-        Accept: 'image/avif,image/webp,image/png,image/jpeg,*/*',
-      },
+      headers: buildProxyUpstreamHeaders(request.headers),
       signal: AbortSignal.timeout(30000),
     });
 

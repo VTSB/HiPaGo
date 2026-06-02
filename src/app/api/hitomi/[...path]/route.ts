@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bypassFetch } from '@/lib/server/bypass-fetch';
+import { buildProxyUpstreamHeaders } from '@/lib/server/proxy-headers';
 
 const LTN_BASE = 'https://ltn.gold-usergeneratedcontent.net';
 
@@ -21,16 +22,7 @@ export async function GET(
   const encodedPath = targetPath.split('/').map(encodeURIComponent).join('/');
   const targetUrl = `${LTN_BASE}/${encodedPath}${url.search}`;
 
-  const headers: Record<string, string> = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': 'https://hitomi.la/',
-    'Origin': 'https://hitomi.la',
-  };
-
-  const rangeHeader = request.headers.get('Range');
-  if (rangeHeader) {
-    headers['Range'] = rangeHeader;
-  }
+  const headers = buildProxyUpstreamHeaders(request.headers);
 
   try {
     const response = await bypassFetch(targetUrl, { headers, signal: AbortSignal.timeout(15000) });

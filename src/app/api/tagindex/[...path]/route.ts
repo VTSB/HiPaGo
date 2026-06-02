@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bypassFetch } from '@/lib/server/bypass-fetch';
+import { buildProxyUpstreamHeaders } from '@/lib/server/proxy-headers';
 
 const TAG_INDEX_BASE = 'https://tagindex.hitomi.la';
 
@@ -17,11 +18,7 @@ export async function GET(
 
   const targetUrl = `${TAG_INDEX_BASE}/${targetPath}`;
 
-  const headers: Record<string, string> = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': 'https://hitomi.la/',
-    'Origin': 'https://hitomi.la',
-  };
+  const headers = buildProxyUpstreamHeaders(request.headers);
 
   try {
     const response = await bypassFetch(targetUrl, { headers, signal: AbortSignal.timeout(15000) });
