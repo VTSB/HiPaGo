@@ -29,6 +29,18 @@
     "attempts": 1,
     "reason": "duplicate translation \"메구리네 루카\" already used by character:luka megurine in the same category"
   },
+  "character:mian": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "\"미안\" is a high-frequency Korean word meaning \"sorry\", creating a direct collision; transliteration is not collision-free as required"
+  },
+  "character:nanashi mumei": {
+    "tried": "2026-06-02",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"나나시 무메이\" already used by character:mumei in the same category"
+  },
   "character:pine": {
     "tried": "2026-06-02",
     "verdict": "REJECT",
@@ -2084,7 +2096,7 @@
   "series:jinrui nekoka": {
     "tried": "2026-06-02",
     "verdict": "REJECT",
-    "attempts": 6,
+    "attempts": 7,
     "reason": "empty translation"
   },
   "series:jl8": {
