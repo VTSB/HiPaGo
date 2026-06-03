@@ -37,16 +37,16 @@ export function BottomNav() {
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
                 onClick={() => haptic.light()}
-                className="flex w-[60px] flex-col items-center gap-1 py-0.5"
+                className="flex w-[62px] flex-col items-center gap-0.5 py-0.5"
               >
                 <span
-                  className={`flex h-9 w-9 items-center justify-center rounded-[14px] transition-colors ${
+                  className={`flex h-10 w-10 items-center justify-center rounded-[15px] transition-colors ${
                     active
                       ? 'bg-[#007AFF] text-white'
                       : 'text-zinc-400 active:bg-white/5 active:text-zinc-200'
                   }`}
                 >
-                  {tab.icon('h-[22px] w-[22px]')}
+                  {tab.icon('h-[26px] w-[26px]')}
                 </span>
                 <span
                   className={`text-[10px] font-semibold leading-none tracking-tight transition-colors ${

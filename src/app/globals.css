@@ -8,7 +8,7 @@
      source of truth consumed by the (main) layout bottom padding and the
      floating page chip anchor (FloatingPageNav). The bar is md:hidden, so this
      only matters below the md breakpoint. */
-  --bottom-nav-h: calc(4.5rem + env(safe-area-inset-bottom));
+  --bottom-nav-h: calc(5rem + env(safe-area-inset-bottom));
 }
 
 /* z-index tiers (documented; values are applied as Tailwind classes):
