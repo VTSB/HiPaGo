@@ -33,10 +33,14 @@
 }
 
 html {
-  /* Always reserve the scrollbar gutter so navigating between a scrolling page
-     (browse) and a short one (search) doesn't shift the centered layout /
-     floating bottom bar horizontally. */
-  scrollbar-gutter: stable;
+  /* Hide the window scrollbar (cleaner for the infinite-scroll feed; YouTube-like).
+     Scrolling still works via wheel/trackpad/touch. As a bonus this removes the
+     tab-switch layout shift too: a 0-width scrollbar never changes content width
+     between a scrolling page and a short one. */
+  scrollbar-width: none; /* Firefox */
+}
+html::-webkit-scrollbar {
+  display: none; /* Chrome / Safari / Edge */
 }
 
 body {
