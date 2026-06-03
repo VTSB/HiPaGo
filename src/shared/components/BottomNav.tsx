@@ -50,7 +50,7 @@ export function BottomNav() {
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
                 onClick={() => haptic.light()}
-                className={`flex w-16 flex-col items-center gap-1 px-2 py-2 transition-colors duration-300 ${
+                className={`flex w-16 flex-col items-center gap-0.5 px-1 py-1.5 transition-colors duration-300 ${
                   active ? 'text-white' : 'text-zinc-400 active:text-zinc-200'
                 }`}
               >
