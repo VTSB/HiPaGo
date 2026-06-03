@@ -22,9 +22,11 @@ export function BottomNav() {
   return (
     <nav
       aria-label={t('nav.browse')}
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-black/5 bg-white/80 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl backdrop-saturate-150 md:hidden dark:border-white/10 dark:bg-zinc-950/75"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] md:hidden"
     >
-      <ul className="mx-auto flex max-w-md items-stretch">
+      {/* Floating rounded bar — detached from the screen edges, moderately
+          rounded corners (not a full pill), elevated translucent surface. */}
+      <ul className="pointer-events-auto mx-3 flex items-stretch rounded-2xl border border-black/5 bg-white/85 shadow-xl backdrop-blur-xl backdrop-saturate-150 dark:border-white/10 dark:bg-zinc-900/85">
         {BOTTOM_TABS.map((tab) => {
           const active = tab.matches(pathname);
           return (
@@ -33,13 +35,13 @@ export function BottomNav() {
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
                 onClick={() => haptic.light()}
-                className={`flex h-[52px] flex-col items-center justify-center gap-1 transition-colors ${
+                className={`flex h-16 flex-col items-center justify-center gap-1 transition-colors ${
                   active
                     ? 'text-[#007AFF] dark:text-[#0A84FF]'
                     : 'text-zinc-400 active:text-zinc-600 dark:text-zinc-500 dark:active:text-zinc-300'
                 }`}
               >
-                {tab.icon('h-[26px] w-[26px]')}
+                {tab.icon('h-[25px] w-[25px]')}
                 <span className="text-[10px] font-medium leading-none tracking-tight">
                   {t(tab.key)}
                 </span>

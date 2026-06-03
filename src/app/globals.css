@@ -3,11 +3,12 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  /* Mobile bottom tab bar height including the iOS safe-area inset. Single
+  /* Vertical space the FLOATING bottom tab bar occupies from the screen bottom
+     (bar height h-16 + its bottom margin + the iOS safe-area inset). Single
      source of truth consumed by the (main) layout bottom padding and the
      floating page chip anchor (FloatingPageNav). The bar is md:hidden, so this
      only matters below the md breakpoint. */
-  --bottom-nav-h: calc(3.5rem + env(safe-area-inset-bottom));
+  --bottom-nav-h: calc(4.5rem + env(safe-area-inset-bottom));
 }
 
 /* z-index tiers (documented; values are applied as Tailwind classes):
@@ -29,6 +30,13 @@
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+}
+
+html {
+  /* Always reserve the scrollbar gutter so navigating between a scrolling page
+     (browse) and a short one (search) doesn't shift the centered layout /
+     floating bottom bar horizontally. */
+  scrollbar-gutter: stable;
 }
 
 body {

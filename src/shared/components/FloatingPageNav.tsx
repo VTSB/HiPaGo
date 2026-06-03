@@ -442,10 +442,10 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           onTouchEnd={onTouchEnd}
           onPointerDown={resetIdle}
           className={[
-            // Mobile: small chip tucked at the very bottom BEHIND the bottom nav
-            // (nav is z-40 and paints on top — App Store-clean bar). Desktop
-            // (>=md): unchanged bottom-right pill at bottom-4, above content.
-            'fixed bottom-2 z-30 flex items-center gap-0.5 rounded-full bg-zinc-900/90 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm md:bottom-4 md:z-40 md:gap-1 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
+            // Mobile: small chip floating just ABOVE the bottom nav so it stays
+            // visible/tappable; on scroll-down it slides down behind the nav
+            // (z-30 < nav z-40). Desktop (>=md): unchanged bottom-right pill.
+            'fixed bottom-[calc(var(--bottom-nav-h)+0.5rem)] z-30 flex items-center gap-0.5 rounded-full bg-zinc-900/90 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm md:bottom-4 md:z-40 md:gap-1 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
             // D1: mobile center, desktop bottom-right.
             'left-1/2 -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0',
             // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
@@ -462,7 +462,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             // at var=1 the pill is fully off-screen). `-translate-x-1/2` (D1) composes
             // through Tailwind v4's single `translate:` property. `sm:translate-y-0`
             // keeps desktop put — byte-identical to before on ≥sm.
-            'translate-y-[calc(var(--list-chrome,0)*(100%_+_0.5rem))] md:translate-y-0',
+            'translate-y-[calc(var(--list-chrome,0)*(100%_+_var(--bottom-nav-h)_+_0.5rem))] md:translate-y-0',
             // D8: idle fade (mobile only). When the pill is hidden it is off-screen,
             // so the fade only reads while it is (partially) shown.
             idle ? 'opacity-40 md:opacity-100' : '',
