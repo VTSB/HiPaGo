@@ -22,29 +22,31 @@ export function BottomNav() {
   return (
     <nav
       aria-label={t('nav.browse')}
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] md:hidden"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-center md:hidden"
     >
-      {/* Floating rounded bar — detached from the edges, moderately rounded
-          corners (not a full pill). SOLID surface + a soft diffuse shadow reads
-          clean/premium; a translucent+blur bar looked murky over dark content. */}
-      <ul className="pointer-events-auto mx-4 flex items-stretch rounded-[20px] bg-white shadow-[0_12px_36px_-8px_rgba(0,0,0,0.45)] ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
+      {/* Compact floating command bar — hugs its content (centered), icons
+          grouped close together (Figma-toolbar feel). Solid dark surface + soft
+          diffuse shadow. Active tab = icon inside a FILLED accent rounded square. */}
+      <ul className="pointer-events-auto flex items-center gap-1 rounded-[20px] bg-zinc-900 px-2 py-2 shadow-[0_12px_36px_-8px_rgba(0,0,0,0.5)] ring-1 ring-white/10">
         {BOTTOM_TABS.map((tab) => {
           const active = tab.matches(pathname);
           return (
-            <li key={tab.href} className="flex-1">
+            <li key={tab.href}>
               <Link
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
+                aria-label={t(tab.key)}
                 onClick={() => haptic.light()}
-                className={`flex h-16 flex-col items-center justify-center gap-1 transition-colors ${
-                  active
-                    ? 'text-[#007AFF] dark:text-[#0A84FF]'
-                    : 'text-zinc-400 active:text-zinc-600 dark:text-zinc-500 dark:active:text-zinc-300'
-                }`}
+                className="flex h-12 w-12 items-center justify-center"
               >
-                {tab.icon('h-[25px] w-[25px]')}
-                <span className="text-[10px] font-medium leading-none tracking-tight">
-                  {t(tab.key)}
+                <span
+                  className={`flex h-11 w-11 items-center justify-center rounded-2xl transition-colors ${
+                    active
+                      ? 'bg-[#007AFF] text-white'
+                      : 'text-zinc-400 active:bg-white/5 active:text-zinc-200'
+                  }`}
+                >
+                  {tab.icon('h-[23px] w-[23px]')}
                 </span>
               </Link>
             </li>
