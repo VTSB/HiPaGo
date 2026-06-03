@@ -73,11 +73,10 @@ export function MobileSearchPage() {
   // Auto-fetch of suggestions.
   useSearch();
 
-  // Focus the input on mount so tapping the Search tab drops into typing.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, []);
+  // Intentionally NO auto-focus on mount. Raising the mobile keyboard the
+  // instant the search page opens — whether via the Search tab or a tag link —
+  // is jarring and covers the content. The user taps the input when they
+  // actually want to type.
 
   // Load popular tags once DB is ready.
   useEffect(() => {

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n/useT';
 import { useHaptic } from '@/shared/hooks/useHaptic';
+import { useKeyboardOpen } from '@/shared/hooks/useKeyboardOpen';
 import { useSettingsStore } from '@/lib/store/settings';
 import { BOTTOM_TABS } from '@/shared/nav/navItems';
 
@@ -24,6 +25,7 @@ export function BottomNav() {
   const t = useT();
   const haptic = useHaptic();
   const locale = useSettingsStore((s) => s.locale);
+  const keyboardOpen = useKeyboardOpen();
 
   const activeIndex = BOTTOM_TABS.findIndex((tab) => tab.matches(pathname));
 
@@ -55,7 +57,10 @@ export function BottomNav() {
   return (
     <nav
       aria-label={t('nav.browse')}
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-center md:hidden"
+      aria-hidden={keyboardOpen || undefined}
+      className={`pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-center transition-[transform,opacity] duration-200 ease-out md:hidden ${
+        keyboardOpen ? 'translate-y-[200%] opacity-0' : 'translate-y-0 opacity-100'
+      }`}
     >
       {/* Compact floating command bar — hugs its content (centered), tabs
           grouped close together (Figma-toolbar feel). Solid dark surface + soft
