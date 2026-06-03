@@ -15,7 +15,7 @@ interface TagChipProps {
   displayName?: string;
   /** Render as Link to search page (default true) */
   linked?: boolean;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
 }
 
 export function TagChip({ tag, type, displayName, linked = true, size = 'sm' }: TagChipProps) {
@@ -24,9 +24,9 @@ export function TagChip({ tag, type, displayName, linked = true, size = 'sm' }: 
 
   const koreanName = displayName ?? localizedName;
   const label = (koreanName ?? tag) + TAG_TYPE_DISPLAY[type];
-  const cls = `whitespace-nowrap rounded-full font-medium ${getTagColor(type)} ${
-    size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-[13px]'
-  }`;
+  const sizeCls =
+    size === 'sm' ? 'px-2 py-0.5 text-xs' : size === 'lg' ? 'px-4 py-2 text-sm' : 'px-3 py-1 text-[13px]';
+  const cls = `whitespace-nowrap rounded-full font-medium ${getTagColor(type)} ${sizeCls}`;
 
   if (!linked) {
     return <span className={cls}>{label}</span>;

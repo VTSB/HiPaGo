@@ -210,6 +210,8 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
     <div className="relative w-full max-w-md">
       <form onSubmit={handleSubmit}>
         <SearchInput
+          leadingIcon
+          pill
           value={value}
           onChange={updateValue}
           onKeyDown={handleKeyDown}

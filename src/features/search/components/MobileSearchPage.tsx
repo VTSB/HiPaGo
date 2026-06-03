@@ -180,7 +180,7 @@ export function MobileSearchPage() {
                   role="option"
                   aria-selected={false}
                   onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(s.tag, s.tagType, s.localName); }}
-                  className="flex min-h-[48px] w-full items-center justify-between gap-3 rounded-2xl px-2 py-2 text-left transition-colors active:bg-zinc-200/60 dark:active:bg-zinc-800/60"
+                  className="flex min-h-[48px] w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
                 >
                   <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="sm" />
                   <span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
@@ -199,7 +199,7 @@ export function MobileSearchPage() {
               <p className="mb-3 px-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">
                 {t('search.popularTags')}
               </p>
-              <div className="-mx-4 flex gap-2 overflow-x-auto scrollbar-hide px-4 pb-1">
+              <div className="-mx-4 flex items-center gap-2.5 overflow-x-auto scrollbar-hide px-4 py-1.5">
                 {popularTags.map((s, i) => (
                   <button
                     key={`${s.tagType}-${s.tag}-${i}`}
@@ -207,7 +207,7 @@ export function MobileSearchPage() {
                     onMouseDown={(e) => { e.preventDefault(); handlePopularClick(s); }}
                     className="shrink-0 rounded-full transition-transform active:scale-95"
                   >
-                    <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="sm" />
+                    <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="lg" />
                   </button>
                 ))}
               </div>
@@ -231,11 +231,11 @@ export function MobileSearchPage() {
               </div>
               <ul>
                 {recentSearches.slice(0, 12).map((q) => (
-                  <li key={q} className="flex items-center gap-2">
+                  <li key={q} className="relative">
                     <button
                       type="button"
                       onMouseDown={(e) => { e.preventDefault(); handleHistoryClick(q); }}
-                      className="min-w-0 flex-1 truncate rounded-2xl py-3.5 pl-1 text-left text-base font-semibold text-zinc-800 transition-colors active:bg-zinc-200/60 dark:text-zinc-100 dark:active:bg-zinc-800/60"
+                      className="block w-full truncate rounded-xl py-3.5 pl-3 pr-14 text-left text-base font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
                     >
                       {q.replace(/_/g, ' ')}
                     </button>
@@ -243,9 +243,9 @@ export function MobileSearchPage() {
                       type="button"
                       aria-label={`${t('search.clearHistory')}: ${q}`}
                       onMouseDown={(e) => { e.preventDefault(); removeRecentSearch(q); }}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-zinc-400 active:bg-zinc-200/60 active:text-zinc-600 dark:text-zinc-500 dark:active:bg-zinc-800/60 dark:active:text-zinc-300"
+                      className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-zinc-400 transition-colors hover:text-zinc-600 active:bg-zinc-300/60 dark:text-zinc-500 dark:hover:text-zinc-300 dark:active:bg-zinc-700/60"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-[19px] w-[19px]">
                         <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
                       </svg>
                     </button>
