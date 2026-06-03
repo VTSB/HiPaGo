@@ -24,10 +24,11 @@ export function BottomNav() {
       aria-label={t('nav.browse')}
       className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-center md:hidden"
     >
-      {/* Compact floating command bar — hugs its content (centered), icons
+      {/* Compact floating command bar — hugs its content (centered), tabs
           grouped close together (Figma-toolbar feel). Solid dark surface + soft
-          diffuse shadow. Active tab = icon inside a FILLED accent rounded square. */}
-      <ul className="pointer-events-auto flex items-center gap-1 rounded-[20px] bg-zinc-900 px-2 py-2 shadow-[0_12px_36px_-8px_rgba(0,0,0,0.5)] ring-1 ring-white/10">
+          diffuse shadow. Active tab = icon inside a FILLED accent rounded square
+          with an accent label below. */}
+      <ul className="pointer-events-auto flex items-end gap-1 rounded-[26px] bg-zinc-900 px-2 py-2 shadow-[0_12px_36px_-8px_rgba(0,0,0,0.5)] ring-1 ring-white/10">
         {BOTTOM_TABS.map((tab) => {
           const active = tab.matches(pathname);
           return (
@@ -35,18 +36,24 @@ export function BottomNav() {
               <Link
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
-                aria-label={t(tab.key)}
                 onClick={() => haptic.light()}
-                className="flex h-12 w-12 items-center justify-center"
+                className="flex w-[60px] flex-col items-center gap-1 py-0.5"
               >
                 <span
-                  className={`flex h-11 w-11 items-center justify-center rounded-2xl transition-colors ${
+                  className={`flex h-9 w-9 items-center justify-center rounded-[14px] transition-colors ${
                     active
                       ? 'bg-[#007AFF] text-white'
                       : 'text-zinc-400 active:bg-white/5 active:text-zinc-200'
                   }`}
                 >
-                  {tab.icon('h-[23px] w-[23px]')}
+                  {tab.icon('h-[22px] w-[22px]')}
+                </span>
+                <span
+                  className={`text-[10px] font-semibold leading-none tracking-tight transition-colors ${
+                    active ? 'text-[#3b9bff]' : 'text-zinc-500'
+                  }`}
+                >
+                  {t(tab.key)}
                 </span>
               </Link>
             </li>
