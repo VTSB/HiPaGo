@@ -30,7 +30,7 @@ export function Header() {
   return (
     <header
       ref={headerRef}
-      className="sticky top-0 z-50 border-b border-zinc-200 bg-white/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm will-change-transform dark:border-zinc-800 dark:bg-zinc-950/90"
+      className="sticky top-0 z-50 hidden border-b border-zinc-200 bg-white/90 pt-[env(safe-area-inset-top)] backdrop-blur-sm will-change-transform md:block dark:border-zinc-800 dark:bg-zinc-950/90"
       style={{ transform: 'translateY(calc(var(--list-chrome, 0) * -100%))' }}
     >
       <div className="mx-auto flex min-h-14 max-w-7xl items-center gap-3 px-4 py-2 md:gap-4">

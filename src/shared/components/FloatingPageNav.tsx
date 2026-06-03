@@ -442,9 +442,10 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           onTouchEnd={onTouchEnd}
           onPointerDown={resetIdle}
           className={[
-            // Mobile: float above the BottomNav (--bottom-nav-h) + 0.5rem gap.
-            // Desktop (>=md): bottom-right at bottom-4 (no bottom nav there).
-            'fixed bottom-[calc(var(--bottom-nav-h)+0.5rem)] z-40 flex items-center gap-1 rounded-full bg-zinc-900/90 px-2.5 py-1.5 text-base text-white shadow-xl backdrop-blur-sm md:bottom-4 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
+            // Mobile: small chip tucked at the very bottom BEHIND the bottom nav
+            // (nav is z-40 and paints on top — App Store-clean bar). Desktop
+            // (>=md): unchanged bottom-right pill at bottom-4, above content.
+            'fixed bottom-2 z-30 flex items-center gap-0.5 rounded-full bg-zinc-900/90 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm md:bottom-4 md:z-40 md:gap-1 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
             // D1: mobile center, desktop bottom-right.
             'left-1/2 -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0',
             // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
@@ -461,7 +462,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             // at var=1 the pill is fully off-screen). `-translate-x-1/2` (D1) composes
             // through Tailwind v4's single `translate:` property. `sm:translate-y-0`
             // keeps desktop put — byte-identical to before on ≥sm.
-            'translate-y-[calc(var(--list-chrome,0)*(100%_+_var(--bottom-nav-h)_+_0.5rem))] md:translate-y-0',
+            'translate-y-[calc(var(--list-chrome,0)*(100%_+_0.5rem))] md:translate-y-0',
             // D8: idle fade (mobile only). When the pill is hidden it is off-screen,
             // so the fade only reads while it is (partially) shown.
             idle ? 'opacity-40 md:opacity-100' : '',
@@ -514,7 +515,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           <button
             onClick={goPrevWithBounce}
             disabled={atFirst}
-            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-30 sm:min-h-11 sm:min-w-11 sm:hover:bg-white/20 dark:active:bg-black/20 sm:dark:hover:bg-black/20"
+            className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-30 md:min-h-11 md:min-w-11 md:hover:bg-white/20 dark:active:bg-black/20 md:dark:hover:bg-black/20"
             aria-label={t('pageNav.prev')}
           >
             <svg
@@ -565,7 +566,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
                   startEditing();
                 }
               }}
-              className="inline-flex min-h-12 min-w-[7.25rem] cursor-text items-center justify-center rounded-full px-3 text-center leading-none tabular-nums whitespace-nowrap active:bg-white/10 sm:min-h-11 sm:min-w-[5rem] sm:px-2 sm:hover:bg-white/10 dark:active:bg-black/10 sm:dark:hover:bg-black/10"
+              className="inline-flex min-h-8 min-w-[4.5rem] cursor-text items-center justify-center rounded-full px-2 text-center leading-none tabular-nums whitespace-nowrap active:bg-white/10 md:min-h-11 md:min-w-[5rem] md:hover:bg-white/10 dark:active:bg-black/10 md:dark:hover:bg-black/10"
               aria-label={t('pageNav.jumpToPage')}
             >
               {viewingPage}&nbsp;/&nbsp;{totalPages.toLocaleString()}
@@ -576,7 +577,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           <button
             onClick={goNextWithBounce}
             disabled={atLast}
-            className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-30 sm:min-h-11 sm:min-w-11 sm:hover:bg-white/20 dark:active:bg-black/20 sm:dark:hover:bg-black/20"
+            className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-30 md:min-h-11 md:min-w-11 md:hover:bg-white/20 dark:active:bg-black/20 md:dark:hover:bg-black/20"
             aria-label={t('pageNav.next')}
           >
             <svg

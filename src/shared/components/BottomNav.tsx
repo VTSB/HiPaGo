@@ -22,7 +22,7 @@ export function BottomNav() {
   return (
     <nav
       aria-label={t('nav.browse')}
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200/80 bg-white/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg md:hidden dark:border-zinc-800/80 dark:bg-zinc-950/90"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-black/5 bg-white/80 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl backdrop-saturate-150 md:hidden dark:border-white/10 dark:bg-zinc-950/75"
     >
       <ul className="mx-auto flex max-w-md items-stretch">
         {BOTTOM_TABS.map((tab) => {
@@ -33,14 +33,14 @@ export function BottomNav() {
                 href={tab.href}
                 aria-current={active ? 'page' : undefined}
                 onClick={() => haptic.light()}
-                className={`flex h-14 flex-col items-center justify-center gap-0.5 transition-colors ${
+                className={`flex h-[52px] flex-col items-center justify-center gap-1 transition-colors ${
                   active
-                    ? 'text-zinc-900 dark:text-zinc-50'
+                    ? 'text-[#007AFF] dark:text-[#0A84FF]'
                     : 'text-zinc-400 active:text-zinc-600 dark:text-zinc-500 dark:active:text-zinc-300'
                 }`}
               >
-                {tab.icon('h-[22px] w-[22px]')}
-                <span className="text-[10px] font-semibold leading-none tracking-tight">
+                {tab.icon('h-[26px] w-[26px]')}
+                <span className="text-[10px] font-medium leading-none tracking-tight">
                   {t(tab.key)}
                 </span>
               </Link>

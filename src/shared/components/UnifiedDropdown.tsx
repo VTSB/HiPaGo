@@ -70,6 +70,12 @@ interface UnifiedDropdownProps {
    * candidate name. Driven by the active input token's script, not the locale.
    */
   koreanDisplay?: boolean;
+  /**
+   * When true the list renders in normal block flow (full-width, no overlay)
+   * for the mobile inline search page. Default false keeps the desktop floating
+   * dropdown (absolute, z-50) behaviour unchanged.
+   */
+  inline?: boolean;
 }
 
 export function UnifiedDropdown({
@@ -81,6 +87,7 @@ export function UnifiedDropdown({
   onClearRecents,
   showingPopular = false,
   koreanDisplay = false,
+  inline = false,
 }: UnifiedDropdownProps) {
   const t = useT();
 
@@ -100,12 +107,16 @@ export function UnifiedDropdown({
   return (
     <div
       role="listbox"
-      className="absolute top-full mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 z-50 max-h-80 overflow-y-auto"
+      className={
+        inline
+          ? 'w-full px-1'
+          : 'absolute top-full mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 z-50 max-h-80 overflow-y-auto'
+      }
     >
       {/* ── Recent Searches section ── */}
       {hasRecent && (
         <>
-          <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
+          <div className={`flex items-center justify-between px-3 py-2 ${inline ? 'pt-3' : 'border-b border-zinc-200 dark:border-zinc-700'}`}>
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
               {t('search.recentSearches')}
             </span>
@@ -141,7 +152,7 @@ export function UnifiedDropdown({
                     onSelectRecent(item.query);
                   }
                 }}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm cursor-pointer ${
+                className={`w-full flex items-center gap-2 px-3 ${inline ? 'py-3 min-h-[44px] rounded-2xl' : 'py-2'} text-left text-sm cursor-pointer ${
                   isSelected ? 'bg-zinc-100 dark:bg-zinc-700' : ''
                 } hover:bg-zinc-100 dark:hover:bg-zinc-700`}
               >
@@ -187,7 +198,7 @@ export function UnifiedDropdown({
                     e.stopPropagation();
                     onRemoveRecent(item.query);
                   }}
-                  className="ml-auto flex-shrink-0 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                  className={`ml-auto flex-shrink-0 ${inline ? 'flex h-9 w-9 items-center justify-center' : 'p-0.5'} text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300`}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -208,8 +219,12 @@ export function UnifiedDropdown({
       {hasSuggestions && (
         <>
           <div
-            className={`flex items-center px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 ${
-              hasRecent ? 'border-t' : ''
+            className={`flex items-center px-3 py-2 ${
+              inline
+                ? hasRecent
+                  ? 'pt-4'
+                  : ''
+                : `border-b border-zinc-200 dark:border-zinc-700 ${hasRecent ? 'border-t' : ''}`
             }`}
           >
             <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
@@ -233,7 +248,7 @@ export function UnifiedDropdown({
                   e.preventDefault();
                   onSelectSuggestion(suggestion.tag, suggestion.tagType, suggestion.localName);
                 }}
-                className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
+                className={`w-full flex items-center justify-between px-4 ${inline ? 'py-3 min-h-[44px] rounded-2xl' : 'py-2 first:rounded-t-lg last:rounded-b-lg'} text-left text-sm transition-colors ${
                   isSelected ? 'bg-zinc-100 dark:bg-zinc-700' : ''
                 } hover:bg-zinc-100 dark:hover:bg-zinc-700`}
               >

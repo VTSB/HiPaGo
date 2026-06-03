@@ -11,12 +11,13 @@
 }
 
 /* z-index tiers (documented; values are applied as Tailwind classes):
-     bottom nav      z-30
-     floating pill   z-40
-     sticky header   z-50
-     drawers/banners z-[60]
+     floating page pill (mobile)  z-30   (BEHIND the bottom nav — App Store-clean bar)
+     bottom nav                   z-40   (paints on top of the mobile pill)
+     floating page pill (desktop) z-40   (md: — no bottom nav at >=md)
+     sticky header (desktop only) z-50
+     drawers/banners              z-[60]
      bottom sheets / page-jump modal  z-[70]   (must outrank header + nav)
-     db error overlay z-[100]                  (always on top) */
+     db error overlay             z-[100]      (always on top) */
 
 @theme inline {
   --color-background: var(--background);

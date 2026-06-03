@@ -12,7 +12,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           original pb-6 — its FloatingPageNav pill stays bottom-right and never
           overlays content. The pb breakpoint is md (not sm) to match where the
           bottom nav hides. */}
-      <main className="mx-auto max-w-7xl px-4 pt-4 pb-[calc(var(--bottom-nav-h)+3rem)] sm:pt-6 md:pb-6">
+      <main className="mx-auto max-w-7xl px-4 pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(var(--bottom-nav-h)+3rem)] md:pt-6 md:pb-6">
         {children}
       </main>
       <BottomNav />

@@ -155,8 +155,8 @@ export function GalleryListView() {
 
   return (
     <div>
-      <div className="mb-5 flex flex-col gap-3 sm:mb-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-2xl font-bold leading-tight text-zinc-900 dark:text-zinc-100">
+      <div className="mb-4 flex flex-row items-center justify-between gap-3">
+        <h1 className="min-w-0 truncate text-2xl font-bold leading-tight text-zinc-900 dark:text-zinc-100">
           {t(`sort.${sort}` as const)}
           {totalLength > 0 && (
             <span className="ml-2 text-lg font-normal text-zinc-500">
@@ -164,7 +164,9 @@ export function GalleryListView() {
             </span>
           )}
         </h1>
-        <SortSelector value={sort} onChange={handleSortChange} />
+        <div className="shrink-0">
+          <SortSelector value={sort} onChange={handleSortChange} />
+        </div>
       </div>
 
       {isInitialLoading ? (

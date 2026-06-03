@@ -11,6 +11,10 @@ export interface SearchInputProps {
   placeholder?: string;
   inputRef: React.RefObject<HTMLInputElement | null>;
   disabled?: boolean;
+  /** Render a leading magnifier icon (Toss-style pill search). Adds left padding. */
+  leadingIcon?: boolean;
+  /** Override the container/input shape, e.g. 'rounded-full' for a pill. */
+  pill?: boolean;
 }
 
 export function SearchInput({
@@ -23,9 +27,25 @@ export function SearchInput({
   placeholder,
   inputRef,
   disabled,
+  leadingIcon = false,
+  pill = false,
 }: SearchInputProps) {
   return (
     <div className="relative flex items-center w-full">
+      {leadingIcon && (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
+          className="pointer-events-none absolute left-4 h-5 w-5 text-zinc-500"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.2-3.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
       <input
         ref={inputRef}
         type="text"
@@ -34,9 +54,9 @@ export function SearchInput({
         onKeyDown={onKeyDown}
         onFocus={onFocus}
         onBlur={onBlur}
-        className="h-12 w-full rounded-xl border border-zinc-700 bg-zinc-900 px-4 pr-10
-          text-base text-white outline-none transition-colors focus:border-zinc-500 sm:h-10 sm:rounded-lg sm:px-3 sm:pr-8 sm:text-sm
-          placeholder:text-zinc-500"
+        className={`h-12 w-full border-0 bg-zinc-800/70 text-base text-white outline-none ring-0 transition-colors focus:bg-zinc-800 sm:h-10 sm:text-sm placeholder:text-zinc-500 ${
+          pill ? 'rounded-full' : 'rounded-2xl sm:rounded-xl'
+        } ${leadingIcon ? 'pl-12 sm:pl-10' : 'px-4 sm:px-3'} ${value && !disabled ? 'pr-10 sm:pr-8' : 'pr-4 sm:pr-3'}`}
         placeholder={placeholder}
         disabled={disabled}
       />
