@@ -53,7 +53,7 @@ export function SortSelector({ value, onChange }: { value: SortOrder; onChange: 
         onClick={() => setSheetOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={sheetOpen}
-        className="flex items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-colors active:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:active:bg-zinc-700"
+        className="flex items-center gap-1.5 rounded-xl bg-[var(--control)] px-3 py-2 text-sm font-medium text-[var(--control-fg)] transition-colors active:bg-[var(--control-hover)]"
       >
         {/* Up/down arrows glyph (⇅) as inline SVG */}
         <svg

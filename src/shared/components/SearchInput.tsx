@@ -54,7 +54,7 @@ export function SearchInput({
         onKeyDown={onKeyDown}
         onFocus={onFocus}
         onBlur={onBlur}
-        className={`h-12 w-full border-0 bg-zinc-800/70 text-base text-white outline-none ring-0 transition-colors focus:bg-zinc-800 sm:h-10 sm:text-sm placeholder:text-zinc-500 ${
+        className={`h-12 w-full border-0 bg-[var(--control)] text-base text-[var(--control-fg)] outline-none ring-0 transition-colors focus:bg-[var(--control-hover)] sm:h-10 sm:text-sm placeholder:text-[var(--control-placeholder)] ${
           pill ? 'rounded-2xl' : 'rounded-2xl sm:rounded-xl'
         } ${leadingIcon ? 'pl-12 sm:pl-10' : 'px-4 sm:px-3'} ${value && !disabled ? 'pr-10 sm:pr-8' : 'pr-4 sm:pr-3'}`}
         placeholder={placeholder}

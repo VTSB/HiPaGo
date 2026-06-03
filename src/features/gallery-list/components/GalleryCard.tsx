@@ -50,7 +50,7 @@ function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
 
 function CardSkeleton() {
   return (
-    <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-200 dark:bg-zinc-800 animate-pulse">
+    <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse">
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 pt-6 sm:pt-8 pb-2">
         <div className="h-4 w-3/4 rounded bg-zinc-400/50 dark:bg-zinc-600/50" />
         <div className="mt-1.5 flex gap-1">
@@ -127,7 +127,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       }}
       onPointerEnter={onPrefetch}
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-800 sm:hover:shadow-lg">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:bg-zinc-800 sm:hover:shadow-lg">
         {block.thumbnail ? (
           <AbortableImage
             src={resolveThumbnailUrl(block.thumbnail)}

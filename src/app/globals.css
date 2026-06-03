@@ -3,6 +3,13 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Semantic control-surface tokens. One source of truth for filled controls
+     (search input, selects, sort chip, …) so they stay color-consistent.
+     Flip under .dark below. */
+  --control: #f4f4f5;            /* zinc-100 */
+  --control-hover: #e4e4e7;      /* zinc-200 */
+  --control-fg: #18181b;         /* zinc-900 */
+  --control-placeholder: #a1a1aa; /* zinc-400 */
   /* Vertical space the FLOATING bottom tab bar occupies from the screen bottom
      (bar height h-16 + its bottom margin + the iOS safe-area inset). Single
      source of truth consumed by the (main) layout bottom padding and the
@@ -34,6 +41,10 @@
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
+  --control: #27272a;            /* zinc-800 */
+  --control-hover: #3f3f46;      /* zinc-700 */
+  --control-fg: #f4f4f5;         /* zinc-100 */
+  --control-placeholder: #71717a; /* zinc-500 */
 }
 
 html {

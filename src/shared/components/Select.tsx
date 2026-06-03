@@ -109,7 +109,7 @@ export function Select({ value, options, onChange, className = '', 'aria-label':
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-activedescendant={open && focusedIndex >= 0 ? `${listboxId}-${focusedIndex}` : undefined}
-        className="flex h-12 w-full items-center justify-between gap-2 rounded-xl border border-zinc-300 bg-zinc-50 px-4 text-base font-medium text-zinc-800 outline-none transition-colors active:bg-zinc-100 focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 sm:h-9 sm:rounded-md sm:px-3 sm:text-sm sm:font-normal sm:hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:active:bg-zinc-800 dark:focus:border-zinc-500 sm:dark:hover:bg-zinc-800"
+        className="flex h-12 w-full items-center justify-between gap-2 rounded-xl border-0 bg-[var(--control)] px-4 text-base font-medium text-[var(--control-fg)] outline-none ring-0 transition-colors active:bg-[var(--control-hover)] sm:h-9 sm:rounded-lg sm:px-3 sm:text-sm sm:font-normal sm:hover:bg-[var(--control-hover)]"
       >
         <span className="truncate">{selected?.label ?? value}</span>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${open ? 'rotate-180' : ''}`}>
@@ -121,7 +121,7 @@ export function Select({ value, options, onChange, className = '', 'aria-label':
           ref={listRef}
           id={listboxId}
           role="listbox"
-          className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-lg sm:rounded-md dark:border-zinc-700 dark:bg-zinc-800"
+          className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl bg-white py-1 shadow-xl ring-1 ring-black/5 sm:rounded-lg dark:bg-zinc-800 dark:ring-white/10"
         >
           {options.map((opt, idx) => (
             <li
