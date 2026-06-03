@@ -55,7 +55,7 @@ export function SearchInput({
         onFocus={onFocus}
         onBlur={onBlur}
         className={`h-12 w-full border-0 bg-zinc-800/70 text-base text-white outline-none ring-0 transition-colors focus:bg-zinc-800 sm:h-10 sm:text-sm placeholder:text-zinc-500 ${
-          pill ? 'rounded-full' : 'rounded-2xl sm:rounded-xl'
+          pill ? 'rounded-2xl' : 'rounded-2xl sm:rounded-xl'
         } ${leadingIcon ? 'pl-12 sm:pl-10' : 'px-4 sm:px-3'} ${value && !disabled ? 'pr-10 sm:pr-8' : 'pr-4 sm:pr-3'}`}
         placeholder={placeholder}
         disabled={disabled}

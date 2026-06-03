@@ -182,7 +182,7 @@ export function MobileSearchPage() {
                   onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(s.tag, s.tagType, s.localName); }}
                   className="flex min-h-[48px] w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
                 >
-                  <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="sm" />
+                  <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="lg" />
                   <span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
                     {s.amount.toLocaleString()}
                   </span>

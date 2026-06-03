@@ -148,7 +148,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
         <div
           className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/80 via-black/40 sm:from-black/95 sm:via-black/70'} to-transparent pt-6 sm:pt-10`}
         >
-          <div className="px-3 pt-1 pb-3 backdrop-blur-sm sm:px-2 sm:pt-1.5 sm:pb-2">
+          <div className="px-2.5 pt-1.5 pb-2.5 backdrop-blur-sm sm:px-2 sm:pt-1.5 sm:pb-2">
             <h3 className="line-clamp-2 text-[13px] leading-tight font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)] sm:text-sm sm:leading-tight">
               {block.title || `#${block.id}`}
             </h3>
