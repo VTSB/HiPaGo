@@ -13,6 +13,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useT } from '@/lib/i18n/useT';
+import { BackBar } from '@/shared/components/BackBar';
 import licenses from '@/lib/licenses.json';
 
 type Entry = {
@@ -90,19 +91,14 @@ export default function LicensesPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      {/* Back link sits above the h1 on mobile (top-left, platform convention),
-          and inline on the right on ≥sm where there's room. */}
-      <Link
-        href="/settings"
-        className="-mx-2 mb-2 inline-flex min-h-11 items-center gap-1 px-2 text-sm text-zinc-500 hover:text-zinc-700 sm:hidden dark:text-zinc-400 dark:hover:text-zinc-200"
-      >
-        ← {t('nav.settings')}
-      </Link>
+      {/* Mobile (stacked route): sticky back bar with title. Desktop: inline
+          back link next to the h1 (header stays visible there). */}
+      <BackBar title={t('licenses.title')} fallbackHref="/settings" />
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{t('licenses.title')}</h1>
         <Link
           href="/settings"
-          className="hidden text-sm text-zinc-500 hover:text-zinc-700 sm:inline dark:text-zinc-400 dark:hover:text-zinc-200"
+          className="hidden text-sm text-zinc-500 hover:text-zinc-700 md:inline dark:text-zinc-400 dark:hover:text-zinc-200"
         >
           ← {t('nav.settings')}
         </Link>

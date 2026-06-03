@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
 import { recordVisit } from '@/lib/db/gallery';
 import { Spinner } from '@/shared/components/Spinner';
+import { BackBar } from '@/shared/components/BackBar';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n, useTagLocalName } from '@/lib/i18n/useTagI18n';
 import { useGalleryBlock } from '@/features/gallery-list/hooks/useGalleryBlock';
@@ -198,9 +199,12 @@ export function GalleryDetail({ id }: { id: number }) {
 
   return (
     <div className="space-y-3 sm:space-y-6">
+      {/* Mobile: sticky back bar (← + title), replaces the tab bar on this
+          stacked route. Desktop: keep the inline back link (header stays). */}
+      <BackBar title={displayBlock.title || `#${id}`} onBack={goBackToList} />
       <button
         onClick={goBackToList}
-        className="-mx-2 inline-flex min-h-12 items-center gap-1 rounded-xl px-2 text-base font-medium text-zinc-500 active:bg-zinc-100 sm:min-h-11 sm:text-sm sm:hover:text-zinc-700 dark:text-zinc-400 dark:active:bg-zinc-900 sm:dark:hover:text-zinc-200"
+        className="-mx-2 hidden min-h-11 items-center gap-1 rounded-xl px-2 text-sm font-medium text-zinc-500 md:inline-flex md:hover:text-zinc-700 dark:text-zinc-400 dark:md:hover:text-zinc-200"
       >
         &larr; {t('detail.back')}
       </button>

@@ -95,3 +95,26 @@ export const BOTTOM_TABS: BottomTab[] = [
 export function isNavActive(pathname: string, href: string): boolean {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
 }
+
+/**
+ * Navigation history model: a route is either a ROOT TAB (shows the bottom tab
+ * bar, no back button) or a STACKED / pushed view (hides the tab bar, shows a
+ * top back bar). `/search` is the one split route — it is a root tab when it
+ * has no query and a stacked results view once a query is present.
+ *
+ * Stacked: gallery detail, licenses, and search results (`/search?q=`).
+ * Root: `/`, `/search` (no q), `/favorites`, `/history`, `/library`, `/settings`.
+ * (The reader lives in its own route group, not under (main), so it is never
+ *  classified here.)
+ */
+export function isStackedRoute(pathname: string, hasQuery: boolean): boolean {
+  if (pathname.startsWith('/gallery')) return true;
+  if (pathname.startsWith('/licenses')) return true;
+  if (pathname.startsWith('/search')) return hasQuery;
+  return false;
+}
+
+/** Inverse of isStackedRoute — true on the root tab destinations. */
+export function isRootTab(pathname: string, hasQuery: boolean): boolean {
+  return !isStackedRoute(pathname, hasQuery);
+}

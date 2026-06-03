@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BOTTOM_TABS, NAV_ITEMS, isNavActive } from '../navItems';
+import { BOTTOM_TABS, NAV_ITEMS, isNavActive, isStackedRoute, isRootTab } from '../navItems';
 
 describe('navItems — bottom tab set', () => {
   it('exposes exactly 4 mobile tabs in order', () => {
@@ -56,5 +56,37 @@ describe('navItems — desktop isNavActive', () => {
       '/library',
       '/settings',
     ]);
+  });
+});
+
+describe('navItems — root vs stacked route classification', () => {
+  it('treats the tab destinations as root (tab bar)', () => {
+    expect(isRootTab('/', false)).toBe(true);
+    expect(isRootTab('/library', false)).toBe(true);
+    expect(isRootTab('/favorites', false)).toBe(true);
+    expect(isRootTab('/history', false)).toBe(true);
+    expect(isRootTab('/settings', false)).toBe(true);
+  });
+
+  it('treats gallery detail and licenses as stacked', () => {
+    expect(isStackedRoute('/gallery/123', false)).toBe(true);
+    expect(isStackedRoute('/licenses', false)).toBe(true);
+    expect(isRootTab('/gallery/123', false)).toBe(false);
+  });
+
+  it('splits /search on the presence of a query', () => {
+    // entry (no q) is a root tab; results (q) is stacked
+    expect(isStackedRoute('/search', false)).toBe(false);
+    expect(isRootTab('/search', false)).toBe(true);
+    expect(isStackedRoute('/search', true)).toBe(true);
+    expect(isRootTab('/search', true)).toBe(false);
+  });
+
+  it('hasQuery only affects /search, not other routes', () => {
+    // a stray q on a root route must not make it stacked
+    expect(isStackedRoute('/', true)).toBe(false);
+    expect(isStackedRoute('/library', true)).toBe(false);
+    // and gallery stays stacked regardless of q
+    expect(isStackedRoute('/gallery/9', true)).toBe(true);
   });
 });

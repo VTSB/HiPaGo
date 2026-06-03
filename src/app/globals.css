@@ -9,6 +9,10 @@
      floating page chip anchor (FloatingPageNav). The bar is md:hidden, so this
      only matters below the md breakpoint. */
   --bottom-nav-h: calc(5rem + env(safe-area-inset-bottom));
+  /* Bottom offset of the floating page chip (FloatingPageNav). Default = above
+     the tab bar; MainShell overrides it to sit near the bottom on stacked
+     routes where the tab bar is hidden. */
+  --page-chip-bottom: calc(var(--bottom-nav-h) + 0.5rem);
 }
 
 /* z-index tiers (documented; values are applied as Tailwind classes):

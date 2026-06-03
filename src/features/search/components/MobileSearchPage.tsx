@@ -152,9 +152,37 @@ export function MobileSearchPage() {
   const showResults = committed;
 
   return (
-    <div>
-      <div className="mb-6 w-full">
-        <form onSubmit={handleSubmit}>
+    // On a results route (/search?q=) this is a stacked view and the (main)
+    // layout drops its top padding, so add the status-bar safe-area here.
+    <div className={urlQuery ? 'pt-[calc(0.5rem+env(safe-area-inset-top))]' : undefined}>
+      <div className="mb-6 flex w-full items-center gap-1.5">
+        {/* On a results route (/search?q=) this is a stacked view: show a ←
+            back chevron to the left of the box (the tab bar is hidden). Pops
+            one history level so repeated searches unwind in reverse order. */}
+        {urlQuery && (
+          <button
+            type="button"
+            aria-label={t('detail.back')}
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.history.length > 1) router.back();
+              else router.replace('/search');
+            }}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-zinc-700 transition-colors active:bg-zinc-200/60 dark:text-zinc-200 dark:active:bg-zinc-800/60"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              aria-hidden="true"
+              className="h-6 w-6"
+            >
+              <path d="m15 5-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
+        <form onSubmit={handleSubmit} className="min-w-0 flex-1">
           <SearchInput
             leadingIcon
             pill
