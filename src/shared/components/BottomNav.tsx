@@ -24,9 +24,10 @@ export function BottomNav() {
       aria-label={t('nav.browse')}
       className="pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] md:hidden"
     >
-      {/* Floating rounded bar — detached from the screen edges, moderately
-          rounded corners (not a full pill), elevated translucent surface. */}
-      <ul className="pointer-events-auto mx-3 flex items-stretch rounded-2xl border border-black/5 bg-white/85 shadow-xl backdrop-blur-xl backdrop-saturate-150 dark:border-white/10 dark:bg-zinc-900/85">
+      {/* Floating rounded bar — detached from the edges, moderately rounded
+          corners (not a full pill). SOLID surface + a soft diffuse shadow reads
+          clean/premium; a translucent+blur bar looked murky over dark content. */}
+      <ul className="pointer-events-auto mx-4 flex items-stretch rounded-[20px] bg-white shadow-[0_12px_36px_-8px_rgba(0,0,0,0.45)] ring-1 ring-black/5 dark:bg-zinc-900 dark:ring-white/10">
         {BOTTOM_TABS.map((tab) => {
           const active = tab.matches(pathname);
           return (
