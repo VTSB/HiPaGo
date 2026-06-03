@@ -3,10 +3,21 @@ import type { Locale } from '@/lib/store/settings';
 const translations = {
   // Header nav
   'nav.browse': { en: 'Browse', ko: '둘러보기' },
+  'nav.search': { en: 'Search', ko: '검색' },
   'nav.favorites': { en: 'Favorites', ko: '즐겨찾기' },
   'nav.history': { en: 'History', ko: '기록' },
   'nav.library': { en: 'Library', ko: '라이브러리' },
+  'nav.saved': { en: 'Library', ko: '보관함' },
   'nav.settings': { en: 'Settings', ko: '설정' },
+
+  // 보관함 hub — segmented control (mobile merged tab)
+  'saved.title': { en: 'Library', ko: '보관함' },
+  'saved.seg.favorites': { en: 'Favorites', ko: '즐겨찾기' },
+  'saved.seg.history': { en: 'History', ko: '기록' },
+  'saved.seg.downloads': { en: 'Downloads', ko: '다운로드' },
+
+  // Sort sheet (mobile)
+  'sort.sheet.title': { en: 'Sort by', ko: '정렬' },
 
   // Search
   'search.placeholder': { en: 'Search tags... (Ctrl+K)', ko: '태그 검색... (Ctrl+K)' },

@@ -3,7 +3,20 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Mobile bottom tab bar height including the iOS safe-area inset. Single
+     source of truth consumed by the (main) layout bottom padding and the
+     floating page chip anchor (FloatingPageNav). The bar is md:hidden, so this
+     only matters below the md breakpoint. */
+  --bottom-nav-h: calc(3.5rem + env(safe-area-inset-bottom));
 }
+
+/* z-index tiers (documented; values are applied as Tailwind classes):
+     bottom nav      z-30
+     floating pill   z-40
+     sticky header   z-50
+     drawers/banners z-[60]
+     bottom sheets / page-jump modal  z-[70]   (must outrank header + nav)
+     db error overlay z-[100]                  (always on top) */
 
 @theme inline {
   --color-background: var(--background);

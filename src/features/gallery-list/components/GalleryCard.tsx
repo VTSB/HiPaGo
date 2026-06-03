@@ -51,7 +51,7 @@ function shouldBlur(block: GalleryBlock, blurTags: string[]): boolean {
 function CardSkeleton() {
   return (
     <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-200 dark:bg-zinc-800 animate-pulse">
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 pt-8 pb-2">
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 pt-6 sm:pt-8 pb-2">
         <div className="h-4 w-3/4 rounded bg-zinc-400/50 dark:bg-zinc-600/50" />
         <div className="mt-1.5 flex gap-1">
           <div className="h-5 w-12 rounded-full bg-zinc-400/50 dark:bg-zinc-600/50" />
@@ -146,10 +146,10 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
           </div>
         )}
         <div
-          className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/95 via-black/70'} to-transparent pt-10`}
+          className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${blurred ? 'from-black/60 via-black/30' : 'from-black/80 via-black/40 sm:from-black/95 sm:via-black/70'} to-transparent pt-6 sm:pt-10`}
         >
-          <div className="px-3 pt-2 pb-3 backdrop-blur-sm sm:px-2 sm:pt-1.5 sm:pb-2">
-            <h3 className="line-clamp-2 text-base font-semibold leading-snug text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)] sm:text-sm sm:leading-tight">
+          <div className="px-3 pt-1 pb-3 backdrop-blur-sm sm:px-2 sm:pt-1.5 sm:pb-2">
+            <h3 className="line-clamp-2 text-[13px] leading-tight font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.8)] sm:text-sm sm:leading-tight">
               {block.title || `#${block.id}`}
             </h3>
             {displayTags.length > 0 && (

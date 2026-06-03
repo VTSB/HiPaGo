@@ -153,6 +153,11 @@ export function SearchResults() {
     window.scrollTo({ top: 0 });
   }, [setViewingPage]);
 
+  // No query yet (dedicated /search entry before typing): render nothing so the
+  // search input + its recent/popular dropdown own the screen. Avoids a stray
+  // "Search: / No results" header on the empty search page.
+  if (!query.trim()) return null;
+
   return (
     <div>
       <div className="mb-4 flex items-start justify-between gap-4">

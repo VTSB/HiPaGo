@@ -14,7 +14,7 @@ import { useDbStatusStore } from '@/lib/store/db-status';
 import { useT } from '@/lib/i18n/useT';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
 
-export function SearchBar() {
+export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -55,6 +55,14 @@ export function SearchBar() {
 
   // Trigger auto-fetch of suggestions
   useSearch();
+
+  // Focus on mount when used as a dedicated search-page entry (mobile /search).
+  // Deferred a frame so the focus + soft keyboard fire after layout settles.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [autoFocus]);
 
   // selectedIndex is stored alongside the suggestions snapshot it belongs to.
   // When suggestions changes identity, the effective index is derived as -1

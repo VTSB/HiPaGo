@@ -59,7 +59,10 @@ const SCROLL_SUPPRESS_MS = 1600;
 const SWIPE_MAX_MS = 400;
 const SWIPE_MIN_DX = 50;
 const SWIPE_MAX_DY = 30;
-const MOBILE_BREAKPOINT_QUERY = '(max-width: 639px)';
+// Mobile = below the md breakpoint, matching where the BottomNav shows and the
+// desktop header nav hides. Keeps the pill from colliding with the bottom tab
+// bar in the 640-767 band.
+const MOBILE_BREAKPOINT_QUERY = '(max-width: 767px)';
 
 export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNavProps>(
   function FloatingPageNav(
@@ -439,9 +442,11 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
           onTouchEnd={onTouchEnd}
           onPointerDown={resetIdle}
           className={[
-            'fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 flex items-center gap-1 rounded-full bg-zinc-900/90 px-2.5 py-1.5 text-base text-white shadow-xl backdrop-blur-sm sm:bottom-4 sm:px-2 sm:py-1 sm:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
+            // Mobile: float above the BottomNav (--bottom-nav-h) + 0.5rem gap.
+            // Desktop (>=md): bottom-right at bottom-4 (no bottom nav there).
+            'fixed bottom-[calc(var(--bottom-nav-h)+0.5rem)] z-40 flex items-center gap-1 rounded-full bg-zinc-900/90 px-2.5 py-1.5 text-base text-white shadow-xl backdrop-blur-sm md:bottom-4 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
             // D1: mobile center, desktop bottom-right.
-            'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0',
+            'left-1/2 -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0',
             // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
             // property and `scale-*` to `scale:`, NOT to legacy `transform: translate(...)`.
             // The transition list names them directly. `translate` is intentionally
@@ -456,10 +461,10 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             // at var=1 the pill is fully off-screen). `-translate-x-1/2` (D1) composes
             // through Tailwind v4's single `translate:` property. `sm:translate-y-0`
             // keeps desktop put — byte-identical to before on ≥sm.
-            'translate-y-[calc(var(--list-chrome,0)*(100%_+_1rem_+_env(safe-area-inset-bottom)))] sm:translate-y-0',
+            'translate-y-[calc(var(--list-chrome,0)*(100%_+_var(--bottom-nav-h)_+_0.5rem))] md:translate-y-0',
             // D8: idle fade (mobile only). When the pill is hidden it is off-screen,
             // so the fade only reads while it is (partially) shown.
-            idle ? 'opacity-40 sm:opacity-100' : '',
+            idle ? 'opacity-40 md:opacity-100' : '',
             // D6: bounce pulse at boundaries.
             bouncing ? 'scale-105' : 'scale-100',
           ]
@@ -473,7 +478,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
               resetIdle();
             }}
             disabled={effectiveCols <= 2}
-            className="hidden sm:inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+            className="hidden md:inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
             aria-label={t('pageNav.shrinkGrid')}
           >
             <svg
@@ -491,7 +496,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
               resetIdle();
             }}
             disabled={effectiveCols >= 7}
-            className="hidden sm:inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
+            className="hidden md:inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-white/20 disabled:opacity-30 dark:hover:bg-black/20"
             aria-label={t('pageNav.growGrid')}
           >
             <svg
@@ -503,7 +508,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
               <path d="M8.75 3.75a.75.75 0 00-1.5 0v3.5h-3.5a.75.75 0 000 1.5h3.5v3.5a.75.75 0 001.5 0v-3.5h3.5a.75.75 0 000-1.5h-3.5v-3.5z" />
             </svg>
           </button>
-          <div className="hidden sm:block mx-0.5 h-4 w-px bg-white/20 dark:bg-black/20" />
+          <div className="hidden md:block mx-0.5 h-4 w-px bg-white/20 dark:bg-black/20" />
 
           {/* D2: prev chevron — SVG, 44×44. */}
           <button

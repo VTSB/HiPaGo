@@ -3,6 +3,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { DBDownload } from '@/lib/db/schema';
 
+// Stub matchMedia (jsdom doesn't ship it) so the useIsMobile branch in the new
+// LibraryHub wrapper resolves deterministically to "desktop" — on desktop the
+// hub renders <DownloadsView /> byte-equivalent to the old library page, keeping
+// these assertions valid. Mobile segmented-control behavior is covered by
+// qa-browser. Same stub shape as FloatingPageNav.test.tsx.
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
