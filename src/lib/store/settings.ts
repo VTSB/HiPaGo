@@ -17,8 +17,14 @@ interface SettingsStoreState {
   scrollZoom: number;
   /** Max image-cache size in bytes. null = unlimited, 0 = off (no caching). */
   imageCacheMaxBytes: number | null;
-  /** Base path for public downloads. null = platform default (Download/HiPaGo). */
-  downloadBasePath: string | null;
+  /**
+   * SAF tree URI for the user-picked download folder (content://…). null = no
+   * folder chosen yet (the first download prompts the picker). This mirrors the
+   * native persisted permission so the settings UI can show the chosen folder.
+   */
+  downloadTreeUri: string | null;
+  /** Display name of the chosen download folder, for the settings UI. */
+  downloadTreeName: string | null;
   setLocale: (locale: Locale) => void;
   setLanguage: (language: string) => void;
   setTheme: (theme: 'light' | 'dark') => void;
@@ -28,7 +34,7 @@ interface SettingsStoreState {
   setGridColumns: (cols: number) => void;
   setScrollZoom: (z: number) => void;
   setImageCacheMaxBytes: (bytes: number | null) => void;
-  setDownloadBasePath: (path: string | null) => void;
+  setDownloadTree: (uri: string | null, name: string | null) => void;
   addBlurTag: (tag: string) => void;
   removeBlurTag: (tag: string) => void;
 }
@@ -51,7 +57,13 @@ const V1_ADDED_BLUR_TAGS = SAFETY_BLUR_TAGS;
  *  Exported for unit tests. */
 export function migrateSettings(persisted: unknown, version: number): unknown {
   if (!persisted || typeof persisted !== 'object') return persisted;
-  let s = persisted as { blurTags?: string[]; imageCacheMaxBytes?: number | null; downloadBasePath?: string | null };
+  let s = persisted as {
+    blurTags?: string[];
+    imageCacheMaxBytes?: number | null;
+    downloadBasePath?: string | null;
+    downloadTreeUri?: string | null;
+    downloadTreeName?: string | null;
+  };
   // v1: union the safety blur tags once.
   if (version < 1) {
     const existing = Array.isArray(s.blurTags) ? s.blurTags : [];
@@ -64,6 +76,15 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   // v3: default the download base path for existing users (additive).
   if (version < 3 && s.downloadBasePath === undefined) {
     s = { ...s, downloadBasePath: null };
+  }
+  // v4: downloads moved from absolute-path base to a SAF tree URI. The old
+  // downloadBasePath was always an absolute filesystem path, never a content://
+  // URI, so it cannot be reused — drop it and start with no folder chosen
+  // (the first download re-prompts the SAF picker).
+  if (version < 4) {
+    const next = { ...s, downloadTreeUri: null, downloadTreeName: null } as typeof s;
+    delete next.downloadBasePath;
+    s = next;
   }
   return s;
 }
@@ -81,7 +102,8 @@ export const useSettingsStore = create<SettingsStoreState>()(
       gridColumns: 0,
       scrollZoom: 1,
       imageCacheMaxBytes: DEFAULT_IMAGE_CACHE_MAX_BYTES,
-      downloadBasePath: null,
+      downloadTreeUri: null,
+      downloadTreeName: null,
       setLocale: (locale) => set({ locale }),
       setLanguage: (language) => set({ language }),
       setTheme: (theme) => set({ theme }),
@@ -91,11 +113,11 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setGridColumns: (cols) => set({ gridColumns: cols }),
       setScrollZoom: (z) => set({ scrollZoom: z }),
       setImageCacheMaxBytes: (bytes) => set({ imageCacheMaxBytes: bytes }),
-      setDownloadBasePath: (path) => set({ downloadBasePath: path }),
+      setDownloadTree: (uri, name) => set({ downloadTreeUri: uri, downloadTreeName: name }),
       addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings', version: 3, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 4, migrate: migrateSettings },
   ),
 );
 

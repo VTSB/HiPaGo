@@ -189,8 +189,8 @@ function fromBase64(b64: string): Uint8Array {
   return bytes;
 }
 
-// The library dir with default base (null override → defaultBaseDir → /fake/Download)
-const LIB = '/fake/Download/HiPaGo';
+// The library dir is now a RELATIVE path under the picked SAF tree.
+const LIB = 'HiPaGo';
 
 // ── Contract suite (mirrors download-store.test.ts) ────────────────────────
 
@@ -378,15 +378,16 @@ describe('AndroidPublicDownloadStore — Android-specific behaviour', () => {
     expect(fakeLib.files.has(`${LIB}/42/0001.webp`)).toBe(true);
   });
 
-  it('coverUrl returns a convertFileSrc URL for the first page', async () => {
+  it('coverUrl returns a data URL for the first page (content:// not WebView-loadable)', async () => {
     await store.ensureGallery(777, 'Cover Test');
     const img = makeBytes(8, 0x77);
     await store.putImage(777, 0, img, 'webp');
 
     const url = await store.coverUrl(777);
     expect(url).not.toBeNull();
-    // Should contain the file path segment
-    expect(url).toContain('0001.webp');
+    expect(url).toMatch(/^data:image\/webp;base64,/);
+    // The base64 payload round-trips to the stored cover bytes.
+    expect(fromBase64(url!.split(',')[1])).toEqual(img);
   });
 
   it('coverUrl returns null when gallery does not exist', async () => {

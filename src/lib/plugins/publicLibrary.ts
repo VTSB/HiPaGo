@@ -1,14 +1,16 @@
 /**
- * Capacitor plugin wrapper for PublicLibraryPlugin (Android raw-file ops in
- * public external storage).
+ * Capacitor plugin wrapper for PublicLibraryPlugin (Android download library
+ * backed by the Storage Access Framework).
  *
- * All paths passed to these methods must be ABSOLUTE paths on the device
- * filesystem. The JS adapter layer (storage/adapters/capacitor.ts) resolves
- * relative gallery paths against the configured base before calling here.
+ * The user picks ONE parent folder via {@link PublicLibraryPlugin.openDocumentTree}
+ * and we hold a persisted URI permission for just that tree. Every file method
+ * below takes a RELATIVE path under that tree (e.g. "HiPaGo/12345 Title/0001.webp");
+ * the native side resolves it to a content:// document URI. There are no
+ * absolute filesystem paths and no MANAGE_EXTERNAL_STORAGE.
  *
  * assertNoTraversal() is exported so the adapter can validate relative
- * sub-paths before they are joined to the base (defence in depth — the Java
- * layer also validates, but the JS check surfaces errors earlier).
+ * sub-paths before they are sent down (defence in depth — the Java layer also
+ * rejects "..", but the JS check surfaces errors earlier).
  */
 import { registerPlugin } from '@capacitor/core';
 
@@ -22,56 +24,70 @@ export interface DirEntry {
   size: number;
 }
 
+export interface TreeInfo {
+  /** The persisted tree URI, or null if none chosen. */
+  treeUri: string | null;
+  /** Human-readable folder name for display, or null when invalid/none. */
+  displayName: string | null;
+  /** Whether the tree URI still has a live, writable persisted permission. */
+  valid: boolean;
+}
+
 export interface PublicLibraryPlugin {
   /**
-   * Returns the absolute path of the public Downloads directory.
-   * Called when no user-configured base path is set.
-   *
-   * DEVICE-PENDING: returns the real path only on Android.
+   * Launch the system folder picker (ACTION_OPEN_DOCUMENT_TREE) and take a
+   * persistable URI permission on the chosen tree. Rejects "cancelled" if the
+   * user backs out.
    */
-  defaultBaseDir(): Promise<{ path: string }>;
+  openDocumentTree(): Promise<{ treeUri: string; displayName: string }>;
 
-  /** Create directory and all parents if they do not exist. */
+  /** Returns the currently persisted tree URI, its display name, and validity. */
+  getTree(): Promise<TreeInfo>;
+
+  /** Release the persisted permission and forget the chosen folder. */
+  clearTree(): Promise<void>;
+
+  /** Create directory and all parents (relative path under the tree). */
   mkdir(options: { path: string }): Promise<void>;
 
   /**
-   * Write bytes to path atomically (write to path+".tmp", then rename).
+   * Write bytes to a relative path. Overwrites an existing file in place
+   * (truncate), so repeated writes to the same name never pile up duplicates.
    * Creates parent directories as needed.
    */
   writeFile(options: { path: string; dataBase64: string }): Promise<void>;
 
-  /** Read file bytes as base64. */
+  /** Read file bytes as base64 (relative path). */
   readFile(options: { path: string }): Promise<{ dataBase64: string }>;
 
-  /** List directory entries. */
+  /** List directory entries (relative path). */
   readdir(options: { path: string }): Promise<{ files: DirEntry[] }>;
 
-  /** Stat a path — works for files and directories. */
+  /** Stat a relative path — works for files and directories. */
   stat(options: { path: string }): Promise<{ exists: boolean; size: number }>;
 
+  /** Returns whether a relative path exists (file or directory). */
+  exists(options: { path: string }): Promise<{ exists: boolean }>;
+
   /**
-   * Copy src → dest atomically (write to dest+".tmp", then rename).
-   * Creates parent directories as needed.
+   * Copy a LOCAL source file (absolute or file:// path, e.g. the image cache)
+   * into the tree at relative `to`. Only the destination is a content URI;
+   * the source stays a normal file. Creates parent directories as needed.
    */
   copy(options: { from: string; to: string }): Promise<void>;
 
-  /** Delete a single file. No-op if file does not exist. */
+  /** Delete a single file (relative path). No-op if it does not exist. */
   delete(options: { path: string }): Promise<void>;
 
-  /** Recursively delete a directory and all its contents. */
+  /** Recursively delete a directory and all its contents (relative path). */
   deleteDir(options: { path: string }): Promise<void>;
 
   /**
-   * Return the file:// URI for an absolute path.
-   * Use Capacitor.convertFileSrc on the result to get a WebView-loadable URL.
+   * Return the content:// document URI for a relative path (or null). Note:
+   * content URIs do NOT load in the WebView via convertFileSrc — read the
+   * bytes instead when you need a displayable image source.
    */
-  getUri(options: { path: string }): Promise<{ uri: string }>;
-
-  /** Rename / move a file or directory. Creates dest parent dirs as needed. */
-  rename(options: { from: string; to: string }): Promise<void>;
-
-  /** Returns whether a path exists (file or directory). */
-  exists(options: { path: string }): Promise<{ exists: boolean }>;
+  getUri(options: { path: string }): Promise<{ uri: string | null }>;
 }
 
 // -----------------------------------------------------------------------
@@ -81,17 +97,49 @@ export interface PublicLibraryPlugin {
 export const PublicLibrary = registerPlugin<PublicLibraryPlugin>('PublicLibrary');
 
 // -----------------------------------------------------------------------
-// JS-side traversal guard (defence-in-depth, mirrors Java normalizeAndCheck)
+// Tree (download folder) helper
+// -----------------------------------------------------------------------
+
+export interface EnsureTreeResult {
+  ok: boolean;
+  treeUri?: string;
+  displayName?: string;
+}
+
+/**
+ * Ensure a valid download folder is selected. Returns the existing tree if it
+ * is still valid; otherwise launches the SAF picker. Returns `{ok: false}` when
+ * the user cancels the picker (caller should abort the write).
+ */
+export async function ensureDownloadTree(): Promise<EnsureTreeResult> {
+  try {
+    const cur = await PublicLibrary.getTree();
+    if (cur.valid && cur.treeUri) {
+      return { ok: true, treeUri: cur.treeUri, displayName: cur.displayName ?? undefined };
+    }
+  } catch {
+    // getTree failed (non-Android or plugin missing) — fall through to picker.
+  }
+  try {
+    const picked = await PublicLibrary.openDocumentTree();
+    return { ok: true, treeUri: picked.treeUri, displayName: picked.displayName };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// -----------------------------------------------------------------------
+// JS-side traversal guard (defence-in-depth, mirrors Java safeSegments)
 // -----------------------------------------------------------------------
 
 /**
  * Throws a TypeError if relPath contains ".." segments or is an absolute path.
- * Call this on the RELATIVE portion of a path before joining it to a base.
+ * Call this on the RELATIVE portion of a path before sending it down.
  *
  * @example
- *   assertNoTraversal('12345 My Title/0001.webp'); // ok
- *   assertNoTraversal('../secret');                // throws
- *   assertNoTraversal('/etc/passwd');              // throws
+ *   assertNoTraversal('HiPaGo/12345 My Title/0001.webp'); // ok
+ *   assertNoTraversal('../secret');                       // throws
+ *   assertNoTraversal('/etc/passwd');                     // throws
  */
 export function assertNoTraversal(relPath: string): void {
   if (typeof relPath !== 'string' || relPath.length === 0) {

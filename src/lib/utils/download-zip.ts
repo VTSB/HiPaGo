@@ -216,6 +216,13 @@ export async function downloadGalleryToLibrary(
 
   const store = await createDownloadStore();
 
+  // Make sure the store can write before we touch the network. On Android this
+  // prompts the SAF folder picker when no download folder is selected yet, and
+  // throws if the user declines — aborting the download cleanly.
+  if (store.ensureReady) {
+    await store.ensureReady();
+  }
+
   // Prepare the gallery folder in public storage if the adapter supports it.
   if (store.ensureGallery) {
     await store.ensureGallery(galleryId, title);

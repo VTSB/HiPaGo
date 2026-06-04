@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 /**
- * AC-008 — DownloadLocationCard component tests.
+ * AC-07 — DownloadLocationCard SAF picker tests.
  *
  * Covers:
  *  - hidden on non-Android platforms
- *  - renders on Android
- *  - Reset button calls setDownloadBasePath(null)
- *  - Apply button calls setDownloadBasePath with input value
- *  - "Grant storage permission" button shown only when permission denied
+ *  - renders on Android with "select folder" when none chosen
+ *  - picking a folder stores the tree URI + name and shows "change"/"clear"
+ *  - clearing releases the tree and resets the mirror
+ *  - mount reconciles the settings mirror with the native persisted tree
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
@@ -19,19 +19,13 @@ vi.mock('@/lib/utils/platform', () => ({
   isAndroid: () => _isAndroid,
 }));
 
-// ── StoragePermission mock ───────────────────────────────────────────────────
-let _granted = true;
-vi.mock('@/lib/plugins/storagePermission', () => ({
-  StoragePermission: {
-    isGranted: () => Promise.resolve({ granted: _granted }),
-    request: vi.fn(() => Promise.resolve()),
-  },
+// ── PublicLibrary mock ───────────────────────────────────────────────────────
+const pub = vi.hoisted(() => ({
+  getTree: vi.fn(),
+  openDocumentTree: vi.fn(),
+  clearTree: vi.fn(),
 }));
-
-// ── migrate-downloads mock (AC-007 may not be landed) ───────────────────────
-vi.mock('@/lib/storage/migrate-downloads', () => ({
-  migrateDownloadsToPublic: vi.fn(() => Promise.resolve()),
-}));
+vi.mock('@/lib/plugins/publicLibrary', () => ({ PublicLibrary: pub }));
 
 // ── i18n passthrough — echo keys ────────────────────────────────────────────
 vi.mock('@/lib/i18n/useT', () => ({ useT: () => (k: string) => k }));
@@ -41,78 +35,79 @@ import { useSettingsStore } from '@/lib/store/settings';
 
 beforeEach(() => {
   _isAndroid = false;
-  _granted = true;
-  useSettingsStore.getState().setDownloadBasePath(null);
+  pub.getTree.mockReset().mockResolvedValue({ treeUri: null, displayName: null, valid: false });
+  pub.openDocumentTree.mockReset();
+  pub.clearTree.mockReset().mockResolvedValue(undefined);
+  useSettingsStore.getState().setDownloadTree(null, null);
 });
 
 async function mount() {
   const utils = render(<DownloadLocationCard />);
-  // let StoragePermission.isGranted resolve
-  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  // let getTree() reconcile resolve
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
   return utils;
 }
 
-describe('DownloadLocationCard', () => {
+describe('DownloadLocationCard (SAF)', () => {
   it('returns null on non-Android platforms', async () => {
     _isAndroid = false;
     const { container } = await mount();
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders on Android', async () => {
+  it('renders on Android with a select-folder button when none chosen', async () => {
     _isAndroid = true;
     await mount();
     expect(screen.getByText('settings.downloadLocation')).toBeTruthy();
+    expect(screen.getByText('settings.downloadLocation.select')).toBeTruthy();
+    expect(screen.getByText('settings.downloadLocation.notSelected')).toBeTruthy();
   });
 
-  it('Reset button calls setDownloadBasePath(null)', async () => {
+  it('picking a folder stores tree + name and shows change/clear', async () => {
     _isAndroid = true;
-    useSettingsStore.getState().setDownloadBasePath('/custom/path');
+    pub.openDocumentTree.mockResolvedValue({ treeUri: 'content://tree/abc', displayName: 'MyDownloads' });
     await mount();
-    const resetBtn = screen.getByText('settings.downloadLocation.resetDefault');
+    const pick = screen.getByText('settings.downloadLocation.select');
     await act(async () => {
-      fireEvent.click(resetBtn);
+      fireEvent.click(pick);
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(useSettingsStore.getState().downloadBasePath).toBeNull();
+    expect(useSettingsStore.getState().downloadTreeUri).toBe('content://tree/abc');
+    expect(useSettingsStore.getState().downloadTreeName).toBe('MyDownloads');
+    expect(screen.getByText('MyDownloads')).toBeTruthy();
+    expect(screen.getByText('settings.downloadLocation.change')).toBeTruthy();
+    expect(screen.getByText('settings.downloadLocation.clear')).toBeTruthy();
   });
 
-  it('Apply button calls setDownloadBasePath with input value', async () => {
+  it('clear releases the tree and resets the mirror', async () => {
     _isAndroid = true;
+    pub.getTree.mockResolvedValue({ treeUri: 'content://tree/abc', displayName: 'MyDownloads', valid: true });
     await mount();
-    const input = screen.getByPlaceholderText('settings.downloadLocation.pathPlaceholder') as HTMLInputElement;
+    expect(useSettingsStore.getState().downloadTreeUri).toBe('content://tree/abc');
+    const clear = screen.getByText('settings.downloadLocation.clear');
     await act(async () => {
-      fireEvent.change(input, { target: { value: '/storage/emulated/0/MyFolder' } });
-    });
-    const applyBtn = screen.getByText('Apply');
-    await act(async () => {
-      fireEvent.click(applyBtn);
+      fireEvent.click(clear);
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(useSettingsStore.getState().downloadBasePath).toBe('/storage/emulated/0/MyFolder');
+    expect(pub.clearTree).toHaveBeenCalled();
+    expect(useSettingsStore.getState().downloadTreeUri).toBeNull();
   });
 
-  it('shows grant permission button when permission is denied', async () => {
+  it('cancelling the picker leaves the current selection untouched', async () => {
     _isAndroid = true;
-    _granted = false;
+    pub.openDocumentTree.mockRejectedValue(new Error('cancelled'));
     await mount();
-    expect(screen.getByText('settings.downloadLocation.grantPermission')).toBeTruthy();
-  });
-
-  it('does not show grant permission button when permission is granted', async () => {
-    _isAndroid = true;
-    _granted = true;
-    await mount();
-    expect(screen.queryByText('settings.downloadLocation.grantPermission')).toBeNull();
-  });
-
-  it('Reset button is disabled when path is already null (default)', async () => {
-    _isAndroid = true;
-    useSettingsStore.getState().setDownloadBasePath(null);
-    await mount();
-    const resetBtn = screen.getByText('settings.downloadLocation.resetDefault') as HTMLButtonElement;
-    expect(resetBtn.disabled).toBe(true);
+    const pick = screen.getByText('settings.downloadLocation.select');
+    await act(async () => {
+      fireEvent.click(pick);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(useSettingsStore.getState().downloadTreeUri).toBeNull();
   });
 });

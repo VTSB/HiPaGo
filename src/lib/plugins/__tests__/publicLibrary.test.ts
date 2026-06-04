@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Hoisted native mock stubs — one per method
 const nativeMethods = vi.hoisted(() => ({
+  openDocumentTree: vi.fn(),
+  getTree: vi.fn(),
+  clearTree: vi.fn(),
   mkdir: vi.fn(),
   writeFile: vi.fn(),
   readFile: vi.fn(),
@@ -11,7 +14,6 @@ const nativeMethods = vi.hoisted(() => ({
   delete: vi.fn(),
   deleteDir: vi.fn(),
   getUri: vi.fn(),
-  rename: vi.fn(),
   exists: vi.fn(),
 }));
 
@@ -19,7 +21,7 @@ vi.mock('@capacitor/core', () => ({
   registerPlugin: () => nativeMethods,
 }));
 
-import { PublicLibrary, assertNoTraversal } from '../publicLibrary';
+import { PublicLibrary, assertNoTraversal, ensureDownloadTree } from '../publicLibrary';
 
 describe('PublicLibrary wrapper', () => {
   beforeEach(() => {
@@ -30,8 +32,9 @@ describe('PublicLibrary wrapper', () => {
 
   it('exposes all required methods', () => {
     const methods: Array<keyof typeof PublicLibrary> = [
+      'openDocumentTree', 'getTree', 'clearTree',
       'mkdir', 'writeFile', 'readFile', 'readdir', 'stat',
-      'copy', 'delete', 'deleteDir', 'getUri', 'rename', 'exists',
+      'copy', 'delete', 'deleteDir', 'getUri', 'exists',
     ];
     for (const m of methods) {
       expect(typeof PublicLibrary[m]).toBe('function');
@@ -98,19 +101,48 @@ describe('PublicLibrary wrapper', () => {
     expect(result).toEqual({ uri: 'file:///sdcard/HiPaGo/test/0001.webp' });
   });
 
-  it('rename delegates to native', async () => {
-    nativeMethods.rename.mockResolvedValue(undefined);
-    await PublicLibrary.rename({ from: '/sdcard/HiPaGo/old', to: '/sdcard/HiPaGo/new' });
-    expect(nativeMethods.rename).toHaveBeenCalledWith({
-      from: '/sdcard/HiPaGo/old',
-      to: '/sdcard/HiPaGo/new',
-    });
-  });
-
   it('exists delegates and returns exists flag', async () => {
     nativeMethods.exists.mockResolvedValue({ exists: false });
-    const result = await PublicLibrary.exists({ path: '/sdcard/HiPaGo/missing' });
+    const result = await PublicLibrary.exists({ path: 'HiPaGo/missing' });
     expect(result).toEqual({ exists: false });
+  });
+
+  it('openDocumentTree delegates and returns treeUri + displayName', async () => {
+    nativeMethods.openDocumentTree.mockResolvedValue({ treeUri: 'content://tree/x', displayName: 'X' });
+    const result = await PublicLibrary.openDocumentTree();
+    expect(result).toEqual({ treeUri: 'content://tree/x', displayName: 'X' });
+  });
+});
+
+// -----------------------------------------------------------------------
+// ensureDownloadTree
+// -----------------------------------------------------------------------
+
+describe('ensureDownloadTree', () => {
+  beforeEach(() => {
+    Object.values(nativeMethods).forEach((m) => m.mockReset());
+  });
+
+  it('returns the existing tree when it is still valid (no picker)', async () => {
+    nativeMethods.getTree.mockResolvedValue({ treeUri: 'content://tree/x', displayName: 'X', valid: true });
+    const res = await ensureDownloadTree();
+    expect(res).toEqual({ ok: true, treeUri: 'content://tree/x', displayName: 'X' });
+    expect(nativeMethods.openDocumentTree).not.toHaveBeenCalled();
+  });
+
+  it('launches the picker when no valid tree, returns the picked tree', async () => {
+    nativeMethods.getTree.mockResolvedValue({ treeUri: null, displayName: null, valid: false });
+    nativeMethods.openDocumentTree.mockResolvedValue({ treeUri: 'content://tree/y', displayName: 'Y' });
+    const res = await ensureDownloadTree();
+    expect(nativeMethods.openDocumentTree).toHaveBeenCalled();
+    expect(res).toEqual({ ok: true, treeUri: 'content://tree/y', displayName: 'Y' });
+  });
+
+  it('returns {ok:false} when the user cancels the picker', async () => {
+    nativeMethods.getTree.mockResolvedValue({ treeUri: null, displayName: null, valid: false });
+    nativeMethods.openDocumentTree.mockRejectedValue(new Error('cancelled'));
+    const res = await ensureDownloadTree();
+    expect(res).toEqual({ ok: false });
   });
 });
 

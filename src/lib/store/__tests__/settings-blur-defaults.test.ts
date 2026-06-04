@@ -32,9 +32,9 @@ describe('default blur tags + v1 migration', () => {
     expect(out.blurTags).toEqual(expect.arrayContaining(['male:yaoi', ...SAFETY]));
   });
 
-  it('is a no-op at version >= 3 (a later user removal stays removed)', () => {
-    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: null };
-    expect(migrateSettings(state, 3)).toBe(state);
+  it('is a no-op at version >= 4 (a later user removal stays removed)', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadTreeUri: null, downloadTreeName: null };
+    expect(migrateSettings(state, 4)).toBe(state);
   });
 
   it('v1 -> v2 adds the default image-cache cap without touching blurTags', () => {
@@ -50,30 +50,30 @@ describe('default blur tags + v1 migration', () => {
   });
 });
 
-describe('v3 migration — downloadBasePath', () => {
-  it('v2 -> v3: adds downloadBasePath: null when field is missing', () => {
-    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0 };
-    const out = migrateSettings(state, 2) as { downloadBasePath: string | null };
-    expect(out.downloadBasePath).toBeNull();
+describe('v4 migration — downloadBasePath → downloadTreeUri (SAF)', () => {
+  it('v3 -> v4: drops downloadBasePath and sets downloadTreeUri/Name to null', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: '/storage/emulated/0/Download' };
+    const out = migrateSettings(state, 3) as {
+      downloadBasePath?: string | null;
+      downloadTreeUri: string | null;
+      downloadTreeName: string | null;
+    };
+    // Old absolute-path override cannot be reused as a SAF tree URI — dropped.
+    expect(out.downloadBasePath).toBeUndefined();
+    expect(out.downloadTreeUri).toBeNull();
+    expect(out.downloadTreeName).toBeNull();
   });
 
-  it('v2 -> v3: does not overwrite an existing downloadBasePath value', () => {
-    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: '/custom/path' };
-    const out = migrateSettings(state, 2) as { downloadBasePath: string | null };
-    expect(out.downloadBasePath).toBe('/custom/path');
-  });
-
-  it('v0 -> v3: adds downloadBasePath: null (multi-version jump)', () => {
+  it('v0 -> v4: sets downloadTreeUri null (multi-version jump)', () => {
     const state = { blurTags: ['male:yaoi'] };
-    const out = migrateSettings(state, 0) as { downloadBasePath: string | null };
-    expect(out.downloadBasePath).toBeNull();
+    const out = migrateSettings(state, 0) as { downloadTreeUri: string | null };
+    expect(out.downloadTreeUri).toBeNull();
   });
 
-  it('v3: is a no-op for downloadBasePath (field already present)', () => {
-    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadBasePath: null };
-    const out = migrateSettings(state, 3) as { downloadBasePath: string | null };
-    expect(out.downloadBasePath).toBeNull();
-    // Must be same reference (no spread), confirming no mutation
+  it('v4: is a no-op (fields already present, same reference)', () => {
+    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadTreeUri: 'content://tree/x', downloadTreeName: 'X' };
+    const out = migrateSettings(state, 4) as { downloadTreeUri: string | null };
+    expect(out.downloadTreeUri).toBe('content://tree/x');
     expect(out).toBe(state);
   });
 });

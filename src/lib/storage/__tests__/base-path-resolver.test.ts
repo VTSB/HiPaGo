@@ -1,8 +1,11 @@
 /**
- * Unit tests for base-path-resolver.ts
+ * Unit tests for base-path-resolver.ts (SAF tree model).
+ *
+ * The library dir is now a RELATIVE path under the user-picked SAF tree
+ * ("HiPaGo"), not an absolute path. There is no settings override or
+ * defaultBaseDir anymore.
  *
  * Mocks:
- *  - @/lib/store/settings   → controls downloadBasePath
  *  - @/lib/plugins/publicLibrary → in-memory stubs for mkdir/exists/writeFile
  */
 
@@ -10,24 +13,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // ── Hoisted mock state (vi.hoisted runs before vi.mock factories) ──────────
 
-const { mockGetState, mockDefaultBaseDir, mockMkdir, mockExists, mockWriteFile } =
-  vi.hoisted(() => ({
-    mockGetState: vi.fn(),
-    mockDefaultBaseDir: vi.fn(),
-    mockMkdir: vi.fn(),
-    mockExists: vi.fn(),
-    mockWriteFile: vi.fn(),
-  }));
+const { mockMkdir, mockExists, mockWriteFile } = vi.hoisted(() => ({
+  mockMkdir: vi.fn(),
+  mockExists: vi.fn(),
+  mockWriteFile: vi.fn(),
+}));
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
-vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: { getState: mockGetState },
-}));
-
 vi.mock('@/lib/plugins/publicLibrary', () => ({
   PublicLibrary: {
-    defaultBaseDir: mockDefaultBaseDir,
     mkdir: mockMkdir,
     exists: mockExists,
     writeFile: mockWriteFile,
@@ -103,28 +98,15 @@ describe('resolveLibraryDir', () => {
     vi.clearAllMocks();
   });
 
-  it('uses defaultBaseDir when no override is set', async () => {
-    mockGetState.mockReturnValue({ downloadBasePath: null });
-    mockDefaultBaseDir.mockResolvedValue({ path: '/storage/emulated/0/Download' });
-
+  it('returns the relative "HiPaGo" root under the picked tree', async () => {
     const dir = await resolveLibraryDir();
-    expect(mockDefaultBaseDir).toHaveBeenCalledOnce();
-    expect(dir).toBe('/storage/emulated/0/Download/HiPaGo');
-  });
-
-  it('uses settings.downloadBasePath when set (does not call defaultBaseDir)', async () => {
-    mockGetState.mockReturnValue({ downloadBasePath: '/sdcard/MyFolder' });
-
-    const dir = await resolveLibraryDir();
-    expect(mockDefaultBaseDir).not.toHaveBeenCalled();
-    expect(dir).toBe('/sdcard/MyFolder/HiPaGo');
+    expect(dir).toBe('HiPaGo');
   });
 });
 
 describe('ensureLibraryDir', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetState.mockReturnValue({ downloadBasePath: '/base' });
     mockMkdir.mockResolvedValue(undefined);
     mockWriteFile.mockResolvedValue(undefined);
   });
@@ -134,11 +116,11 @@ describe('ensureLibraryDir', () => {
 
     const dir = await ensureLibraryDir();
 
-    expect(dir).toBe('/base/HiPaGo');
-    expect(mockMkdir).toHaveBeenCalledWith({ path: '/base/HiPaGo' });
-    expect(mockExists).toHaveBeenCalledWith({ path: '/base/HiPaGo/.nomedia' });
+    expect(dir).toBe('HiPaGo');
+    expect(mockMkdir).toHaveBeenCalledWith({ path: 'HiPaGo' });
+    expect(mockExists).toHaveBeenCalledWith({ path: 'HiPaGo/.nomedia' });
     expect(mockWriteFile).toHaveBeenCalledWith({
-      path: '/base/HiPaGo/.nomedia',
+      path: 'HiPaGo/.nomedia',
       dataBase64: '',
     });
   });

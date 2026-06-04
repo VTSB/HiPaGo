@@ -175,16 +175,18 @@ const translations = {
   // Settings → Download location (Android only)
   'settings.downloadLocation': { en: 'Download Location', ko: '다운로드 위치' },
   'settings.downloadLocation.desc': {
-    en: 'Where offline galleries are saved. Visible in a file manager under Downloads/HiPaGo. Files persist after uninstall and are hidden from the Gallery app (.nomedia). Deleting or renaming folders in a file manager may remove them from the in-app library.',
-    ko: '오프라인 갤러리가 저장되는 위치입니다. 파일 관리자에서 Downloads/HiPaGo 경로로 확인할 수 있습니다. 앱 삭제 후에도 파일이 유지되며 갤러리 앱에는 표시되지 않습니다(.nomedia). 파일 관리자에서 폴더를 삭제하거나 이름을 변경하면 앱 내 라이브러리에서 해제될 수 있습니다.',
+    en: 'Pick a folder for offline galleries. The app creates a HiPaGo subfolder inside it. Files stay visible in a file manager and persist after uninstall, but are hidden from the Gallery app (.nomedia). You only choose the folder once.',
+    ko: '오프라인 갤러리를 저장할 폴더를 선택하세요. 그 안에 HiPaGo 하위 폴더를 앱이 자동으로 만듭니다. 파일 관리자에서는 보이고 앱 삭제 후에도 유지되지만, 갤러리 앱에는 표시되지 않습니다(.nomedia). 폴더는 한 번만 고르면 됩니다.',
   },
   'settings.downloadLocation.current': { en: 'Current folder', ko: '현재 폴더' },
-  'settings.downloadLocation.default': { en: 'Downloads/HiPaGo (default)', ko: 'Downloads/HiPaGo (기본값)' },
-  'settings.downloadLocation.pathLabel': { en: 'Base path', ko: '기본 경로' },
-  'settings.downloadLocation.pathPlaceholder': { en: '/storage/emulated/0/Downloads', ko: '/storage/emulated/0/Downloads' },
-  'settings.downloadLocation.resetDefault': { en: 'Reset to default', ko: '기본값으로 초기화' },
-  'settings.downloadLocation.moving': { en: 'Moving files…', ko: '파일 이동 중…' },
-  'settings.downloadLocation.grantPermission': { en: 'Grant storage permission', ko: '저장소 권한 허용' },
+  'settings.downloadLocation.notSelected': { en: 'Not selected yet', ko: '아직 선택 안 됨' },
+  'settings.downloadLocation.select': { en: 'Select folder', ko: '폴더 선택' },
+  'settings.downloadLocation.change': { en: 'Change folder', ko: '폴더 변경' },
+  'settings.downloadLocation.clear': { en: 'Clear', ko: '해제' },
+  'settings.downloadLocation.hint': {
+    en: 'If not set, you will be asked to pick a folder on your first download.',
+    ko: '설정하지 않으면 첫 다운로드 시 폴더를 선택하라는 창이 뜹니다.',
+  },
 
   // Gallery list
   'list.loadMore': { en: 'More', ko: '더보기' },

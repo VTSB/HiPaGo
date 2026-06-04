@@ -10,7 +10,12 @@
 
 import { sanitizeFilename } from '@/lib/utils/download-zip';
 import { PublicLibrary } from '@/lib/plugins/publicLibrary';
-import { useSettingsStore } from '@/lib/store/settings';
+
+/**
+ * The library root is a RELATIVE path under the user-picked SAF tree, not an
+ * absolute filesystem path. Files land at `<picked tree>/HiPaGo/<id title>/…`.
+ */
+export const LIBRARY_ROOT = 'HiPaGo';
 
 // ── Title sanitization ────────────────────────────────────────────────────────
 
@@ -37,28 +42,24 @@ export function galleryFolderName(galleryId: number, title: string): string {
 // ── Library directory resolution ──────────────────────────────────────────────
 
 /**
- * Resolve the HiPaGo library directory path.
- *
- * Priority:
- *  1. `settings.downloadBasePath` (user-configured override) → `<override>/HiPaGo`
- *  2. `PublicLibrary.defaultBaseDir()` (device Downloads dir) → `<Downloads>/HiPaGo`
- *
- * Returns the absolute path string; does NOT create the directory.
+ * The HiPaGo library directory, as a relative path under the picked SAF tree.
+ * Always `"HiPaGo"`. Does NOT create the directory or require a tree to exist.
  */
 export async function resolveLibraryDir(): Promise<string> {
-  const override = useSettingsStore.getState().downloadBasePath;
-  const base = override ?? (await PublicLibrary.defaultBaseDir()).path;
-  return `${base}/HiPaGo`;
+  return LIBRARY_ROOT;
 }
 
 /**
- * Resolve the HiPaGo library directory, create it if missing, and ensure the
- * `.nomedia` sentinel file exists (so Android media scanner ignores the folder).
+ * Ensure the HiPaGo library directory exists under the picked tree and that the
+ * `.nomedia` sentinel is present (so the media scanner skips the folder and the
+ * downloaded images do not show up in the photo Gallery).
  *
- * Returns the absolute library directory path.
+ * Returns the relative library directory path (`"HiPaGo"`). Requires a valid
+ * SAF tree — callers gate on `store.ensureReady()` first; if no tree is
+ * selected the underlying plugin rejects with `NO_TREE`.
  */
 export async function ensureLibraryDir(): Promise<string> {
-  const dir = await resolveLibraryDir();
+  const dir = LIBRARY_ROOT;
   await PublicLibrary.mkdir({ path: dir });
   const nomedia = `${dir}/.nomedia`;
   const { exists } = await PublicLibrary.exists({ path: nomedia });

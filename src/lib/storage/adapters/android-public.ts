@@ -24,7 +24,8 @@ import {
   ensureLibraryDir,
   resolveLibraryDir,
 } from '../base-path-resolver';
-import { PublicLibrary } from '@/lib/plugins/publicLibrary';
+import { PublicLibrary, ensureDownloadTree } from '@/lib/plugins/publicLibrary';
+import { useSettingsStore } from '@/lib/store/settings';
 
 export class AndroidPublicDownloadStore implements DownloadStore {
   /** Cache: galleryId → resolved folder name (e.g. "12345 My Title"). */
@@ -53,6 +54,22 @@ export class AndroidPublicDownloadStore implements DownloadStore {
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  }
+
+  // ── Readiness (SAF folder pick) ──────────────────────────────────────────────
+
+  /**
+   * Ensure a download folder is selected. Prompts the SAF picker if none is set
+   * yet (or the previous grant was lost). Mirrors the chosen folder into the
+   * settings store for the UI. Throws if the user declines — the caller aborts
+   * the download.
+   */
+  async ensureReady(): Promise<void> {
+    const res = await ensureDownloadTree();
+    if (!res.ok) throw new Error('download folder not selected');
+    useSettingsStore
+      .getState()
+      .setDownloadTree(res.treeUri ?? null, res.displayName ?? null);
   }
 
   // ── Folder resolution ──────────────────────────────────────────────────────
@@ -172,9 +189,15 @@ export class AndroidPublicDownloadStore implements DownloadStore {
         .filter((n) => /^0001\./.test(n))
         .sort()[0];
       if (!first) return null;
-      const { uri } = await PublicLibrary.getUri({ path: `${libDir}/${folder}/${first}` });
-      const { Capacitor } = await import('@capacitor/core');
-      return Capacitor.convertFileSrc(uri);
+      // SAF documents are content:// URIs, which do NOT load in the WebView via
+      // convertFileSrc. Read the single cover image and hand back a data URL.
+      // It is one small thumbnail per gallery, so the JS-heap cost is fine.
+      const { dataBase64 } = await PublicLibrary.readFile({
+        path: `${libDir}/${folder}/${first}`,
+      });
+      const ext = first.slice(first.lastIndexOf('.') + 1).toLowerCase();
+      const mime = ext === 'jpg' ? 'jpeg' : ext;
+      return `data:image/${mime};base64,${dataBase64}`;
     } catch {
       return null;
     }

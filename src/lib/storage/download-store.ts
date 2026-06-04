@@ -67,6 +67,14 @@ export interface DownloadStore {
    */
   ensureGallery?(galleryId: number, title: string): Promise<void>;
 
+  /**
+   * Ensure the store is ready to write — e.g. the Android SAF adapter prompts
+   * the user to pick a download folder if none is selected yet. Throws if the
+   * user declines (download should abort). Optional: adapters that need no
+   * pre-write gate (web/iOS/desktop) omit it; callers feature-detect.
+   */
+  ensureReady?(): Promise<void>;
+
   /** List all gallery IDs that have at least one stored image. */
   listGalleries(): Promise<number[]>;
 
