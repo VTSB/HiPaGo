@@ -220,24 +220,26 @@ export function PageJumpModal({ currentPage, totalPages, onCommit, onClose }: Pa
         {/* Constrain content on tablets while keeping the sheet full-width */}
         <div className="mx-auto w-full max-w-md">
           {/* Drag handle */}
-          <div className="flex justify-center pb-2 pt-3">
+          <div className="flex justify-center pb-3 pt-4">
             <div className="h-1.5 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700" />
           </div>
 
           <form
             onSubmit={handleSubmit}
-            className="px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]"
+            className="px-6 pt-2 pb-[calc(2rem+env(safe-area-inset-bottom))]"
           >
-            {/* Title */}
+            {/* Title — quiet label, not competing with the CTA. */}
             <h2
               id="page-jump-title"
-              className="mb-5 text-center text-base font-semibold text-zinc-900 dark:text-zinc-100"
+              className="mb-6 text-center text-sm font-medium text-zinc-500 dark:text-zinc-400"
             >
               {t('pageJump.title')}
             </h2>
 
-            {/* Large page number input */}
-            <div className="mb-2 flex flex-col items-center gap-1">
+            {/* Page number input — prefilled with the current page (so no
+                separate "current" hint is needed). Input value and the total
+                share one size so the row reads as a single unit. */}
+            <div className="mb-7 flex items-center justify-center gap-2.5">
               <input
                 ref={inputRef}
                 type="number"
@@ -246,37 +248,21 @@ export function PageJumpModal({ currentPage, totalPages, onCommit, onClose }: Pa
                 max={totalPages}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                className="block w-36 rounded-2xl border-0 bg-zinc-100 px-4 py-3 text-center text-4xl font-bold tabular-nums text-zinc-900 outline-none ring-0 focus:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:bg-zinc-800 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                className="block w-20 rounded-xl border-0 bg-zinc-100 px-3 py-3 text-center text-lg font-semibold tabular-nums text-zinc-900 outline-none ring-0 focus:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:bg-zinc-800 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
               />
-              <p className="text-sm tabular-nums text-zinc-400 dark:text-zinc-500">
+              <span className="text-lg tabular-nums text-zinc-400 dark:text-zinc-500">
                 / {totalPages.toLocaleString()}
-              </p>
+              </span>
             </div>
 
-            {/* Current page hint */}
-            <p className="mb-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
-              {t('pageJump.current')}:{' '}
-              <span className="font-medium tabular-nums text-zinc-600 dark:text-zinc-400">
-                {currentPage}
-              </span>
-            </p>
-
-            {/* Primary CTA */}
+            {/* Primary CTA — matches the app's standard full-width button
+                (UpdateCheckCard / DownloadLocationCard). Dismiss is via backdrop
+                tap, drag-down, or Esc, so there is no separate cancel button. */}
             <button
               type="submit"
-              className="mb-3 flex min-h-12 w-full items-center justify-center rounded-full bg-zinc-900 px-6 text-base font-semibold text-white transition active:scale-[0.98] dark:bg-zinc-100 dark:text-zinc-900"
+              className="flex min-h-12 w-full items-center justify-center rounded-xl bg-zinc-900 px-4 text-base font-semibold text-white transition-colors active:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200"
             >
               {t('pageJump.go')}
-            </button>
-
-            {/* Secondary: quiet cancel */}
-            <button
-              type="button"
-              onClick={requestClose}
-              aria-label={t('pageJump.close')}
-              className="flex min-h-10 w-full items-center justify-center rounded-full px-6 text-sm font-medium text-zinc-500 transition hover:text-zinc-700 active:scale-[0.98] dark:text-zinc-400 dark:hover:text-zinc-200"
-            >
-              {t('pageJump.cancel')}
             </button>
           </form>
         </div>
