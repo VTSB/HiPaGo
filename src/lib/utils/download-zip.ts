@@ -2,12 +2,12 @@ import { zipSync } from 'fflate';
 import { getImageUrl } from './image-url';
 import { apiClient, ApiError } from '@/lib/api/client';
 import type { GalleryFile, GgConfig } from './types';
-import { createDownloadStore } from '@/lib/storage/download-store';
+import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
 import { getImageCache } from '@/lib/cache/image-cache';
 import {
   upsertDownload,
-  updateDownloadStatus,
   updateDownloadProgress,
+  setDownloadError,
   serializeTags,
 } from '@/lib/db/download';
 import { parseRetryAfter } from '@/lib/api/tag-fetcher';
@@ -192,11 +192,17 @@ export async function getDownloadedImage(
  *  - If putImageFromFile (cache copy) throws, the error is caught and the page
  *    falls through to the network fetch path — no whole-download failure.
  *  - On success: final upsertDownload with status:'complete' and final stats.
- *  - On abort before first page: no DB row left; AbortError rethrown.
- *  - On abort after some pages (rowCreated): updateDownloadStatus('failed'), rethrow.
- *  - On non-abort error before first page: no DB row left; error rethrown.
- *  - On non-abort error after some pages (rowCreated): updateDownloadStatus('failed'),
- *    partial pages retained; error rethrown.
+ *  - On user cancel before first page: no DB row left; error rethrown.
+ *  - On user cancel after some pages (rowCreated): row left as 'failed' (resumable,
+ *    no lastError message), partial pages retained; error rethrown.
+ *  - On genuine failure (any point, including before the first page): a 'failed'
+ *    row is recorded with the real reason in lastError so the library shows it
+ *    and offers retry; partial pages (if any) retained; error rethrown.
+ *
+ * Resume contract (AC-005): when `opts.resume` is true, pages already stored
+ * (per the 0000.json manifest, with the last page verified on disk) are skipped
+ * and only the remainder is fetched. Default `resume:false` is byte-identical to
+ * the original full-download behavior.
  */
 export async function downloadGalleryToLibrary(
   galleryId: number,
@@ -207,6 +213,7 @@ export async function downloadGalleryToLibrary(
   tags: Record<string, string[]>,
   onProgress?: (p: DownloadProgress) => void,
   signal?: AbortSignal,
+  opts?: { resume?: boolean },
 ): Promise<void> {
   const total = files.length;
   const now = new Date().toISOString();
@@ -237,10 +244,48 @@ export async function downloadGalleryToLibrary(
   const pageExts: string[] = [];
   let totalBytes = 0;
   let rowCreated = false;
+  let startIndex = 0;
+
+  // ── Resume seeding (AC-005) ───────────────────────────────────────────────
+  // Read the manifest to find pages already stored, verify the last one really
+  // exists (guard a torn write), then continue from the first missing page.
+  if (opts?.resume) {
+    try {
+      const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+      if (manifestBytes) {
+        const existing = decodeManifest(manifestBytes);
+        let validCount = existing.length;
+        if (validCount > 0) {
+          const lastIdx = validCount - 1;
+          const lastBytes = await store
+            .getImage(galleryId, lastIdx, existing[lastIdx])
+            .catch(() => null);
+          if (!lastBytes) validCount = lastIdx; // drop torn last page
+        }
+        for (let k = 0; k < validCount && k < total; k++) pageExts.push(existing[k]);
+        startIndex = pageExts.length;
+      }
+    } catch {
+      // No manifest / unreadable — start from scratch.
+    }
+    if (startIndex > 0) {
+      // A row already exists from the prior attempt. Flip it back to
+      // 'downloading' and clear the stale error; seed totalBytes from disk.
+      rowCreated = true;
+      totalBytes = await store.gallerySize(galleryId).catch(() => 0);
+      await setDownloadError(galleryId, 'downloading', null);
+    }
+  }
 
   try {
     for (let i = 0; i < total; i++) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+      // Already-stored page (resume) — keep its manifest ext, skip the fetch.
+      if (i < startIndex) {
+        onProgress?.({ current: i + 1, total });
+        continue;
+      }
 
       const file = files[i];
       const url = getImageUrl(file, ggConfig, 'webp');
@@ -319,16 +364,35 @@ export async function downloadGalleryToLibrary(
       folderName,
     });
   } catch (err) {
-    const isAbort = (err as Error).name === 'AbortError';
+    const e = err as Error;
+    const isCancel = e.name === 'AbortError' || err instanceof DownloadCancelledError;
 
-    if (rowCreated) {
-      // Partial pages are retained; mark failed so the UI can show the state.
-      await updateDownloadStatus(galleryId, 'failed');
-    }
-    // When no row was created (error on page 0): nothing to clean up.
-
-    if (isAbort && !rowCreated) {
-      // Aborted before any page was written: leave no trace.
+    if (isCancel) {
+      // User cancel. If pages were already written, leave a resumable 'failed'
+      // row with NO error message (it was not a failure). If nothing was
+      // written yet, leave no trace at all.
+      if (rowCreated) await setDownloadError(galleryId, 'failed', null);
+    } else {
+      // Genuine failure. Record a 'failed' row WITH the real reason even when no
+      // page was stored yet (failure before page 0) so the library shows it and
+      // can offer retry.
+      const reason = e.message || 'Download failed';
+      if (rowCreated) {
+        await setDownloadError(galleryId, 'failed', reason);
+      } else {
+        await upsertDownload({
+          galleryId,
+          title,
+          thumbnail,
+          tags: serializeTags(tags),
+          pageCount: 0,
+          totalBytes: 0,
+          downloadedAt: now,
+          status: 'failed',
+          folderName,
+          lastError: reason,
+        });
+      }
     }
 
     throw err;

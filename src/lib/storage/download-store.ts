@@ -11,6 +11,21 @@
 
 import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
+// ── Errors ───────────────────────────────────────────────────────────────────
+
+/**
+ * Thrown when the user backs out of a required step (e.g. declines the Android
+ * SAF download-folder picker). Callers treat this like an AbortError: a silent
+ * no-op — no error surfaced to the user, no 'failed' history row recorded.
+ * Distinct from a genuine failure, which carries a real message and IS recorded.
+ */
+export class DownloadCancelledError extends Error {
+  constructor(message = 'download cancelled by user') {
+    super(message);
+    this.name = 'DownloadCancelledError';
+  }
+}
+
 // ── Interface ──────────────────────────────────────────────────────────────
 
 export interface DownloadStore {

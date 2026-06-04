@@ -315,14 +315,14 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     expect(colNames.has('migratedAt')).toBe(true);
   });
 
-  it('sets user_version to LATEST_VERSION (4) after v4 migration', async () => {
+  it('sets user_version to LATEST_VERSION after v4 migration', async () => {
     await adapter.exec(SCHEMA_V3_DOWNLOAD);
     await adapter.exec('PRAGMA user_version = 3');
 
     await runMigrations(adapter);
 
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
-    expect(LATEST_VERSION).toBe(4);
+    expect(LATEST_VERSION).toBe(5);
   });
 
   it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {
@@ -368,5 +368,97 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     const colNames = new Set(cols.map((c) => c.name));
     expect(colNames.has('folderName')).toBe(true);
     expect(colNames.has('migratedAt')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Migration v5: adds lastError to download table
+// ---------------------------------------------------------------------------
+
+// Simulate a v4 DB: download table with folderName + migratedAt but no lastError
+const SCHEMA_V4_DOWNLOAD = `
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT
+);
+`;
+
+describe('runMigrations: migration v5 adds lastError to download', () => {
+  let adapter: PragmaTestAdapter;
+
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('adds lastError column when upgrading from v4', async () => {
+    await adapter.exec(SCHEMA_V4_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 4');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('lastError')).toBe(true);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+  });
+
+  it('is idempotent: lastError column appears exactly once after running twice', async () => {
+    await adapter.exec(SCHEMA_V4_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 4');
+
+    await runMigrations(adapter);
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = cols.map((c) => c.name);
+    expect(colNames.filter((n) => n === 'lastError')).toHaveLength(1);
+  });
+
+  it('does not throw when lastError already exists but user_version is stuck at 4', async () => {
+    await adapter.exec(`
+      CREATE TABLE IF NOT EXISTS download (
+        galleryId INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        thumbnail TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '{}',
+        pageCount INTEGER NOT NULL DEFAULT 0,
+        totalBytes INTEGER NOT NULL DEFAULT 0,
+        downloadedAt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'downloading',
+        folderName TEXT,
+        migratedAt TEXT,
+        lastError TEXT
+      )
+    `);
+    await adapter.exec('PRAGMA user_version = 4');
+
+    await expect(runMigrations(adapter)).resolves.toBeUndefined();
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    expect(new Set(cols.map((c) => c.name)).has('lastError')).toBe(true);
+  });
+
+  it('full upgrade from v3 lands both v4 and v5 columns', async () => {
+    await adapter.exec(SCHEMA_V3_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('folderName')).toBe(true);
+    expect(colNames.has('migratedAt')).toBe(true);
+    expect(colNames.has('lastError')).toBe(true);
   });
 });

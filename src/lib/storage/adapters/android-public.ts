@@ -18,7 +18,7 @@
  */
 
 import type { DownloadStore } from '../download-store';
-import { imageFileName } from '../download-store';
+import { imageFileName, DownloadCancelledError } from '../download-store';
 import {
   galleryFolderName as resolverFolderName,
   ensureLibraryDir,
@@ -61,12 +61,20 @@ export class AndroidPublicDownloadStore implements DownloadStore {
   /**
    * Ensure a download folder is selected. Prompts the SAF picker if none is set
    * yet (or the previous grant was lost). Mirrors the chosen folder into the
-   * settings store for the UI. Throws if the user declines — the caller aborts
-   * the download.
+   * settings store for the UI.
+   *
+   * Throws to abort the download:
+   *  - {@link DownloadCancelledError} when the user backs out of the picker —
+   *    the caller treats this like an AbortError (silent, no failure recorded).
+   *  - a plain Error carrying the real native reason on a genuine failure —
+   *    the caller surfaces and records it.
    */
   async ensureReady(): Promise<void> {
     const res = await ensureDownloadTree();
-    if (!res.ok) throw new Error('download folder not selected');
+    if (!res.ok) {
+      if (res.reason === 'cancelled') throw new DownloadCancelledError();
+      throw new Error(`download folder unavailable: ${res.message}`);
+    }
     useSettingsStore
       .getState()
       .setDownloadTree(res.treeUri ?? null, res.displayName ?? null);

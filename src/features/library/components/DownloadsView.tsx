@@ -6,11 +6,14 @@ import Link from 'next/link';
 import { Spinner } from '@/shared/components/Spinner';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { useT } from '@/lib/i18n/useT';
-import { listDownloads, searchDownloads, deleteDownload } from '@/lib/db/download';
-import { createDownloadStore } from '@/lib/storage/download-store';
+import { listDownloads, searchDownloads, deleteDownload, deserializeTags } from '@/lib/db/download';
+import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
 import { galleryHref } from '@/lib/utils/routes';
+import { getGgConfig } from '@/lib/api/client';
+import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
+import { downloadGalleryToLibrary, type DownloadProgress } from '@/lib/utils/download-zip';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,6 +66,63 @@ interface LibraryCardProps {
   item: DBDownload;
   onDelete: (galleryId: number) => void;
   onExport: (galleryId: number, title: string) => void;
+  onRetry: (item: DBDownload) => void;
+  isRetrying: boolean;
+  retryProgress: DownloadProgress | null;
+}
+
+/**
+ * Kebab (⋯) overflow menu. Holds the destructive Delete action so it is no
+ * longer one mis-tap away from Open/Export. Closes on outside click.
+ */
+function OverflowMenu({ label, deleteLabel, onDelete }: {
+  label: string;
+  deleteLabel: string;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointer = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocPointer);
+    return () => document.removeEventListener('mousedown', onDocPointer);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-zinc-300 text-zinc-500 active:bg-zinc-50 sm:min-h-9 sm:min-w-9 sm:rounded-md sm:hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+          <path d="M8 4a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2z" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1 min-w-32 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { setOpen(false); onDelete(); }}
+            className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 active:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 dark:active:bg-red-950"
+          >
+            {deleteLabel}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** A WebView file URL for the gallery's downloaded first page, used as an offline
@@ -79,8 +139,9 @@ function useDownloadedCoverUrl(galleryId: number): string | null {
   return data ?? null;
 }
 
-function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
+function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgress }: LibraryCardProps) {
   const t = useT();
+  const isFailed = item.status === 'failed';
   // Prefer the locally downloaded first page (offline, no network) and fall back
   // to the network thumbnail when there is no local file (or on web).
   const localCover = useDownloadedCoverUrl(item.galleryId);
@@ -114,30 +175,63 @@ function LibraryCard({ item, onDelete, onExport }: LibraryCardProps) {
             <span>{formatDate(item.downloadedAt)}</span>
             <StatusBadge status={item.status} />
           </div>
+          {isFailed && item.lastError && (
+            <p className="mt-1.5 line-clamp-2 text-xs text-red-600 dark:text-red-400">
+              {t('library.errorPrefix')}: {item.lastError}
+            </p>
+          )}
         </div>
 
-        {/* Actions */}
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={galleryHref(item.galleryId)}
-            className="inline-flex min-h-10 items-center rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white active:bg-zinc-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-300 sm:dark:hover:bg-zinc-300"
-          >
-            {t('library.open')}
-          </Link>
-          <button
-            type="button"
-            onClick={() => onExport(item.galleryId, item.title)}
-            className="inline-flex min-h-10 items-center rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 active:bg-zinc-50 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-          >
-            {t('library.exportZip')}
-          </button>
-          <button
-            type="button"
-            onClick={() => onDelete(item.galleryId)}
-            className="inline-flex min-h-10 items-center rounded-xl border border-red-300 px-4 py-2 text-sm font-semibold text-red-600 active:bg-red-50 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:active:bg-red-950 sm:dark:hover:bg-red-950"
-          >
-            {t('library.delete')}
-          </button>
+        {/* Actions. Delete lives in the ⋯ menu so it is not one mis-tap from Open. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {isFailed ? (
+            isRetrying ? (
+              <span className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-zinc-100 px-4 text-sm font-medium text-zinc-600 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs dark:bg-zinc-800 dark:text-zinc-300">
+                <Spinner size="sm" />
+                {retryProgress ? `${retryProgress.current}/${retryProgress.total}` : t('library.retrying')}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onRetry(item)}
+                className="inline-flex min-h-10 items-center rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white active:bg-zinc-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-300 sm:dark:hover:bg-zinc-300"
+              >
+                {t('library.retry')}
+              </button>
+            )
+          ) : (
+            <Link
+              href={galleryHref(item.galleryId)}
+              className="inline-flex min-h-10 items-center rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white active:bg-zinc-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-300 sm:dark:hover:bg-zinc-300"
+            >
+              {t('library.open')}
+            </Link>
+          )}
+          {/* Failed-but-partial galleries can still be opened to read what landed. */}
+          {isFailed && item.pageCount > 0 && !isRetrying && (
+            <Link
+              href={galleryHref(item.galleryId)}
+              className="inline-flex min-h-10 items-center rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 active:bg-zinc-50 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+            >
+              {t('library.open')}
+            </Link>
+          )}
+          {item.status === 'complete' && (
+            <button
+              type="button"
+              onClick={() => onExport(item.galleryId, item.title)}
+              className="inline-flex min-h-10 items-center rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 active:bg-zinc-50 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:text-xs sm:font-medium sm:hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+            >
+              {t('library.exportZip')}
+            </button>
+          )}
+          {!isRetrying && (
+            <OverflowMenu
+              label={t('library.more')}
+              deleteLabel={t('library.delete')}
+              onDelete={() => onDelete(item.galleryId)}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -218,6 +312,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const [rawQuery, setRawQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Foreground retry (resume) state — one item at a time.
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+  const [retryProgress, setRetryProgress] = useState<DownloadProgress | null>(null);
 
   const handleQueryChange = useCallback((v: string) => {
     setRawQuery(v);
@@ -270,6 +367,43 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     const { exportGalleryZip } = await import('@/lib/utils/download-zip');
     await exportGalleryZip(galleryId, title);
   }, []);
+
+  // Retry a failed download by RESUMING it: re-fetch the gallery's file list
+  // (not stored on the row) + gg config, then download only the missing pages.
+  // download-zip updates the row's status/lastError; we just refresh on finish.
+  const handleRetry = useCallback(async (item: DBDownload) => {
+    if (retryingId !== null) return; // one retry at a time
+    setRetryingId(item.galleryId);
+    setRetryProgress(null);
+    try {
+      const [{ files }, config] = await Promise.all([
+        resolveGalleryDetail(item.galleryId),
+        getGgConfig(),
+      ]);
+      await downloadGalleryToLibrary(
+        item.galleryId,
+        item.title,
+        item.thumbnail,
+        files,
+        config,
+        deserializeTags(item.tags),
+        setRetryProgress,
+        undefined,
+        { resume: true },
+      );
+    } catch (e) {
+      // Cancels are silent. Genuine failures already wrote lastError onto the
+      // row inside download-zip; the query refresh below surfaces the new reason.
+      if (!(e instanceof DownloadCancelledError) && !(e instanceof DOMException && e.name === 'AbortError')) {
+        console.error('Retry failed:', e);
+      }
+    } finally {
+      setRetryingId(null);
+      setRetryProgress(null);
+      queryClient.invalidateQueries({ queryKey: ['library-list'] });
+      queryClient.invalidateQueries({ queryKey: ['library-search'] });
+    }
+  }, [retryingId, queryClient]);
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);
 
@@ -327,6 +461,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
               item={item}
               onDelete={handleDelete}
               onExport={handleExport}
+              onRetry={handleRetry}
+              isRetrying={retryingId === item.galleryId}
+              retryProgress={retryingId === item.galleryId ? retryProgress : null}
             />
           ))}
         </div>

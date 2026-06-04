@@ -94,7 +94,8 @@ CREATE TABLE IF NOT EXISTS download (
   downloadedAt TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'downloading',
   folderName TEXT,
-  migratedAt TEXT
+  migratedAt TEXT,
+  lastError TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt);
 CREATE INDEX IF NOT EXISTS idx_download_status ON download(status);

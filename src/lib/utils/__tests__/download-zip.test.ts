@@ -29,17 +29,24 @@ vi.mock('@/lib/api/client', () => {
   };
 });
 
-// Mock db/download (upsertDownload, updateDownloadStatus, updateDownloadProgress, serializeTags)
+// Mock db/download (upsertDownload, updateDownloadProgress, setDownloadError, serializeTags)
 vi.mock('@/lib/db/download', () => ({
   upsertDownload: vi.fn().mockResolvedValue(undefined),
-  updateDownloadStatus: vi.fn().mockResolvedValue(undefined),
   updateDownloadProgress: vi.fn().mockResolvedValue(undefined),
+  setDownloadError: vi.fn().mockResolvedValue(undefined),
   serializeTags: vi.fn((tags: Record<string, string[]>) => JSON.stringify(tags)),
 }));
 
-// Mock createDownloadStore — we inject a fake store per test
+// Mock createDownloadStore — we inject a fake store per test. DownloadCancelledError
+// is the real class so `instanceof` checks in download-zip behave correctly.
 vi.mock('@/lib/storage/download-store', () => ({
   createDownloadStore: vi.fn(),
+  DownloadCancelledError: class DownloadCancelledError extends Error {
+    constructor(message = 'download cancelled by user') {
+      super(message);
+      this.name = 'DownloadCancelledError';
+    }
+  },
   imageFileName: (index: number, ext: string) =>
     String(index + 1).padStart(4, '0') + '.' + ext,
   galleryFolderName: (id: number) => String(id),
@@ -73,8 +80,8 @@ import {
 import { zipSync } from 'fflate';
 import { getImageUrl } from '../image-url';
 import { apiClient } from '@/lib/api/client';
-import { upsertDownload, updateDownloadStatus, updateDownloadProgress } from '@/lib/db/download';
-import { createDownloadStore } from '@/lib/storage/download-store';
+import { upsertDownload, setDownloadError, updateDownloadProgress } from '@/lib/db/download';
+import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -363,7 +370,7 @@ describe('downloadGalleryToLibrary', () => {
     vi.mocked(apiClient.fetchUrl).mockResolvedValue(makeFetchResponse('image/webp', new Uint8Array([10, 20, 30])));
     vi.mocked(getImageUrl).mockReturnValue('https://example.com/image.webp');
     vi.mocked(upsertDownload).mockResolvedValue(undefined);
-    vi.mocked(updateDownloadStatus).mockResolvedValue(undefined);
+    vi.mocked(setDownloadError).mockResolvedValue(undefined);
     vi.mocked(updateDownloadProgress).mockResolvedValue(undefined);
   });
 
@@ -396,8 +403,9 @@ describe('downloadGalleryToLibrary', () => {
     expect(exts).toEqual(['webp', 'webp']);
   });
 
-  // AC-006 (a): first-page fetch fails all retries → upsertDownload NEVER called (no 0-page row)
-  it('(a) never creates a DB row when all retries fail before the first page', async () => {
+  // AC-003: a genuine failure before the first page now RECORDS a 'failed' row
+  // (pageCount 0) carrying the real reason, so the library shows it + offers retry.
+  it('(a) records a failed row with the real reason when all retries fail before the first page', async () => {
     vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network error'));
 
     await expect(
@@ -411,8 +419,15 @@ describe('downloadGalleryToLibrary', () => {
       ),
     ).rejects.toThrow('Network error');
 
-    expect(upsertDownload).not.toHaveBeenCalled();
-    expect(updateDownloadStatus).not.toHaveBeenCalled();
+    expect(upsertDownload).toHaveBeenCalledTimes(1);
+    const failedRow = vi.mocked(upsertDownload).mock.calls[0][0];
+    expect(failedRow).toMatchObject({
+      galleryId: 1,
+      status: 'failed',
+      pageCount: 0,
+      totalBytes: 0,
+      lastError: 'Network error',
+    });
   });
 
   // AC-006 (b): first page ok → row created pageCount:1, then updateDownloadProgress per page
@@ -527,6 +542,7 @@ describe('downloadGalleryToLibrary', () => {
     // (the abort check at the top of the loop fires first)
     expect(callCount).toBe(0);
     expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
   });
 
   // AC-006 (e): failure on page 5 (rowCreated) → updateDownloadStatus('failed'), 4 pages retained
@@ -549,8 +565,8 @@ describe('downloadGalleryToLibrary', () => {
     expect(upsertDownload).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'downloading', pageCount: 1 }),
     );
-    // Failed status set because row exists
-    expect(updateDownloadStatus).toHaveBeenCalledWith(4, 'failed');
+    // Failed status + real reason set because row exists
+    expect(setDownloadError).toHaveBeenCalledWith(4, 'failed', 'Network error on page 5');
 
     // 4 pages retained in store (pages 0–3 written before page 4 failed)
     for (let i = 0; i < 4; i++) {
@@ -608,7 +624,7 @@ describe('downloadGalleryToLibrary', () => {
     ).rejects.toMatchObject({ name: 'AbortError' });
 
     expect(upsertDownload).not.toHaveBeenCalled();
-    expect(updateDownloadStatus).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
   });
 
   it('marks download as failed when fetch throws mid-download (after first page)', async () => {
@@ -627,7 +643,7 @@ describe('downloadGalleryToLibrary', () => {
       ),
     ).rejects.toThrow('Network error');
 
-    expect(updateDownloadStatus).toHaveBeenCalledWith(4, 'failed');
+    expect(setDownloadError).toHaveBeenCalledWith(4, 'failed', 'Network error');
   });
 
   it('accumulates totalBytes correctly', async () => {
@@ -647,6 +663,130 @@ describe('downloadGalleryToLibrary', () => {
 
     const firstUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
     expect(firstUpsert.folderName).toBe('42 My Title');
+  });
+
+  // AC-003: user cancel (SAF picker backout via ensureReady) before any page is
+  // a silent no-op — no row, no error reason recorded.
+  it('cancel (folder-picker backout) before first page leaves no DB row', async () => {
+    const store = Object.assign(makeMemoryStore(), {
+      async ensureReady() {
+        throw new DownloadCancelledError();
+      },
+    });
+    vi.mocked(createDownloadStore).mockResolvedValue(store);
+
+    await expect(
+      downloadGalleryToLibrary(1, 'G', 'thumb.jpg', [makeFile()], makeGgConfig(), {}),
+    ).rejects.toBeInstanceOf(DownloadCancelledError);
+
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+  });
+
+  // AC-003: abort AFTER some pages leaves a resumable 'failed' row with NO error
+  // message (it was a cancel, not a failure).
+  it('abort mid-download (after first page) marks failed with a null reason', async () => {
+    const controller = new AbortController();
+    let callCount = 0;
+    vi.mocked(apiClient.fetchUrl).mockImplementation(() => {
+      callCount++;
+      if (callCount === 2) {
+        controller.abort();
+        return Promise.reject(new DOMException('Aborted', 'AbortError'));
+      }
+      return Promise.resolve(makeFetchResponse('image/webp', new Uint8Array([1])));
+    });
+
+    await expect(
+      downloadGalleryToLibrary(
+        7,
+        'G',
+        'thumb.jpg',
+        [makeFile('a.jpg'), makeFile('b.jpg')],
+        makeGgConfig(),
+        {},
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(setDownloadError).toHaveBeenCalledWith(7, 'failed', null);
+  });
+
+  // AC-005: resume skips already-stored pages (per manifest) and fetches the rest.
+  it('resume skips stored pages and fetches only the remainder', async () => {
+    await memStore.putImage(9, -1, new TextEncoder().encode(JSON.stringify(['webp', 'webp'])), 'json');
+    await memStore.putImage(9, 0, new Uint8Array([1, 1]), 'webp');
+    await memStore.putImage(9, 1, new Uint8Array([2, 2]), 'webp');
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([3, 3, 3])),
+    );
+    const files = [makeFile('a'), makeFile('b'), makeFile('c'), makeFile('d')];
+
+    await downloadGalleryToLibrary(
+      9,
+      'G',
+      'thumb.jpg',
+      files,
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true },
+    );
+
+    // Only pages 2 and 3 fetched (0 and 1 were already stored).
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(2);
+    // Resume flips the stale 'failed' row back to 'downloading' and clears the error.
+    expect(setDownloadError).toHaveBeenCalledWith(9, 'downloading', null);
+    const lastUpsert = vi.mocked(upsertDownload).mock.calls.at(-1)![0];
+    expect(lastUpsert.status).toBe('complete');
+    expect(lastUpsert.pageCount).toBe(4);
+    const manifest = await memStore.getImage(9, -1, 'json');
+    expect(JSON.parse(new TextDecoder().decode(manifest!))).toEqual(['webp', 'webp', 'webp', 'webp']);
+  });
+
+  // AC-005: a torn last page (manifest claims it but the file is missing) is
+  // dropped and re-fetched on resume.
+  it('resume re-fetches a torn last page that is missing on disk', async () => {
+    await memStore.putImage(10, -1, new TextEncoder().encode(JSON.stringify(['webp', 'webp'])), 'json');
+    await memStore.putImage(10, 0, new Uint8Array([1]), 'webp');
+    // page 1 intentionally absent (torn write)
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([9])),
+    );
+    const files = [makeFile('a'), makeFile('b')];
+
+    await downloadGalleryToLibrary(
+      10,
+      'G',
+      'thumb.jpg',
+      files,
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true },
+    );
+
+    // Page 0 kept, torn page 1 re-fetched → exactly one network call.
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1);
+  });
+
+  // AC-005: default (no opts) is byte-identical — a full download, nothing skipped.
+  it('without resume, a fresh download fetches every page', async () => {
+    await memStore.putImage(11, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(11, 0, new Uint8Array([1]), 'webp');
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([5])),
+    );
+    const files = [makeFile('a'), makeFile('b')];
+
+    await downloadGalleryToLibrary(11, 'G', 'thumb.jpg', files, makeGgConfig(), {});
+
+    // No resume → both pages fetched despite a pre-existing manifest/page.
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(2);
+    expect(setDownloadError).not.toHaveBeenCalledWith(11, 'downloading', null);
   });
 });
 

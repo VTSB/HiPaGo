@@ -5,6 +5,7 @@ import {
   getDownload,
   listDownloads,
   updateDownloadStatus,
+  setDownloadError,
   deleteDownload,
   searchDownloads,
   serializeTags,
@@ -183,6 +184,52 @@ describe('updateDownloadStatus', () => {
 
     const other = await getDownload(1002);
     expect(other!.status).toBe('downloading');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// lastError column + setDownloadError (AC-004)
+// ---------------------------------------------------------------------------
+
+describe('lastError column + setDownloadError', () => {
+  it('round-trips lastError through upsert + getDownload', async () => {
+    await upsertDownload(makeRow({ status: 'failed', lastError: 'download folder unavailable: NO_TREE' }));
+    const row = await getDownload(1001);
+    expect(row!.status).toBe('failed');
+    expect(row!.lastError).toBe('download folder unavailable: NO_TREE');
+  });
+
+  it('stores NULL lastError when not provided', async () => {
+    await upsertDownload(makeRow({ status: 'complete' }));
+    const row = await getDownload(1001);
+    expect(row!.lastError == null).toBe(true);
+  });
+
+  it('setDownloadError sets status + reason together', async () => {
+    await upsertDownload(makeRow({ status: 'downloading' }));
+    await setDownloadError(1001, 'failed', 'mkdir failed: HiPaGo');
+    const row = await getDownload(1001);
+    expect(row!.status).toBe('failed');
+    expect(row!.lastError).toBe('mkdir failed: HiPaGo');
+  });
+
+  it('setDownloadError can clear the reason on a successful retry', async () => {
+    await upsertDownload(makeRow({ status: 'failed', lastError: 'boom' }));
+    await setDownloadError(1001, 'downloading', null);
+    const row = await getDownload(1001);
+    expect(row!.status).toBe('downloading');
+    expect(row!.lastError == null).toBe(true);
+  });
+
+  it('setDownloadError is a no-op for a non-existent galleryId', async () => {
+    await expect(setDownloadError(99999, 'failed', 'x')).resolves.not.toThrow();
+  });
+
+  it('listDownloads returns lastError on failed rows', async () => {
+    await upsertDownload(makeRow({ galleryId: 1003, status: 'failed', lastError: 'net down' }));
+    const rows = await listDownloads();
+    const failed = rows.find((r) => r.galleryId === 1003);
+    expect(failed!.lastError).toBe('net down');
   });
 });
 

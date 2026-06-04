@@ -75,6 +75,21 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 5,
+    description: 'Add lastError column to download (failure reason for failed rows)',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+      // download table is created by migration v3; if it is somehow absent
+      // (PRAGMA returns no rows), there is nothing to alter — skip rather than
+      // fail with "no such table".
+      if (cols.length === 0) return;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has('lastError')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN lastError TEXT');
+      }
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

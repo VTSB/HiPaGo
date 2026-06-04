@@ -100,16 +100,24 @@ export const PublicLibrary = registerPlugin<PublicLibraryPlugin>('PublicLibrary'
 // Tree (download folder) helper
 // -----------------------------------------------------------------------
 
-export interface EnsureTreeResult {
-  ok: boolean;
-  treeUri?: string;
-  displayName?: string;
-}
+/**
+ * Discriminated result of {@link ensureDownloadTree}:
+ *  - `{ok:true}`  — a writable tree is available (existing or freshly picked).
+ *  - `{ok:false, reason:'cancelled'}` — the user backed out of the picker;
+ *    the caller should abort silently (no error surfaced, no failure recorded).
+ *  - `{ok:false, reason:'error', message}` — a genuine failure with the real
+ *    native reason; the caller should surface and record it.
+ */
+export type EnsureTreeResult =
+  | { ok: true; treeUri: string; displayName?: string }
+  | { ok: false; reason: 'cancelled' }
+  | { ok: false; reason: 'error'; message: string };
 
 /**
  * Ensure a valid download folder is selected. Returns the existing tree if it
- * is still valid; otherwise launches the SAF picker. Returns `{ok: false}` when
- * the user cancels the picker (caller should abort the write).
+ * is still valid; otherwise launches the SAF picker. Distinguishes a user
+ * cancel from a genuine failure so the caller can stay silent on the former and
+ * surface the real reason on the latter.
  */
 export async function ensureDownloadTree(): Promise<EnsureTreeResult> {
   try {
@@ -123,8 +131,13 @@ export async function ensureDownloadTree(): Promise<EnsureTreeResult> {
   try {
     const picked = await PublicLibrary.openDocumentTree();
     return { ok: true, treeUri: picked.treeUri, displayName: picked.displayName };
-  } catch {
-    return { ok: false };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // The native side rejects with the literal "cancelled" when the user backs
+    // out of the SAF picker (PublicLibraryPlugin.onTreePicked). That is a user
+    // cancel; anything else is a real failure whose reason we propagate.
+    if (/cancel/i.test(message)) return { ok: false, reason: 'cancelled' };
+    return { ok: false, reason: 'error', message };
   }
 }
 

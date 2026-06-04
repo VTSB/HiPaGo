@@ -138,11 +138,25 @@ describe('ensureDownloadTree', () => {
     expect(res).toEqual({ ok: true, treeUri: 'content://tree/y', displayName: 'Y' });
   });
 
-  it('returns {ok:false} when the user cancels the picker', async () => {
+  it('reports a user cancel distinctly when the picker is backed out', async () => {
     nativeMethods.getTree.mockResolvedValue({ treeUri: null, displayName: null, valid: false });
     nativeMethods.openDocumentTree.mockRejectedValue(new Error('cancelled'));
     const res = await ensureDownloadTree();
-    expect(res).toEqual({ ok: false });
+    expect(res).toEqual({ ok: false, reason: 'cancelled' });
+  });
+
+  it('reports a genuine failure with the real reason (not a cancel)', async () => {
+    nativeMethods.getTree.mockResolvedValue({ treeUri: null, displayName: null, valid: false });
+    nativeMethods.openDocumentTree.mockRejectedValue(new Error('openDocumentTree error: boom'));
+    const res = await ensureDownloadTree();
+    expect(res).toEqual({ ok: false, reason: 'error', message: 'openDocumentTree error: boom' });
+  });
+
+  it('falls through to the picker when getTree itself throws (plugin missing)', async () => {
+    nativeMethods.getTree.mockRejectedValue(new Error('not implemented on web'));
+    nativeMethods.openDocumentTree.mockResolvedValue({ treeUri: 'content://tree/z', displayName: 'Z' });
+    const res = await ensureDownloadTree();
+    expect(res).toEqual({ ok: true, treeUri: 'content://tree/z', displayName: 'Z' });
   });
 });
 

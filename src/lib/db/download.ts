@@ -32,8 +32,8 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
   const db = await ensureDb();
   await db.execute(
     `INSERT OR REPLACE INTO download
-       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.galleryId,
       row.title,
@@ -45,6 +45,7 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
       row.status,
       row.folderName ?? null,
       row.migratedAt ?? null,
+      row.lastError ?? null,
     ],
   );
   await persistDb();
@@ -60,6 +61,25 @@ export async function updateDownloadStatus(
 ): Promise<void> {
   const db = await ensureDb();
   await db.execute('UPDATE download SET status = ? WHERE galleryId = ?', [status, galleryId]);
+  await persistDb();
+}
+
+/**
+ * Update the status and failure reason of an existing download row in one write.
+ * Pass `lastError` = null to clear the reason (e.g. when a retry succeeds).
+ * A no-op if the galleryId does not exist.
+ */
+export async function setDownloadError(
+  galleryId: number,
+  status: DownloadStatus,
+  lastError: string | null,
+): Promise<void> {
+  const db = await ensureDb();
+  await db.execute('UPDATE download SET status = ?, lastError = ? WHERE galleryId = ?', [
+    status,
+    lastError,
+    galleryId,
+  ]);
   await persistDb();
 }
 
@@ -131,7 +151,7 @@ export async function deleteDownload(galleryId: number): Promise<void> {
 export async function getDownload(galleryId: number): Promise<DBDownload | null> {
   const db = await ensureDb();
   const rows = await db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt FROM download WHERE galleryId = ?',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError FROM download WHERE galleryId = ?',
     [galleryId],
   );
   return rows[0] ?? null;
@@ -143,7 +163,7 @@ export async function getDownload(galleryId: number): Promise<DBDownload | null>
 export async function listDownloads(): Promise<DBDownload[]> {
   const db = await ensureDb();
   return db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt FROM download ORDER BY downloadedAt DESC',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError FROM download ORDER BY downloadedAt DESC',
   );
 }
 
@@ -179,7 +199,7 @@ export async function searchDownloads(options: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt FROM download ${where} ORDER BY downloadedAt DESC`;
+  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError FROM download ${where} ORDER BY downloadedAt DESC`;
 
   return db.query<DBDownload>(sql, params);
 }

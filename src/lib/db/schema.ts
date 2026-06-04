@@ -105,6 +105,8 @@ export interface DBDownload {
   status: DownloadStatus;
   folderName?: string | null;
   migratedAt?: string | null;
+  /** Last failure reason (real error message), set when status is 'failed'. NULL otherwise. */
+  lastError?: string | null;
 }
 
 // === Database Initialization ===
