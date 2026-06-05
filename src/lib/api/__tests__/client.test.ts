@@ -279,6 +279,50 @@ describe('apiClient.fetchLtnBinaryWithTotal', () => {
     expect(result.total).toBeNull();
   });
 
+  it('should slice a full 200 response when the Range request is ignored', async () => {
+    const buffer = new ArrayBuffer(256);
+    const view = new Uint8Array(buffer);
+    for (let i = 0; i < view.length; i++) {
+      view[i] = i;
+    }
+    const mockResponse = new Response(buffer, { status: 200 });
+    fetchMock.mockResolvedValue(mockResponse);
+
+    const result = await apiClient.fetchLtnBinaryWithTotal('file.bin', 'bytes=100-199');
+
+    const resultView = new Uint8Array(result.data);
+    expect(result.data.byteLength).toBe(100);
+    expect(resultView[0]).toBe(100);
+    expect(resultView[99]).toBe(199);
+    expect(result.total).toBe(256);
+  });
+
+  it('should return an empty slice when an ignored Range starts beyond the full response', async () => {
+    const buffer = new ArrayBuffer(256);
+    const mockResponse = new Response(buffer, { status: 200 });
+    fetchMock.mockResolvedValue(mockResponse);
+
+    const result = await apiClient.fetchLtnBinaryWithTotal('file.bin', 'bytes=300-399');
+
+    expect(result.data.byteLength).toBe(0);
+    expect(result.total).toBe(256);
+  });
+
+  it('should not slice a 206 response that includes Content-Range', async () => {
+    const buffer = new ArrayBuffer(256);
+    const mockResponse = new Response(buffer, {
+      status: 206,
+      headers: { 'Content-Range': 'bytes 100-199/256' },
+    });
+    Object.defineProperty(mockResponse, 'ok', { value: false });
+    fetchMock.mockResolvedValue(mockResponse);
+
+    const result = await apiClient.fetchLtnBinaryWithTotal('file.bin', 'bytes=100-199');
+
+    expect(result.data.byteLength).toBe(256);
+    expect(result.total).toBe(256);
+  });
+
   it('should return correct data ArrayBuffer', async () => {
     const buffer = new ArrayBuffer(256);
     const view = new Uint8Array(buffer);

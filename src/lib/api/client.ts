@@ -19,6 +19,25 @@ interface FetchOptions extends RequestInit {
   queuePriority?: number;  // lower = higher priority; default 1
 }
 
+interface ByteRange {
+  start: number;
+  end: number;
+  length: number;
+}
+
+function parseByteRange(range: string): ByteRange | null {
+  const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+  if (!match) return null;
+
+  const start = Number.parseInt(match[1], 10);
+  const end = Number.parseInt(match[2], 10);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || end < start) {
+    return null;
+  }
+
+  return { start, end, length: end - start + 1 };
+}
+
 class ApiClient {
   private queue: { priority: number; fn: () => void }[] = [];
   private activeRequests = 0;
@@ -154,6 +173,16 @@ class ApiClient {
       if (match) total = parseInt(match[1], 10);
     }
     const data = await response.arrayBuffer();
+
+    const requestedRange = parseByteRange(range);
+    if (!contentRange && requestedRange && data.byteLength > requestedRange.length) {
+      const slicedEnd = Math.min(requestedRange.end + 1, data.byteLength);
+      return {
+        data: data.slice(requestedRange.start, slicedEnd),
+        total: data.byteLength,
+      };
+    }
+
     return { data, total };
   }
 
