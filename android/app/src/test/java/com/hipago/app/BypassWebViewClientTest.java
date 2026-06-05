@@ -13,13 +13,12 @@ import org.junit.Test;
 /**
  * Local JVM unit tests for {@link BypassWebViewClient#buildUpstreamHeaders}.
  *
- * Contract: forward the client's request headers as-is, overwriting only the
- * headers the bypass transport must own — {@code Referer}/{@code Origin}
- * (spoofed) and {@code Accept-Encoding} (dropped so bypass-core owns
- * decompression). Regression guard for the Android-only title-search bug where
- * the {@code Range} header was dropped, so every non-root B-tree
- * galleries-index fetch returned the full file from offset 0 and untyped/title
- * search returned no results.
+ * Contract: synthesize stable browser-like headers, copy only the caller's
+ * {@code Range} header, and spoof {@code Referer}/{@code Origin}. Regression
+ * guard for Android list/search pagination: dropping {@code Range} makes later
+ * pages and non-root B-tree index reads decode bytes from offset 0.
+ * WebView-only/request-context headers are intentionally dropped so they do not
+ * leak through the native bypass transport.
  */
 public class BypassWebViewClientTest {
 
@@ -29,6 +28,17 @@ public class BypassWebViewClientTest {
         assertEquals("https://hitomi.la/", out.get("Referer"));
         assertEquals("https://hitomi.la", out.get("Origin"));
         assertFalse(out.containsKey("Range"));
+    }
+
+    @Test
+    public void synthesizesBrowserLikeDefaults() {
+        Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(null);
+        assertEquals("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", out.get("User-Agent"));
+        assertEquals("*/*", out.get("Accept"));
+        assertEquals("en-US,en;q=0.9", out.get("Accept-Language"));
+        assertEquals("cross-site", out.get("Sec-Fetch-Site"));
+        assertEquals("cors", out.get("Sec-Fetch-Mode"));
+        assertEquals("empty", out.get("Sec-Fetch-Dest"));
     }
 
     @Test
@@ -47,7 +57,8 @@ public class BypassWebViewClientTest {
         Map<String, String> req = new HashMap<>();
         req.put("range", "bytes=0-463"); // WebView may report a lowercased name
         Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
-        assertEquals("bytes=0-463", out.get("range"));
+        assertEquals("bytes=0-463", out.get("Range"));
+        assertFalse(out.containsKey("range"));
     }
 
     @Test
@@ -60,19 +71,23 @@ public class BypassWebViewClientTest {
     }
 
     @Test
-    public void forwardsArbitraryClientHeaders() {
-        // The whole point: anything the client set (other than the overwritten
-        // identity / transport headers) passes through unchanged.
+    public void dropsWebViewClientHeadersExceptRange() {
         Map<String, String> req = new HashMap<>();
         req.put("Range", "bytes=100-200");
         req.put("If-Range", "\"etag-xyz\"");
         req.put("Accept", "image/avif,image/webp,*/*");
-        req.put("Sec-Fetch-Mode", "cors");
+        req.put("Sec-Fetch-Mode", "no-cors");
+        req.put("Sec-Fetch-Dest", "image");
+        req.put("X-Requested-With", "com.hipago.app");
         Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
         assertEquals("bytes=100-200", out.get("Range"));
-        assertEquals("\"etag-xyz\"", out.get("If-Range"));
-        assertEquals("image/avif,image/webp,*/*", out.get("Accept"));
+        assertFalse(out.containsKey("If-Range"));
+        assertFalse(out.containsKey("X-Requested-With"));
+        // Browser-like defaults are synthesized; WebView-provided variants do
+        // not override them.
+        assertEquals("*/*", out.get("Accept"));
         assertEquals("cors", out.get("Sec-Fetch-Mode"));
+        assertEquals("empty", out.get("Sec-Fetch-Dest"));
     }
 
     @Test
@@ -91,7 +106,7 @@ public class BypassWebViewClientTest {
     }
 
     @Test
-    public void dropsAcceptEncodingSoTransportOwnsDecompression() {
+    public void dropsAcceptEncoding() {
         Map<String, String> req = new HashMap<>();
         req.put("Accept-Encoding", "gzip, deflate, br");
         req.put("Range", "bytes=0-9");
@@ -116,9 +131,10 @@ public class BypassWebViewClientTest {
         req.put("Range", null);
         Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
         assertFalse(out.containsKey("Range"));
-        // Only the two canonical identity headers remain.
-        assertEquals(2, out.size());
+        // Browser-like defaults plus the two canonical identity headers remain.
         assertTrue(out.containsKey("Referer"));
         assertTrue(out.containsKey("Origin"));
+        assertTrue(out.containsKey("User-Agent"));
+        assertTrue(out.containsKey("Accept"));
     }
 }

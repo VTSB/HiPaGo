@@ -588,21 +588,17 @@ describe('getGalleryIdsForQuery — Korean query normalization', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tag→title fallback: a bare localized word that collides with a tag name is
-// searched as a tag first, then falls back to the galleries title index when
-// the tag-substituted query returns nothing.
+// Localized title/free-text search: a bare localized word that collides with a
+// tag name still goes directly to the galleries title index. Users opt into tag
+// lookup by typing an explicit type label.
 // ---------------------------------------------------------------------------
-describe('getGalleryIdsForQuery — tag→title fallback', () => {
+describe('getGalleryIdsForQuery — localized title/free-text search', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     await useTagI18nStore.getState().loadLocale('ko');
   });
 
-  it('falls back to the title index when an auto-substituted bare KO word yields no tag results', async () => {
-    // "로리" maps to female:loli (auto-substituted). Tag pass is empty → the raw
-    // word is re-run against the galleries index.
-    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([]); // female:loli → empty
-
+  it('sends a bare localized word directly to the title index, not tag nozomi', async () => {
     const hash = new Uint8Array(
       await crypto.subtle.digest('SHA-256', new TextEncoder().encode('로리')),
     ).slice(0, 4);
@@ -613,42 +609,58 @@ describe('getGalleryIdsForQuery — tag→title fallback', () => {
 
     const result = await getGalleryIdsForQuery('로리', 'all');
 
-    expect(fetchNozomiSearch).toHaveBeenCalledWith('tag', 'female:loli', 'all', undefined);
+    expect(fetchNozomiSearch).not.toHaveBeenCalled();
     expect(result).toEqual([11, 22, 33]);
   });
 
-  it('reverts only positive auto-substituted terms; a negative auto-sub stays a tag exclusion', async () => {
-    // "로리 -얌": 로리 (positive, auto-sub) reverts to a title lookup; -얌 (negative,
-    // auto-sub) must remain an artist:yam exclusion in the fallback pass.
-    vi.mocked(fetchNozomiSearch).mockImplementation(async (_area, tag) => {
-      if (tag === 'female:loli') return []; // primary tag pass empty → fallback
-      if (tag === 'yam') return [22];        // -얌 exclusion still applied in fallback
-      return [];
-    });
+  it('keeps a negative bare localized word as a title-index exclusion', async () => {
+    const cmp = (a: Uint8Array, b: Uint8Array) => {
+      for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] - b[i];
+      return a.length - b.length;
+    };
+    const sha4 = async (s: string) =>
+      new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))).slice(0, 4);
 
-    const hash = new Uint8Array(
-      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('로리')),
-    ).slice(0, 4);
+    const entries = [
+      { hash: await sha4('로리'), off: 0, len: 12, ids: [11, 22, 33] },
+      { hash: await sha4('얌'), off: 100, len: 4, ids: [22] },
+    ].sort((a, b) => cmp(a.hash, b.hash));
+
+    const node = buildMultiKeyNode(
+      entries.map((e) => e.hash),
+      entries.map((e) => ({ offset: e.off, length: e.len })),
+    );
+
     vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
-    vi.mocked(apiClient.fetchLtnBinary)
-      .mockResolvedValueOnce(buildNodeWithKeyAndData(hash, { offset: 0, length: 12 }))
-      .mockResolvedValueOnce(buildGalleryIdBuffer([11, 22, 33]));
+    vi.mocked(apiClient.fetchLtnBinary).mockImplementation(async (_path: string, range?: string) => {
+      if (range === 'bytes=0-463') return node;
+      for (const e of entries) {
+        if (range === `bytes=${e.off}-${e.off + e.len - 1}`) return buildGalleryIdBuffer(e.ids);
+      }
+      throw new Error(`unexpected range ${range}`);
+    });
 
     const result = await getGalleryIdsForQuery('로리 -얌', 'all');
 
-    // 로리 → title index [11,22,33]; -얌 stayed artist:yam exclusion {22} → [11,33]
+    // 로리 → title index [11,22,33]; -얌 → title index exclusion {22} → [11,33]
     expect(result).toEqual([11, 33]);
-    expect(fetchNozomiSearch).toHaveBeenCalledWith('artist', 'yam', 'all', undefined);
+    expect(fetchNozomiSearch).not.toHaveBeenCalled();
   });
 
-  it('uses the tag result and skips the fallback when the primary query is non-empty', async () => {
-    vi.mocked(fetchNozomiSearch).mockResolvedValueOnce([100, 200]); // female:loli → hits
+  it('keeps 스프레이 as an untyped title lookup on Android-equivalent search path', async () => {
+    const hash = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', new TextEncoder().encode('스프레이')),
+    ).slice(0, 4);
+    vi.mocked(fetchIndexVersion).mockResolvedValueOnce('v1');
+    vi.mocked(apiClient.fetchLtnBinary)
+      .mockResolvedValueOnce(buildNodeWithKeyAndData(hash, { offset: 0, length: 8 }))
+      .mockResolvedValueOnce(buildGalleryIdBuffer([101, 202]));
 
-    const result = await getGalleryIdsForQuery('로리', 'all');
+    const result = await getGalleryIdsForQuery('스프레이', 'all');
 
-    expect(result).toEqual([100, 200]);
-    expect(fetchIndexVersion).not.toHaveBeenCalled();
-    expect(apiClient.fetchLtnBinary).not.toHaveBeenCalled();
+    expect(result).toEqual([101, 202]);
+    expect(fetchNozomiSearch).not.toHaveBeenCalled();
+    expect(fetchIndexVersion).toHaveBeenCalledWith('galleriesindex');
   });
 
   it('does not run a second pass when no term was auto-substituted', async () => {
@@ -673,11 +685,9 @@ describe('getGalleryIdsForQuery — tag→title fallback', () => {
     expect(fetchIndexVersion).not.toHaveBeenCalled(); // explicit typed never reverts to title
   });
 
-  it('reverts an auto-sub positive while keeping a plain passthrough positive — both via the title index (headline "수영복 그녀" shape)', async () => {
-    // "로리 그녀": 로리 auto-subs to female:loli; 그녀 has no tag mapping (passthrough).
-    // Primary intersects tag female:loli (empty) with title 그녀 → empty → fallback
-    // re-runs 로리 as a raw title word; both 로리 and 그녀 hit the galleries index.
-    vi.mocked(fetchNozomiSearch).mockResolvedValue([]); // female:loli (primary) → empty
+  it('intersects multiple bare localized title words via the title index (headline "수영복 그녀" shape)', async () => {
+    // "로리 그녀": both words are typeless title/free-text terms, even if 로리
+    // also has a localized tag mapping.
     vi.mocked(fetchIndexVersion).mockResolvedValue('v1');
 
     const cmp = (a: Uint8Array, b: Uint8Array) => {
@@ -709,6 +719,7 @@ describe('getGalleryIdsForQuery — tag→title fallback', () => {
 
     // title index: 로리→[11,22,33] ∩ 그녀→[22,33,44] = [22,33]
     expect(result).toEqual([22, 33]);
+    expect(fetchNozomiSearch).not.toHaveBeenCalled();
   });
 });
 

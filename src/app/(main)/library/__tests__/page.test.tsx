@@ -198,7 +198,10 @@ describe('LibraryPage', () => {
     await act(async () => { await renderPage(); });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
-    const deleteBtn = screen.getByRole('button', { name: 'library.delete' });
+    const moreBtn = screen.getByRole('button', { name: 'library.more' });
+    await act(async () => { fireEvent.click(moreBtn); });
+
+    const deleteBtn = screen.getByRole('menuitem', { name: 'library.delete' });
     await act(async () => { fireEvent.click(deleteBtn); });
 
     expect(mockDeleteDownload).toHaveBeenCalledWith(2001);
@@ -212,7 +215,10 @@ describe('LibraryPage', () => {
     await act(async () => { await renderPage(); });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
-    const deleteBtn = screen.getByRole('button', { name: 'library.delete' });
+    const moreBtn = screen.getByRole('button', { name: 'library.more' });
+    await act(async () => { fireEvent.click(moreBtn); });
+
+    const deleteBtn = screen.getByRole('menuitem', { name: 'library.delete' });
     await act(async () => { fireEvent.click(deleteBtn); });
 
     expect(mockDeleteDownload).not.toHaveBeenCalled();

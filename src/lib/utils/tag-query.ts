@@ -7,7 +7,8 @@ import { tagFromDisplay } from './hitomi-tag';
  *
  * The search box, the `/search?q=` URL and recent searches keep the query in
  * the script the user typed (Korean stays Korean). English↔Korean translation
- * happens only at the nozomi execution boundary via `normalizeQueryToEnglish`.
+ * happens only for explicit type-qualified tags at the nozomi execution
+ * boundary via `normalizeQueryToEnglish`.
  */
 
 /** The 7 user-facing tag types that can carry a Korean type label. */
@@ -91,10 +92,9 @@ export interface NormalizedTerm {
  *    known) to the English searchForm;
  *  - rebuild as `type:searchForm`.
  *
- * English terms pass through byte-identical. An unknown type prefix is treated
- * as a plain (typeless) term — the term is returned unchanged, matching the
- * current `parseQuery` behavior. `autoSubstituted` flags the one case that the
- * title-search fallback can revert: a bare localized word rewritten to a tag.
+ * Typeless terms pass through byte-identical, including Korean title/free-text
+ * queries. An unknown type prefix is treated as a plain (typeless) term — the
+ * term is returned unchanged, matching the current `parseQuery` behavior.
  */
 export function normalizeQueryTerms(query: string): NormalizedTerm[] {
   const trimmed = query.trim();
@@ -110,18 +110,8 @@ export function normalizeQueryTerms(query: string): NormalizedTerm[] {
 
     const colonIdx = body.indexOf(':');
     if (colonIdx <= 0) {
-      // Typeless term. Translate if the whole term is Hangul.
-      if (isHangul(body)) {
-        const matches = i18n.reverseLookupAll(body.replace(/_/g, ' '));
-        if (matches.length > 0) {
-          // One Korean name may map to several English tags (variants/aliases);
-          // emit them as a '|'-joined OR-group that the executor unions.
-          const eng = matches
-            .map((m) => `${m.type}:${tagFromDisplay(m.name, m.type as TagType).searchForm}`)
-            .join('|');
-          return { raw: term, normalized: negative ? `-${eng}` : eng, autoSubstituted: true, negative };
-        }
-      }
+      // Typeless search is title/free-text search. Do not reverse-resolve bare
+      // Korean words into tags; users must opt into tag lookup with a type label.
       return { raw: term, normalized: term, autoSubstituted: false, negative };
     }
 

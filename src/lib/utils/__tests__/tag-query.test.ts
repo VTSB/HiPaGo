@@ -180,9 +180,8 @@ describe('tag-query — duplicate-translation OR-group expansion', () => {
     expect(out.split('|').sort()).toEqual(['tag:gokan', 'tag:goukan']);
   });
 
-  it('typeless collision expands to a |-joined OR-group', () => {
-    const out = normalizeQueryToEnglish('인피니트_스트라토스');
-    expect(out.split('|').sort()).toEqual(['series:infinite_stratos', 'series:is']);
+  it('typeless localized words stay title/free-text queries even when tags collide', () => {
+    expect(normalizeQueryToEnglish('인피니트_스트라토스')).toBe('인피니트_스트라토스');
   });
 
   it('non-colliding Korean term stays a single term (no pipe)', () => {
@@ -212,10 +211,17 @@ describe('tag-query — normalizeQueryTerms metadata', () => {
     await useTagI18nStore.getState().loadLocale('ko');
   });
 
-  it('flags a bare localized word rewritten to a tag as autoSubstituted', () => {
+  it('does not auto-substitute a bare localized word even when a tag mapping exists', () => {
     expect(normalizeQueryTerms('로리')).toEqual([
-      { raw: '로리', normalized: 'female:loli', autoSubstituted: true, negative: false },
+      { raw: '로리', normalized: '로리', autoSubstituted: false, negative: false },
     ]);
+  });
+
+  it('keeps bare Korean title text such as 스프레이 out of tag matching', () => {
+    expect(normalizeQueryTerms('스프레이')).toEqual([
+      { raw: '스프레이', normalized: '스프레이', autoSubstituted: false, negative: false },
+    ]);
+    expect(normalizeQueryToEnglish('스프레이')).toBe('스프레이');
   });
 
   it('does not auto-substitute a bare localized word with no tag mapping', () => {
@@ -236,15 +242,15 @@ describe('tag-query — normalizeQueryTerms metadata', () => {
     ]);
   });
 
-  it('marks a negative bare localized word both autoSubstituted and negative', () => {
+  it('keeps a negative bare localized word typeless', () => {
     expect(normalizeQueryTerms('-로리')).toEqual([
-      { raw: '-로리', normalized: '-female:loli', autoSubstituted: true, negative: true },
+      { raw: '-로리', normalized: '-로리', autoSubstituted: false, negative: true },
     ]);
   });
 
   it('returns one entry per whitespace term with per-term flags', () => {
     expect(normalizeQueryTerms('로리 hello 여자:안경')).toEqual([
-      { raw: '로리', normalized: 'female:loli', autoSubstituted: true, negative: false },
+      { raw: '로리', normalized: '로리', autoSubstituted: false, negative: false },
       { raw: 'hello', normalized: 'hello', autoSubstituted: false, negative: false },
       { raw: '여자:안경', normalized: 'female:glasses', autoSubstituted: false, negative: false },
     ]);
@@ -256,7 +262,7 @@ describe('tag-query — normalizeQueryTerms metadata', () => {
   });
 
   it('normalizeQueryToEnglish equals the joined normalized terms (wrapper parity)', () => {
-    for (const q of ['로리', '여자:로리 artist:yam', 'hello world', '-로리 그녀', 'female:loli']) {
+    for (const q of ['로리', '여자:로리 artist:yam', 'hello world', '-로리 그녀', 'female:loli', '스프레이']) {
       expect(normalizeQueryToEnglish(q)).toBe(
         normalizeQueryTerms(q).map((t) => t.normalized).join(' '),
       );

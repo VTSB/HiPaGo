@@ -105,51 +105,43 @@ public class BypassWebViewClient extends BridgeWebViewClient {
     /**
      * Build the header map sent upstream through bypass-core for a GET.
      *
-     * Strategy: forward the client's request headers as-is and overwrite only
-     * the few that the bypass transport must own. This preserves request intent
-     * the WebView set — most importantly {@code Range} (the search/index pipeline
-     * issues byte-range reads for every B-tree galleries-index node and data
-     * segment, and for nozomi pagination), plus conditional headers like
-     * {@code If-Range} and the {@code Accept} negotiation. Dropping {@code Range}
-     * was the original bug: bypass-core forwards headers verbatim, so a missing
-     * Range made upstream return the full file (HTTP 200) from offset 0; the root
-     * B-tree node lives at offset 0 so it decoded, but any non-zero-offset
-     * sub-node fetch then re-decoded the root instead of the requested node, so
-     * untyped/title search ("스프레이") found nothing while tag/nozomi browsing
-     * (read from offset 0) kept working.
+     * Strategy: synthesize a stable browser-like request shape for bypass-core,
+     * then copy only the per-request header we must preserve: {@code Range}.
+     * The list/search pipeline issues byte-range reads for nozomi pagination and
+     * B-tree index nodes. Dropping {@code Range} made upstream return the full
+     * file (HTTP 200) from offset 0, so later pages and non-root B-tree reads
+     * decoded the wrong bytes.
      *
-     * Overwritten / dropped (case-insensitive, since WebView casing varies):
-     *  - {@code Referer}/{@code Origin}: replaced with the spoofed hitomi values
-     *    so the WebView's own cross-origin values can't leak through.
-     *  - {@code Accept-Encoding}: dropped so bypass-core (rquest Chrome
-     *    impersonation) owns content negotiation and transparently decompresses.
-     *    Forwarding the WebView's Accept-Encoding would suppress that gunzip and
-     *    hand back a compressed body, corrupting the binary index reads this code
-     *    path depends on.
+     * WebView-supplied request-context headers are intentionally not replayed.
+     * Android-specific values such as {@code X-Requested-With}, localhost
+     * identity, cookies, or WebView's own {@code Sec-Fetch-*} should not leak to
+     * upstream. The native client already impersonates Chrome at the TLS layer;
+     * these fixed headers keep the HTTP layer browser-like without trusting
+     * local WebView metadata.
      *
      * Package-private + static with no Android dependencies so it is unit
      * testable on the local JVM without Robolectric.
      */
     static Map<String, String> buildUpstreamHeaders(Map<String, String> requestHeaders) {
         Map<String, String> headers = new HashMap<>();
+        headers.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+        headers.put("Accept", "*/*");
+        headers.put("Accept-Language", "en-US,en;q=0.9");
+        headers.put("Sec-Fetch-Site", "cross-site");
+        headers.put("Sec-Fetch-Mode", "cors");
+        headers.put("Sec-Fetch-Dest", "empty");
+        headers.put("Referer", "https://hitomi.la/");
+        headers.put("Origin", "https://hitomi.la");
 
         if (requestHeaders != null) {
             for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
                 String k = e.getKey();
                 if (k == null || e.getValue() == null) continue;
-                // Identity headers are set canonically below; let the bypass
-                // transport own content-encoding/decompression.
-                if (k.equalsIgnoreCase("Referer")
-                        || k.equalsIgnoreCase("Origin")
-                        || k.equalsIgnoreCase("Accept-Encoding")) {
-                    continue;
+                if (k.equalsIgnoreCase("Range")) {
+                    headers.put("Range", e.getValue());
                 }
-                headers.put(k, e.getValue());
             }
         }
-
-        headers.put("Referer", "https://hitomi.la/");
-        headers.put("Origin", "https://hitomi.la");
         return headers;
     }
 
