@@ -30,8 +30,8 @@ importers:
         specifier: ^2
         version: 2.10.1
       '@tauri-apps/plugin-fs':
-        specifier: ^2
-        version: 2.5.1
+        specifier: ^2.4.1
+        version: 2.4.1
       '@tauri-apps/plugin-sql':
         specifier: ^2
         version: 2.3.2
@@ -1214,8 +1214,8 @@ packages:
     engines: {node: '>= 10'}
     hasBin: true
 
-  '@tauri-apps/plugin-fs@2.5.1':
-    resolution: {integrity: sha512-9Lz+Jopp6QyeEWhlpkMx4R/+P9HgR+AVAI4vOZhlT8Xaymtz8iVI/Ov984/XTqgJz/5gz5NretqPB/XEMS3NhQ==}
+  '@tauri-apps/plugin-fs@2.4.1':
+    resolution: {integrity: sha512-vJlKZVGF3UAFGoIEVT6Oq5L4HGDCD78WmA4uhzitToqYiBKWAvZR61M6zAyQzHqLs0ADemkE4RSy/5sCmZm6ZQ==}
 
   '@tauri-apps/plugin-sql@2.3.2':
     resolution: {integrity: sha512-4VDXhcKXVpyh5KKpnTGAn6q2DikPHH+TXGh9ZDQzULmG/JEz1RDvzQStgBJKddiukRbYEZ8CGIA2kskx+T+PpA==}
@@ -4281,7 +4281,7 @@ snapshots:
       '@tauri-apps/cli-win32-ia32-msvc': 2.10.0
       '@tauri-apps/cli-win32-x64-msvc': 2.10.0
 
-  '@tauri-apps/plugin-fs@2.5.1':
+  '@tauri-apps/plugin-fs@2.4.1':
     dependencies:
       '@tauri-apps/api': 2.11.0
 
