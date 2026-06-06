@@ -28,6 +28,12 @@ export function Providers({ children }: { children: ReactNode }) {
     initLocaleOnce();
   }, []);
 
+  useEffect(() => {
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'auto';
+    }
+  }, []);
+
   // Sync html lang attribute with locale (Issue 15)
   useEffect(() => {
     document.documentElement.lang = LOCALE_TO_LANG[locale] || 'en';

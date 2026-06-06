@@ -11,7 +11,6 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 import { useT } from '@/lib/i18n/useT';
 import { useSettingsStore } from '@/lib/store/settings';
 import type { SortOrder } from '@/lib/utils/types';
-import { readListScrollSnapshot } from '../utils/listScrollSnapshot';
 
 const VALID_SORTS: SortOrder[] = [
   'date_added',
@@ -79,41 +78,6 @@ export function GalleryListView() {
   useEffect(() => {
     replaceUrlState(sort);
   }, [replaceUrlState, sort]);
-
-  // Scroll restoration
-  const restoredRef = useRef(false);
-  useEffect(() => {
-    if (restoredRef.current || totalLength === 0) return;
-    const stored = readListScrollSnapshot();
-    if (!stored) return;
-    const restoreAt = stored.anchorIndex;
-    restoredRef.current = true;
-    const pageIndex = Math.floor(restoreAt / PAGE_SIZE);
-    requestPage(Math.max(0, pageIndex - 1));
-    requestPage(pageIndex);
-    requestPage(pageIndex + 1);
-    setViewingPage(pageIndex + 1);
-    gridRef.current?.scrollToItem(restoreAt);
-
-    let attempts = 0;
-    const tryRestore = () => {
-      const anchor = document.querySelector<HTMLElement>(
-        `[data-item-index="${stored.anchorIndex}"]`,
-      );
-      if (anchor) {
-        const delta = anchor.getBoundingClientRect().top - stored.anchorTop;
-        window.scrollTo({ top: Math.max(0, window.scrollY + delta), behavior: 'auto' });
-        return;
-      }
-      attempts += 1;
-      if (attempts < 20) {
-        window.setTimeout(tryRestore, 16);
-        return;
-      }
-      window.scrollTo({ top: stored.scrollY, behavior: 'auto' });
-    };
-    window.setTimeout(tryRestore, 0);
-  }, [requestPage, totalLength]);
 
   const handleSortChange = useCallback((newSort: SortOrder) => {
     setSort(newSort);

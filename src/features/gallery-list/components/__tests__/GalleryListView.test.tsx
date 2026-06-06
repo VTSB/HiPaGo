@@ -78,7 +78,7 @@ vi.mock('@/lib/utils/constants', () => ({
   PAGE_SIZE: 25,
 }));
 
-describe('GalleryListView URL and scroll restoration', () => {
+describe('GalleryListView URL state and native scroll restoration', () => {
   let replaceStateSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -186,21 +186,10 @@ describe('GalleryListView URL and scroll restoration', () => {
     setItemSpy.mockRestore();
   });
 
-  it('restores list scroll state from the current history entry and requests the target pages', async () => {
+  it('does not run custom history-state scroll restoration', async () => {
     window.history.replaceState(
       {
-        hipagoListScrollSnapshot: {
-          version: 1,
-          url: '/',
-          at: 175,
-          scrollY: 3200,
-          ts: Date.now(),
-          anchorIndex: 175,
-          anchorTop: 0,
-          clickedIndex: 180,
-          clickedId: 123,
-          viewportWidth: 390,
-        },
+        unrelatedAppState: { scrollY: 3200, anchorIndex: 175 },
       },
       '',
       '/',
@@ -213,97 +202,15 @@ describe('GalleryListView URL and scroll restoration', () => {
       render(<GalleryListView />);
     });
 
-    expect(mockRequestPage).toHaveBeenCalledWith(6);
-    expect(mockRequestPage).toHaveBeenCalledWith(7);
-    expect(mockRequestPage).toHaveBeenCalledWith(8);
-    expect(mockScrollToItem).toHaveBeenCalledWith(175);
-    expect(navPropsRef.current.viewingPage).toBe(8);
+    expect(mockRequestPage).not.toHaveBeenCalled();
+    expect(mockScrollToItem).not.toHaveBeenCalled();
+    expect(navPropsRef.current.viewingPage).toBe(1);
 
     act(() => {
       vi.advanceTimersByTime(16 * 20);
     });
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 3200, behavior: 'auto' });
+    expect(scrollToSpy).not.toHaveBeenCalled();
 
     scrollToSpy.mockRestore();
-  });
-
-  it('restores history-entry scroll state when only legacy ?at= changed while away', async () => {
-    mockAtParam = '11';
-    window.history.replaceState(
-      {
-        hipagoListScrollSnapshot: {
-          version: 1,
-          url: '/?at=1',
-          at: 25,
-          scrollY: 3612,
-          ts: Date.now(),
-          anchorIndex: 25,
-          anchorTop: 0,
-          clickedIndex: 26,
-          clickedId: 123,
-          viewportWidth: 390,
-        },
-      },
-      '',
-      '/?at=11',
-    );
-    const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
-
-    vi.resetModules();
-    const { GalleryListView } = await import('../GalleryListView');
-    await act(async () => {
-      render(<GalleryListView />);
-    });
-
-    expect(mockScrollToItem).toHaveBeenCalledWith(25);
-    act(() => {
-      vi.advanceTimersByTime(16 * 20);
-    });
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 3612, behavior: 'auto' });
-
-    scrollToSpy.mockRestore();
-  });
-
-  it('restores by anchor offset when grid metrics changed', async () => {
-    window.history.replaceState(
-      {
-        hipagoListScrollSnapshot: {
-          version: 1,
-          url: '/',
-          at: 25,
-          scrollY: 3612,
-          ts: Date.now(),
-          anchorIndex: 25,
-          anchorTop: 48,
-          clickedIndex: 26,
-          clickedId: 123,
-          viewportWidth: 390,
-        },
-      },
-      '',
-      '/',
-    );
-    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 });
-    const anchor = document.createElement('div');
-    anchor.dataset.itemIndex = '25';
-    anchor.getBoundingClientRect = () =>
-      ({ top: 120, bottom: 380, left: 0, right: 180, width: 180, height: 260 }) as DOMRect;
-    document.body.appendChild(anchor);
-    const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
-
-    vi.resetModules();
-    const { GalleryListView } = await import('../GalleryListView');
-    await act(async () => {
-      render(<GalleryListView />);
-    });
-
-    expect(mockScrollToItem).toHaveBeenCalledWith(25);
-    act(() => {
-      vi.runOnlyPendingTimers();
-    });
-    expect(scrollToSpy).toHaveBeenCalledWith({ top: 1072, behavior: 'auto' });
-
-    scrollToSpy.mockRestore();
-    document.body.removeChild(anchor);
   });
 });
