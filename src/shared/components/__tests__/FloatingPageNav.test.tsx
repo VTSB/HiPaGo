@@ -228,6 +228,16 @@ describe('FloatingPageNav — immediate page update', () => {
     expect(jump.textContent).toBe('1\u00a0/\u00a03,871');
   });
 
+  it('centers the mobile pill without an x-axis translate transform', () => {
+    renderNav(4, 23);
+    const nav = screen.getByRole('button', { name: /jump to page/i }).parentElement as HTMLElement;
+
+    expect(nav.className).toContain('inset-x-0');
+    expect(nav.className).toContain('mx-auto');
+    expect(nav.className).not.toContain('-translate-x-1/2');
+    expect(nav.className).toContain('max-w-[calc(100vw-1rem)]');
+  });
+
   it('does not apply hidden transform after programmatic next-page scroll settles', () => {
     const div = document.createElement('div');
     div.setAttribute('data-item-index', '150');

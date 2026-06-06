@@ -37,6 +37,9 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
 
   // Mobile (<sm):
   //   - Toolbar centered horizontally for thumb-reach.
+  //   - The fixed wrapper spans the viewport and centers with flex instead of
+  //     `left: 50% + translateX(-50%)`; older Android WebViews can compose that
+  //     transform against the wrong viewport when the system nav bar is visible.
   //   - 2-page toggle hidden (unreadable side-by-side at 375px).
   // Desktop (≥sm):
   //   - Toolbar pinned bottom-right (original placement; familiar mouse target).
@@ -44,13 +47,13 @@ export function ReaderControls({ onBack, currentPage, totalPages, mode, onModeCh
   // and the original 38px buttons were borderline for any precision-input UX.
   return (
     <div
-      className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 will-change-transform sm:left-auto sm:right-4 sm:translate-x-0"
+      className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-2 sm:inset-x-auto sm:right-4 sm:block sm:px-0"
     >
       {/* Reveal is gesture-coupled: `--reader-chrome` (0 shown → 1 hidden) is
           driven imperatively by useScrollReveal so the pill tracks the scroll
           1:1 (no transition = no lag), sliding down off-screen proportionally. */}
       <div
-        className="flex items-center gap-0.5 rounded-full bg-black/60 px-2 py-1.5 shadow-2xl backdrop-blur-md will-change-transform sm:gap-1.5 sm:px-3 sm:py-2"
+        className="flex max-w-[calc(100vw-1rem)] items-center gap-0.5 rounded-full bg-black/60 px-2 py-1.5 shadow-2xl backdrop-blur-md will-change-transform sm:max-w-[calc(100vw-2rem)] sm:gap-1.5 sm:px-3 sm:py-2"
         style={{
           transform: 'translateY(calc(var(--reader-chrome, 0) * 150%))',
           opacity: 'calc(1 - var(--reader-chrome, 0))',

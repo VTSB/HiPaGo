@@ -445,9 +445,7 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             // Mobile: small chip floating just ABOVE the bottom nav so it stays
             // visible/tappable; on scroll-down it slides down behind the nav
             // (z-30 < nav z-40). Desktop (>=md): unchanged bottom-right pill.
-            'fixed bottom-[var(--page-chip-bottom)] z-30 flex items-center gap-0.5 rounded-full bg-zinc-900/90 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm md:bottom-4 md:z-40 md:gap-1 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
-            // D1: mobile center, desktop bottom-right.
-            'left-1/2 -translate-x-1/2 md:left-auto md:right-4 md:translate-x-0',
+            'fixed inset-x-0 bottom-[var(--page-chip-bottom)] z-30 mx-auto flex w-fit max-w-[calc(100vw-1rem)] items-center gap-0.5 rounded-full bg-zinc-900/90 px-2 py-1 text-sm text-white shadow-lg backdrop-blur-sm md:inset-x-auto md:bottom-4 md:right-4 md:z-40 md:mx-0 md:max-w-[calc(100vw-2rem)] md:gap-1 md:px-2 md:py-1 md:text-sm dark:bg-zinc-100/90 dark:text-zinc-900',
             // Tailwind v4 writes `translate-*` to the standalone `translate:` CSS
             // property and `scale-*` to `scale:`, NOT to legacy `transform: translate(...)`.
             // The transition list names them directly. `translate` is intentionally
@@ -459,9 +457,9 @@ export const FloatingPageNav = forwardRef<FloatingPageNavHandle, FloatingPageNav
             // the slide clears BOTH the pill height AND the `bottom-4` (1rem) anchor
             // via `calc(100% + 1rem + safe-area)`, scaled by the var so it follows the
             // scroll proportionally (no binary snap, no opacity-0 fighting the var —
-            // at var=1 the pill is fully off-screen). `-translate-x-1/2` (D1) composes
-            // through Tailwind v4's single `translate:` property. `sm:translate-y-0`
-            // keeps desktop put — byte-identical to before on ≥sm.
+            // at var=1 the pill is fully off-screen). Horizontal centering uses
+            // inset-x-0 + mx-auto so older Android WebViews do not compose X/Y
+            // translations against different viewports.
             'translate-y-[calc(var(--list-chrome,0)*(100%_+_var(--page-chip-bottom)))] md:translate-y-0',
             // D8: idle fade (mobile only). When the pill is hidden it is off-screen,
             // so the fade only reads while it is (partially) shown.
