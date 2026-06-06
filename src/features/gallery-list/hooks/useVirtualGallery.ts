@@ -8,7 +8,21 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 import type { SortOrder } from '@/lib/utils/types';
 
 const MAX_ACTIVE_PAGES = 50;
+const PREFETCH_AHEAD_PAGES = 3;
 const TOTAL_LENGTH_CACHE_PREFIX = 'hipago:listTotalLength';
+
+function expandPageWindow(pageIndex: number): number[] {
+  return Array.from(
+    { length: PREFETCH_AHEAD_PAGES + 1 },
+    (_, offset) => pageIndex + offset,
+  );
+}
+
+function capActivePages(pages: Set<number>): Set<number> {
+  if (pages.size <= MAX_ACTIVE_PAGES) return pages;
+  const arr = Array.from(pages);
+  return new Set(arr.slice(-MAX_ACTIVE_PAGES));
+}
 
 function totalLengthCacheKey(language: string, sort: SortOrder): string {
   return `${TOTAL_LENGTH_CACHE_PREFIX}:${language}:${sort}`;
@@ -48,8 +62,12 @@ async function fetchIdPage(language: string, pageIndex: number, sort: SortOrder)
 export function useVirtualGallery(sort: SortOrder = 'date_added') {
   const language = useSettingsStore((s) => s.language);
 
-  // Set of page indices we've requested — only grows, never shrinks (cache stays valid)
-  const [neededPages, setNeededPages] = useState<ReadonlySet<number>>(() => new Set([0]));
+  // Set of page indices we've requested — only grows until capped.
+  // Seed a few pages ahead so Android WebView has IDs ready even if scroll
+  // virtualizer updates arrive late or only cover the first mobile rows.
+  const [neededPages, setNeededPages] = useState<ReadonlySet<number>>(
+    () => new Set(expandPageWindow(0)),
+  );
 
   // Ratchet: once we've seen a totalLength, never report lower than that.
   // Prevents the virtualizer height from collapsing to 0 when pages are evicted
@@ -69,7 +87,7 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
   if (sort !== prevSort || language !== prevLanguage) {
     setPrevSort(sort);
     setPrevLanguage(language);
-    setNeededPages(new Set([0]));
+    setNeededPages(new Set(expandPageWindow(0)));
     // Seed from the new key's cache so the container height for the
     // newly-selected filter is correct synchronously.
     setMaxTotalLength(readCachedTotalLength(language, sort));
@@ -108,14 +126,15 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
 
   const requestPage = useCallback((pageIndex: number) => {
     setNeededPages((prev) => {
-      if (prev.has(pageIndex)) return prev;
       const next = new Set(prev);
-      next.add(pageIndex);
-      if (next.size > MAX_ACTIVE_PAGES) {
-        const arr = Array.from(next);
-        return new Set(arr.slice(-MAX_ACTIVE_PAGES));
+      let changed = false;
+      for (const page of expandPageWindow(pageIndex)) {
+        if (next.has(page)) continue;
+        next.add(page);
+        changed = true;
       }
-      return next;
+      if (!changed) return prev;
+      return capActivePages(next);
     });
   }, []);
 

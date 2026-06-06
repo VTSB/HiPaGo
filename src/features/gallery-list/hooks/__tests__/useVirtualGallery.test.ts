@@ -47,6 +47,15 @@ describe('useVirtualGallery', () => {
     expect(fetchBrowseIds).toHaveBeenCalledWith('all', 0, PAGE_SIZE, 'date_added');
   });
 
+  it('prefetches the first pages on mount so mobile scroll has IDs ready', async () => {
+    renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
+    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(4));
+    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 0, PAGE_SIZE, 'date_added');
+    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 1, PAGE_SIZE, 'date_added');
+    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 2, PAGE_SIZE, 'date_added');
+    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 3, PAGE_SIZE, 'date_added');
+  });
+
   it('isInitialLoading is true while page 0 is pending', () => {
     fetchBrowseIds.mockReturnValue(new Promise(() => {})); // never resolves
     const { result } = renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
@@ -205,26 +214,27 @@ describe('neededPages ring buffer', () => {
     // Allow all queries to settle
     await new Promise((r) => setTimeout(r, 50));
 
-    // The ring buffer caps at 20: pages 1-20 are active, page 0 was dropped
+    // Requesting a page also prefetches the next three pages.
     // Verify: page 20 was fetched (it's in the cap window)
     expect(fetchedPages.has(20)).toBe(true);
 
-    // Page 0 may or may not have been fetched before it was dropped from the set.
-    // The key invariant: neededPages never exceeds 20 entries.
-    // We verify this indirectly: total unique pages fetched by React Query <= 21
-    // (the cap logic limits the SET to 20, but queries already initiated still run)
-    expect(fetchedPages.size).toBeLessThanOrEqual(21);
+    // Page 0 may or may not have been fetched before it was dropped from the set,
+    // and each explicit request can fetch three pages ahead. The indirect
+    // invariant here is that unique fetches stay bounded by requested pages plus
+    // the prefetch window, not unbounded growth.
+    expect(fetchedPages.size).toBeLessThanOrEqual(24);
   });
 
   it('requestPage for already-requested page within cap does not grow the set', async () => {
     const { result } = renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(4));
 
-    // Request pages 1-10 (total = 11, well within cap of 20)
+    // Request pages 1-10. Pages 1-3 are already covered by mount prefetch;
+    // page 10 also prefetches up to page 13.
     for (let p = 1; p <= 10; p++) {
       act(() => { result.current.requestPage(p); });
     }
-    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(11));
+    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(14));
 
     // Re-requesting pages 1-10 must be deduplicated — neededPages Set prevents re-adding
     const callCountBefore = fetchBrowseIds.mock.calls.length;
