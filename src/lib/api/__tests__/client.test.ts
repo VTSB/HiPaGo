@@ -109,6 +109,34 @@ describe('apiClient.fetchUrl', () => {
     }));
   });
 
+  it('should work when AbortSignal.timeout is unavailable', async () => {
+    const originalTimeout = AbortSignal.timeout;
+    Object.defineProperty(AbortSignal, 'timeout', {
+      configurable: true,
+      value: undefined,
+    });
+    const mockResponse = new Response('ok', { status: 200 });
+    fetchMock.mockResolvedValue(mockResponse);
+
+    try {
+      const response = await apiClient.fetchUrl('https://example.com/legacy-webview');
+
+      expect(response).toBe(mockResponse);
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://example.com/legacy-webview',
+        expect.objectContaining({
+          headers: {},
+          signal: expect.any(AbortSignal),
+        }),
+      );
+    } finally {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        configurable: true,
+        value: originalTimeout,
+      });
+    }
+  });
+
   it('should merge custom headers with Range header', async () => {
     const mockResponse = new Response('ok', { status: 206 });
     Object.defineProperty(mockResponse, 'ok', { value: false });

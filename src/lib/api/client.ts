@@ -38,6 +38,19 @@ function parseByteRange(range: string): ByteRange | null {
   return { start, end, length: end - start + 1 };
 }
 
+function createTimeoutSignal(ms: number): { signal: AbortSignal; cleanup: () => void } {
+  if (typeof AbortSignal.timeout === 'function') {
+    return { signal: AbortSignal.timeout(ms), cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ms);
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timeoutId),
+  };
+}
+
 class ApiClient {
   private queue: { priority: number; fn: () => void }[] = [];
   private activeRequests = 0;
@@ -121,11 +134,16 @@ class ApiClient {
         // interceptor performs the bypass and injects Referer/Origin.
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { range: _range, queuePriority: _qp, ...fetchInit } = options;
-        response = await fetch(url, {
-          ...fetchInit,
-          headers,
-          signal: options.signal ?? AbortSignal.timeout(30000),
-        });
+        const timeout = options.signal ? null : createTimeoutSignal(30000);
+        try {
+          response = await fetch(url, {
+            ...fetchInit,
+            headers,
+            signal: options.signal ?? timeout?.signal,
+          });
+        } finally {
+          timeout?.cleanup();
+        }
       }
 
       if (!response.ok && response.status !== 206) {
