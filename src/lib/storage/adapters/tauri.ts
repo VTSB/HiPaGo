@@ -2,8 +2,7 @@
  * Tauri DownloadStore adapter.
  *
  * Stores gallery images under the app's data directory using
- * @tauri-apps/plugin-fs (dynamically imported at runtime — not installed as a
- * build-time dep, matching the pattern of TauriAdapter in src/lib/db/).
+ * @tauri-apps/plugin-fs.
  * Layout: <AppData>/downloads/<galleryId>/<filename>
  */
 
@@ -25,13 +24,8 @@ export class TauriDownloadStore implements DownloadStore {
   }
 
   static async create(): Promise<TauriDownloadStore> {
-    // Variable-indirection import so the bundler does not statically resolve
-    // @tauri-apps/plugin-fs at build time — it is only installed in Tauri
-    // builds, not in web/Capacitor. Same pattern as bypass-fetch.ts /
-    // tag-fetcher.ts use for optional native modules.
-    const pkg = '@tauri-apps/plugin-fs';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const fs: any = await import(/* webpackIgnore: true */ pkg);
+    const fs: any = await import('@tauri-apps/plugin-fs');
     return new TauriDownloadStore(fs, fs.BaseDirectory);
   }
 

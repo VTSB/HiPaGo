@@ -54,6 +54,7 @@ async fn bypass_download_to_file(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         // Auto-update from GitHub Releases. Endpoint + pubkey live in
         // tauri.conf.json's plugins.updater block. Signature verification

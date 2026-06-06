@@ -17,12 +17,8 @@ function safeKey(key: string): string {
 }
 
 export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend> {
-  // Variable-indirection import so the bundler does not statically resolve
-  // @tauri-apps/plugin-fs in web/Capacitor builds (same pattern as the Tauri
-  // download adapter).
-  const pkg = '@tauri-apps/plugin-fs';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fs: any = await import(/* webpackIgnore: true */ pkg);
+  const fs: any = await import('@tauri-apps/plugin-fs');
   const { invoke, convertFileSrc } = await import('@tauri-apps/api/core');
   const { appCacheDir, join } = await import('@tauri-apps/api/path');
   const baseDir = fs.BaseDirectory.AppCache;
