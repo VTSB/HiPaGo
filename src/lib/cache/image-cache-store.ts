@@ -147,7 +147,12 @@ export class ImageCacheStore {
     let size: number;
     try {
       size = await this.backend.download(key, url, headers);
-    } catch {
+    } catch (e) {
+      console.warn('[image-cache] download failed', {
+        key,
+        url,
+        error: e instanceof Error ? e.message : String(e),
+      });
       return null;
     }
     const existing = this.entries.get(key);

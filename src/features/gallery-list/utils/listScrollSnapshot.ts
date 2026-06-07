@@ -19,7 +19,11 @@ type HistoryStateWithListScroll = {
 };
 
 function currentListUrl(): string {
-  return window.location.pathname + window.location.search;
+  const parsed = new URL(window.location.href);
+  parsed.searchParams.delete('at');
+  parsed.searchParams.delete('page');
+  parsed.searchParams.sort();
+  return parsed.pathname + parsed.search;
 }
 
 function normalizeListUrl(url: string): string | null {

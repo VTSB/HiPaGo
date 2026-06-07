@@ -29,18 +29,7 @@ export function GalleryListView() {
     return s && VALID_SORTS.includes(s as SortOrder) ? (s as SortOrder) : 'date_added';
   });
 
-  // Read at/page from URL — migrate ?page= to ?at=
-  const initialAt = (() => {
-    const at = searchParams.get('at');
-    if (at) return Math.max(0, parseInt(at, 10) || 0);
-    const page = searchParams.get('page');
-    if (page) return Math.max(0, (parseInt(page, 10) || 1) - 1) * PAGE_SIZE;
-    return 0;
-  })();
-
-  const [viewingPage, setViewingPage] = useState(() =>
-    initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1,
-  );
+  const [viewingPage, setViewingPage] = useState(1);
 
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
@@ -78,76 +67,60 @@ export function GalleryListView() {
     gridRef.current?.scrollToPage(page);
   }, []);
 
-  // Debounced URL sync on scroll (200ms).
-  // sortRef holds the latest sort so the scroll handler always uses the current
-  // value without being re-subscribed on every sort change. Assigned in an
-  // effect, not during render (react-hooks/refs).
-  const urlTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const sortRef = useRef(sort);
+  const replaceUrlState = useCallback((nextSort: SortOrder) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('at');
+    url.searchParams.delete('page');
+    if (nextSort !== 'date_added') url.searchParams.set('sort', nextSort);
+    else url.searchParams.delete('sort');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search);
+  }, []);
+
   useEffect(() => {
-    sortRef.current = sort;
-  });
-  useEffect(() => {
-    const syncUrl = () => {
-      clearTimeout(urlTimerRef.current);
-      urlTimerRef.current = setTimeout(() => {
-        const url = new URL(window.location.href);
-        let at = 0;
-        const items = document.querySelectorAll('[data-item-index]');
-        for (let i = items.length - 1; i >= 0; i--) {
-          const rect = items[i].getBoundingClientRect();
-          if (rect.top <= 100) {
-            at = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
-            break;
-          }
-        }
-        if (at > 0) url.searchParams.set('at', String(at));
-        else url.searchParams.delete('at');
-        if (sortRef.current !== 'date_added') url.searchParams.set('sort', sortRef.current);
-        else url.searchParams.delete('sort');
-        url.searchParams.delete('page');
-        window.history.replaceState(history.state, '', url.pathname + url.search);
-      }, 200);
-    };
-    window.addEventListener('scroll', syncUrl, { passive: true });
-    syncUrl(); // initial sync for sort changes
-    return () => {
-      window.removeEventListener('scroll', syncUrl);
-      clearTimeout(urlTimerRef.current);
-    };
-  }, [sort]);
+    replaceUrlState(sort);
+  }, [replaceUrlState, sort]);
 
   // Scroll restoration
   const restoredRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current || totalLength === 0) return;
     const stored = readListScrollSnapshot();
-    const restoreAt = stored?.anchorIndex ?? initialAt;
-    if (restoreAt <= 0 && !stored) return;
+    if (!stored) return;
+    const restoreAt = stored.anchorIndex;
     restoredRef.current = true;
-    if (restoreAt > 0) {
-      gridRef.current?.scrollToItem(restoreAt);
-    }
-    if (stored) {
-      window.setTimeout(() => {
-        const anchor = document.querySelector<HTMLElement>(
-          `[data-item-index="${stored.anchorIndex}"]`,
-        );
-        if (anchor) {
-          const delta = anchor.getBoundingClientRect().top - stored.anchorTop;
-          window.scrollTo({ top: Math.max(0, window.scrollY + delta), behavior: 'auto' });
-          return;
-        }
-        window.scrollTo({ top: stored.scrollY, behavior: 'auto' });
-      }, 0);
-    }
-  }, [totalLength, initialAt]);
+    const pageIndex = Math.floor(restoreAt / PAGE_SIZE);
+    requestPage(Math.max(0, pageIndex - 1));
+    requestPage(pageIndex);
+    requestPage(pageIndex + 1);
+    setViewingPage(pageIndex + 1);
+    gridRef.current?.scrollToItem(restoreAt);
+
+    let attempts = 0;
+    const tryRestore = () => {
+      const anchor = document.querySelector<HTMLElement>(
+        `[data-item-index="${stored.anchorIndex}"]`,
+      );
+      if (anchor) {
+        const delta = anchor.getBoundingClientRect().top - stored.anchorTop;
+        window.scrollTo({ top: Math.max(0, window.scrollY + delta), behavior: 'auto' });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) {
+        window.setTimeout(tryRestore, 16);
+        return;
+      }
+      window.scrollTo({ top: stored.scrollY, behavior: 'auto' });
+    };
+    window.setTimeout(tryRestore, 0);
+  }, [requestPage, totalLength]);
 
   const handleSortChange = useCallback((newSort: SortOrder) => {
     setSort(newSort);
     setViewingPage(1);
+    replaceUrlState(newSort);
     window.scrollTo({ top: 0 });
-  }, []);
+  }, [replaceUrlState]);
 
   if (error && totalLength === 0) {
     return <div className="py-12 text-center text-red-500">{error}</div>;

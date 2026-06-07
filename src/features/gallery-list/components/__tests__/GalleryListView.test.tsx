@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act, cleanup } from '@testing-library/react';
+import { render, act, cleanup, fireEvent } from '@testing-library/react';
 import React from 'react';
 
-// Container objects for props captured from mock components.
-// Populated via useEffect inside each mock (effect runs after render, within act()).
 const navPropsRef: { current: Record<string, unknown> } = { current: {} };
-const gridPropsRef: { current: Record<string, unknown> } = { current: {} };
 const mockScrollToPage = vi.fn();
 const mockScrollToItem = vi.fn();
+const mockRequestPage = vi.fn();
 let mockAtParam: string | null = null;
 let mockSortParam: string | null = null;
 let mockPageParam: string | null = null;
@@ -27,7 +25,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('../../hooks/useVirtualGallery', () => ({
   useVirtualGallery: vi.fn(() => ({
     totalLength: 5000,
-    requestPage: vi.fn(),
+    requestPage: mockRequestPage,
     getItemId: () => null,
     isInitialLoading: false,
     error: null,
@@ -36,12 +34,9 @@ vi.mock('../../hooks/useVirtualGallery', () => ({
 
 vi.mock('../VirtualGalleryGrid', () => ({
   VirtualGalleryGrid: React.forwardRef(function MockGrid(
-    props: Record<string, unknown>,
+    _props: Record<string, unknown>,
     ref: React.Ref<unknown>,
   ) {
-    React.useEffect(() => {
-      gridPropsRef.current = props;
-    });
     React.useImperativeHandle(ref, () => ({
       scrollToPage: mockScrollToPage,
       scrollToItem: mockScrollToItem,
@@ -69,7 +64,9 @@ vi.mock('../GalleryGrid', () => ({
 
 vi.mock('@/shared/components/SortSelector', () => ({
   SortSelector: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <div data-testid="sort-selector" data-sort={value} onClick={() => onChange('popular_year')} />
+    <button data-testid="sort-selector" data-sort={value} onClick={() => onChange('popular_year')}>
+      sort
+    </button>
   ),
 }));
 
@@ -81,15 +78,13 @@ vi.mock('@/lib/utils/constants', () => ({
   PAGE_SIZE: 25,
 }));
 
-describe('GalleryListView — URL state (?at=, ?sort=)', () => {
+describe('GalleryListView URL and scroll restoration', () => {
   let replaceStateSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    sessionStorage.clear();
     navPropsRef.current = {};
-    gridPropsRef.current = {};
     mockAtParam = null;
     mockSortParam = null;
     mockPageParam = null;
@@ -112,18 +107,21 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     expect(navPropsRef.current.viewingPage).toBe(1);
   });
 
-  it('reads ?at= and derives viewingPage', async () => {
+  it('ignores legacy ?at= and ?page= for initial page', async () => {
     mockAtParam = '450';
+    mockPageParam = '3';
+    window.history.replaceState(null, '', '/?at=450&page=3');
+
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
     await act(async () => {
       render(<GalleryListView />);
     });
-    // at=450, PAGE_SIZE=25 → page = floor(450/25) + 1 = 19
-    expect(navPropsRef.current.viewingPage).toBe(19);
+
+    expect(navPropsRef.current.viewingPage).toBe(1);
   });
 
-  it('reads ?sort= from URL', async () => {
+  it('reads valid ?sort= from URL', async () => {
     mockSortParam = 'popular_year';
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
@@ -141,93 +139,39 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     expect(sortEl?.getAttribute('data-sort')).toBe('date_added');
   });
 
-  it('migrates ?page=3 to at=50 when ?at= is absent', async () => {
-    mockPageParam = '3';
-    vi.resetModules();
-    const { GalleryListView } = await import('../GalleryListView');
-    await act(async () => {
-      render(<GalleryListView />);
-    });
-    // page=3 → at=(3-1)*25=50 → viewingPage = floor(50/25)+1 = 3
-    expect(navPropsRef.current.viewingPage).toBe(3);
-  });
+  it('strips legacy ?at= and ?page= without writing scroll position back to URL', async () => {
+    mockAtParam = '100';
+    mockPageParam = '5';
+    mockSortParam = 'popular_year';
+    window.history.replaceState(null, '', '/?at=100&page=5&sort=popular_year');
 
-  it('writes debounced ?at= to URL via replaceState from visible DOM item', async () => {
-    // Add a data-item-index element so the DOM query finds it
-    const div = document.createElement('div');
-    div.setAttribute('data-item-index', '100');
-    div.getBoundingClientRect = () =>
-      ({ top: 50, bottom: 60, left: 0, right: 100, width: 100, height: 10 }) as DOMRect;
-    document.body.appendChild(div);
-
-    vi.resetModules();
-    const { GalleryListView } = await import('../GalleryListView');
-    await act(async () => {
-      render(<GalleryListView />);
-    });
-    replaceStateSpy.mockClear();
-
-    const onViewingPageChange = navPropsRef.current.onViewingPageChange as (p: number) => void;
-    act(() => {
-      onViewingPageChange(5);
-    });
-
-    // Before debounce: no replaceState yet
-    expect(replaceStateSpy).not.toHaveBeenCalled();
-
-    // After 200ms debounce
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-
-    const calls = replaceStateSpy.mock.calls;
-    expect(calls.length).toBeGreaterThan(0);
-    const lastUrl = calls[calls.length - 1]?.[2] as string;
-    expect(lastUrl).toContain('at=100');
-
-    document.body.removeChild(div);
-  });
-
-  it('omits ?sort= from URL when sort is date_added (default)', async () => {
-    vi.resetModules();
-    const { GalleryListView } = await import('../GalleryListView');
-    await act(async () => {
-      render(<GalleryListView />);
-    });
-    replaceStateSpy.mockClear();
-
-    const onViewingPageChange = navPropsRef.current.onViewingPageChange as (p: number) => void;
-    act(() => {
-      onViewingPageChange(2);
-    });
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-
-    const calls = replaceStateSpy.mock.calls;
-    const lastUrl = calls[calls.length - 1]?.[2] as string;
-    expect(lastUrl).not.toContain('sort=');
-  });
-
-  it('cleans up legacy ?page= param from URL', async () => {
-    mockPageParam = '3';
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
     render(<GalleryListView />);
-    replaceStateSpy.mockClear();
-
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
 
     const calls = replaceStateSpy.mock.calls;
-    if (calls.length > 0) {
-      const lastUrl = calls[calls.length - 1]?.[2] as string;
-      expect(lastUrl).not.toContain('page=');
-    }
+    const lastUrl = calls[calls.length - 1]?.[2] as string;
+    expect(lastUrl).toBe('/?sort=popular_year');
+    expect(lastUrl).not.toContain('at=');
+    expect(lastUrl).not.toContain('page=');
   });
 
-  it('does not use sessionStorage', async () => {
+  it('updates sort in URL on sort change', async () => {
+    const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    vi.resetModules();
+    const { GalleryListView } = await import('../GalleryListView');
+    const { getByTestId } = render(<GalleryListView />);
+    replaceStateSpy.mockClear();
+
+    fireEvent.click(getByTestId('sort-selector'));
+
+    const lastUrl = replaceStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastUrl).toBe('/?sort=popular_year');
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 0 });
+    scrollToSpy.mockRestore();
+  });
+
+  it('does not use sessionStorage for list position', async () => {
     const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
     vi.resetModules();
     const { GalleryListView } = await import('../GalleryListView');
@@ -237,20 +181,17 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
     act(() => {
       (navPropsRef.current.onViewingPageChange as (p: number) => void)(10);
     });
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
     const galleryCalls = setItemSpy.mock.calls.filter(([key]) => key === 'gallery-list-page');
     expect(galleryCalls).toHaveLength(0);
     setItemSpy.mockRestore();
   });
 
-  it('restores list scroll state from the current history entry', async () => {
+  it('restores list scroll state from the current history entry and requests the target pages', async () => {
     window.history.replaceState(
       {
         hipagoListScrollSnapshot: {
           version: 1,
-          url: window.location.pathname + window.location.search,
+          url: '/',
           at: 175,
           scrollY: 3200,
           ts: Date.now(),
@@ -262,7 +203,7 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
         },
       },
       '',
-      window.location.pathname + window.location.search,
+      '/',
     );
     const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
 
@@ -272,17 +213,21 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
       render(<GalleryListView />);
     });
 
+    expect(mockRequestPage).toHaveBeenCalledWith(6);
+    expect(mockRequestPage).toHaveBeenCalledWith(7);
+    expect(mockRequestPage).toHaveBeenCalledWith(8);
     expect(mockScrollToItem).toHaveBeenCalledWith(175);
+    expect(navPropsRef.current.viewingPage).toBe(8);
+
     act(() => {
-      vi.runOnlyPendingTimers();
+      vi.advanceTimersByTime(16 * 20);
     });
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 3200, behavior: 'auto' });
 
     scrollToSpy.mockRestore();
   });
 
-  it('restores history-entry scroll state when only ?at= changed while away', async () => {
-    window.history.replaceState(null, '', '/?at=11');
+  it('restores history-entry scroll state when only legacy ?at= changed while away', async () => {
     mockAtParam = '11';
     window.history.replaceState(
       {
@@ -312,7 +257,7 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
 
     expect(mockScrollToItem).toHaveBeenCalledWith(25);
     act(() => {
-      vi.runOnlyPendingTimers();
+      vi.advanceTimersByTime(16 * 20);
     });
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 3612, behavior: 'auto' });
 
@@ -324,7 +269,7 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
       {
         hipagoListScrollSnapshot: {
           version: 1,
-          url: '/?at=1',
+          url: '/',
           at: 25,
           scrollY: 3612,
           ts: Date.now(),
@@ -336,7 +281,7 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
         },
       },
       '',
-      '/?at=11',
+      '/',
     );
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 1000 });
     const anchor = document.createElement('div');
@@ -360,22 +305,5 @@ describe('GalleryListView — URL state (?at=, ?sort=)', () => {
 
     scrollToSpy.mockRestore();
     document.body.removeChild(anchor);
-  });
-
-  it('omits ?at= when viewingPage is 1 (clean URL)', async () => {
-    vi.resetModules();
-    const { GalleryListView } = await import('../GalleryListView');
-    render(<GalleryListView />);
-    replaceStateSpy.mockClear();
-
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-
-    const calls = replaceStateSpy.mock.calls;
-    if (calls.length > 0) {
-      const lastUrl = calls[calls.length - 1]?.[2] as string;
-      expect(lastUrl).not.toContain('at=');
-    }
   });
 });

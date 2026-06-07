@@ -339,6 +339,19 @@ export const VirtualGalleryGrid = memo(
       requestPage,
     });
 
+    // Main-list IDs are loaded lazily by page. On some mobile WebViews the
+    // window virtualizer can lag behind native scroll updates, so relying only
+    // on virtualItems means page 0 is seeded but later ID pages are never
+    // requested. Request the current page window from viewingPage as an
+    // independent signal; search-result grids already have all IDs, so their
+    // requestPage is a no-op.
+    useEffect(() => {
+      const pageIndex = Math.max(0, viewingPage - 1);
+      requestPage(pageIndex);
+      requestPage(pageIndex + 1);
+      requestPage(pageIndex + 2);
+    }, [viewingPage, requestPage]);
+
     // Request pages for all rows currently in the virtual window
     useEffect(() => {
       for (const vRow of virtualItems) {

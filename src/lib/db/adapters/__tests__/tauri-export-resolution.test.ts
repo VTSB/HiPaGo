@@ -1,67 +1,72 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fakeDb = {
-  execute: vi.fn(async () => ({ rowsAffected: 0, lastInsertId: 0 })),
-  select: vi.fn(async () => []),
-  close: vi.fn(async () => true),
-};
+const invoke = vi.fn(async (cmd: string) => {
+  switch (cmd) {
+    case 'plugin:sql|load':
+      return 'sqlite:test.db';
+    case 'plugin:sql|execute':
+      return [1, 7];
+    case 'plugin:sql|select':
+      return [{ id: 1 }];
+    case 'plugin:sql|close':
+      return true;
+    default:
+      throw new Error(`unexpected invoke: ${cmd}`);
+  }
+});
 
-function makeDatabaseClass() {
-  return class {
-    static load = vi.fn(async () => fakeDb);
-  };
-}
+vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function loadAdapterWith(moduleShape: any) {
-  vi.resetModules();
-  vi.doMock('@tauri-apps/plugin-sql', () => moduleShape);
-  const { TauriAdapter } = await import('../tauri');
-  return TauriAdapter;
-}
+vi.mock('@tauri-apps/plugin-sql', () => {
+  throw new Error('TauriAdapter must not import @tauri-apps/plugin-sql');
+});
 
-describe('TauriAdapter — defensive Database export resolution', () => {
+describe('TauriAdapter — direct tauri-plugin-sql invoke bridge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
   });
 
-  it('loads from the standard default export', async () => {
-    const Database = makeDatabaseClass();
-    const Adapter = await loadAdapterWith({ default: Database, Database: undefined });
+  it('loads and configures sqlite without importing the plugin-sql JS binding', async () => {
+    const { TauriAdapter } = await import('../tauri');
 
-    await expect(Adapter.create('sqlite:test.db')).resolves.toBeDefined();
+    await expect(TauriAdapter.create('sqlite:test.db')).resolves.toBeDefined();
 
-    expect(Database.load).toHaveBeenCalledWith('sqlite:test.db');
-    expect(fakeDb.execute).toHaveBeenCalledWith('PRAGMA journal_mode = WAL', []);
-    expect(fakeDb.execute).toHaveBeenCalledWith('PRAGMA foreign_keys = ON', []);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'plugin:sql|load', { db: 'sqlite:test.db' });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'plugin:sql|execute', {
+      db: 'sqlite:test.db',
+      query: 'PRAGMA journal_mode = WAL',
+      values: [],
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, 'plugin:sql|execute', {
+      db: 'sqlite:test.db',
+      query: 'PRAGMA foreign_keys = ON',
+      values: [],
+    });
   });
 
-  it('loads from a named Database export when default interop is missing', async () => {
-    const Database = makeDatabaseClass();
-    const Adapter = await loadAdapterWith({ default: undefined, Database });
+  it('executes, selects, and closes through plugin commands', async () => {
+    const { TauriAdapter } = await import('../tauri');
+    const adapter = await TauriAdapter.create('sqlite:test.db');
+    vi.clearAllMocks();
 
-    await expect(Adapter.create('sqlite:test.db')).resolves.toBeDefined();
+    await expect(adapter.execute('INSERT INTO t VALUES (?)', [1])).resolves.toEqual({
+      changes: 1,
+      lastInsertRowId: 7,
+    });
+    await expect(adapter.query('SELECT * FROM t', [])).resolves.toEqual([{ id: 1 }]);
+    await expect(adapter.close()).resolves.toBeUndefined();
 
-    expect(Database.load).toHaveBeenCalledWith('sqlite:test.db');
-  });
-
-  it('loads from nested default interop shapes', async () => {
-    const Database = makeDatabaseClass();
-    const Adapter = await loadAdapterWith({ default: { default: Database }, Database: undefined });
-
-    await expect(Adapter.create('sqlite:test.db')).resolves.toBeDefined();
-
-    expect(Database.load).toHaveBeenCalledWith('sqlite:test.db');
-  });
-
-  it('throws an actionable error when no Database.load export exists', async () => {
-    const Adapter = await loadAdapterWith({ default: {}, Database: undefined, other: true });
-
-    await expect(Adapter.create('sqlite:test.db')).rejects.toThrow(
-      /Database\.load export not found/,
-    );
-    await expect(Adapter.create('sqlite:test.db')).rejects.toThrow(/module keys: \[/);
+    expect(invoke).toHaveBeenNthCalledWith(1, 'plugin:sql|execute', {
+      db: 'sqlite:test.db',
+      query: 'INSERT INTO t VALUES (?)',
+      values: [1],
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, 'plugin:sql|select', {
+      db: 'sqlite:test.db',
+      query: 'SELECT * FROM t',
+      values: [],
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, 'plugin:sql|close', { db: 'sqlite:test.db' });
   });
 });

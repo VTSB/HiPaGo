@@ -1,71 +1,51 @@
 import type { DbAdapter, QueryResult } from '../adapter';
 
-type TauriSqlDatabaseConstructor = {
-  load(path: string): Promise<unknown>;
-};
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function readExport(mod: any, key: string): unknown {
-  try {
-    return mod?.[key];
-  } catch {
-    return undefined;
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function resolveDatabaseConstructor(mod: any): TauriSqlDatabaseConstructor {
-  const defaultExport = readExport(mod, 'default');
-  const namedExport = readExport(mod, 'Database');
-  const candidates = [
-    defaultExport,
-    namedExport,
-    readExport(defaultExport, 'default'),
-    readExport(defaultExport, 'Database'),
-    mod,
-  ];
-  const Database = candidates.find((candidate) => typeof readExport(candidate, 'load') === 'function');
-  if (!Database) {
-    const keys = mod && typeof mod === 'object' ? Object.keys(mod) : [];
-    throw new Error(
-      `@tauri-apps/plugin-sql Database.load export not found; module keys: [${keys.join(', ')}]`,
-    );
-  }
-  return Database;
-}
-
 /**
- * SQLite adapter for Tauri desktop using @tauri-apps/plugin-sql.
- * Requires: `pnpm add @tauri-apps/plugin-sql` when Tauri is set up.
+ * SQLite adapter for Tauri desktop using tauri-plugin-sql commands directly.
+ *
+ * Do not import @tauri-apps/plugin-sql here. In static-export/Tauri bundles the
+ * JS guest binding can be rewritten through browser aliases or package interop,
+ * which produced a Capacitor-shaped module at runtime
+ * (`CapacitorSQLite, SQLiteConnection, default`) instead of Database.load.
+ * The guest binding is only a tiny wrapper around these invoke commands, so
+ * calling them directly is less fragile.
  */
 export class TauriAdapter implements DbAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private db: any;
+  private dbPath: string;
 
   static async create(path: string = 'sqlite:hipago.db'): Promise<TauriAdapter> {
-    const Database = resolveDatabaseConstructor(await import('@tauri-apps/plugin-sql'));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = (await Database.load(path)) as any;
-    await db.execute('PRAGMA journal_mode = WAL', []);
-    await db.execute('PRAGMA foreign_keys = ON', []);
-    return new TauriAdapter(db);
+    const { invoke } = await import('@tauri-apps/api/core');
+    const dbPath = await invoke<string>('plugin:sql|load', { db: path });
+    const adapter = new TauriAdapter(dbPath);
+    await adapter.execute('PRAGMA journal_mode = WAL', []);
+    await adapter.execute('PRAGMA foreign_keys = ON', []);
+    return adapter;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private constructor(db: any) {
-    this.db = db;
+  private constructor(dbPath: string) {
+    this.dbPath = dbPath;
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
-    const result = await this.db.execute(sql, params);
+    const { invoke } = await import('@tauri-apps/api/core');
+    const [rowsAffected, lastInsertId] = await invoke<[number, number]>('plugin:sql|execute', {
+      db: this.dbPath,
+      query: sql,
+      values: params,
+    });
     return {
-      changes: result.rowsAffected ?? 0,
-      lastInsertRowId: result.lastInsertId ?? 0,
+      changes: rowsAffected ?? 0,
+      lastInsertRowId: lastInsertId ?? 0,
     };
   }
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
-    return this.db.select(sql, params) as Promise<T[]>;
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<T[]>('plugin:sql|select', {
+      db: this.dbPath,
+      query: sql,
+      values: params,
+    });
   }
 
   async exec(sql: string): Promise<void> {
@@ -74,11 +54,12 @@ export class TauriAdapter implements DbAdapter {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     for (const stmt of statements) {
-      await this.db.execute(stmt, []);
+      await this.execute(stmt, []);
     }
   }
 
   async close(): Promise<void> {
-    await this.db.close();
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('plugin:sql|close', { db: this.dbPath });
   }
 }

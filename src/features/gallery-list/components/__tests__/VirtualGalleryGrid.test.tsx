@@ -206,6 +206,23 @@ describe('VirtualGalleryGrid — requestPage', () => {
     expect(requestPage).toHaveBeenCalled();
     expect(requestPage).toHaveBeenCalledWith(0);
   });
+
+  it('requests the current viewing page window even when virtual rows lag behind scroll', () => {
+    const requestPage = vi.fn();
+    render(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 20}
+        totalPages={20}
+        viewingPage={7}
+        getItemId={() => null}
+        requestPage={requestPage}
+      />,
+    );
+
+    expect(requestPage).toHaveBeenCalledWith(6);
+    expect(requestPage).toHaveBeenCalledWith(7);
+    expect(requestPage).toHaveBeenCalledWith(8);
+  });
 });
 
 // ---------------------------------------------------------------------------

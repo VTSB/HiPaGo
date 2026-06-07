@@ -17,18 +17,20 @@ function safeKey(key: string): string {
 }
 
 export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fs: any = await import('@tauri-apps/plugin-fs');
   const { invoke, convertFileSrc } = await import('@tauri-apps/api/core');
-  const { appCacheDir, join } = await import('@tauri-apps/api/path');
-  const baseDir = fs.BaseDirectory.AppCache;
+  const { BaseDirectory, appCacheDir, join } = await import('@tauri-apps/api/path');
+  const baseDir = BaseDirectory.AppCache;
   const appCache = await appCacheDir();
 
   const absPath = (key: string): Promise<string> => join(appCache, DIR, safeKey(key));
+  const relPath = (key: string): string => `${DIR}/${safeKey(key)}`;
 
   const ensureDir = async (): Promise<void> => {
     try {
-      await fs.mkdir(DIR, { baseDir, recursive: true });
+      await invoke('plugin:fs|mkdir', {
+        path: DIR,
+        options: { baseDir, recursive: true },
+      });
     } catch {
       // already exists
     }
@@ -37,7 +39,10 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
   return {
     async statSize(key) {
       try {
-        const info = await fs.stat(`${DIR}/${safeKey(key)}`, { baseDir });
+        const info = await invoke<{ size: number }>('plugin:fs|stat', {
+          path: relPath(key),
+          options: { baseDir },
+        });
         return info.size as number;
       } catch {
         return null;
@@ -58,14 +63,28 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
     },
     async remove(key) {
       try {
-        await fs.remove(`${DIR}/${safeKey(key)}`, { baseDir });
+        await invoke('plugin:fs|remove', {
+          path: relPath(key),
+          options: { baseDir },
+        });
       } catch {
         // already gone
       }
     },
     async loadIndex() {
       try {
-        const text = (await fs.readTextFile(INDEX_FILE, { baseDir })) as string;
+        const data = await invoke<unknown>('plugin:fs|read_text_file', {
+          path: INDEX_FILE,
+          options: { baseDir },
+        });
+        const text =
+          typeof data === 'string'
+            ? data
+            : new TextDecoder().decode(
+                data instanceof ArrayBuffer
+                  ? new Uint8Array(data)
+                  : Uint8Array.from(data as number[]),
+              );
         return JSON.parse(text) as ImageCacheIndexEntry[];
       } catch {
         return [];
@@ -73,11 +92,19 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
     },
     async saveIndex(entries) {
       await ensureDir();
-      await fs.writeTextFile(INDEX_FILE, JSON.stringify(entries), { baseDir });
+      await invoke('plugin:fs|write_text_file', new TextEncoder().encode(JSON.stringify(entries)), {
+        headers: {
+          path: encodeURIComponent(INDEX_FILE),
+          options: JSON.stringify({ baseDir }),
+        },
+      });
     },
     async clearAll() {
       try {
-        await fs.remove(DIR, { baseDir, recursive: true });
+        await invoke('plugin:fs|remove', {
+          path: DIR,
+          options: { baseDir, recursive: true },
+        });
       } catch {
         // already gone
       }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, fireEvent } from '@testing-library/react';
 import React from 'react';
 
 let mockQuery = '';
@@ -59,7 +59,11 @@ vi.mock('@/shared/components/FloatingPageNav', () => ({
 }));
 
 vi.mock('@/shared/components/SortSelector', () => ({
-  SortSelector: ({ value }: { value: string }) => <div data-testid="sort-selector" data-sort={value} />,
+  SortSelector: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <button data-testid="sort-selector" data-sort={value} onClick={() => onChange('popular_year')}>
+      sort
+    </button>
+  ),
 }));
 
 vi.mock('@/lib/i18n/useT', () => ({
@@ -76,15 +80,20 @@ vi.mock('@/lib/utils/constants', () => ({
 }));
 
 describe('SearchResults — VirtualGalleryGrid integration', () => {
+  let replaceStateSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     capturedGridRef.current = null;
     mockQuery = 'female:test';
     mockSortParam = null;
     mockAtParam = null;
+    window.history.replaceState(null, '', '/search?q=female%3Atest');
+    replaceStateSpy = vi.spyOn(window.history, 'replaceState');
   });
 
   afterEach(() => {
+    replaceStateSpy.mockRestore();
     cleanup();
   });
 
@@ -136,6 +145,31 @@ describe('SearchResults — VirtualGalleryGrid integration', () => {
     const { container } = render(<SearchResults />);
     const sortSelector = container.querySelector('[data-testid="sort-selector"]');
     expect(sortSelector?.getAttribute('data-sort')).toBe('popular_year');
+  });
+
+  it('strips legacy ?at= and ?page= from URL', async () => {
+    mockAtParam = '100';
+    window.history.replaceState(null, '', '/search?q=female%3Atest&at=100&page=5');
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    render(<SearchResults />);
+    const lastUrl = replaceStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastUrl).toBe('/search?q=female%3Atest');
+  });
+
+  it('updates sort in URL on sort change', async () => {
+    const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
+    vi.resetModules();
+    const { SearchResults } = await import('../SearchResults');
+    const { getByTestId } = render(<SearchResults />);
+    replaceStateSpy.mockClear();
+
+    fireEvent.click(getByTestId('sort-selector'));
+
+    const lastUrl = replaceStateSpy.mock.calls.at(-1)?.[2] as string;
+    expect(lastUrl).toBe('/search?q=female%3Atest&sort=popular_year');
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 0 });
+    scrollToSpy.mockRestore();
   });
 
   it('does not render InfiniteScrollTrigger', async () => {

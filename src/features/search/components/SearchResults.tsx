@@ -48,14 +48,7 @@ export function SearchResults() {
     return s && VALID_SORTS.includes(s as SortOrder) ? (s as SortOrder) : 'date_added';
   });
 
-  const initialAt = (() => {
-    const at = searchParams.get('at');
-    return at ? Math.max(0, parseInt(at, 10) || 0) : 0;
-  })();
-
-  const [viewingPage, setViewingPage] = useState(() =>
-    initialAt > 0 ? Math.floor(initialAt / PAGE_SIZE) + 1 : 1
-  );
+  const [viewingPage, setViewingPage] = useState(1);
 
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
@@ -101,57 +94,25 @@ export function SearchResults() {
     gridRef.current?.scrollToPage(page);
   }, [setViewingPage]);
 
-  // Debounced URL sync on scroll (200ms).
-  // sortRef holds the latest sort so the scroll handler always uses the current
-  // value without being re-subscribed on every sort change. Assigned in an
-  // effect, not during render (react-hooks/refs).
-  const urlTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const sortRef = useRef(sort);
-  useEffect(() => {
-    sortRef.current = sort;
-  });
-  useEffect(() => {
-    const syncUrl = () => {
-      clearTimeout(urlTimerRef.current);
-      urlTimerRef.current = setTimeout(() => {
-        const url = new URL(window.location.href);
-        let at = 0;
-        const items = document.querySelectorAll('[data-item-index]');
-        for (let i = items.length - 1; i >= 0; i--) {
-          const rect = items[i].getBoundingClientRect();
-          if (rect.top <= 100) {
-            at = parseInt((items[i] as HTMLElement).dataset.itemIndex || '0', 10);
-            break;
-          }
-        }
-        if (at > 0) url.searchParams.set('at', String(at));
-        else url.searchParams.delete('at');
-        if (sortRef.current !== 'date_added') url.searchParams.set('sort', sortRef.current);
-        else url.searchParams.delete('sort');
-        window.history.replaceState(history.state, '', url.pathname + url.search);
-      }, 200);
-    };
-    window.addEventListener('scroll', syncUrl, { passive: true });
-    syncUrl();
-    return () => {
-      window.removeEventListener('scroll', syncUrl);
-      clearTimeout(urlTimerRef.current);
-    };
-  }, [sort]);
+  const replaceUrlState = useCallback((nextSort: SortOrder) => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('at');
+    url.searchParams.delete('page');
+    if (nextSort !== 'date_added') url.searchParams.set('sort', nextSort);
+    else url.searchParams.delete('sort');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search);
+  }, []);
 
-  // Scroll restoration
-  const restoredRef = useRef(false);
   useEffect(() => {
-    if (restoredRef.current || filteredIds.length === 0 || initialAt <= 0) return;
-    restoredRef.current = true;
-    gridRef.current?.scrollToItem(initialAt);
-  }, [filteredIds.length, initialAt]);
+    replaceUrlState(sort);
+  }, [replaceUrlState, sort]);
 
   const handleSortChange = useCallback((newSort: SortOrder) => {
     setSort(newSort);
     setViewingPage(1);
+    replaceUrlState(newSort);
     window.scrollTo({ top: 0 });
-  }, [setViewingPage]);
+  }, [replaceUrlState, setViewingPage]);
 
   // No query yet (dedicated /search entry before typing): render nothing so the
   // search input + its recent/popular dropdown own the screen. Avoids a stray

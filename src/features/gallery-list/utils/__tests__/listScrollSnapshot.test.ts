@@ -37,7 +37,7 @@ describe('listScrollSnapshot', () => {
     const snapshot = window.history.state?.hipagoListScrollSnapshot;
     expect(snapshot).toMatchObject({
       version: 1,
-      url: '/?at=25',
+      url: '/',
       at: 25,
       scrollY: 3612,
       anchorIndex: 25,
