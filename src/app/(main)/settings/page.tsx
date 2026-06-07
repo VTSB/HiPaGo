@@ -16,6 +16,10 @@ import { Select } from '@/shared/components/Select';
 import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
 import { ImageCacheCard } from '@/shared/components/ImageCacheCard';
 import { DownloadLocationCard } from '@/shared/components/DownloadLocationCard';
+import {
+  getActiveDefaultFilterToken,
+  replaceActiveDefaultFilterToken,
+} from '@/lib/utils/default-filter-query';
 
 function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   const [input, setInput] = useState('');
@@ -91,16 +95,97 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
   );
 }
 
+function DefaultFilterInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (query: string) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dbReady = useDbStatusStore((s) => s.dbReady);
+  const locale = useSettingsStore((s) => s.locale);
+  const t = useT();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const active = getActiveDefaultFilterToken(value);
+    debounceRef.current = setTimeout(async () => {
+      if (!active || (!dbReady && isHangul(active.query))) {
+        setSuggestions([]);
+        setShowDropdown(false);
+        return;
+      }
+      try {
+        if (dbReady) {
+          const r = await searchLocalTags(active.query);
+          setSuggestions(r);
+          setShowDropdown(r.length > 0);
+        } else if (active.query.length >= 2) {
+          const r = await getSuggestionsForQuery(active.query);
+          setSuggestions(r);
+          setShowDropdown(r.length > 0);
+        }
+      } catch {
+        // Recoverable: network/db failure — keep existing suggestions.
+      }
+    }, dbReady ? 120 : 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [value, dbReady]);
+
+  const closeDropdown = useCallback(() => setShowDropdown(false), []);
+  useClickOutside([dropdownRef, inputRef], closeDropdown);
+
+  const handleSelect = useCallback((s: Suggestion) => {
+    const tag = toSearchString(tagFromSuggestion(s));
+    onChange(replaceActiveDefaultFilterToken(value, tag));
+    setSuggestions([]);
+    setShowDropdown(false);
+  }, [onChange, value]);
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => onChange(value.trim())}
+        onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
+        placeholder={t('settings.defaultFilter.placeholder')}
+        className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+      />
+      {showDropdown && suggestions.length > 0 && (
+        <div ref={dropdownRef} className="absolute top-full z-50 mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 max-h-60 overflow-y-auto">
+          {suggestions.map((s, i) => (
+            <button key={`${s.tagType}-${s.tag}-${i}`} type="button" onClick={() => handleSelect(s)}
+              className="flex min-h-12 w-full items-center justify-between px-4 py-2 text-left text-base active:bg-zinc-100 sm:min-h-0 sm:px-3 sm:text-sm sm:hover:bg-zinc-100 dark:active:bg-zinc-700 sm:dark:hover:bg-zinc-700">
+              <TagChip tag={s.tag} type={s.tagType} displayName={locale === 'ko' && s.localName ? s.localName : undefined} linked={false} size="sm" />
+              <span className="text-xs text-zinc-500 ml-auto">{s.amount.toLocaleString()}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const locale = useSettingsStore((s) => s.locale);
   const language = useSettingsStore((s) => s.language);
   const readerMode = useSettingsStore((s) => s.readerMode);
   const imageFormat = useSettingsStore((s) => s.imageFormat);
   const blurTags = useSettingsStore((s) => s.blurTags);
+  const defaultFilterQuery = useSettingsStore((s) => s.defaultFilterQuery);
   const setLocale = useSettingsStore((s) => s.setLocale);
   const setLanguage = useSettingsStore((s) => s.setLanguage);
   const setReaderMode = useSettingsStore((s) => s.setReaderMode);
   const setImageFormat = useSettingsStore((s) => s.setImageFormat);
+  const setDefaultFilterQuery = useSettingsStore((s) => s.setDefaultFilterQuery);
   const addBlurTag = useSettingsStore((s) => s.addBlurTag);
   const removeBlurTag = useSettingsStore((s) => s.removeBlurTag);
   const t = useT();
@@ -151,6 +236,15 @@ export default function SettingsPage() {
               { value: 'korean', label: t('settings.langFilter.korean') },
             ]}
           />
+        </div>
+
+        {/* Default Result Filter */}
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4">
+          <div>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">{t('settings.defaultFilter')}</p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">{t('settings.defaultFilter.desc')}</p>
+          </div>
+          <DefaultFilterInput value={defaultFilterQuery} onChange={setDefaultFilterQuery} />
         </div>
 
         {/* Reader Mode */}

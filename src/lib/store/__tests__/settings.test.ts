@@ -34,6 +34,7 @@ describe('settings store', () => {
       readerMode: 'page',
       imageFormat: 'auto',
       blurTags: ['male:yaoi'],
+      defaultFilterQuery: '',
     });
   });
 
@@ -56,6 +57,10 @@ describe('settings store', () => {
 
     it('has default blurTags containing male:yaoi', () => {
       expect(useSettingsStore.getState().blurTags).toEqual(['male:yaoi']);
+    });
+
+    it('has no default result filter', () => {
+      expect(useSettingsStore.getState().defaultFilterQuery).toBe('');
     });
   });
 
@@ -165,6 +170,18 @@ describe('settings store', () => {
       useSettingsStore.getState().addBlurTag('tag:a');
       useSettingsStore.getState().addBlurTag('tag:b');
       expect(useSettingsStore.getState().blurTags).toEqual(['male:yaoi', 'tag:a', 'tag:b']);
+    });
+  });
+
+  describe('setDefaultFilterQuery', () => {
+    it('sets the default result filter query', () => {
+      useSettingsStore.getState().setDefaultFilterQuery('-female:loli');
+      expect(useSettingsStore.getState().defaultFilterQuery).toBe('-female:loli');
+    });
+
+    it('preserves edit-time whitespace so users can type multiple terms', () => {
+      useSettingsStore.getState().setDefaultFilterQuery('  female:loli -artist:yam  ');
+      expect(useSettingsStore.getState().defaultFilterQuery).toBe('  female:loli -artist:yam  ');
     });
   });
 
