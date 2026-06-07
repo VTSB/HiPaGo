@@ -8,8 +8,12 @@ import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeWebViewClient;
 
 import java.io.ByteArrayInputStream;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import uniffi.bypass.BypassKt;
 import uniffi.bypass.BypassResponse;
@@ -106,43 +110,95 @@ public class BypassWebViewClient extends BridgeWebViewClient {
      * Build the header map sent upstream through bypass-core for a GET.
      *
      * Strategy: synthesize a stable browser-like request shape for bypass-core,
-     * then copy only the per-request header we must preserve: {@code Range}.
-     * The list/search pipeline issues byte-range reads for nozomi pagination and
-     * B-tree index nodes. Dropping {@code Range} made upstream return the full
-     * file (HTTP 200) from offset 0, so later pages and non-root B-tree reads
-     * decoded the wrong bytes.
-     *
-     * WebView-supplied request-context headers are intentionally not replayed.
-     * Android-specific values such as {@code X-Requested-With}, localhost
-     * identity, cookies, or WebView's own {@code Sec-Fetch-*} should not leak to
-     * upstream. The native client already impersonates Chrome at the TLS layer;
-     * these fixed headers keep the HTTP layer browser-like without trusting
-     * local WebView metadata.
+     * then copy the WebView request headers except transport/privacy headers the
+     * native bypass transport must own. The list/search pipeline issues
+     * byte-range reads for nozomi pagination and B-tree index nodes. Dropping
+     * {@code Range} or related conditional headers makes upstream return the
+     * wrong bytes, so Android must mirror the web proxy's forward-most contract.
      *
      * Package-private + static with no Android dependencies so it is unit
      * testable on the local JVM without Robolectric.
      */
     static Map<String, String> buildUpstreamHeaders(Map<String, String> requestHeaders) {
         Map<String, String> headers = new HashMap<>();
-        headers.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-        headers.put("Accept", "*/*");
-        headers.put("Accept-Language", "en-US,en;q=0.9");
-        headers.put("Sec-Fetch-Site", "cross-site");
-        headers.put("Sec-Fetch-Mode", "cors");
-        headers.put("Sec-Fetch-Dest", "empty");
-        headers.put("Referer", "https://hitomi.la/");
-        headers.put("Origin", "https://hitomi.la");
+        putHeader(headers, "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+        putHeader(headers, "Accept", "*/*");
+        putHeader(headers, "Accept-Language", "en-US,en;q=0.9");
+        putHeader(headers, "Sec-Fetch-Site", "cross-site");
+        putHeader(headers, "Sec-Fetch-Mode", "cors");
+        putHeader(headers, "Sec-Fetch-Dest", "empty");
 
         if (requestHeaders != null) {
             for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
                 String k = e.getKey();
                 if (k == null || e.getValue() == null) continue;
-                if (k.equalsIgnoreCase("Range")) {
-                    headers.put("Range", e.getValue());
-                }
+                if (shouldDropRequestHeader(k)) continue;
+                putHeader(headers, canonicalHeaderName(k), e.getValue());
             }
         }
+        putHeader(headers, "Referer", "https://hitomi.la/");
+        putHeader(headers, "Origin", "https://hitomi.la");
         return headers;
+    }
+
+    private static final Set<String> DENIED_REQUEST_HEADERS = new HashSet<>(Arrays.asList(
+            "referer",
+            "origin",
+            "accept-encoding",
+            "cookie",
+            "x-forwarded-for",
+            "x-forwarded-host",
+            "x-forwarded-proto",
+            "x-real-ip",
+            "forwarded",
+            "host",
+            "connection",
+            "keep-alive",
+            "proxy-connection",
+            "transfer-encoding",
+            "te",
+            "upgrade",
+            "content-length"
+    ));
+
+    private static boolean shouldDropRequestHeader(String key) {
+        String lower = key.toLowerCase(Locale.ROOT);
+        return DENIED_REQUEST_HEADERS.contains(lower)
+                || lower.startsWith("x-middleware-")
+                || lower.startsWith("x-invoke-")
+                || lower.startsWith("x-nextjs-");
+    }
+
+    private static String canonicalHeaderName(String key) {
+        String lower = key.toLowerCase(Locale.ROOT);
+        switch (lower) {
+            case "range": return "Range";
+            case "if-range": return "If-Range";
+            case "if-none-match": return "If-None-Match";
+            case "if-modified-since": return "If-Modified-Since";
+            case "accept": return "Accept";
+            case "accept-language": return "Accept-Language";
+            case "user-agent": return "User-Agent";
+            case "content-type": return "Content-Type";
+            case "sec-fetch-site": return "Sec-Fetch-Site";
+            case "sec-fetch-mode": return "Sec-Fetch-Mode";
+            case "sec-fetch-dest": return "Sec-Fetch-Dest";
+            default: return key;
+        }
+    }
+
+    private static void putHeader(Map<String, String> headers, String key, String value) {
+        String existing = null;
+        for (String k : headers.keySet()) {
+            if (k.equalsIgnoreCase(key)) {
+                existing = k;
+                break;
+            }
+        }
+        if (existing != null) {
+            headers.remove(existing);
+        }
+        headers.put(key, value);
     }
 
     private static boolean isBypassHost(String host) {

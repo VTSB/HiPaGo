@@ -13,12 +13,10 @@ import org.junit.Test;
 /**
  * Local JVM unit tests for {@link BypassWebViewClient#buildUpstreamHeaders}.
  *
- * Contract: synthesize stable browser-like headers, copy only the caller's
- * {@code Range} header, and spoof {@code Referer}/{@code Origin}. Regression
- * guard for Android list/search pagination: dropping {@code Range} makes later
+ * Contract: synthesize stable browser-like headers, forward safe WebView
+ * request headers, and spoof {@code Referer}/{@code Origin}. Regression guard
+ * for Android list/search pagination: dropping byte-range headers makes later
  * pages and non-root B-tree index reads decode bytes from offset 0.
- * WebView-only/request-context headers are intentionally dropped so they do not
- * leak through the native bypass transport.
  */
 public class BypassWebViewClientTest {
 
@@ -71,23 +69,39 @@ public class BypassWebViewClientTest {
     }
 
     @Test
-    public void dropsWebViewClientHeadersExceptRange() {
+    public void forwardsSafeWebViewClientHeaders() {
         Map<String, String> req = new HashMap<>();
         req.put("Range", "bytes=100-200");
         req.put("If-Range", "\"etag-xyz\"");
         req.put("Accept", "image/avif,image/webp,*/*");
         req.put("Sec-Fetch-Mode", "no-cors");
         req.put("Sec-Fetch-Dest", "image");
+        req.put("X-Client-Trace", "abc123");
         req.put("X-Requested-With", "com.hipago.app");
         Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
         assertEquals("bytes=100-200", out.get("Range"));
-        assertFalse(out.containsKey("If-Range"));
-        assertFalse(out.containsKey("X-Requested-With"));
-        // Browser-like defaults are synthesized; WebView-provided variants do
-        // not override them.
-        assertEquals("*/*", out.get("Accept"));
-        assertEquals("cors", out.get("Sec-Fetch-Mode"));
-        assertEquals("empty", out.get("Sec-Fetch-Dest"));
+        assertEquals("\"etag-xyz\"", out.get("If-Range"));
+        assertEquals("image/avif,image/webp,*/*", out.get("Accept"));
+        assertEquals("no-cors", out.get("Sec-Fetch-Mode"));
+        assertEquals("image", out.get("Sec-Fetch-Dest"));
+        assertEquals("abc123", out.get("X-Client-Trace"));
+        assertEquals("com.hipago.app", out.get("X-Requested-With"));
+    }
+
+    @Test
+    public void forwardsRangeRelatedHeadersRegardlessOfHeaderNameCasing() {
+        Map<String, String> req = new HashMap<>();
+        req.put("range", "bytes=2048-4095");
+        req.put("if-range", "\"etag-lower\"");
+        req.put("if-none-match", "\"etag-next\"");
+        req.put("if-modified-since", "Sun, 07 Jun 2026 00:00:00 GMT");
+        Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
+        assertEquals("bytes=2048-4095", out.get("Range"));
+        assertEquals("\"etag-lower\"", out.get("If-Range"));
+        assertEquals("\"etag-next\"", out.get("If-None-Match"));
+        assertEquals("Sun, 07 Jun 2026 00:00:00 GMT", out.get("If-Modified-Since"));
+        assertFalse(out.containsKey("range"));
+        assertFalse(out.containsKey("if-range"));
     }
 
     @Test
@@ -122,6 +136,34 @@ public class BypassWebViewClientTest {
         Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
         assertFalse(out.containsKey("accept-encoding"));
         assertFalse(out.containsKey("Accept-Encoding"));
+    }
+
+    @Test
+    public void dropsUnsafeHeadersCaseInsensitively() {
+        Map<String, String> req = new HashMap<>();
+        req.put("Cookie", "session=secret");
+        req.put("host", "localhost");
+        req.put("Content-Length", "123");
+        req.put("Connection", "keep-alive");
+        req.put("TE", "trailers");
+        req.put("x-forwarded-for", "127.0.0.1");
+        req.put("X-Real-IP", "127.0.0.1");
+        req.put("x-middleware-prefetch", "1");
+        req.put("x-invoke-path", "/api/hitomi");
+        req.put("x-nextjs-data", "1");
+        req.put("Range", "bytes=0-9");
+        Map<String, String> out = BypassWebViewClient.buildUpstreamHeaders(req);
+        assertEquals("bytes=0-9", out.get("Range"));
+        assertFalse(out.containsKey("Cookie"));
+        assertFalse(out.containsKey("host"));
+        assertFalse(out.containsKey("Content-Length"));
+        assertFalse(out.containsKey("Connection"));
+        assertFalse(out.containsKey("TE"));
+        assertFalse(out.containsKey("x-forwarded-for"));
+        assertFalse(out.containsKey("X-Real-IP"));
+        assertFalse(out.containsKey("x-middleware-prefetch"));
+        assertFalse(out.containsKey("x-invoke-path"));
+        assertFalse(out.containsKey("x-nextjs-data"));
     }
 
     @Test
