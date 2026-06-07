@@ -262,20 +262,6 @@ export const VirtualGalleryGrid = memo(
       }
     }, [actualCols, containerWidth, viewingPage, windowStartPage, totalRows, virtualizer]);
 
-    // On first render with data, scroll to the initial viewingPage if it's not page 1.
-    // This handles scroll restoration after navigating back from detail.
-    const initialScrollDoneRef = useRef(false);
-    useLayoutEffect(() => {
-      if (initialScrollDoneRef.current || totalRows === 0 || viewingPage <= 1) return;
-      initialScrollDoneRef.current = true;
-
-      const targetRow = Math.max(
-        0,
-        Math.floor(((viewingPage - windowStartPage) * PAGE_SIZE) / actualCols),
-      );
-      virtualizer.scrollToIndex(Math.min(targetRow, totalRows - 1), { align: 'start' });
-    }, [totalRows, viewingPage, windowStartPage, actualCols, virtualizer]);
-
     useImperativeHandle(
       ref,
       () => ({

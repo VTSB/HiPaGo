@@ -272,6 +272,39 @@ describe('VirtualGalleryGrid — scrollToPage handle', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Native browser back restoration
+// ---------------------------------------------------------------------------
+
+describe('VirtualGalleryGrid — native back restoration', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('does not convert restored pixel scroll into page-start scroll when viewingPage updates', () => {
+    const { rerender } = render(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 20}
+        totalPages={20}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    mockScrollToIndex.mockClear();
+
+    rerender(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 20}
+        totalPages={20}
+        viewingPage={6}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+
+    expect(mockScrollToIndex).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sliding window
 // ---------------------------------------------------------------------------
 
