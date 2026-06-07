@@ -43,6 +43,7 @@ HiPaGo is a cross-platform web application for browsing and managing hitomi.la g
 - **TypeScript**: Strict mode enabled. Path alias `@/*` maps to `src/`.
 - **Platform detection**: Code detects Tauri, Capacitor, or web platform at runtime via `window.__TAURI__` and `window.Capacitor`.
 - **Database**: Adapters provided for Tauri (native SQLite), Capacitor (native), and web (WASM SQLite + IndexedDB).
+- **Tag translation workflows**: For tag translation or validation work, use the Codex-native files in `.codex/skills/translate-tags/SKILL.md`, `.codex/skills/validate-tags/SKILL.md`, `.codex/agents/tag-translator/tag-translator.md`, and `.codex/agents/tag-validator/tag-validator.md`.
 
 ### Database Architecture
 
