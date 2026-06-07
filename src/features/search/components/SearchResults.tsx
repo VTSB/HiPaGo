@@ -17,6 +17,10 @@ import type { SortOrder } from '@/lib/utils/types';
 
 const VALID_SORTS: SortOrder[] = ['date_added', 'popular_year', 'popular_month', 'popular_week', 'popular_day'];
 
+function combineDefaultFilter(query: string, defaultFilterQuery: string): string {
+  return [query.trim(), defaultFilterQuery.trim()].filter(Boolean).join(' ');
+}
+
 /**
  * Human-readable header for a single search term. Drops a recognized type
  * prefix (English or Korean) and turns underscores into spaces. The term is
@@ -41,6 +45,7 @@ export function SearchResults() {
   const searchParams = useSearchParams();
   const query = searchParams.get('q') || '';
   const language = useSettingsStore((s) => s.language);
+  const defaultFilterQuery = useSettingsStore((s) => s.defaultFilterQuery);
   const t = useT();
 
   const [sort, setSort] = useState<SortOrder>(() => {
@@ -53,20 +58,21 @@ export function SearchResults() {
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
 
-  const isSingleTerm = parseCompoundQuery(query).length === 1;
+  const executedQuery = combineDefaultFilter(query, defaultFilterQuery);
+  const isSingleTerm = parseCompoundQuery(executedQuery).length === 1;
   const numericId = /^\d+$/.test(query) ? Number(query) : null;
 
   const idsQuery = useQuery({
-    queryKey: ['search-ids', query, language, sort],
-    queryFn: () => getGalleryIdsForQuery(query, language, isSingleTerm ? sort : undefined),
+    queryKey: ['search-ids', query, defaultFilterQuery, language, sort],
+    queryFn: () => getGalleryIdsForQuery(executedQuery, language, isSingleTerm ? sort : undefined),
     enabled: query.length > 0,
   });
 
   const langQueryDone = !idsQuery.isLoading && language !== 'all' && query.length > 0;
   const langQueryEmpty = langQueryDone && (idsQuery.isError || (idsQuery.data !== undefined && idsQuery.data.length === 0));
   const fallbackQuery = useQuery({
-    queryKey: ['search-ids', query, 'all', sort],
-    queryFn: () => getGalleryIdsForQuery(query, 'all', isSingleTerm ? sort : undefined),
+    queryKey: ['search-ids', query, defaultFilterQuery, 'all', sort],
+    queryFn: () => getGalleryIdsForQuery(executedQuery, 'all', isSingleTerm ? sort : undefined),
     enabled: langQueryEmpty,
   });
 

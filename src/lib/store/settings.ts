@@ -11,6 +11,8 @@ interface SettingsStoreState {
   readerMode: 'page' | 'scroll';
   imageFormat: 'auto' | 'avif' | 'webp' | 'original';
   blurTags: string[];
+  /** Search-query syntax applied to every list/search result set. */
+  defaultFilterQuery: string;
   dualPage: boolean;
   gridColumns: number;
   /** Scroll-mode zoom scale. 1 = fit container width; >1 enlarges (pan), <1 shrinks. */
@@ -30,6 +32,7 @@ interface SettingsStoreState {
   setTheme: (theme: 'light' | 'dark') => void;
   setReaderMode: (mode: 'page' | 'scroll') => void;
   setImageFormat: (format: 'auto' | 'avif' | 'webp' | 'original') => void;
+  setDefaultFilterQuery: (query: string) => void;
   setDualPage: (dual: boolean) => void;
   setGridColumns: (cols: number) => void;
   setScrollZoom: (z: number) => void;
@@ -60,6 +63,7 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   let s = persisted as {
     blurTags?: string[];
     imageCacheMaxBytes?: number | null;
+    defaultFilterQuery?: string;
     downloadBasePath?: string | null;
     downloadTreeUri?: string | null;
     downloadTreeName?: string | null;
@@ -86,6 +90,10 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     delete next.downloadBasePath;
     s = next;
   }
+  // v5: default result filter query. Empty means disabled.
+  if (version < 5 && s.defaultFilterQuery === undefined) {
+    s = { ...s, defaultFilterQuery: '' };
+  }
   return s;
 }
 
@@ -98,6 +106,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       readerMode: 'page',
       imageFormat: 'auto',
       blurTags: DEFAULT_BLUR_TAGS,
+      defaultFilterQuery: '',
       dualPage: false,
       gridColumns: 0,
       scrollZoom: 1,
@@ -109,6 +118,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setTheme: (theme) => set({ theme }),
       setReaderMode: (mode) => set({ readerMode: mode }),
       setImageFormat: (format) => set({ imageFormat: format }),
+      setDefaultFilterQuery: (query) => set({ defaultFilterQuery: query }),
       setDualPage: (dual) => set({ dualPage: dual }),
       setGridColumns: (cols) => set({ gridColumns: cols }),
       setScrollZoom: (z) => set({ scrollZoom: z }),
@@ -117,7 +127,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings', version: 4, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 5, migrate: migrateSettings },
   ),
 );
 

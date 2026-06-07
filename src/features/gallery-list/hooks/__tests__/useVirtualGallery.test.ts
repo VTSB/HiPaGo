@@ -6,16 +6,25 @@ import React from 'react';
 import { useVirtualGallery } from '../useVirtualGallery';
 import { PAGE_SIZE } from '@/lib/utils/constants';
 
+let mockDefaultFilterQuery = '';
+
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { language: string }) => unknown) => sel({ language: 'all' }),
+  useSettingsStore: (sel: (s: { language: string; defaultFilterQuery: string }) => unknown) =>
+    sel({ language: 'all', defaultFilterQuery: mockDefaultFilterQuery }),
 }));
 
 vi.mock('@/lib/api/gallery', () => ({
   fetchBrowseIds: vi.fn(),
 }));
 
+vi.mock('@/lib/api/search', () => ({
+  getGalleryIdsForQuery: vi.fn(),
+}));
+
 import { fetchBrowseIds as _fetchBrowseIds } from '@/lib/api/gallery';
+import { getGalleryIdsForQuery as _getGalleryIdsForQuery } from '@/lib/api/search';
 const fetchBrowseIds = _fetchBrowseIds as unknown as ReturnType<typeof vi.fn>;
+const getGalleryIdsForQuery = _getGalleryIdsForQuery as unknown as ReturnType<typeof vi.fn>;
 
 function makeWrapper() {
   const client = new QueryClient({
@@ -34,7 +43,9 @@ describe('useVirtualGallery', () => {
     // restoration. Clear between tests so a prior test's cached totalLength
     // doesn't leak into the next render.
     if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
+    mockDefaultFilterQuery = '';
     fetchBrowseIds.mockResolvedValue({ idList: [101, 102, 103], length: 300 });
+    getGalleryIdsForQuery.mockResolvedValue([900, 800, 700]);
   });
 
   // ---------------------------------------------------------------------------
@@ -83,6 +94,20 @@ describe('useVirtualGallery', () => {
     expect(result.current.getItemId(0)).toBe(101);
     expect(result.current.getItemId(1)).toBe(102);
     expect(result.current.getItemId(2)).toBe(103);
+  });
+
+  it('uses default filter search results instead of paged browse when configured', async () => {
+    mockDefaultFilterQuery = '-female:loli';
+    getGalleryIdsForQuery.mockResolvedValue([900, 800, 700]);
+
+    const { result } = renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
+
+    await waitFor(() => expect(result.current.totalLength).toBe(3));
+    expect(fetchBrowseIds).not.toHaveBeenCalled();
+    expect(getGalleryIdsForQuery).toHaveBeenCalledWith('-female:loli', 'all', 'date_added');
+    expect(result.current.getItemId(0)).toBe(900);
+    expect(result.current.getItemId(2)).toBe(700);
+    expect(result.current.getItemId(3)).toBeNull();
   });
 
   it('getItemId returns null for index beyond loaded ids', async () => {
@@ -185,7 +210,9 @@ describe('neededPages ring buffer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
+    mockDefaultFilterQuery = '';
     fetchBrowseIds.mockResolvedValue({ idList: [], length: 100 });
+    getGalleryIdsForQuery.mockResolvedValue([900, 800, 700]);
   });
 
   it('requesting 21 pages caps at 20 — only 20 unique pages are ever active', async () => {

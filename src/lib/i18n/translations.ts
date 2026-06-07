@@ -151,6 +151,15 @@ const translations = {
   'settings.langFilter.english': { en: 'English', ko: '영어' },
   'settings.langFilter.chinese': { en: 'Chinese', ko: '중국어' },
   'settings.langFilter.korean': { en: 'Korean', ko: '한국어' },
+  'settings.defaultFilter': { en: 'Default Filter', ko: '기본 필터' },
+  'settings.defaultFilter.desc': {
+    en: 'Apply this query to every list and search result',
+    ko: '모든 목록과 검색 결과에 적용할 쿼리',
+  },
+  'settings.defaultFilter.placeholder': {
+    en: 'Example: -male:yaoi',
+    ko: '예: -male:yaoi',
+  },
   'settings.theme': { en: 'Theme', ko: '테마' },
   'settings.theme.desc': { en: 'Choose your preferred color scheme', ko: '색상 테마 선택' },
   'settings.theme.light': { en: 'Light', ko: '라이트' },

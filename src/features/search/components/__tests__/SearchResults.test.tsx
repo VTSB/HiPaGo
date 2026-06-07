@@ -6,6 +6,8 @@ import React from 'react';
 let mockQuery = '';
 let mockSortParam: string | null = null;
 let mockAtParam: string | null = null;
+let mockDefaultFilterQuery = '';
+const capturedUseQueryOptions: Array<{ queryKey: unknown[]; queryFn?: () => unknown }> = [];
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => ({
@@ -19,11 +21,14 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { language: string }) => unknown) => sel({ language: 'all' }),
+  useSettingsStore: (sel: (s: { language: string; defaultFilterQuery: string }) => unknown) =>
+    sel({ language: 'all', defaultFilterQuery: mockDefaultFilterQuery }),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: vi.fn(({ queryKey }: { queryKey: string[] }) => {
+  useQuery: vi.fn((options: { queryKey: string[]; queryFn?: () => unknown }) => {
+    const { queryKey } = options;
+    capturedUseQueryOptions.push(options);
     // Return mock search results
     if (queryKey[0] === 'search-ids' && mockQuery) {
       return {
@@ -85,9 +90,11 @@ describe('SearchResults — VirtualGalleryGrid integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedGridRef.current = null;
+    capturedUseQueryOptions.length = 0;
     mockQuery = 'female:test';
     mockSortParam = null;
     mockAtParam = null;
+    mockDefaultFilterQuery = '';
     window.history.replaceState(null, '', '/search?q=female%3Atest');
     replaceStateSpy = vi.spyOn(window.history, 'replaceState');
   });
@@ -118,6 +125,26 @@ describe('SearchResults — VirtualGalleryGrid integration', () => {
       for (let i = 0; i < 5; i++) gridIds.push(getItemId(i));
       expect(gridIds).not.toContain(200);
     }
+  });
+
+  it('combines the user query with the default result filter for execution', async () => {
+    mockQuery = 'artist:yam';
+    mockDefaultFilterQuery = '-female:loli';
+    vi.resetModules();
+
+    const { getGalleryIdsForQuery } = await import('@/lib/api/search');
+    const { SearchResults } = await import('../SearchResults');
+    render(<SearchResults />);
+
+    const primary = capturedUseQueryOptions.find((o) => o.queryKey[0] === 'search-ids');
+    expect(primary?.queryKey).toEqual(['search-ids', 'artist:yam', '-female:loli', 'all', 'date_added']);
+
+    await primary?.queryFn?.();
+    expect(getGalleryIdsForQuery).toHaveBeenCalledWith(
+      'artist:yam -female:loli',
+      'all',
+      undefined,
+    );
   });
 
   it('preserves numericId featured card for numeric queries', async () => {
