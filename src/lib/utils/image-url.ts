@@ -72,6 +72,10 @@ export function imageHashCode(hash: string): number {
   return parseInt(hash.slice(-1) + hash.slice(-3, -1), 16);
 }
 
+function fileExtension(name: string): string {
+  return name.split('.').pop()?.toLowerCase() || 'jpg';
+}
+
 /**
  * Get the full image URL for a gallery file.
  *
@@ -88,26 +92,41 @@ export function getImageUrl(
   config: GgConfig,
   preferredFormat?: 'auto' | 'avif' | 'webp' | 'original',
 ): string {
-  let ext: string;
-  let dir: string; // 'images' for originals, '' for webp/avif (matches hitomi's url_from_hash)
-  let subPrefix: string; // 'w' for webp, 'a' for avif, '' for originals
+  let ext = 'jpg';
+  let dir = 'images'; // 'images' for originals, '' for webp/avif (matches hitomi's url_from_hash)
+  let subPrefix = ''; // 'w' for webp, 'a' for avif, '' for originals
+  const originalExt = fileExtension(image.name);
+  const originalIsWebp = originalExt === 'webp';
+  const originalIsAvif = originalExt === 'avif';
+
+  const applyOriginal = () => {
+    ext = originalExt;
+    if (originalIsWebp) {
+      dir = '';
+      subPrefix = 'w';
+    } else if (originalIsAvif) {
+      dir = '';
+      subPrefix = 'a';
+    } else {
+      dir = 'images';
+      subPrefix = '';
+    }
+  };
 
   if (preferredFormat === 'original') {
-    ext = image.name.split('.').pop() || 'jpg';
-    dir = 'images';
-    subPrefix = '';
+    applyOriginal();
   } else if (preferredFormat === 'webp') {
-    if (image.haswebp) { ext = 'webp'; dir = ''; subPrefix = 'w'; }
-    else { ext = image.name.split('.').pop() || 'jpg'; dir = 'images'; subPrefix = ''; }
+    if (image.haswebp || originalIsWebp) { ext = 'webp'; dir = ''; subPrefix = 'w'; }
+    else { applyOriginal(); }
   } else if (preferredFormat === 'avif') {
-    if (image.hasavif) { ext = 'avif'; dir = ''; subPrefix = 'a'; }
-    else if (image.haswebp) { ext = 'webp'; dir = ''; subPrefix = 'w'; }
-    else { ext = image.name.split('.').pop() || 'jpg'; dir = 'images'; subPrefix = ''; }
+    if (image.hasavif || originalIsAvif) { ext = 'avif'; dir = ''; subPrefix = 'a'; }
+    else if (image.haswebp || originalIsWebp) { ext = 'webp'; dir = ''; subPrefix = 'w'; }
+    else { applyOriginal(); }
   } else {
     // 'auto' or undefined - avif > webp > original
-    if (image.hasavif) { ext = 'avif'; dir = ''; subPrefix = 'a'; }
-    else if (image.haswebp) { ext = 'webp'; dir = ''; subPrefix = 'w'; }
-    else { ext = image.name.split('.').pop() || 'jpg'; dir = 'images'; subPrefix = ''; }
+    if (image.hasavif || originalIsAvif) { ext = 'avif'; dir = ''; subPrefix = 'a'; }
+    else if (image.haswebp || originalIsWebp) { ext = 'webp'; dir = ''; subPrefix = 'w'; }
+    else { applyOriginal(); }
   }
 
   const g = imageHashCode(image.hash);
@@ -141,7 +160,7 @@ export function getThumbnailUrl(
     return resolveImgUrl('tn', `webp${size}tn/${hashPath}.webp`);
   }
 
-  const ext = image.name.split('.').pop() || 'jpg';
+  const ext = fileExtension(image.name);
   return resolveImgUrl('tn', `${size}tn/${hashPath}.${ext}`);
 }
 
@@ -171,4 +190,3 @@ export function galleryImageToFile(image: GalleryImage): GalleryFile {
     hasavifsmalltn: image.types.has(ImageType.AVIFSMALLTN) ? 1 : 0,
   };
 }
-

@@ -46,7 +46,7 @@ class MemStore {
     this.galleries.delete(galleryId);
   }
 
-  async ensureGallery(_galleryId: number, _title: string): Promise<void> {
+  async ensureGallery(): Promise<void> {
     // No-op for tests — folder concept is implicit.
   }
 
@@ -324,7 +324,7 @@ describe('migrateDownloadsToPublic — validation before delete', () => {
     // Make newStore.getImage always return null for the validation check
     // (after putImage writes, getImage still returns null — simulates a broken store)
     const origGet = mockNewStore.getImage.bind(mockNewStore);
-    mockNewStore.getImage = async (_id, _index, _ext) => null;
+    mockNewStore.getImage = async () => null;
 
     const result = await migrateDownloadsToPublic();
 

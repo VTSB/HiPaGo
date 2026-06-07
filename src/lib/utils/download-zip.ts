@@ -65,6 +65,29 @@ function decodeManifest(bytes: Uint8Array): string[] {
 const FETCH_MAX_RETRIES = 3;
 const FETCH_BACKOFF_MS = [1000, 2000, 4000];
 
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function createAttemptSignal(
+  timeoutMs: number,
+  callerSignal?: AbortSignal,
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const onCallerAbort = () => controller.abort();
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    },
+  };
+}
+
 /**
  * Fetch a URL with up to 3 retries and exponential backoff.
  *
@@ -97,21 +120,19 @@ async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Respon
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     }
 
-    // Per-attempt timeout controller (30 s), distinct from caller signal.
-    // Mirrors tag-fetcher.ts HttpFetcher: pass the timeout signal only;
-    // distinguish caller-abort from timeout-abort via signal?.aborted in catch.
-    const attemptController = new AbortController();
-    const timer = setTimeout(() => attemptController.abort(), 30_000);
+    // Per-attempt timeout plus caller abort. Passing only the timeout signal
+    // would leave an in-flight image fetch running after the user cancels.
+    const attemptAbort = createAttemptSignal(30_000, signal);
 
     try {
-      const res = await apiClient.fetchUrl(url, { signal: attemptController.signal });
+      const res = await apiClient.fetchUrl(url, { signal: attemptAbort.signal });
 
       if (res.status === 429) {
         retryAfterMs = parseRetryAfter(res.headers.get('retry-after'));
         lastError = new ApiError(429, `Rate limited (429) fetching image (attempt ${attempt + 1})`);
         continue;
       }
-      if (res.status === 502 || res.status === 503 || res.status === 504) {
+      if (isRetryableStatus(res.status)) {
         lastError = new ApiError(res.status, `Server error ${res.status} fetching image (attempt ${attempt + 1})`);
         continue;
       }
@@ -131,10 +152,17 @@ async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Respon
         continue;
       }
 
+      // apiClient.fetchUrl throws ApiError for non-ok statuses, so retryable
+      // HTTP statuses arrive here rather than through the Response branch above.
+      if (err instanceof ApiError && isRetryableStatus(err.status)) {
+        lastError = err;
+        continue;
+      }
+
       // Other errors (ApiError 4xx, network, etc.): rethrow immediately.
       throw e;
     } finally {
-      clearTimeout(timer);
+      attemptAbort.cleanup();
     }
   }
 
