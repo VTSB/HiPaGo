@@ -10,6 +10,12 @@ vi.mock('@/lib/utils/platform', () => ({
   isAndroid: vi.fn(() => false),
 }));
 
+const mockInvoke = vi.fn();
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
+
 import { createTagFetcher, parseRetryAfter } from '../tag-fetcher';
 import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
@@ -21,6 +27,7 @@ beforeEach(() => {
   vi.mocked(isCapacitor).mockReturnValue(false);
   vi.mocked(isAndroid).mockReturnValue(false);
   mockFetch.mockReset();
+  mockInvoke.mockReset();
 });
 
 afterEach(() => {
@@ -43,6 +50,23 @@ describe('createTagFetcher — factory', () => {
     const fetcher = createTagFetcher();
     expect(typeof fetcher.fetchPage).toBe('function');
     expect(typeof fetcher.dispose).toBe('function');
+  });
+
+  it('on Tauri fetches tag pages through the bundled bypass_fetch command', async () => {
+    vi.mocked(isTauri).mockReturnValue(true);
+    mockInvoke.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: btoa('<html>tauri</html>'),
+    });
+
+    const fetcher = createTagFetcher();
+    await expect(fetcher.fetchPage('allartists-a.html')).resolves.toBe('<html>tauri</html>');
+
+    expect(mockInvoke).toHaveBeenCalledWith('bypass_fetch', {
+      url: 'https://hitomi.la/allartists-a.html',
+      headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },
+    });
   });
 
   it('returns CapacitorHttpFetcher when Capacitor detected', () => {

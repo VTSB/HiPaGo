@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Cross-platform static export build for native platforms (Tauri/Capacitor).
 // Temporarily hides API routes and dynamic pages incompatible with static export.
-import { existsSync, mkdirSync, renameSync, cpSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync, cpSync, rmSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
@@ -22,7 +22,9 @@ function hide() {
     const dest = join(backup, dir);
     if (existsSync(src)) {
       mkdirSync(dirname(dest), { recursive: true });
-      renameSync(src, dest);
+      if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+      cpSync(src, dest, { recursive: true });
+      rmSync(src, { recursive: true, force: true });
       console.log(`Hidden: ${dir}`);
     }
   }
@@ -34,11 +36,30 @@ function restore() {
     const dest = join(root, dir);
     if (existsSync(src)) {
       mkdirSync(dirname(dest), { recursive: true });
-      renameSync(src, dest);
+      if (existsSync(dest)) rmSync(dest, { recursive: true, force: true });
+      cpSync(src, dest, { recursive: true });
+      rmSync(src, { recursive: true, force: true });
       console.log(`Restored: ${dir}`);
     }
   }
   if (existsSync(backup)) rmSync(backup, { recursive: true });
+}
+
+function createCleanUrlAliases() {
+  const outDir = join(root, 'out');
+  if (!existsSync(outDir)) return;
+
+  for (const entry of readdirSync(outDir)) {
+    if (!entry.endsWith('.html')) continue;
+    if (entry === 'index.html' || entry === '404.html' || entry === '_not-found.html') continue;
+
+    const routeName = basename(entry, '.html');
+    const routeDir = join(outDir, routeName);
+    if (existsSync(routeDir) && !statSync(routeDir).isDirectory()) continue;
+    mkdirSync(routeDir, { recursive: true });
+    cpSync(join(outDir, entry), join(routeDir, 'index.html'));
+    console.log(`Created clean URL alias: out/${routeName}/index.html`);
+  }
 }
 
 try {
@@ -63,6 +84,8 @@ try {
     cpSync(indexHtml, join(readerFallbackDir, 'index.html'));
     console.log('Created SPA fallback: out/reader/index.html');
   }
+
+  createCleanUrlAliases();
 } finally {
   restore();
 }

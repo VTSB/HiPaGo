@@ -97,8 +97,7 @@ class HttpFetcher implements TagFetcher {
 
 class TauriBypassFetcher implements TagFetcher {
   async fetchPage(path: string): Promise<string> {
-    const tauriModule = '@tauri-apps/api/core';
-    const { invoke } = await import(/* webpackIgnore: true */ tauriModule);
+    const { invoke } = await import('@tauri-apps/api/core');
     const resp = (await invoke('bypass_fetch', {
       url: `https://hitomi.la/${path}`,
       headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },

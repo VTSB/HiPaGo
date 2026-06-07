@@ -1,5 +1,7 @@
 import type { DbAdapter, QueryResult } from '../adapter';
 
+export const TAURI_DB_PATH = 'sqlite:hipago.db';
+
 /**
  * SQLite adapter for Tauri desktop using tauri-plugin-sql commands directly.
  *
@@ -13,7 +15,7 @@ import type { DbAdapter, QueryResult } from '../adapter';
 export class TauriAdapter implements DbAdapter {
   private dbPath: string;
 
-  static async create(path: string = 'sqlite:hipago.db'): Promise<TauriAdapter> {
+  static async create(path: string = TAURI_DB_PATH): Promise<TauriAdapter> {
     const { invoke } = await import('@tauri-apps/api/core');
     const dbPath = await invoke<string>('plugin:sql|load', { db: path });
     const adapter = new TauriAdapter(dbPath);

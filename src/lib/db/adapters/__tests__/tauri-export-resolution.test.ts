@@ -69,4 +69,16 @@ describe('TauriAdapter — direct tauri-plugin-sql invoke bridge', () => {
     });
     expect(invoke).toHaveBeenNthCalledWith(3, 'plugin:sql|close', { db: 'sqlite:test.db' });
   });
+
+  it('uses an app DB path covered by the packaged Tauri SQL capability', async () => {
+    const { TAURI_DB_PATH } = await import('../tauri');
+    const capability = await import('../../../../../src-tauri/capabilities/default.json');
+    const permissions = capability.default.permissions as Array<string | { identifier: string; allow?: Array<{ path?: string }> }>;
+
+    expect(TAURI_DB_PATH).toBe('sqlite:hipago.db');
+    expect(permissions).toContain('sql:allow-load');
+    expect(permissions).toContain('sql:allow-execute');
+    expect(permissions).toContain('sql:allow-select');
+    expect(permissions).toContain('sql:allow-close');
+  });
 });
