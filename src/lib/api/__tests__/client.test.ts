@@ -2,6 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { apiClient, ApiError, getGgConfig, clearGgConfigCache } from '../client';
 
+const bypassFetchMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/plugins/bypass', () => ({
+  Bypass: {
+    fetch: bypassFetchMock,
+  },
+}));
+
 describe('ApiError', () => {
   it('should set status and message', () => {
     const error = new ApiError(404, 'Not Found');
@@ -25,6 +33,7 @@ describe('apiClient.fetchUrl', () => {
 
   beforeEach(() => {
     fetchMock = vi.fn();
+    bypassFetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -42,26 +51,31 @@ describe('apiClient.fetchUrl', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://example.com/test', expect.objectContaining({ headers: {} }));
   });
 
-  it('uses a plain fetch on Android — not the Bypass plugin (WebView interceptor bypasses)', async () => {
+  it('uses the Bypass plugin on Android API fetches so Range response headers stay visible', async () => {
     // Real platform module reads window.Capacitor; make it Android.
     vi.stubGlobal('window', {
       Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' },
     });
-    const mockResponse = new Response('ok', { status: 200 });
-    fetchMock.mockResolvedValue(mockResponse);
+    bypassFetchMock.mockResolvedValue({
+      status: 206,
+      headers: { 'Content-Range': 'bytes 0-399/8000' },
+      body: [1, 2, 3, 4],
+    });
 
-    const response = await apiClient.fetchUrl('https://aa.gold-usergeneratedcontent.net/x');
+    const response = await apiClient.fetchUrl('https://aa.gold-usergeneratedcontent.net/x', {
+      range: 'bytes=0-399',
+    });
 
-    expect(response).toBe(mockResponse);
-    // Global fetch is used with the real URL + injected native headers (which the
-    // interceptor honours). If it had taken the iOS plugin branch instead, it
-    // would import @/lib/plugins/bypass and never call global fetch.
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://aa.gold-usergeneratedcontent.net/x',
-      expect.objectContaining({
-        headers: expect.objectContaining({ Referer: 'https://hitomi.la/' }),
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(bypassFetchMock).toHaveBeenCalledWith({
+      url: 'https://aa.gold-usergeneratedcontent.net/x',
+      headers: expect.objectContaining({
+        Range: 'bytes=0-399',
+        Referer: 'https://hitomi.la/',
       }),
-    );
+    });
+    expect(response.status).toBe(206);
+    expect(response.headers.get('Content-Range')).toBe('bytes 0-399/8000');
   });
 
   it('should throw ApiError on non-ok response', async () => {
