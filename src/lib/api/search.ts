@@ -349,16 +349,6 @@ async function executeTerms(
 ): Promise<number[]> {
   if (terms.length === 0) return [];
 
-  // Single term: pass sort through
-  if (terms.length === 1) {
-    const term = terms[0];
-    if (term.startsWith('-') && term.length > 1) {
-      // Single negative term with no positive terms: no results
-      return [];
-    }
-    return getGalleryIdsForSingleTerm(term, language, sort);
-  }
-
   // Separate positive and negative terms
   const positiveTerms: string[] = [];
   const negativeTerms: string[] = [];
@@ -372,6 +362,11 @@ async function executeTerms(
     }
   }
 
+  // Single positive term: pass sort through.
+  if (positiveTerms.length === 1 && negativeTerms.length === 0) {
+    return getGalleryIdsForSingleTerm(positiveTerms[0], language, sort);
+  }
+
   // Sort positive terms: typed terms (containing ':') first
   // This matches hitomi.la's optimization — typed terms via nozomi are typically
   // smaller result sets, so fetching them first is more efficient
@@ -383,11 +378,16 @@ async function executeTerms(
     return 0;
   });
 
-  if (positiveTerms.length === 0) return [];
+  // Negative-only query: use the full browse index as the base, then exclude.
+  // This is intentionally a full nozomi read, not per-page browse fetching,
+  // because search results need an in-memory ID list to subtract from.
+  const basePromise = positiveTerms.length > 0
+    ? Promise.all(positiveTerms.map((term) => getGalleryIdsForSingleTerm(term, language)))
+    : fetchNozomiSearch('', 'index', language || 'all', sort).then((ids) => [ids]);
 
-  // Fetch positive and negative terms in parallel
+  // Fetch positive/base and negative terms in parallel
   const [positiveSets, negativeSets] = await Promise.all([
-    Promise.all(positiveTerms.map((term) => getGalleryIdsForSingleTerm(term, language))),
+    basePromise,
     negativeTerms.length > 0
       ? Promise.all(negativeTerms.map((term) => getGalleryIdsForSingleTerm(term, language)))
       : Promise.resolve([]),

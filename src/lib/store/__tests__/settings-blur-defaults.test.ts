@@ -32,9 +32,15 @@ describe('default blur tags + v1 migration', () => {
     expect(out.blurTags).toEqual(expect.arrayContaining(['male:yaoi', ...SAFETY]));
   });
 
-  it('is a no-op at version >= 4 (a later user removal stays removed)', () => {
-    const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadTreeUri: null, downloadTreeName: null };
-    expect(migrateSettings(state, 4)).toBe(state);
+  it('is a no-op at version >= 5 (a later user removal stays removed)', () => {
+    const state = {
+      blurTags: ['male:yaoi'],
+      imageCacheMaxBytes: 0,
+      downloadTreeUri: null,
+      downloadTreeName: null,
+      defaultFilterQuery: '',
+    };
+    expect(migrateSettings(state, 5)).toBe(state);
   });
 
   it('v1 -> v2 adds the default image-cache cap without touching blurTags', () => {
@@ -70,9 +76,22 @@ describe('v4 migration — downloadBasePath → downloadTreeUri (SAF)', () => {
     expect(out.downloadTreeUri).toBeNull();
   });
 
-  it('v4: is a no-op (fields already present, same reference)', () => {
+  it('v4 -> v5: adds the default result filter without touching SAF fields', () => {
     const state = { blurTags: ['male:yaoi'], imageCacheMaxBytes: 0, downloadTreeUri: 'content://tree/x', downloadTreeName: 'X' };
-    const out = migrateSettings(state, 4) as { downloadTreeUri: string | null };
+    const out = migrateSettings(state, 4) as { downloadTreeUri: string | null; defaultFilterQuery: string };
+    expect(out.downloadTreeUri).toBe('content://tree/x');
+    expect(out.defaultFilterQuery).toBe('');
+  });
+
+  it('v5: is a no-op (fields already present, same reference)', () => {
+    const state = {
+      blurTags: ['male:yaoi'],
+      imageCacheMaxBytes: 0,
+      downloadTreeUri: 'content://tree/x',
+      downloadTreeName: 'X',
+      defaultFilterQuery: '',
+    };
+    const out = migrateSettings(state, 5) as { downloadTreeUri: string | null };
     expect(out.downloadTreeUri).toBe('content://tree/x');
     expect(out).toBe(state);
   });

@@ -453,11 +453,32 @@ describe('getGalleryIdsForQuery — multi-term intersection', () => {
     expect(result).toEqual([500, 300, 100]);
   });
 
-  it('returns empty array for single negative term with no positive terms', async () => {
+  it('uses the full browse index as the base for a single negative-only term', async () => {
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([500, 400, 300, 200, 100]) // full index
+      .mockResolvedValueOnce([400, 200]);               // female:loli exclusion
+
     const result = await getGalleryIdsForQuery('-female:loli', 'all');
 
-    expect(fetchNozomiSearch).not.toHaveBeenCalled();
-    expect(result).toEqual([]);
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(2);
+    expect(fetchNozomiSearch).toHaveBeenNthCalledWith(1, '', 'index', 'all', undefined);
+    expect(fetchNozomiSearch).toHaveBeenNthCalledWith(2, 'tag', 'female:loli', 'all', undefined);
+    expect(result).toEqual([500, 300, 100]);
+  });
+
+  it('subtracts the union of exclusions for multiple negative-only terms', async () => {
+    vi.mocked(fetchNozomiSearch)
+      .mockResolvedValueOnce([900, 800, 700, 600, 500, 400]) // full sorted index
+      .mockResolvedValueOnce([800, 500])                     // female:loli
+      .mockResolvedValueOnce([700, 500]);                    // artist:yam
+
+    const result = await getGalleryIdsForQuery('-female:loli -artist:yam', 'all');
+
+    expect(fetchNozomiSearch).toHaveBeenCalledTimes(3);
+    expect(fetchNozomiSearch).toHaveBeenNthCalledWith(1, '', 'index', 'all', undefined);
+    expect(fetchNozomiSearch).toHaveBeenNthCalledWith(2, 'tag', 'female:loli', 'all', undefined);
+    expect(fetchNozomiSearch).toHaveBeenNthCalledWith(3, 'artist', 'yam', 'all', undefined);
+    expect(result).toEqual([900, 600, 400]);
   });
 
   it('sorts typed terms first before plain text in positive terms', async () => {
