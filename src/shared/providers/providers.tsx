@@ -6,11 +6,13 @@ import { DbInitializer } from '@/shared/components/DbInitializer';
 import { DbErrorOverlay } from '@/shared/components/DbErrorOverlay';
 import { initLocaleOnce, useSettingsStore } from '@/lib/store/settings';
 import { AndroidBackButtonProvider } from '@/shared/providers/AndroidBackButtonProvider';
+import { setSecureScreen } from '@/lib/plugins/secureScreen';
 
 const LOCALE_TO_LANG: Record<string, string> = { en: 'en', ko: 'ko' };
 
 export function Providers({ children }: { children: ReactNode }) {
   const locale = useSettingsStore((s) => s.locale);
+  const secureScreen = useSettingsStore((s) => s.secureScreen);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -38,6 +40,10 @@ export function Providers({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.lang = LOCALE_TO_LANG[locale] || 'en';
   }, [locale]);
+
+  useEffect(() => {
+    void setSecureScreen(secureScreen);
+  }, [secureScreen]);
 
   // Sync dark mode class with theme setting
   const theme = useSettingsStore((s) => s.theme);

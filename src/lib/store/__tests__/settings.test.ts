@@ -8,9 +8,15 @@ const mockLocalStorage = vi.hoisted(() => {
   const store: Record<string, string> = {};
   return {
     getItem: vi.fn((key: string): string | null => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
-    removeItem: vi.fn((key: string) => { delete store[key]; }),
-    clear: vi.fn(() => { Object.keys(store).forEach((k) => delete store[k]); }),
+    setItem: vi.fn((key: string, value: string) => {
+      store[key] = value;
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete store[key];
+    }),
+    clear: vi.fn(() => {
+      Object.keys(store).forEach((k) => delete store[k]);
+    }),
     _store: store,
   };
 });
@@ -35,6 +41,7 @@ describe('settings store', () => {
       imageFormat: 'auto',
       blurTags: ['male:yaoi'],
       defaultFilterQuery: '',
+      secureScreen: false,
     });
   });
 
@@ -61,6 +68,10 @@ describe('settings store', () => {
 
     it('has no default result filter', () => {
       expect(useSettingsStore.getState().defaultFilterQuery).toBe('');
+    });
+
+    it('has secure screen disabled by default', () => {
+      expect(useSettingsStore.getState().secureScreen).toBe(false);
     });
   });
 
@@ -185,6 +196,15 @@ describe('settings store', () => {
     });
   });
 
+  describe('setSecureScreen', () => {
+    it('toggles secure screen mode', () => {
+      useSettingsStore.getState().setSecureScreen(true);
+      expect(useSettingsStore.getState().secureScreen).toBe(true);
+      useSettingsStore.getState().setSecureScreen(false);
+      expect(useSettingsStore.getState().secureScreen).toBe(false);
+    });
+  });
+
   describe('removeBlurTag', () => {
     it('removes an existing tag from the list', () => {
       useSettingsStore.getState().removeBlurTag('male:yaoi');
@@ -291,7 +311,9 @@ describe('initLocaleOnce', () => {
       // localStorage IS defined (set by vi.hoisted mock) and returns a non-null JSON string.
       // This covers the `typeof localStorage !== 'undefined'` → true branch on line 47,
       // with getItem returning an actual stored value, so raw is truthy and locale stays unchanged.
-      mockLocalStorage.getItem.mockReturnValue(JSON.stringify({ state: { locale: 'en', language: 'all' } }));
+      mockLocalStorage.getItem.mockReturnValue(
+        JSON.stringify({ state: { locale: 'en', language: 'all' } }),
+      );
       vi.stubGlobal('navigator', { language: 'ko-KR' });
 
       initLocaleOnce();

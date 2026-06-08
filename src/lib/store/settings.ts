@@ -13,6 +13,8 @@ interface SettingsStoreState {
   blurTags: string[];
   /** Search-query syntax applied to every list/search result set. */
   defaultFilterQuery: string;
+  /** Android-only: block screenshots, screen recording, and recent-app previews. */
+  secureScreen: boolean;
   dualPage: boolean;
   gridColumns: number;
   /** Scroll-mode zoom scale. 1 = fit container width; >1 enlarges (pan), <1 shrinks. */
@@ -33,6 +35,7 @@ interface SettingsStoreState {
   setReaderMode: (mode: 'page' | 'scroll') => void;
   setImageFormat: (format: 'auto' | 'avif' | 'webp' | 'original') => void;
   setDefaultFilterQuery: (query: string) => void;
+  setSecureScreen: (enabled: boolean) => void;
   setDualPage: (dual: boolean) => void;
   setGridColumns: (cols: number) => void;
   setScrollZoom: (z: number) => void;
@@ -45,10 +48,14 @@ interface SettingsStoreState {
 // furry/snuff/guro/scat each appear under BOTH the female: and male: hitomi
 // namespaces, so both forms are listed to catch a gallery tagged under either.
 const SAFETY_BLUR_TAGS = [
-  'female:furry', 'male:furry',
-  'female:snuff', 'male:snuff',
-  'female:guro', 'male:guro',
-  'female:scat', 'male:scat',
+  'female:furry',
+  'male:furry',
+  'female:snuff',
+  'male:snuff',
+  'female:guro',
+  'male:guro',
+  'female:scat',
+  'male:scat',
 ];
 export const DEFAULT_BLUR_TAGS = ['male:yaoi', ...SAFETY_BLUR_TAGS];
 // Safety tags added to the default blur filter in settings v1; merged once into
@@ -64,6 +71,7 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     blurTags?: string[];
     imageCacheMaxBytes?: number | null;
     defaultFilterQuery?: string;
+    secureScreen?: boolean;
     downloadBasePath?: string | null;
     downloadTreeUri?: string | null;
     downloadTreeName?: string | null;
@@ -94,6 +102,11 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version < 5 && s.defaultFilterQuery === undefined) {
     s = { ...s, defaultFilterQuery: '' };
   }
+  // v6: Android screenshot/recent-app preview protection. Default disabled so
+  // existing users do not unexpectedly lose screenshot/screen-recording support.
+  if (version < 6 && s.secureScreen === undefined) {
+    s = { ...s, secureScreen: false };
+  }
   return s;
 }
 
@@ -107,6 +120,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       imageFormat: 'auto',
       blurTags: DEFAULT_BLUR_TAGS,
       defaultFilterQuery: '',
+      secureScreen: false,
       dualPage: false,
       gridColumns: 0,
       scrollZoom: 1,
@@ -119,15 +133,17 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setReaderMode: (mode) => set({ readerMode: mode }),
       setImageFormat: (format) => set({ imageFormat: format }),
       setDefaultFilterQuery: (query) => set({ defaultFilterQuery: query }),
+      setSecureScreen: (enabled) => set({ secureScreen: enabled }),
       setDualPage: (dual) => set({ dualPage: dual }),
       setGridColumns: (cols) => set({ gridColumns: cols }),
       setScrollZoom: (z) => set({ scrollZoom: z }),
       setImageCacheMaxBytes: (bytes) => set({ imageCacheMaxBytes: bytes }),
       setDownloadTree: (uri, name) => set({ downloadTreeUri: uri, downloadTreeName: name }),
-      addBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
+      addBlurTag: (tag) =>
+        set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings', version: 5, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 6, migrate: migrateSettings },
   ),
 );
 
@@ -135,7 +151,8 @@ export const useSettingsStore = create<SettingsStoreState>()(
  *  Waits for Zustand persist hydration to avoid reading stale defaults. */
 export function initLocaleOnce() {
   function applyAutoLocale() {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('hipago-settings') : null;
+    const raw =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('hipago-settings') : null;
     if (!raw && typeof navigator !== 'undefined' && navigator.language.startsWith('ko')) {
       useSettingsStore.getState().setLocale('ko');
     }
