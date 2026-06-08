@@ -16,10 +16,15 @@ vi.mock('@/shared/providers/AndroidBackButtonProvider', () => ({
   AndroidBackButtonProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
+vi.mock('@/lib/plugins/secureScreen', () => ({
+  setSecureScreen: vi.fn(),
+}));
+
 vi.mock('@/lib/store/settings', () => ({
   initLocaleOnce: vi.fn(),
-  useSettingsStore: (sel: (s: { locale: string; theme: string }) => unknown) =>
-    sel({ locale: 'en', theme: 'light' }),
+  useSettingsStore: (
+    sel: (s: { locale: string; theme: string; secureScreen: boolean }) => unknown,
+  ) => sel({ locale: 'en', theme: 'light', secureScreen: false }),
 }));
 
 describe('Providers', () => {
