@@ -305,6 +305,79 @@ describe('VirtualGalleryGrid — native back restoration', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Initial column count (REQ__list-scroll-restoration)
+// ---------------------------------------------------------------------------
+
+function setWindowWidth(w: number) {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+}
+
+describe('VirtualGalleryGrid — initial column count', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Immediate rAF so the resize handler's deferred compute runs synchronously.
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+  });
+
+  afterEach(() => {
+    setWindowWidth(1024);
+    vi.unstubAllGlobals();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  it('mounts at mobile width with the breakpoint column count and no scrollToIndex (native restore untouched)', () => {
+    setWindowWidth(375);
+    const { container } = render(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 20}
+        totalPages={20}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    // First render already uses the mobile column count — no post-mount cols flip.
+    expect(container.innerHTML).toContain('repeat(2, minmax(0, 1fr))');
+    expect(container.innerHTML).not.toContain('repeat(5, minmax(0, 1fr))');
+    // The cols-settle path used to call scrollToIndex(row 0) right after mount,
+    // overwriting the browser's natively restored scroll position.
+    expect(mockScrollToIndex).not.toHaveBeenCalled();
+  });
+
+  it('still anchors via scrollToIndex when a post-mount resize crosses a column breakpoint', () => {
+    setWindowWidth(375);
+    render(
+      <VirtualGalleryGrid
+        totalLength={PAGE_SIZE * 20}
+        totalPages={20}
+        viewingPage={1}
+        getItemId={() => null}
+        requestPage={noop}
+      />,
+    );
+    mockScrollToIndex.mockClear();
+
+    act(() => {
+      setWindowWidth(1280); // crosses 640/768/1024 breakpoints: 2 -> 5 cols
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    expect(mockScrollToIndex).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sliding window
 // ---------------------------------------------------------------------------
 

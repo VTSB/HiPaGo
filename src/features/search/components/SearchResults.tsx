@@ -62,10 +62,16 @@ export function SearchResults() {
   const isSingleTerm = parseCompoundQuery(executedQuery).length === 1;
   const numericId = /^\d+$/.test(query) ? Number(query) : null;
 
+  // gcTime keeps result ids cached across detail visits so a back navigation
+  // renders the grid at full height synchronously — native scroll restoration
+  // needs the document height to be correct before it lands (REQ__list-scroll-restoration).
+  const SEARCH_IDS_GC_TIME = 30 * 60_000;
+
   const idsQuery = useQuery({
     queryKey: ['search-ids', query, defaultFilterQuery, language, sort],
     queryFn: () => getGalleryIdsForQuery(executedQuery, language, isSingleTerm ? sort : undefined),
     enabled: query.length > 0,
+    gcTime: SEARCH_IDS_GC_TIME,
   });
 
   const langQueryDone = !idsQuery.isLoading && language !== 'all' && query.length > 0;
@@ -74,6 +80,7 @@ export function SearchResults() {
     queryKey: ['search-ids', query, defaultFilterQuery, 'all', sort],
     queryFn: () => getGalleryIdsForQuery(executedQuery, 'all', isSingleTerm ? sort : undefined),
     enabled: langQueryEmpty,
+    gcTime: SEARCH_IDS_GC_TIME,
   });
 
   const isFallback = langQueryEmpty && (fallbackQuery.data?.length ?? 0) > 0;

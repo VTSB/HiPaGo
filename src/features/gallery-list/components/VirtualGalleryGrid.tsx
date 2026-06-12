@@ -57,29 +57,40 @@ function SkeletonCard() {
   );
 }
 
+const COLS_BY_SETTINGS: Record<number, [number, number, number, number]> = {
+  // [base(<640), sm(640+), md(768+), lg(1024+)]
+  2: [2, 2, 2, 2],
+  3: [2, 3, 3, 3],
+  4: [2, 3, 4, 4],
+  5: [2, 3, 4, 5],
+  6: [2, 4, 5, 6],
+  7: [2, 4, 6, 7],
+};
+
+function computeGridColumns(settingsCols: number, w: number): number {
+  const bp = COLS_BY_SETTINGS[settingsCols || 5] ?? [2, 3, 4, 5];
+  return w >= 1024 ? bp[3] : w >= 768 ? bp[2] : w >= 640 ? bp[1] : bp[0];
+}
+
 /**
  * Returns the actual column count for the current viewport + settings,
  * matching the breakpoints in GalleryGrid.tsx useGridClass.
+ *
+ * The initial value is computed synchronously from window.innerWidth so the
+ * very first render already uses the real column count. A post-mount cols
+ * correction used to trigger the colsChanged anchor effect below, which
+ * called scrollToIndex(row 0) right after a back-navigation remount and
+ * overwrote the browser's native scroll restoration (REQ__list-scroll-restoration).
  */
 function useActualGridColumns(): number {
   const settingsCols = useSettingsStore((s) => s.gridColumns);
-  const [cols, setCols] = useState(5);
+  const [cols, setCols] = useState(() =>
+    typeof window === 'undefined' ? 5 : computeGridColumns(settingsCols, window.innerWidth),
+  );
 
   useEffect(() => {
-    const colsBySettings: Record<number, [number, number, number, number]> = {
-      // [base(<640), sm(640+), md(768+), lg(1024+)]
-      2: [2, 2, 2, 2],
-      3: [2, 3, 3, 3],
-      4: [2, 3, 4, 4],
-      5: [2, 3, 4, 5],
-      6: [2, 4, 5, 6],
-      7: [2, 4, 6, 7],
-    };
     const compute = () => {
-      const w = window.innerWidth;
-      const effective = settingsCols || 5;
-      const bp = colsBySettings[effective] ?? [2, 3, 4, 5];
-      setCols(w >= 1024 ? bp[3] : w >= 768 ? bp[2] : w >= 640 ? bp[1] : bp[0]);
+      setCols(computeGridColumns(settingsCols, window.innerWidth));
     };
     compute();
     let rafId = 0;
