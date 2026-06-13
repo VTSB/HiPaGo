@@ -7,10 +7,7 @@ android {
   }
 }
 
-def cordovaVariables = file("../capacitor-cordova-android-plugins/cordova.variables.gradle")
-if (cordovaVariables.exists()) {
-    apply from: cordovaVariables
-}
+apply from: "../capacitor-cordova-android-plugins/cordova.variables.gradle"
 dependencies {
     implementation project(':capacitor-community-sqlite')
     implementation project(':capacitor-filesystem')
