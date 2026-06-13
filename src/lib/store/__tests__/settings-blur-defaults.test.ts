@@ -43,7 +43,7 @@ describe('default blur tags + v1 migration', () => {
       defaultFilterQuery: '',
     };
     const out = migrateSettings(state, 5) as { secureScreen: boolean };
-    expect(out.secureScreen).toBe(false);
+    expect(out.secureScreen).toBe(true);
   });
 
   it('v1 -> v2 adds the default image-cache cap without touching blurTags', () => {

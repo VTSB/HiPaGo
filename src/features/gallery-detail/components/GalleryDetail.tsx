@@ -149,6 +149,7 @@ export function GalleryDetail({ id }: { id: number }) {
     start: handleDownload,
     cancel: handleCancelDownload,
     error: dlError,
+    isDownloaded,
   } = useDownloadGallery(
     id,
     displayBlock?.title || `Gallery ${id}`,
@@ -336,6 +337,26 @@ export function GalleryDetail({ id }: { id: number }) {
                 >
                   <Spinner size="sm" />
                   {dlProgress.current}/{dlProgress.total}
+                </button>
+              ) : isDownloaded ? (
+                <button
+                  onClick={handleDownload}
+                  title={t('detail.redownload')}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-green-600/40 bg-green-50 px-8 py-2.5 text-base font-semibold text-green-700 active:bg-green-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-green-100 dark:border-green-500/40 dark:bg-green-950/40 dark:text-green-400 dark:active:bg-green-900/40 sm:dark:hover:bg-green-900/40"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {t('detail.downloaded')}
                 </button>
               ) : (
                 <button

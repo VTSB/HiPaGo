@@ -41,7 +41,7 @@ describe('settings store', () => {
       imageFormat: 'auto',
       blurTags: ['male:yaoi'],
       defaultFilterQuery: '',
-      secureScreen: false,
+      secureScreen: true,
     });
   });
 
@@ -70,8 +70,8 @@ describe('settings store', () => {
       expect(useSettingsStore.getState().defaultFilterQuery).toBe('');
     });
 
-    it('has secure screen disabled by default', () => {
-      expect(useSettingsStore.getState().secureScreen).toBe(false);
+    it('has secure screen enabled by default', () => {
+      expect(useSettingsStore.getState().secureScreen).toBe(true);
     });
   });
 
