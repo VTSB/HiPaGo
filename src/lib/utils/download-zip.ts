@@ -316,7 +316,14 @@ export async function downloadGalleryToLibrary(
       }
 
       const file = files[i];
-      const url = getImageUrl(file, ggConfig, 'webp');
+      // 'auto' (avif > webp > original) mirrors the reader. Hardcoding 'webp'
+      // breaks avif-only galleries (no haswebp): getImageUrl falls back to the
+      // original .jpg, which the CDN does not serve, so every page 404s/fails.
+      const url = getImageUrl(file, ggConfig, 'auto');
+      // The ext the 'auto' URL actually points at (avif/webp/jpg/…), used both
+      // for the cache-copy filename and its manifest entry so offline reads
+      // resolve the right file.
+      const urlExt = url.split('?')[0].split('.').pop() || 'webp';
 
       let pageWritten = false;
 
@@ -328,8 +335,8 @@ export async function downloadGalleryToLibrary(
         const cachedPath = await imageCache.cachedFilePath(url).catch(() => null);
         if (cachedPath) {
           try {
-            const size = await store.putImageFromFile(galleryId, i, cachedPath, 'webp');
-            pageExts.push('webp');
+            const size = await store.putImageFromFile(galleryId, i, cachedPath, urlExt);
+            pageExts.push(urlExt);
             totalBytes += size;
             pageWritten = true;
           } catch {
@@ -487,7 +494,7 @@ export async function downloadGalleryAsZip(
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
     const file = files[i];
-    const url = getImageUrl(file, ggConfig, 'webp');
+    const url = getImageUrl(file, ggConfig, 'auto');
     const res = await apiClient.fetchUrl(url, { signal });
     const buf = await res.arrayBuffer();
     // Derive extension from actual content type or URL
