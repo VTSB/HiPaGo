@@ -1,6 +1,6 @@
 apply plugin: 'com.android.application'
 // Required to compile the UniFFI-generated Kotlin bindings dropped into
-// src/main/java/uniffi/bypass/ by scripts/build-android.mjs.
+// generated/java/uniffi/bypass/ by scripts/build-android.mjs.
 apply plugin: 'kotlin-android'
 
 android {
@@ -51,7 +51,12 @@ android {
     }
     sourceSets {
         main {
-            jniLibs.srcDirs = ['src/main/jniLibs']
+            // bypass-uniffi outputs (libbypass_uniffi.so + generated Kotlin
+            // bindings) are produced by scripts/build-android.mjs into
+            // generated/ — kept out of src/ and gitignored. CI rebuilds them
+            // before assembleRelease.
+            jniLibs.srcDirs = ['generated/jniLibs']
+            java.srcDir 'generated/java'
         }
     }
     // Match the JVM target capacitor.build.gradle sets for Java (17),

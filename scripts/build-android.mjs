@@ -15,8 +15,9 @@ execSync(
   { cwd: root, stdio: 'inherit' },
 );
 
-// Copy .so files to Android jniLibs
-const jniLibs = join(root, 'android/app/src/main/jniLibs');
+// Copy .so files to the generated jniLibs dir (outside src/, gitignored;
+// registered as a jniLibs srcDir in app/build.gradle).
+const jniLibs = join(root, 'android/app/generated/jniLibs');
 const targets = [
   ['aarch64-linux-android', 'arm64-v8a'],
   ['armv7-linux-androideabi', 'armeabi-v7a'],
@@ -32,14 +33,15 @@ for (const [rustTarget, abi] of targets) {
   );
 }
 
-// Generate Kotlin bindings
+// Generate Kotlin bindings into the generated source dir (outside src/,
+// gitignored; registered as a java srcDir in app/build.gradle).
 console.log('Generating Kotlin bindings...');
 execSync(
   [
     'cargo run -p bypass-uniffi --bin uniffi-bindgen generate',
     `--library target/aarch64-linux-android/release/libbypass_uniffi.so`,
     '--language kotlin',
-    `--out-dir android/app/src/main/java/`,
+    `--out-dir android/app/generated/java/`,
   ].join(' '),
   { cwd: root, stdio: 'inherit' },
 );
