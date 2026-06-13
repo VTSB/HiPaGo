@@ -79,7 +79,7 @@ import {
 } from '../download-zip';
 import { zipSync } from 'fflate';
 import { getImageUrl } from '../image-url';
-import { apiClient } from '@/lib/api/client';
+import { apiClient, ApiError } from '@/lib/api/client';
 import { upsertDownload, setDownloadError, updateDownloadProgress } from '@/lib/db/download';
 import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
 
@@ -463,7 +463,7 @@ describe('downloadGalleryToLibrary', () => {
   // AC-006 (c): putImageFromFile rejects → falls back to fetch, page is still written
   it('(c) putImageFromFile failure falls back to network fetch and page is still written', async () => {
     const storeWithFailingCopy = Object.assign(makeMemoryStore(), {
-      async putImageFromFile(_galleryId: number, _index: number, _srcPath: string, _ext: string): Promise<number> {
+      async putImageFromFile(): Promise<number> {
         throw new Error('Permission denied');
       },
     });
@@ -514,6 +514,59 @@ describe('downloadGalleryToLibrary', () => {
       expect.objectContaining({ status: 'downloading', pageCount: 1 }),
     );
   }, 15_000);
+
+  it('(d) retries ApiError transient statuses thrown by apiClient and succeeds', async () => {
+    let callCount = 0;
+    vi.mocked(apiClient.fetchUrl).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new ApiError(503, 'HTTP 503: Service Unavailable'));
+      }
+      return Promise.resolve(makeFetchResponse('image/webp', new Uint8Array([5, 6, 7])));
+    });
+
+    await downloadGalleryToLibrary(30, 'G', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
+
+    expect(callCount).toBe(2);
+    expect(upsertDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 30, status: 'downloading', pageCount: 1 }),
+    );
+  });
+
+  it('(d) aborts the in-flight image fetch when the caller signal is aborted', async () => {
+    const controller = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    vi.mocked(apiClient.fetchUrl).mockImplementation((_url, options) => {
+      fetchSignal = options?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        fetchSignal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('Aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+
+    const downloadPromise = downloadGalleryToLibrary(
+      31,
+      'G',
+      'thumb.jpg',
+      [makeFile()],
+      makeGgConfig(),
+      {},
+      undefined,
+      controller.signal,
+    );
+
+    await vi.waitFor(() => {
+      expect(fetchSignal).toBeDefined();
+    });
+    controller.abort();
+
+    await expect(downloadPromise).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
 
   it('(d) does not retry caller AbortError — rethrows immediately', async () => {
     const controller = new AbortController();

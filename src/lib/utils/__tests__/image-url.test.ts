@@ -250,6 +250,15 @@ describe('getImageUrl preferredFormat', () => {
     expect(url).toContain('.jpg');
   });
 
+  it("'webp' treats a .webp source file as webp even when haswebp=0", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'source.webp', hash: 'abcdef1234' });
+    const config = makeConfig();
+    const url = getImageUrl(file, config, 'webp');
+    expect(url).toMatch(/^\/api\/img\/w[12]\//);
+    expect(url).not.toContain('/images/');
+    expect(url).toContain('.webp');
+  });
+
   it("'avif' uses avif when hasavif (no dir prefix)", () => {
     const file = makeFile({ hasavif: 1, haswebp: 1, name: 'photo.jpg', hash: 'abcdef1234' });
     const config = makeConfig();
@@ -274,6 +283,15 @@ describe('getImageUrl preferredFormat', () => {
     expect(url).toContain('.jpg');
   });
 
+  it("'avif' treats a .avif source file as avif even when hasavif=0", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'source.avif', hash: 'abcdef1234' });
+    const config = makeConfig();
+    const url = getImageUrl(file, config, 'avif');
+    expect(url).toMatch(/^\/api\/img\/a[12]\//);
+    expect(url).not.toContain('/images/');
+    expect(url).toContain('.avif');
+  });
+
   it("'auto' behaves like default (avif > webp > original)", () => {
     const fileAvif = makeFile({ hasavif: 1, haswebp: 1, hash: 'abcdef1234' });
     expect(getImageUrl(fileAvif, makeConfig(), 'auto')).toContain('.avif');
@@ -283,6 +301,20 @@ describe('getImageUrl preferredFormat', () => {
 
     const fileOrig = makeFile({ hasavif: 0, haswebp: 0, name: 'x.png', hash: 'abcdef1234' });
     expect(getImageUrl(fileOrig, makeConfig(), 'auto')).toContain('.png');
+  });
+
+  it("'auto' routes .webp source files through the webp CDN host", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'x.webp', hash: 'abcdef1234' });
+    const url = getImageUrl(file, makeConfig(), 'auto');
+    expect(url).toMatch(/^\/api\/img\/w[12]\//);
+    expect(url).not.toContain('/images/');
+  });
+
+  it("'original' routes .webp source files through the webp CDN host", () => {
+    const file = makeFile({ hasavif: 0, haswebp: 0, name: 'x.webp', hash: 'abcdef1234' });
+    const url = getImageUrl(file, makeConfig(), 'original');
+    expect(url).toMatch(/^\/api\/img\/w[12]\//);
+    expect(url).not.toContain('/images/');
   });
 
   it('undefined preferredFormat behaves like default (avif > webp > original)', () => {
