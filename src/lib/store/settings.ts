@@ -102,10 +102,10 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version < 5 && s.defaultFilterQuery === undefined) {
     s = { ...s, defaultFilterQuery: '' };
   }
-  // v6: Android screenshot/recent-app preview protection. Default disabled so
-  // existing users do not unexpectedly lose screenshot/screen-recording support.
+  // v6: Android screenshot/recent-app preview protection. Default enabled for
+  // existing users as well, so the secure-screen protection applies by default.
   if (version < 6 && s.secureScreen === undefined) {
-    s = { ...s, secureScreen: false };
+    s = { ...s, secureScreen: true };
   }
   return s;
 }
@@ -120,7 +120,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       imageFormat: 'auto',
       blurTags: DEFAULT_BLUR_TAGS,
       defaultFilterQuery: '',
-      secureScreen: false,
+      secureScreen: true,
       dualPage: false,
       gridColumns: 0,
       scrollZoom: 1,

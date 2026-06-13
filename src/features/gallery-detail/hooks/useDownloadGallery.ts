@@ -1,9 +1,7 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
-import { getGgConfig, ApiError } from '@/lib/api/client';
-import { downloadGalleryToLibrary, type DownloadProgress } from '@/lib/utils/download-zip';
-import { DownloadCancelledError } from '@/lib/storage/download-store';
+import { useCallback, useEffect } from 'react';
+import { useDownloadProgressStore } from '@/lib/store/download-progress';
 import type { GalleryFile } from '@/lib/utils/types';
 
 export function useDownloadGallery(
@@ -13,51 +11,32 @@ export function useDownloadGallery(
   files: GalleryFile[],
   tags: Record<string, string[]> = {},
 ) {
-  const [progress, setProgress] = useState<DownloadProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  // Read this gallery's live download state from the global store so progress
+  // survives navigating away from and back to the detail screen.
+  const entry = useDownloadProgressStore((s) => s.entries[id]);
+  const isDownloaded = useDownloadProgressStore((s) => s.downloaded[id] ?? false);
+  const startDownload = useDownloadProgressStore((s) => s.start);
+  const cancelDownload = useDownloadProgressStore((s) => s.cancel);
+  const refreshDownloaded = useDownloadProgressStore((s) => s.refreshDownloaded);
 
-  const start = useCallback(async () => {
-    if (progress || files.length === 0) return;
-    setError(null);
-    try {
-      const config = await getGgConfig();
-      abortRef.current = new AbortController();
-      setProgress({ current: 0, total: files.length });
-      await downloadGalleryToLibrary(
-        id,
-        title,
-        thumbnail,
-        files,
-        config,
-        tags,
-        setProgress,
-        abortRef.current.signal,
-      );
-    } catch (e) {
-      // User-cancel paths are silent (no error shown): aborting the download, or
-      // backing out of the Android SAF folder picker.
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      if (e instanceof DownloadCancelledError) return;
-      console.error('Download failed:', e);
-      if (e instanceof ApiError) {
-        setError(`Download failed (HTTP ${e.status})`);
-      } else if (e instanceof Error && e.message) {
-        // Surface the REAL reason (e.g. NO_TREE, mkdir failed, native message)
-        // instead of a flat 'Download failed' — on-device failures stay diagnosable.
-        setError(e.message);
-      } else {
-        setError('Download failed');
-      }
-    } finally {
-      setProgress(null);
-      abortRef.current = null;
-    }
-  }, [id, title, thumbnail, files, tags, progress]);
+  // Load persisted download status so a previously-completed download is
+  // reflected when revisiting the gallery.
+  useEffect(() => {
+    refreshDownloaded(id);
+  }, [id, refreshDownloaded]);
 
-  const cancel = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
+  const start = useCallback(
+    () => startDownload({ id, title, thumbnail, files, tags }),
+    [startDownload, id, title, thumbnail, files, tags],
+  );
 
-  return { progress, start, cancel, error };
+  const cancel = useCallback(() => cancelDownload(id), [cancelDownload, id]);
+
+  return {
+    progress: entry?.progress ?? null,
+    error: entry?.error ?? null,
+    isDownloaded,
+    start,
+    cancel,
+  };
 }
