@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Spinner } from '@/shared/components/Spinner';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { TagChip } from '@/shared/components/TagChip';
+import { DownloadQueueView } from '@/features/library/components/DownloadQueueView';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import { listLibraryDownloads, searchDownloads, deleteDownload, deserializeTags } from '@/lib/db/download';
@@ -448,6 +449,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           <StorageIndicator />
         </div>
       )}
+
+      {/* Download manager — active + queued/paused items, ABOVE the completed
+          list. Hidden (renders null) when nothing is active or queued. */}
+      <DownloadQueueView />
 
       {/* Search bar — hidden when library is empty and no query active. */}
       {showSearchBar && (

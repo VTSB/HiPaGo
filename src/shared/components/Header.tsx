@@ -8,6 +8,7 @@ import { SyncStatusIndicator } from '@/shared/components/SyncStatusIndicator';
 import { useT } from '@/lib/i18n/useT';
 import { useScrollReveal } from '@/shared/hooks/useScrollReveal';
 import { NAV_ITEMS } from '@/shared/nav/navItems';
+import { QueueBadgeDot } from '@/shared/nav/QueueBadgeDot';
 
 /**
  * Top header. Desktop (>=md) is unchanged: brand + search + language filter +
@@ -57,9 +58,10 @@ export function Header() {
             <Link
               key={n.href}
               href={n.href}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="relative rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
             >
               {t(n.key)}
+              {n.href === '/library' && <QueueBadgeDot className="absolute right-1 top-1" />}
             </Link>
           ))}
           <div className="mx-1 h-4 w-px bg-zinc-300 dark:bg-zinc-700" />

@@ -28,14 +28,18 @@ vi.mock('@/lib/utils/download-zip', async () => {
   };
 });
 
-const queue: { id: number; pageCount: number; paused?: boolean }[] = [];
+const queue: { id: number; pageCount: number; paused?: boolean; pos?: number }[] = [];
 const removed: number[] = [];
 const enqueued: { meta: unknown; opts: unknown }[] = [];
 
 vi.mock('@/lib/db/download-queue', () => ({
   dequeueNextQueued: vi.fn(async () => {
-    // Mirror the SQL `WHERE status = 'queued'`: paused items are NOT dequeued.
-    const item = queue.find((q) => !q.paused);
+    // Mirror the SQL `WHERE status = 'queued' ORDER BY queuePosition`: paused
+    // items are NOT dequeued; lowest position runs next.
+    const item = queue
+      .slice()
+      .sort((a, b) => (a.pos ?? a.id) - (b.pos ?? b.id))
+      .find((q) => !q.paused);
     if (!item) return null;
     return {
       galleryId: item.id,
@@ -57,10 +61,47 @@ vi.mock('@/lib/db/download-queue', () => ({
     if (!queue.find((q) => q.id === m.galleryId)) queue.push({ id: m.galleryId, pageCount: 0 });
     return queue.length;
   }),
+  // Queue surface consumed by the store actions (AC-001). listQueue() returns
+  // queued + paused rows in position order, mirroring the production SQL.
+  listQueue: vi.fn(async () =>
+    queue
+      .slice()
+      .sort((a, b) => (a.pos ?? a.id) - (b.pos ?? b.id))
+      .map((q) => ({
+        galleryId: q.id,
+        title: `G${q.id}`,
+        thumbnail: '/tn',
+        tags: '{}',
+        pageCount: q.pageCount,
+        status: q.paused ? 'paused' : 'queued',
+        queuePosition: q.pos ?? q.id,
+      })),
+  ),
+  pauseQueued: vi.fn(async (id: number) => {
+    const item = queue.find((q) => q.id === id);
+    if (item) item.paused = true;
+  }),
+  resumeQueued: vi.fn(async (id: number) => {
+    const item = queue.find((q) => q.id === id);
+    if (item) item.paused = false;
+  }),
+  reorderQueue: vi.fn(async (id: number, newPos: number) => {
+    const item = queue.find((q) => q.id === id);
+    if (item) item.pos = newPos;
+  }),
 }));
 
 vi.mock('@/lib/db/download', () => ({
-  getDownload: vi.fn(async () => null),
+  getDownload: vi.fn(async (id: number) => ({
+    galleryId: id,
+    title: `G${id}`,
+    thumbnail: '/tn',
+    tags: '{}',
+    pageCount: 0,
+    totalBytes: 0,
+    downloadedAt: '',
+    status: 'downloading',
+  })),
   deserializeTags: vi.fn(() => ({})),
 }));
 
@@ -95,7 +136,7 @@ vi.mock('@/lib/utils/network', () => ({
 import { processQueue, useDownloadProgressStore } from '../download-progress';
 import * as queueOps from '@/lib/db/download-queue';
 
-beforeEach(() => {
+beforeEach(async () => {
   queue.length = 0;
   removed.length = 0;
   enqueued.length = 0;
@@ -103,7 +144,10 @@ beforeEach(() => {
   dl.mockReset();
   unmetered.mockReset();
   unmetered.mockResolvedValue(true);
-  useDownloadProgressStore.setState({ entries: {}, downloaded: {} });
+  useDownloadProgressStore.setState({ entries: {}, downloaded: {}, queue: [], globalPaused: false });
+  // Clear the module-level globalPaused flag (queue is already empty, so this is
+  // a pure reset — it kicks an empty processQueue which is a no-op).
+  await useDownloadProgressStore.getState().resumeAll();
 });
 
 describe('processQueue (AC-005)', () => {
@@ -189,6 +233,99 @@ describe('cancel (AC-005)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(removed).toContain(42);
+  });
+});
+
+describe('queue actions (AC-001 / Task B)', () => {
+  it('pause(active) marks the row paused (not failed) and retains its pages', async () => {
+    queue.push({ id: 7, pageCount: 3 });
+    let paused = false;
+    // download-zip: when the abort is a PAUSE signal, it throws DownloadPausedError
+    // (mirroring the live seam: opts.isPauseSignal() true → status 'paused').
+    dl.mockImplementation(async (...a: unknown[]) => {
+      const opts = a[8] as { isPauseSignal: () => boolean };
+      // Simulate the in-flight download: pause is requested mid-run.
+      await new Promise((r) => setTimeout(r, 5));
+      if (opts.isPauseSignal()) {
+        const item = queue.find((q) => q.id === 7);
+        if (item) item.paused = true; // row stays in queue at its position
+        paused = true;
+        throw new DownloadPausedError();
+      }
+    });
+
+    const run = processQueue();
+    // Let the processor start the active run, then pause it.
+    await new Promise((r) => setTimeout(r, 1));
+    await useDownloadProgressStore.getState().pause(7);
+    await run;
+
+    expect(paused).toBe(true);
+    // Paused → NOT removed from the queue (pages retained for resume).
+    expect(removed).not.toContain(7);
+    expect(queue.find((q) => q.id === 7)?.paused).toBe(true);
+    expect(queue.find((q) => q.id === 7)?.pageCount).toBe(3);
+  });
+
+  it('pause(queued) holds a not-yet-started item via pauseQueued', async () => {
+    queue.push({ id: 8, pageCount: 0 });
+    await useDownloadProgressStore.getState().pause(8);
+    expect(vi.mocked(queueOps.pauseQueued)).toHaveBeenCalledWith(8);
+    expect(queue.find((q) => q.id === 8)?.paused).toBe(true);
+  });
+
+  it('resume re-drives the processor and continues a paused item', async () => {
+    queue.push({ id: 9, pageCount: 2, paused: true });
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+    });
+
+    await useDownloadProgressStore.getState().resume(9);
+    // resume() kicks processQueue async; let it drain.
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(vi.mocked(queueOps.resumeQueued)).toHaveBeenCalledWith(9);
+    expect(order).toContain(9);
+  });
+
+  it('reorder calls reorderQueue for a pending item', async () => {
+    queue.push({ id: 10, pageCount: 0, pos: 1 }, { id: 11, pageCount: 0, pos: 2 });
+    await useDownloadProgressStore.getState().reorder(11, 0);
+    expect(vi.mocked(queueOps.reorderQueue)).toHaveBeenCalledWith(11, 0);
+    expect(queue.find((q) => q.id === 11)?.pos).toBe(0);
+  });
+
+  it('pauseAll stops auto-advance: a queued item does NOT start under global pause', async () => {
+    queue.push({ id: 20, pageCount: 0 }, { id: 21, pageCount: 0 });
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+    });
+
+    await useDownloadProgressStore.getState().pauseAll();
+    expect(useDownloadProgressStore.getState().globalPaused).toBe(true);
+
+    // Kicking the processor while globally paused must not dequeue anything.
+    await processQueue();
+    expect(order).toEqual([]);
+    expect(removed).toEqual([]);
+
+    // resumeAll clears the gate and drives the queue again.
+    await useDownloadProgressStore.getState().resumeAll();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(order).toEqual([20, 21]);
+  });
+
+  it('nav-badge selector is true iff the queue is non-empty', async () => {
+    const { selectQueueActive } = await import('../download-progress');
+    useDownloadProgressStore.setState({ queue: [] });
+    expect(selectQueueActive(useDownloadProgressStore.getState())).toBe(false);
+
+    queue.push({ id: 30, pageCount: 0 });
+    await useDownloadProgressStore.getState().refreshQueue();
+    expect(selectQueueActive(useDownloadProgressStore.getState())).toBe(true);
+    expect(useDownloadProgressStore.getState().queue.map((q) => q.id)).toContain(30);
   });
 });
 

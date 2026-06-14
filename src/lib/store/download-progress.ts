@@ -11,9 +11,14 @@ import {
   enqueueDownload,
   dequeueNextQueued,
   removeFromQueue,
+  listQueue,
+  pauseQueued,
+  resumeQueued,
+  reorderQueue,
 } from '@/lib/db/download-queue';
 import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
 import type { GalleryFile } from '@/lib/utils/types';
+import type { DownloadStatus } from '@/lib/db/schema';
 
 interface DownloadEntry {
   progress: DownloadProgress | null;
@@ -22,6 +27,24 @@ interface DownloadEntry {
   queued?: boolean;
   /** The gallery's position in the queue while queued (null once it starts). */
   position?: number | null;
+}
+
+/**
+ * A reactive row in the download-manager UI. Built from `listQueue()`
+ * (queued/paused rows) merged with the single active in-flight item (the entry
+ * whose `progress` is non-null). The active item is rendered with a live
+ * progress bar; queued/paused items show their position.
+ */
+export interface QueueItem {
+  id: number;
+  title: string;
+  thumbnail: string;
+  /** 'downloading' for the active item, else the DB status ('queued'|'paused'). */
+  status: Extract<DownloadStatus, 'downloading' | 'queued' | 'paused'>;
+  /** Queue position (from the DB). null for the active item. */
+  position: number | null;
+  /** Live progress for the active item only; null for queued/paused rows. */
+  progress: DownloadProgress | null;
 }
 
 export interface StartDownloadParams {
@@ -39,13 +62,36 @@ interface DownloadProgressState {
   /** Whether a gallery is already fully downloaded, keyed by gallery id.
    *  Seeded from the DB via refreshDownloaded(), set true after a download completes. */
   downloaded: Record<number, boolean>;
+  /** The download-manager surface: active item + queued/paused rows in order.
+   *  Rebuilt from listQueue() (merged with the active entry) by refreshQueue(). */
+  queue: QueueItem[];
+  /** When true, the processor stops auto-advancing and the active item is paused. */
+  globalPaused: boolean;
   /** Enqueue a gallery (userInitiated) and kick the processor. */
   start: (params: StartDownloadParams) => Promise<void>;
   /** Cancel: aborts the active run, or drops a queued/paused item from the queue. */
   cancel: (id: number) => void;
   /** Load the persisted download status for a gallery from the DB into the store. */
   refreshDownloaded: (id: number) => Promise<void>;
+  /** Re-read listQueue() + the active entry and publish the reactive `queue`. */
+  refreshQueue: () => Promise<void>;
+  /** Pause one item: active → pausing+abort (download-zip writes 'paused');
+   *  queued → pauseQueued. Paused items stay in the queue at their position. */
+  pause: (id: number) => Promise<void>;
+  /** Resume a paused item back to 'queued' and (unless globally paused) re-drive. */
+  resume: (id: number) => Promise<void>;
+  /** Move a PENDING (queued/paused) item to a new queue position. The active
+   *  in-flight item is not reorderable (guarded). */
+  reorder: (id: number, newPos: number) => Promise<void>;
+  /** Stop the whole queue: set globalPaused and pause the active item if any. */
+  pauseAll: () => Promise<void>;
+  /** Resume the whole queue: clear globalPaused, resume every paused row, re-drive. */
+  resumeAll: () => Promise<void>;
 }
+
+/** True iff the queue is non-empty (active or pending) — drives the nav badge.
+ *  A cheap selector so subscribers only re-render on the boolean flip. */
+export const selectQueueActive = (s: DownloadProgressState): boolean => s.queue.length > 0;
 
 // AbortControllers are kept module-level (not in store state): they are not
 // serializable and need no reactivity.
@@ -64,11 +110,18 @@ const fileCache = new Map<number, { files: GalleryFile[]; tags: Record<string, s
 // async DB read — that would be a read-then-write race (PLAN decision 6).
 let running = false;
 
+// Module-level global-pause flag. Read synchronously at the top of the processor
+// loop so a pauseAll() stops auto-advance immediately (the store's reactive
+// `globalPaused` mirrors this for the UI). Kept here, not in store state, so the
+// processor can consult it without subscribing to React.
+let globalPaused = false;
+
 // Internal helper that the store closure binds to so processQueue can push
 // store updates. Assigned once when the store is created.
 let storeApi: {
   setEntry: (id: number, entry: DownloadEntry | null) => void;
   markDownloaded: (id: number) => void;
+  refreshQueue: () => void;
 } | null = null;
 
 /**
@@ -80,8 +133,9 @@ export async function processQueue(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    let next = await dequeueNextQueued();
-    for (; next; next = await dequeueNextQueued()) {
+    // Honour a global pause before dequeuing the first item, too.
+    let next = globalPaused ? null : await dequeueNextQueued();
+    for (; next; next = globalPaused ? null : await dequeueNextQueued()) {
       const id = next.galleryId;
 
       // Resolve the gallery's file list + tags. Prefer the cached list from a
@@ -118,6 +172,10 @@ export async function processQueue(): Promise<void> {
       const controller = new AbortController();
       controllers.set(id, controller);
       storeApi?.setEntry(id, { progress: { current: 0, total: files.length }, error: null });
+      // Transition: this item just became the active in-flight download — the
+      // queue row left listQueue() (status flipped to 'downloading'), so rebuild
+      // the reactive queue to surface it as the active item.
+      storeApi?.refreshQueue();
 
       try {
         const config = await getGgConfig();
@@ -167,6 +225,10 @@ export async function processQueue(): Promise<void> {
         controllers.delete(id);
         pausing.delete(id);
         fileCache.delete(id);
+        // Transition: this item reached a terminal state (complete/paused/
+        // cancelled/failed). Rebuild the reactive queue before advancing so the
+        // manager UI reflects the new head/order at every step.
+        storeApi?.refreshQueue();
       }
     }
   } finally {
@@ -193,12 +255,61 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
   const markDownloaded = (id: number) =>
     set((s) => ({ downloaded: { ...s.downloaded, [id]: true } }));
 
+  // Rebuild the reactive `queue`: the queued/paused rows from listQueue() merged
+  // with the single active in-flight item (the entry whose progress is non-null).
+  // listQueue() is the source of truth for order; the active item (already flipped
+  // to 'downloading', so absent from listQueue) is prepended from the live entry.
+  const refreshQueue = async () => {
+    let rows: Awaited<ReturnType<typeof listQueue>>;
+    try {
+      rows = await listQueue();
+    } catch {
+      // DB unavailable — leave the queue untouched rather than blanking the UI.
+      return;
+    }
+    const entries = get().entries;
+    const activeId = Object.keys(entries)
+      .map(Number)
+      .find((id) => entries[id]?.progress);
+
+    const pending: QueueItem[] = rows.map((r) => ({
+      id: r.galleryId,
+      title: r.title,
+      thumbnail: r.thumbnail,
+      status: r.status === 'paused' ? 'paused' : 'queued',
+      position: r.queuePosition ?? null,
+      progress: null,
+    }));
+
+    let queue: QueueItem[] = pending;
+    if (activeId !== undefined) {
+      const active = entries[activeId];
+      // The active item flipped to 'downloading', so it is no longer in
+      // listQueue(); read its row directly for title/thumbnail metadata.
+      const activeRow = await getDownload(activeId).catch(() => null);
+      const activeItem: QueueItem = {
+        id: activeId,
+        title: activeRow?.title ?? '',
+        thumbnail: activeRow?.thumbnail ?? '',
+        status: 'downloading',
+        position: null,
+        progress: active?.progress ?? null,
+      };
+      // Active item is always rendered at the top; drop any stale pending dup.
+      queue = [activeItem, ...pending.filter((p) => p.id !== activeId)];
+    }
+    set({ queue });
+  };
+
   // Bind the module-level processor to this store instance.
-  storeApi = { setEntry, markDownloaded };
+  storeApi = { setEntry, markDownloaded, refreshQueue: () => void refreshQueue() };
 
   return {
     entries: {},
     downloaded: {},
+    queue: [],
+    globalPaused: false,
+    refreshQueue,
     refreshDownloaded: async (id) => {
       try {
         const row = await getDownload(id);
@@ -231,6 +342,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         return;
       }
 
+      void refreshQueue();
       void processQueue();
     },
     cancel: (id) => {
@@ -240,10 +352,62 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         controller.abort();
       } else {
         // Queued/paused but not yet started → drop it from the queue.
-        void removeFromQueue(id).catch(() => {});
+        void removeFromQueue(id)
+          .catch(() => {})
+          .finally(() => void refreshQueue());
         fileCache.delete(id);
         setEntry(id, null);
       }
+    },
+    pause: async (id) => {
+      const controller = controllers.get(id);
+      if (controller) {
+        // Active run → mark it as a PAUSE before aborting so download-zip reads
+        // the pausing signal and writes status 'paused' (not 'failed').
+        pausing.add(id);
+        controller.abort();
+      } else {
+        // Not-yet-started queued item → just hold it.
+        await pauseQueued(id);
+      }
+      await refreshQueue();
+    },
+    resume: async (id) => {
+      await resumeQueued(id);
+      if (!globalPaused) void processQueue();
+      await refreshQueue();
+    },
+    reorder: async (id, newPos) => {
+      // The active in-flight item is not reorderable — it keeps downloading.
+      if (controllers.has(id)) return;
+      await reorderQueue(id, newPos);
+      await refreshQueue();
+    },
+    pauseAll: async () => {
+      globalPaused = true;
+      set({ globalPaused: true });
+      // Pause the active item too, if one is in flight.
+      for (const [id, controller] of controllers) {
+        pausing.add(id);
+        controller.abort();
+      }
+      await refreshQueue();
+    },
+    resumeAll: async () => {
+      globalPaused = false;
+      set({ globalPaused: false });
+      // Flip every paused row back to 'queued', then re-drive the processor.
+      let rows: Awaited<ReturnType<typeof listQueue>> = [];
+      try {
+        rows = await listQueue();
+      } catch {
+        rows = [];
+      }
+      for (const r of rows) {
+        if (r.status === 'paused') await resumeQueued(r.galleryId);
+      }
+      void processQueue();
+      await refreshQueue();
     },
   };
 });

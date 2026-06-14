@@ -8,6 +8,7 @@ import { useHaptic } from '@/shared/hooks/useHaptic';
 import { useKeyboardOpen } from '@/shared/hooks/useKeyboardOpen';
 import { useSettingsStore } from '@/lib/store/settings';
 import { BOTTOM_TABS } from '@/shared/nav/navItems';
+import { QueueBadgeDot } from '@/shared/nav/QueueBadgeDot';
 
 /**
  * Apple/Toss-style floating bottom tab bar. Mobile only (md:hidden) — the
@@ -94,7 +95,12 @@ export function BottomNav() {
                   active ? 'text-white' : 'text-zinc-400 active:text-zinc-200'
                 }`}
               >
-                {tab.icon('h-6 w-6')}
+                <span className="relative">
+                  {tab.icon('h-6 w-6')}
+                  {tab.href === '/library' && (
+                    <QueueBadgeDot className="absolute -right-0.5 -top-0.5" />
+                  )}
+                </span>
                 <span className="text-[10px] font-semibold leading-none tracking-tight">
                   {t(tab.key)}
                 </span>

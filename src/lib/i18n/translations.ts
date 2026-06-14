@@ -120,6 +120,22 @@ const translations = {
   'library.status.failed': { en: 'Failed', ko: '실패' },
   'library.search.placeholder': { en: 'Search downloads...', ko: '다운로드 검색...' },
 
+  // Download manager / queue (top of the Downloads tab)
+  'library.queue.title': { en: 'Downloading', ko: '다운로드 중' },
+  'library.queue.active': { en: 'Now downloading', ko: '현재 다운로드' },
+  'library.queue.queued': { en: 'Queued', ko: '대기 중' },
+  'library.queue.paused': { en: 'Paused', ko: '일시중지됨' },
+  'library.queue.downloading': { en: 'Downloading', ko: '다운로드 중' },
+  'library.queue.pause': { en: 'Pause', ko: '일시중지' },
+  'library.queue.resume': { en: 'Resume', ko: '재개' },
+  'library.queue.cancel': { en: 'Remove from queue', ko: '대기열에서 제거' },
+  'library.queue.pauseAll': { en: 'Pause all', ko: '모두 일시중지' },
+  'library.queue.resumeAll': { en: 'Resume all', ko: '모두 재개' },
+  'library.queue.empty': { en: 'No active downloads', ko: '진행 중인 다운로드 없음' },
+  'library.queue.reorder': { en: 'Drag to reorder', ko: '드래그하여 순서 변경' },
+  'library.queue.position': { en: 'Position', ko: '순서' },
+  'library.queue.of': { en: 'of', ko: '/' },
+
   // Pagination
   'page.shown': { en: 'shown', ko: '표시' },
 
