@@ -37,6 +37,15 @@ vi.mock('@/lib/db/download', () => ({
   listDownloads: () => mockListDownloads(),
   searchDownloads: (opts: { query?: string }) => mockSearchDownloads(opts),
   deleteDownload: (id: number) => mockDeleteDownload(id),
+  // The redesigned card deserializes tags at render time (not just in retry),
+  // so the mock must provide it too.
+  deserializeTags: (raw: string) => {
+    try {
+      return JSON.parse(raw) as Record<string, string[]>;
+    } catch {
+      return {};
+    }
+  },
 }));
 
 vi.mock('@/lib/storage/download-store', () => ({
@@ -162,23 +171,29 @@ describe('LibraryPage', () => {
     expect(screen.getByText('(2)')).toBeTruthy();
   });
 
-  it('renders Open link pointing to the gallery route', async () => {
+  it('makes the whole card a link pointing to the gallery route', async () => {
+    // The card is now a cover-forward gallery-block card: tapping the card
+    // itself opens the gallery (no inline "Open" button).
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001 })]);
 
     await act(async () => { await renderPage(); });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
-    const openLink = screen.getByRole('link', { name: 'library.open' });
-    expect(openLink.getAttribute('href')).toBe('/gallery?id=1001');
+    const cardLink = screen.getByRole('link');
+    expect(cardLink.getAttribute('href')).toBe('/gallery?id=1001');
   });
 
-  it('renders page count and formatted size metadata', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ pageCount: 42, totalBytes: 1024 })]);
+  it('does NOT show per-card size/page-count metadata on the card face', async () => {
+    // The redesigned card matches the gallery-block card: title + tags only.
+    // Page count and size were removed from the card (storage-used stays in the
+    // page header). Verify the page-count number is not rendered on the card.
+    mockListDownloads.mockResolvedValue([makeItem({ pageCount: 42, totalBytes: 1024, title: 'Sized Gallery' })]);
 
     await act(async () => { await renderPage(); });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
-    expect(screen.getByText(/42/)).toBeTruthy();
+    expect(screen.getByText('Sized Gallery')).toBeTruthy();
+    expect(screen.queryByText(/42/)).toBeNull();
   });
 
   // ── AC-004: delete action ─────────────────────────────────────────────────
