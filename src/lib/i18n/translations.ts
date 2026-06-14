@@ -65,6 +65,10 @@ const translations = {
   'detail.download': { en: 'Download', ko: '다운로드' },
   'detail.downloaded': { en: 'Downloaded', ko: '다운로드됨' },
   'detail.redownload': { en: 'Download again', ko: '다시 다운로드' },
+  'detail.redownloadConfirm': {
+    en: 'This gallery is already downloaded. Download it again?',
+    ko: '이미 다운로드된 갤러리입니다. 다시 받을까요?',
+  },
   'detail.copyId': { en: 'Copy ID', ko: 'ID 복사' },
   'detail.copied': { en: 'ID copied!', ko: 'ID 복사됨!' },
 

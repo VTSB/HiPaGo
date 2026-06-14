@@ -158,6 +158,12 @@ export function GalleryDetail({ id }: { id: number }) {
     displayBlock?.tags as Record<string, string[]> | undefined,
   );
 
+  // A completed gallery's button re-downloads on tap; confirm first so an
+  // accidental tap doesn't re-start a finished download.
+  const handleRedownload = useCallback(() => {
+    if (window.confirm(t('detail.redownloadConfirm'))) handleDownload();
+  }, [t, handleDownload]);
+
   const handleShare = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(String(id));
@@ -340,7 +346,7 @@ export function GalleryDetail({ id }: { id: number }) {
                 </button>
               ) : isDownloaded ? (
                 <button
-                  onClick={handleDownload}
+                  onClick={handleRedownload}
                   title={t('detail.redownload')}
                   className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-green-600/40 bg-green-50 px-8 py-2.5 text-base font-semibold text-green-700 active:bg-green-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-green-100 dark:border-green-500/40 dark:bg-green-950/40 dark:text-green-400 dark:active:bg-green-900/40 sm:dark:hover:bg-green-900/40"
                 >
