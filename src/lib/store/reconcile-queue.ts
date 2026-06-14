@@ -17,11 +17,65 @@ import { ensureDb } from '@/lib/db/adapter';
 import type { DBDownload } from '@/lib/db/schema';
 import { enqueueDownload } from '@/lib/db/download-queue';
 import { listDueAutoRetries } from '@/lib/db/download-retry';
-import { deserializeTags } from '@/lib/db/download';
+import { deserializeTags, getDownload, upsertDownload } from '@/lib/db/download';
+import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
+import { isAndroid } from '@/lib/utils/platform';
 import { processQueue, armAutoRetryTimer } from './download-progress';
 
 let started = false;
+
+/**
+ * Android worker reconcile (Task C, AC-006).
+ *
+ * The native WorkManager worker writes images + the 0000.json manifest directly
+ * into the SAF tree but is DB-decoupled (it cannot write the app's SQLite). So on
+ * app open we reconcile DB status from the on-disk manifest: a 'downloading' row
+ * whose manifest now lists at least `pageCount` pages (the recorded target) is
+ * marked 'complete'. Unfinished rows are left 'downloading' so the generic zombie
+ * step re-enqueues them — on Android processQueue hands them back to the worker,
+ * which skips already-present pages (resume).
+ *
+ * Best-effort: any per-row failure is swallowed so boot never breaks.
+ */
+async function reconcileAndroidWorkerDownloads(): Promise<void> {
+  let db;
+  try {
+    db = await ensureDb();
+  } catch {
+    return;
+  }
+  let rows: DBDownload[] = [];
+  try {
+    rows = await db.query<DBDownload>(
+      `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
+         FROM download
+        WHERE status = 'downloading' AND pageCount > 0`,
+    );
+  } catch {
+    return;
+  }
+
+  for (const row of rows) {
+    try {
+      const pages = await getDownloadedGalleryPages(row.galleryId);
+      // The manifest lists one ext per stored page. When it covers at least the
+      // recorded target page count, every page is on disk → the worker finished.
+      if (pages.length > 0 && pages.length >= row.pageCount) {
+        const current = await getDownload(row.galleryId);
+        if (!current || current.status === 'complete') continue;
+        await upsertDownload({
+          ...current,
+          pageCount: pages.length,
+          status: 'complete',
+          lastError: null,
+        });
+      }
+    } catch {
+      // Leave the row as-is; the zombie re-enqueue path will resume it.
+    }
+  }
+}
 
 /** Reset the guard — test-only. */
 export function __resetReconcileQueueForTests(): void {
@@ -34,6 +88,15 @@ export async function reconcileQueue(): Promise<void> {
 
   try {
     const db = await ensureDb();
+
+    // Android (Task C): the background worker is DB-decoupled, so first reconcile
+    // DB status from the on-disk manifest — galleries the worker finished while
+    // the app was gone are marked 'complete' here. Unfinished ones stay
+    // 'downloading' and fall through to the zombie re-enqueue below, which on
+    // Android hands them back to the worker (resume).
+    if (isAndroid()) {
+      await reconcileAndroidWorkerDownloads();
+    }
 
     // Zombie 'downloading' rows with stored pages → re-enqueue with resume
     // intent (enqueueDownload preserves pageCount/folderName so the processor

@@ -81,6 +81,11 @@ dependencies {
     // user-picked download folder (PublicLibraryPlugin). Replaces the old
     // absolute-path File I/O that needed MANAGE_EXTERNAL_STORAGE.
     implementation "androidx.documentfile:documentfile:1.0.1"
+    // WorkManager — runs the background gallery download worker
+    // (GalleryDownloadWorker) so downloads survive app kill, on a Wi-Fi-only
+    // (UNMETERED) constraint with a foreground-service progress notification.
+    // 2.9.x is the stable line compatible with compileSdk 34.
+    implementation "androidx.work:work-runtime:2.9.1"
     implementation project(':capacitor-android')
     // Kotlin stdlib + JNA — the generated UniFFI bindings link against both.
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$rootProject.ext.kotlinVersion"

@@ -5,8 +5,9 @@
  * the inline logic did (getImageUrl 'auto' + urlExt split).
  */
 import { describe, it, expect } from 'vitest';
-import { resolveWorkOrder } from '../work-order';
+import { resolveWorkOrder, buildWorkOrder } from '../work-order';
 import { getImageUrl } from '../image-url';
+import { galleryFolderName, LIBRARY_ROOT } from '@/lib/storage/base-path-resolver';
 import type { GalleryFile, GgConfig } from '../types';
 
 const ggConfig: GgConfig = {
@@ -59,5 +60,43 @@ describe('resolveWorkOrder', () => {
 
   it('empty file list yields an empty work order', () => {
     expect(resolveWorkOrder([], ggConfig)).toEqual([]);
+  });
+});
+
+describe('buildWorkOrder (Task C handoff)', () => {
+  it('produces the galleryId/title/folderName + one page per file', () => {
+    const files = [file(), file({ hash: 'b'.repeat(64) })];
+    const order = buildWorkOrder(12345, 'My Title', files, ggConfig);
+    expect(order.galleryId).toBe(12345);
+    expect(order.title).toBe('My Title');
+    expect(order.folderName).toBe(galleryFolderName(12345, 'My Title'));
+    expect(order.pages).toHaveLength(2);
+  });
+
+  it('relPath is HiPaGo/<folder>/<1-based zero-padded>.<ext> (matches imageFileName)', () => {
+    const files = [file({ haswebp: 1 }), file({ hash: 'b'.repeat(64) })];
+    const order = buildWorkOrder(777, 'T', files, ggConfig);
+    const folder = galleryFolderName(777, 'T');
+    expect(order.pages[0].relPath).toBe(`${LIBRARY_ROOT}/${folder}/0001.${order.pages[0].ext}`);
+    expect(order.pages[1].relPath).toBe(`${LIBRARY_ROOT}/${folder}/0002.${order.pages[1].ext}`);
+  });
+
+  it('each page carries the same url/ext as resolveWorkOrder (no drift)', () => {
+    const files = [file({ haswebp: 1, hasavif: 0 })];
+    const order = buildWorkOrder(1, 'T', files, ggConfig);
+    const flat = resolveWorkOrder(files, ggConfig);
+    expect(order.pages[0].url).toBe(flat[0].url);
+    expect(order.pages[0].ext).toBe(flat[0].ext);
+    expect(order.pages[0].index).toBe(0);
+  });
+
+  it('headers default to {} off-native (getNativeHeaders is empty in node env)', () => {
+    const order = buildWorkOrder(1, 'T', [file()], ggConfig);
+    expect(order.pages[0].headers).toEqual({});
+  });
+
+  it('empty file list yields an empty pages array', () => {
+    const order = buildWorkOrder(9, 'T', [], ggConfig);
+    expect(order.pages).toEqual([]);
   });
 });

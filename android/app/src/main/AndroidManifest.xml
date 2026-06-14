@@ -46,4 +46,16 @@
          the user picks one folder via ACTION_OPEN_DOCUMENT_TREE and we hold a
          persisted URI permission for just that tree. No all-files access, no
          WRITE_EXTERNAL_STORAGE needed. -->
+
+    <!-- Background download worker (GalleryDownloadWorker via WorkManager):
+         it runs as a foreground service so downloads continue when the app is
+         backgrounded/killed. On API 34+ the dataSync service type is also
+         declared on the ForegroundInfo in code; POST_NOTIFICATIONS (API 33+)
+         is required for the visible progress notification.
+         NOTE: WorkManager's default initialization (the androidx-startup
+         provider) is merged in from the work-runtime library manifest — it is
+         intentionally NOT disabled here. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

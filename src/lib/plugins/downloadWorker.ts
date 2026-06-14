@@ -1,0 +1,44 @@
+/**
+ * Capacitor plugin wrapper for DownloadWorkerPlugin — the native Android
+ * WorkManager background download worker (Task C).
+ *
+ * On Android the worker is the SOLE downloader. TS resolves a gallery's
+ * work-order, hands it off to the native side via {@link writeWorkOrder} (so TS
+ * never needs raw access to the app's filesDir), then schedules the worker via
+ * {@link enqueue}. One unique, Wi-Fi-constrained worker drains all pending
+ * work-orders, surviving app background/kill with a foreground notification.
+ *
+ * {@link cancel} drops one gallery's pending work-order and stops the worker when
+ * the queue empties.
+ *
+ * This plugin is implemented ONLY on Android; callers must gate on isAndroid()
+ * before invoking it (web/Tauri/iOS keep the in-process TS downloader).
+ */
+import { registerPlugin } from '@capacitor/core';
+
+export interface DownloadWorkerPlugin {
+  /**
+   * Persist a work-order JSON to the native handoff dir
+   * (filesDir/dl-queue/<galleryId>.json). `json` is the already-serialized
+   * {@link import('@/lib/utils/work-order').WorkOrder}. Does NOT schedule the
+   * worker — call {@link enqueue} after.
+   */
+  writeWorkOrder(options: { galleryId: string; json: string }): Promise<void>;
+
+  /**
+   * Schedule the unique, UNMETERED-constrained download worker (ExistingWorkPolicy
+   * KEEP). The work-order file is assumed already written. A worker already
+   * running picks up newly written work-orders, so enqueueing several galleries
+   * then calling enqueue once is sufficient.
+   */
+  enqueue(options: { galleryId: string }): Promise<void>;
+
+  /**
+   * Cancel one gallery's pending download: removes its work-order file and, when
+   * none remain, cancels the unique work. Resolves the count of remaining
+   * work-orders.
+   */
+  cancel(options: { galleryId: string }): Promise<{ remaining: number }>;
+}
+
+export const DownloadWorker = registerPlugin<DownloadWorkerPlugin>('DownloadWorker');

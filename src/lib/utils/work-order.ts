@@ -2,19 +2,49 @@
  * Pure work-order resolution for a gallery download.
  *
  * Extracts the per-page URL + ext derivation that download-zip and the native
- * workers (later task) both need: for each page, the 'auto' (avif > webp >
+ * Android WorkManager worker both need: for each page, the 'auto' (avif > webp >
  * original) image URL and the extension that URL actually points at.
  *
+ * For the native worker (Task C) it ALSO produces, per page, the target relative
+ * path under the SAF tree (`HiPaGo/<id title>/NNNN.ext`) and the request headers
+ * the Rust core must send (the same Referer/Origin the in-process fetch uses on
+ * native, via getNativeHeaders) — so the worker re-derives nothing.
+ *
  * This is intentionally side-effect-free so it can be unit-tested directly and
- * persisted for a native worker without re-deriving anything.
+ * persisted for the native worker without re-deriving anything.
  */
 import { getImageUrl } from './image-url';
+import { getNativeHeaders } from '@/lib/api/url-resolver';
+import { galleryFolderName, LIBRARY_ROOT } from '@/lib/storage/base-path-resolver';
 import type { GalleryFile, GgConfig } from './types';
 
 export interface WorkOrderItem {
   index: number;
   url: string;
   ext: string;
+}
+
+/**
+ * A single page of the native worker's handoff work-order. Extends
+ * {@link WorkOrderItem} with the SAF-relative destination path and the request
+ * headers, so the worker can download + place each page with no further derivation.
+ */
+export interface WorkOrderPage extends WorkOrderItem {
+  /** Relative path under the picked SAF tree, e.g. "HiPaGo/12345 Title/0001.webp". */
+  relPath: string;
+  /** Headers the native downloader must send (Referer/Origin on native, else {}). */
+  headers: Record<string, string>;
+}
+
+/**
+ * The full handoff work-order written to the Android handoff dir and read by the
+ * native worker. Mirrors the worker's JSON contract exactly.
+ */
+export interface WorkOrder {
+  galleryId: number;
+  title: string;
+  folderName: string;
+  pages: WorkOrderPage[];
 }
 
 /**
@@ -34,4 +64,31 @@ export function resolveWorkOrder(files: GalleryFile[], ggConfig: GgConfig): Work
     const ext = url.split('?')[0].split('.').pop() || 'webp';
     return { index, url, ext };
   });
+}
+
+/**
+ * Build the full handoff work-order for the native Android download worker.
+ *
+ * Adds, per page, the SAF-relative destination path
+ * (`HiPaGo/<id title>/NNNN.ext`, matching the TS reader/`imageFileName` 1-based
+ * zero-padded naming) and the native request headers (getNativeHeaders()). The
+ * worker writes images + the `0000.json` manifest into exactly this location, so
+ * the existing library reader/reconcile sees them unchanged.
+ */
+export function buildWorkOrder(
+  galleryId: number,
+  title: string,
+  files: GalleryFile[],
+  ggConfig: GgConfig,
+): WorkOrder {
+  const folderName = galleryFolderName(galleryId, title);
+  const headers = getNativeHeaders();
+  const items = resolveWorkOrder(files, ggConfig);
+  const pages: WorkOrderPage[] = items.map((item) => ({
+    ...item,
+    // 1-based, zero-padded to 4 digits — identical to imageFileName(index, ext).
+    relPath: `${LIBRARY_ROOT}/${folderName}/${String(item.index + 1).padStart(4, '0')}.${item.ext}`,
+    headers,
+  }));
+  return { galleryId, title, folderName, pages };
 }

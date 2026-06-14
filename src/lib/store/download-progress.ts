@@ -6,7 +6,8 @@ import {
   type DownloadProgress,
 } from '@/lib/utils/download-zip';
 import { DownloadCancelledError } from '@/lib/storage/download-store';
-import { getDownload, deserializeTags } from '@/lib/db/download';
+import { getDownload, deserializeTags, upsertDownload, serializeTags } from '@/lib/db/download';
+import { galleryFolderName } from '@/lib/storage/base-path-resolver';
 import {
   enqueueDownload,
   dequeueNextQueued,
@@ -24,6 +25,9 @@ import {
   earliestNextRetryAt,
 } from '@/lib/db/download-retry';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
+import { isAndroid } from '@/lib/utils/platform';
+import { buildWorkOrder } from '@/lib/utils/work-order';
+import { DownloadWorker } from '@/lib/plugins/downloadWorker';
 import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
 import type { GalleryFile } from '@/lib/utils/types';
 import type { DownloadStatus } from '@/lib/db/schema';
@@ -232,6 +236,32 @@ export async function fireDueAutoRetries(): Promise<void> {
 }
 
 /**
+ * Android handoff (Task C): hand one gallery off to the native WorkManager
+ * worker instead of running the in-process downloader.
+ *
+ * Resolves the gg config, builds the work-order (per-page url/ext/relPath/
+ * headers), writes it to the native handoff dir, and enqueues the unique
+ * Wi-Fi-constrained worker (ExistingWorkPolicy KEEP — one worker drains all
+ * pending work-orders). The worker writes images + the 0000.json manifest into
+ * the SAF tree the reader already uses; the row's completion is reconciled on
+ * next app open/foreground (reconcileQueue). This is fast (no download is awaited
+ * here), so the processor does NOT hold `running` waiting on the worker.
+ *
+ * Throws on a genuine handoff failure so the caller leaves the item failed.
+ */
+async function handOffToAndroidWorker(
+  id: number,
+  title: string,
+  files: GalleryFile[],
+): Promise<void> {
+  const config = await getGgConfig();
+  const order = buildWorkOrder(id, title, files, config);
+  const galleryId = String(id);
+  await DownloadWorker.writeWorkOrder({ galleryId, json: JSON.stringify(order) });
+  await DownloadWorker.enqueue({ galleryId });
+}
+
+/**
  * Drive the queue sequentially. Synchronous `running` guard ensures only one
  * active download at a time. After each item completes/fails/pauses, re-checks
  * for the next 'queued' item and continues until the queue is empty.
@@ -270,6 +300,53 @@ export async function processQueue(): Promise<void> {
       if (files.length === 0) {
         await removeFromQueue(id);
         storeApi?.setEntry(id, null);
+        continue;
+      }
+
+      // ── Android branch (Task C) ───────────────────────────────────────────
+      // On Android the native WorkManager worker is the SOLE downloader. Hand
+      // the work-order off to it (fast, non-blocking) instead of running the
+      // in-process downloader, then drop the item from the TS queue — the worker
+      // owns it now and the row is reconciled on next app open. We keep draining
+      // the TS queue so every queued gallery is handed off; ExistingWorkPolicy
+      // KEEP means the single worker picks them all up.
+      if (isAndroid()) {
+        try {
+          await handOffToAndroidWorker(id, next.title, files);
+          // Leave a tracked 'downloading' row (NOT in the queue) so the worker's
+          // progress survives app kill and reconcileQueue can finalize it on next
+          // open. pageCount carries the TARGET total here (the worker is
+          // DB-decoupled and writes only the SAF manifest); reconcile marks the
+          // row 'complete' once the on-disk manifest covers all pages. The row's
+          // queuePosition is cleared so it leaves listQueue() like the in-process
+          // active item does.
+          await upsertDownload({
+            galleryId: id,
+            title: next.title,
+            thumbnail: next.thumbnail,
+            tags: serializeTags(tags),
+            pageCount: files.length,
+            totalBytes: next.totalBytes ?? 0,
+            downloadedAt: next.downloadedAt ?? new Date().toISOString(),
+            status: 'downloading',
+            folderName: galleryFolderName(id, next.title),
+            queuePosition: null,
+            lastError: null,
+          });
+          // Surface a "downloading (background)" entry: no live progress here
+          // (the worker reports via its notification; completion reconciles on
+          // open), so progress is a 0/total placeholder.
+          storeApi?.setEntry(id, { progress: { current: 0, total: files.length }, error: null });
+        } catch (e) {
+          console.error('Queue: failed to hand off to Android worker', id, e);
+          await removeFromQueue(id);
+          const message =
+            e instanceof Error && e.message ? e.message : 'Failed to start background download';
+          storeApi?.setEntry(id, { progress: null, error: message });
+        } finally {
+          fileCache.delete(id);
+          storeApi?.refreshQueue();
+        }
         continue;
       }
 
@@ -480,6 +557,17 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       if (controller) {
         // Active run → genuine cancel (NOT a pause).
         controller.abort();
+      } else if (isAndroid()) {
+        // Android: the gallery may have been handed off to the native worker
+        // (no controller, not in the TS queue). Drop its work-order so the
+        // worker skips it (and stops if the handoff queue empties); also drop it
+        // from the TS queue in case it was still queued (not yet handed off).
+        void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+        void removeFromQueue(id)
+          .catch(() => {})
+          .finally(() => void refreshQueue());
+        fileCache.delete(id);
+        setEntry(id, null);
       } else {
         // Queued/paused but not yet started → drop it from the queue.
         void removeFromQueue(id)

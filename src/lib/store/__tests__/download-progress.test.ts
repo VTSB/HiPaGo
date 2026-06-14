@@ -19,12 +19,15 @@ import { DownloadPausedError } from '@/lib/utils/download-zip';
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const dl = vi.fn();
+// galleryId → manifest page list (for the Android reconcile-from-manifest test).
+const manifestPages = new Map<number, { index: number; ext: string }[]>();
 vi.mock('@/lib/utils/download-zip', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/utils/download-zip')>('@/lib/utils/download-zip');
   return {
     ...actual,
     downloadGalleryToLibrary: (...a: unknown[]) => dl(...a),
+    getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
   };
 });
 
@@ -94,6 +97,7 @@ vi.mock('@/lib/db/download-queue', () => ({
 // getDownload returns a row whose retryCount we can steer per-test (the genuine-
 // failure branch reads it to decide whether to schedule another auto-retry).
 const downloadRows = new Map<number, { retryCount: number }>();
+const upsertedRows: unknown[] = [];
 vi.mock('@/lib/db/download', () => ({
   getDownload: vi.fn(async (id: number) => ({
     galleryId: id,
@@ -107,6 +111,57 @@ vi.mock('@/lib/db/download', () => ({
     retryCount: downloadRows.get(id)?.retryCount ?? 0,
   })),
   deserializeTags: vi.fn(() => ({})),
+  serializeTags: vi.fn(() => '{}'),
+  upsertDownload: vi.fn(async (row: unknown) => {
+    upsertedRows.push(row);
+    // Mirror production: an upsert to a non-'queued' status (e.g. the Android
+    // handoff's 'downloading') drops the row out of dequeueNextQueued()/listQueue
+    // (which only surface 'queued'/'paused'). Without this the in-memory test
+    // queue would keep re-dequeuing the same id forever.
+    const r = row as { galleryId: number; status?: string };
+    if (r.status && r.status !== 'queued' && r.status !== 'paused') {
+      const idx = queueRef().findIndex((q) => q.id === r.galleryId);
+      if (idx >= 0) queueRef().splice(idx, 1);
+    }
+  }),
+}));
+
+// Forward-reference to the shared in-memory queue (declared below) so the
+// upsertDownload mock can drop handed-off rows. Defined as a getter because the
+// `queue` const is initialized after this mock factory is hoisted.
+function queueRef(): { id: number; pageCount: number; paused?: boolean; pos?: number }[] {
+  return queue;
+}
+
+// ── Android worker handoff seam (Task C) ──────────────────────────────────────
+// isAndroid() is steered per-test; the DownloadWorker plugin is fully mocked so
+// no native call happens. buildWorkOrder/galleryFolderName run for real (pure).
+let androidFlag = false;
+vi.mock('@/lib/utils/platform', () => ({
+  isAndroid: () => androidFlag,
+  // url-resolver (pulled in by buildWorkOrder → getNativeHeaders) imports
+  // isNativePlatform; keep it false so headers default to {} in the test.
+  isNativePlatform: () => false,
+  isTauri: () => false,
+  isCapacitor: () => false,
+}));
+
+const workOrderWrites: { galleryId: string; json: string }[] = [];
+const workerEnqueues: string[] = [];
+const workerCancels: string[] = [];
+vi.mock('@/lib/plugins/downloadWorker', () => ({
+  DownloadWorker: {
+    writeWorkOrder: vi.fn(async (o: { galleryId: string; json: string }) => {
+      workOrderWrites.push(o);
+    }),
+    enqueue: vi.fn(async (o: { galleryId: string }) => {
+      workerEnqueues.push(o.galleryId);
+    }),
+    cancel: vi.fn(async (o: { galleryId: string }) => {
+      workerCancels.push(o.galleryId);
+      return { remaining: 0 };
+    }),
+  },
 }));
 
 // Auto-retry helpers (Task E). scheduleAutoRetry records calls; the due-list +
@@ -165,6 +220,12 @@ beforeEach(async () => {
   dueRows = [];
   earliest = null;
   downloadRows.clear();
+  manifestPages.clear();
+  upsertedRows.length = 0;
+  workOrderWrites.length = 0;
+  workerEnqueues.length = 0;
+  workerCancels.length = 0;
+  androidFlag = false;
   dl.mockReset();
   unmetered.mockReset();
   unmetered.mockResolvedValue(true);
@@ -245,6 +306,80 @@ describe('processQueue (AC-005)', () => {
     expect(removed).toContain(1);
     expect(removed).toContain(2);
     expect(useDownloadProgressStore.getState().entries[1]?.error).toBe('boom');
+  });
+});
+
+describe('Android worker handoff (Task C, AC-005)', () => {
+  it('hands off to the native worker instead of the in-process downloader', async () => {
+    androidFlag = true;
+    queue.push({ id: 100, pageCount: 0 });
+    dl.mockResolvedValue(undefined);
+
+    await processQueue();
+
+    // The in-process downloader is NEVER called on Android.
+    expect(dl).not.toHaveBeenCalled();
+    // The work-order was written + the worker enqueued for this gallery.
+    expect(workOrderWrites.map((w) => w.galleryId)).toContain('100');
+    expect(workerEnqueues).toContain('100');
+    // A 'downloading' (background) row was upserted (not removed) so reconcile
+    // can finalize it; the store surfaces a background entry.
+    const upserted = upsertedRows.find((r) => (r as { galleryId: number }).galleryId === 100) as
+      | { status: string; pageCount: number }
+      | undefined;
+    expect(upserted?.status).toBe('downloading');
+    expect(upserted?.pageCount).toBe(1); // resolveGalleryDetail returns 1 file
+    expect(useDownloadProgressStore.getState().entries[100]?.progress?.total).toBe(1);
+  });
+
+  it('the work-order JSON carries pages with index/url/ext/relPath/headers', async () => {
+    androidFlag = true;
+    queue.push({ id: 200, pageCount: 0 });
+    await processQueue();
+
+    const write = workOrderWrites.find((w) => w.galleryId === '200');
+    expect(write).toBeTruthy();
+    const order = JSON.parse(write!.json);
+    expect(order.galleryId).toBe(200);
+    expect(order.pages).toHaveLength(1);
+    const page = order.pages[0];
+    expect(page).toHaveProperty('index', 0);
+    expect(page).toHaveProperty('url');
+    expect(page).toHaveProperty('ext');
+    expect(page.relPath).toMatch(/^HiPaGo\/200.*\/0001\./);
+    expect(page).toHaveProperty('headers');
+  });
+
+  it('drains the whole queue, handing every gallery to the worker', async () => {
+    androidFlag = true;
+    queue.push({ id: 1, pageCount: 0 }, { id: 2, pageCount: 0 }, { id: 3, pageCount: 0 });
+    await processQueue();
+    expect(workerEnqueues.sort()).toEqual(['1', '2', '3']);
+    expect(dl).not.toHaveBeenCalled();
+  });
+
+  it('non-Android still runs the in-process downloader (no worker call)', async () => {
+    androidFlag = false;
+    queue.push({ id: 300, pageCount: 0 });
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+    });
+
+    await processQueue();
+
+    expect(order).toEqual([300]);
+    expect(workOrderWrites).toEqual([]);
+    expect(workerEnqueues).toEqual([]);
+  });
+
+  it('cancel on Android drops the work-order via the worker plugin', async () => {
+    androidFlag = true;
+    // No active controller / queue entry — simulate an item already handed off.
+    useDownloadProgressStore.getState().cancel(100);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(workerCancels).toContain('100');
   });
 });
 
@@ -494,6 +629,45 @@ describe('reconcileQueue (AC-007)', () => {
     const callsAfterFirst = vi.mocked(queueOps.enqueueDownload).mock.calls.length;
     await reconcileQueue(); // guarded → no-op
     expect(vi.mocked(queueOps.enqueueDownload).mock.calls.length).toBe(callsAfterFirst);
+  });
+
+  it('Android: marks a gallery complete when its manifest covers all pages', async () => {
+    androidFlag = true;
+    // A 'downloading' row targeting 3 pages; the worker finished while away.
+    adapterRows.push({ galleryId: 55, title: 'W', thumbnail: '/tn', tags: '{}', pageCount: 3, status: 'downloading' });
+    manifestPages.set(55, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+      { index: 2, ext: 'webp' },
+    ]);
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const completed = upsertedRows.find(
+      (r) => (r as { galleryId: number }).galleryId === 55,
+    ) as { status: string } | undefined;
+    expect(completed?.status).toBe('complete');
+  });
+
+  it('Android: does NOT mark complete when the manifest is short of the target', async () => {
+    androidFlag = true;
+    adapterRows.push({ galleryId: 56, title: 'W', thumbnail: '/tn', tags: '{}', pageCount: 5, status: 'downloading' });
+    manifestPages.set(56, [{ index: 0, ext: 'webp' }, { index: 1, ext: 'webp' }]); // 2 of 5
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const completed = upsertedRows.find(
+      (r) =>
+        (r as { galleryId: number }).galleryId === 56 &&
+        (r as { status: string }).status === 'complete',
+    );
+    expect(completed).toBeFalsy();
   });
 
   it('does NOT kick the processor on a metered network', async () => {
