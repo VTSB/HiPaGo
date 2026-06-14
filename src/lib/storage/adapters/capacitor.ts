@@ -125,6 +125,24 @@ export class CapacitorDownloadStore implements DownloadStore {
     }
   }
 
+  async imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    try {
+      // Filesystem.stat rejects when the path does not exist; a present file
+      // with size 0 is a torn write and is reported as missing.
+      const stat = await this.Filesystem.stat({
+        path: this.imagePath(galleryId, index, ext),
+        directory: this.Directory.Data,
+      });
+      return (stat?.size ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
   async coverUrl(galleryId: number): Promise<string | null> {
     try {
       const dir = this.galleryPath(galleryId);

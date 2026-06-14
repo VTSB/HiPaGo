@@ -118,6 +118,21 @@ export class TauriDownloadStore implements DownloadStore {
     }
   }
 
+  async imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    try {
+      // plugin:fs|stat throws if the path does not exist; a present file with
+      // size 0 is a torn write and is reported as missing.
+      const st = await this.stat(this.imagePath(galleryId, index, ext));
+      return (st?.size ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
   async coverUrl(galleryId: number): Promise<string | null> {
     try {
       const dir = this.galleryPath(galleryId);

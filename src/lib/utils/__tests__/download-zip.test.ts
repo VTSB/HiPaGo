@@ -826,6 +826,157 @@ describe('downloadGalleryToLibrary', () => {
     expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1);
   });
 
+  // resume-verify-all-pages: a page deleted from the MIDDLE of a gallery is
+  // re-fetched on resume (the old last-page-only seeding skipped it forever).
+  it('resume re-fetches ONLY a deleted middle page and heals the gap', async () => {
+    await memStore.putImage(
+      20,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp', 'webp'])),
+      'json',
+    );
+    await memStore.putImage(20, 0, new Uint8Array([1]), 'webp');
+    // page 1 deleted externally (gap in the middle); page 2 still present.
+    await memStore.putImage(20, 2, new Uint8Array([3]), 'webp');
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([9, 9])),
+    );
+    const files = [makeFile('a'), makeFile('b'), makeFile('c')];
+
+    await downloadGalleryToLibrary(
+      20,
+      'G',
+      'thumb.jpg',
+      files,
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true },
+    );
+
+    // Exactly the middle page is re-fetched.
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1);
+    // The gap is filled and the gallery is complete with a full manifest.
+    expect(await memStore.getImage(20, 1, 'webp')).toBeInstanceOf(Uint8Array);
+    const lastUpsert = vi.mocked(upsertDownload).mock.calls.at(-1)![0];
+    expect(lastUpsert.status).toBe('complete');
+    expect(lastUpsert.pageCount).toBe(3);
+    const manifest = await memStore.getImage(20, -1, 'json');
+    expect(JSON.parse(new TextDecoder().decode(manifest!))).toEqual(['webp', 'webp', 'webp']);
+  });
+
+  // resume-verify-all-pages: a fully-present gallery fetches nothing on resume
+  // and is marked complete (no redundant network).
+  it('resume of a fully-present gallery fetches nothing and completes', async () => {
+    await memStore.putImage(
+      21,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(21, 0, new Uint8Array([1, 1]), 'webp');
+    await memStore.putImage(21, 1, new Uint8Array([2, 2]), 'jpg');
+    const files = [makeFile('a'), makeFile('b')];
+
+    await downloadGalleryToLibrary(
+      21,
+      'G',
+      'thumb.jpg',
+      files,
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true },
+    );
+
+    expect(apiClient.fetchUrl).not.toHaveBeenCalled();
+    const lastUpsert = vi.mocked(upsertDownload).mock.calls.at(-1)![0];
+    expect(lastUpsert.status).toBe('complete');
+    expect(lastUpsert.pageCount).toBe(2);
+    // Manifest preserved with the original (mixed) exts.
+    const manifest = await memStore.getImage(21, -1, 'json');
+    expect(JSON.parse(new TextDecoder().decode(manifest!))).toEqual(['webp', 'jpg']);
+  });
+
+  // resume-verify-all-pages: resume with NO manifest (folder/manifest entirely
+  // gone) re-downloads all pages from index 0.
+  it('resume with no manifest re-downloads all pages from the start', async () => {
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([7])),
+    );
+    const files = [makeFile('a'), makeFile('b'), makeFile('c')];
+
+    await downloadGalleryToLibrary(
+      22,
+      'G',
+      'thumb.jpg',
+      files,
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true },
+    );
+
+    // No manifest → nothing to verify → every page fetched.
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(3);
+    // No stale row to flip back to 'downloading'.
+    expect(setDownloadError).not.toHaveBeenCalledWith(22, 'downloading', null);
+    const lastUpsert = vi.mocked(upsertDownload).mock.calls.at(-1)![0];
+    expect(lastUpsert.status).toBe('complete');
+    expect(lastUpsert.pageCount).toBe(3);
+  });
+
+  // resume-verify-all-pages: when the store exposes the cheap imageExists probe,
+  // resume uses it (stat, no byte read) — and a size-0 page is treated missing.
+  it('resume uses store.imageExists when available and refetches a torn (size-0) page', async () => {
+    const probed: Array<[number, string]> = [];
+    const base = makeMemoryStore();
+    const storeWithExists = Object.assign(base, {
+      async imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
+        probed.push([index, ext]);
+        const bytes = await base.getImage(galleryId, index, ext);
+        return !!bytes && bytes.byteLength > 0;
+      },
+    });
+    vi.mocked(createDownloadStore).mockResolvedValue(storeWithExists);
+
+    await storeWithExists.putImage(
+      23,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp'])),
+      'json',
+    );
+    await storeWithExists.putImage(23, 0, new Uint8Array([1, 1]), 'webp');
+    // page 1 present but ZERO bytes → torn write → must refetch.
+    await storeWithExists.putImage(23, 1, new Uint8Array(0), 'webp');
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([5])),
+    );
+    const files = [makeFile('a'), makeFile('b')];
+
+    await downloadGalleryToLibrary(
+      23,
+      'G',
+      'thumb.jpg',
+      files,
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true },
+    );
+
+    // imageExists was consulted for the verifiable indices.
+    expect(probed).toContainEqual([0, 'webp']);
+    expect(probed).toContainEqual([1, 'webp']);
+    // Only the torn page is refetched.
+    expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1);
+    expect(await storeWithExists.getImage(23, 1, 'webp')).toEqual(new Uint8Array([5]));
+  });
+
   // AC-005: default (no opts) is byte-identical — a full download, nothing skipped.
   it('without resume, a fresh download fetches every page', async () => {
     await memStore.putImage(11, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');

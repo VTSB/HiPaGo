@@ -68,6 +68,21 @@ export interface DownloadStore {
   ): Promise<Uint8Array | null>;
 
   /**
+   * Cheap existence check for a single stored page — true only when the file
+   * exists AND has non-zero size. A zero-byte file (a torn/partial write) is
+   * reported as MISSING so resume re-fetches it. Optional: adapters that omit
+   * it force callers to fall back to `getImage(...) !== null`.
+   *
+   * Unlike getImage, this should NOT read the file bytes into the JS heap —
+   * adapters use a stat/handle probe so resume stays cheap on large galleries.
+   */
+  imageExists?(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean>;
+
+  /**
    * A WebView-loadable URL (convertFileSrc) for the gallery's first downloaded
    * page, to use as an offline cover — no image bytes pass through the JS heap.
    * Returns null when nothing is downloaded. Optional: adapters without a native

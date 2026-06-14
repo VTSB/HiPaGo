@@ -184,6 +184,27 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     }
   }
 
+  // ── imageExists ──────────────────────────────────────────────────────────────
+
+  async imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    const folder = await this.resolveFolder(galleryId);
+    if (!folder) return false;
+    const libDir = await resolveLibraryDir();
+    const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
+    try {
+      // stat reports existence + size in one call; a present file with size 0
+      // is a torn write and is reported as missing.
+      const { exists, size } = await PublicLibrary.stat({ path: filePath });
+      return exists && (size ?? 0) > 0;
+    } catch {
+      return false;
+    }
+  }
+
   // ── coverUrl ──────────────────────────────────────────────────────────────
 
   async coverUrl(galleryId: number): Promise<string | null> {

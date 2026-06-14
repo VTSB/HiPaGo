@@ -242,10 +242,15 @@ export async function getDownloadedImage(
  *    row is recorded with the real reason in lastError so the library shows it
  *    and offers retry; partial pages (if any) retained; error rethrown.
  *
- * Resume contract (AC-005): when `opts.resume` is true, pages already stored
- * (per the 0000.json manifest, with the last page verified on disk) are skipped
- * and only the remainder is fetched. Default `resume:false` is byte-identical to
- * the original full-download behavior.
+ * Resume contract (AC-005 + resume-verify-all-pages): when `opts.resume` is
+ * true, EVERY page is verified on disk per-page (not just the last). A page is
+ * re-fetched whenever it is missing — including a gap deleted from the MIDDLE of
+ * a previously-downloaded gallery, or a torn/zero-byte page. Pages confirmed
+ * present on disk are skipped (no network) and keep their stored ext. The
+ * manifest is rebuilt to reflect the true on-disk set. Existence is probed via
+ * the cheap `store.imageExists` (stat, size>0) when the adapter exposes it,
+ * falling back to `getImage(...) !== null` otherwise. Default `resume:false` is
+ * byte-identical to the original full-download behavior.
  */
 export async function downloadGalleryToLibrary(
   galleryId: number,
@@ -292,47 +297,62 @@ export async function downloadGalleryToLibrary(
   const pageExts: string[] = [];
   let totalBytes = 0;
   let rowCreated = false;
-  let startIndex = 0;
 
-  // ── Resume seeding (AC-005) ───────────────────────────────────────────────
-  // Read the manifest to find pages already stored, verify the last one really
-  // exists (guard a torn write), then continue from the first missing page.
+  // ── Resume seeding (per-page verify) ──────────────────────────────────────
+  // Read the manifest to learn each already-stored page's ext. The main loop
+  // verifies every index against the disk and re-fetches any gap (deleted or
+  // torn page), instead of continuing past the last stored page only.
+  let manifestExts: string[] = [];
   if (opts?.resume) {
     try {
       const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
-      if (manifestBytes) {
-        const existing = decodeManifest(manifestBytes);
-        let validCount = existing.length;
-        if (validCount > 0) {
-          const lastIdx = validCount - 1;
-          const lastBytes = await store
-            .getImage(galleryId, lastIdx, existing[lastIdx])
-            .catch(() => null);
-          if (!lastBytes) validCount = lastIdx; // drop torn last page
-        }
-        for (let k = 0; k < validCount && k < total; k++) pageExts.push(existing[k]);
-        startIndex = pageExts.length;
-      }
+      if (manifestBytes) manifestExts = decodeManifest(manifestBytes);
     } catch {
-      // No manifest / unreadable — start from scratch.
+      // No manifest / unreadable — manifestExts stays empty (full re-download).
     }
-    if (startIndex > 0) {
+    if (manifestExts.length > 0) {
       // A row already exists from the prior attempt. Flip it back to
-      // 'downloading' and clear the stale error; seed totalBytes from disk.
+      // 'downloading' and clear the stale error; seed totalBytes from disk so
+      // skipped (already-present) pages keep contributing to the size stat.
       rowCreated = true;
       totalBytes = await store.gallerySize(galleryId).catch(() => 0);
       await setDownloadError(galleryId, 'downloading', null);
     }
   }
 
+  // Probe whether a page already exists on disk: prefer the cheap
+  // store.imageExists (stat, size>0) and fall back to reading the bytes.
+  const pageIsPresent = async (index: number, ext: string): Promise<boolean> => {
+    if (store.imageExists) return store.imageExists(galleryId, index, ext);
+    return (await store.getImage(galleryId, index, ext).catch(() => null)) !== null;
+  };
+
   try {
     for (let i = 0; i < total; i++) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-      // Already-stored page (resume) — keep its manifest ext, skip the fetch.
-      if (i < startIndex) {
-        onProgress?.({ current: i + 1, total });
-        continue;
+      // ── Resume: skip a page already present on disk ──────────────────────────
+      // Only checkable when the manifest knows this index's ext; an unknown ext
+      // (manifest shorter than i, or missing) is treated as missing → fetched.
+      if (opts?.resume) {
+        const knownExt = manifestExts[i];
+        if (knownExt && (await pageIsPresent(i, knownExt))) {
+          // Keep the stored ext; its bytes are already counted in the
+          // disk-seeded totalBytes (rowCreated is true whenever a manifest
+          // existed, which is the only way knownExt is set). Skip the network.
+          pageExts.push(knownExt);
+          // Keep the on-disk manifest in step with the verified set, so an
+          // interruption right after a refetched gap (which truncates the
+          // manifest to its own index) does not drop the trailing exts.
+          await store.putImage(
+            galleryId,
+            MANIFEST_INDEX,
+            encodeManifest(pageExts),
+            MANIFEST_EXT,
+          );
+          onProgress?.({ current: i + 1, total });
+          continue;
+        }
       }
 
       const file = files[i];

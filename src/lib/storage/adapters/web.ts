@@ -63,6 +63,22 @@ class OpfsStore implements DownloadStore {
     }
   }
 
+  async imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    try {
+      const dir = await this.galleryDir(galleryId);
+      const fh = await dir.getFileHandle(imageFileName(index, ext));
+      // getFile() exposes the size without reading the bytes into the heap.
+      const file = await fh.getFile();
+      return file.size > 0;
+    } catch {
+      return false;
+    }
+  }
+
   async listGalleries(): Promise<number[]> {
     const ids: number[] = [];
     // FileSystemDirectoryHandle async iterator — cast to any for TS compat
@@ -173,6 +189,24 @@ class IdbStore implements DownloadStore {
       const req = store.get(idbKey(galleryId, index, ext));
       req.onsuccess = () => resolve(req.result ?? null);
       req.onerror = () => reject(req.error);
+    });
+  }
+
+  async imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    // IndexedDB cannot report a stored value's size without retrieving it, so
+    // read the value and check its byte length (treating empty as missing).
+    const store = this.tx('readonly');
+    return new Promise((resolve) => {
+      const req = store.get(idbKey(galleryId, index, ext));
+      req.onsuccess = () => {
+        const val: Uint8Array | undefined = req.result;
+        resolve(!!val && val.byteLength > 0);
+      };
+      req.onerror = () => resolve(false);
     });
   }
 
@@ -304,6 +338,16 @@ export class WebDownloadStore implements DownloadStore {
     ext: string,
   ): Promise<Uint8Array | null> {
     return this.backend.getImage(galleryId, index, ext);
+  }
+
+  imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    // Both OPFS and IDB backends implement imageExists; the `?? false` keeps the
+    // facade total even if a future backend omits it.
+    return this.backend.imageExists?.(galleryId, index, ext) ?? Promise.resolve(false);
   }
 
   listGalleries(): Promise<number[]> {

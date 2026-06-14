@@ -9,7 +9,7 @@
  * native adapter tests can re-use it with a mocked native store.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { imageFileName, galleryFolderName } from '../download-store';
 import type { DownloadStore } from '../download-store';
 
@@ -43,6 +43,15 @@ class MemoryDownloadStore implements DownloadStore {
     ext: string,
   ): Promise<Uint8Array | null> {
     return this.store.get(this.key(galleryId, index, ext)) ?? null;
+  }
+
+  async imageExists(
+    galleryId: number,
+    index: number,
+    ext: string,
+  ): Promise<boolean> {
+    const v = this.store.get(this.key(galleryId, index, ext));
+    return !!v && v.byteLength > 0;
   }
 
   async listGalleries(): Promise<number[]> {
@@ -118,6 +127,27 @@ export function runDownloadStoreContract(
     it('getImage returns null for a missing file', async () => {
       const result = await store.getImage(999, 0, 'webp');
       expect(result).toBeNull();
+    });
+
+    // ── imageExists ──────────────────────────────────────────────────────
+
+    it('imageExists returns true for a present, non-empty page', async () => {
+      await store.putImage(120, 0, makeBytes(8, 0x33), 'webp');
+      expect(await store.imageExists?.(120, 0, 'webp')).toBe(true);
+    });
+
+    it('imageExists returns false for a missing page', async () => {
+      expect(await store.imageExists?.(120, 5, 'webp')).toBe(false);
+    });
+
+    it('imageExists treats a zero-byte page as missing (torn write)', async () => {
+      await store.putImage(120, 1, makeBytes(0), 'webp');
+      expect(await store.imageExists?.(120, 1, 'webp')).toBe(false);
+    });
+
+    it('imageExists returns false when the ext differs from the stored file', async () => {
+      await store.putImage(120, 2, makeBytes(8), 'webp');
+      expect(await store.imageExists?.(120, 2, 'jpg')).toBe(false);
     });
 
     it('putImage overwrites an existing file', async () => {
@@ -244,6 +274,104 @@ export function runDownloadStoreContract(
 // ── Run contract against the in-memory implementation ──────────────────────
 
 runDownloadStoreContract('MemoryDownloadStore', () => new MemoryDownloadStore());
+
+// ── WebDownloadStore (OPFS backend) imageExists ────────────────────────────
+// The OPFS path is the primary web backend. The default vitest env is `node`
+// (no real OPFS), so we drive the real OpfsStore code through a minimal
+// in-memory FileSystem*Handle mock — this exercises the adapter's actual
+// getFileHandle/getFile + size>0 logic, not a reimplementation.
+
+class FakeFileHandle {
+  kind = 'file' as const;
+  bytes: Uint8Array;
+  constructor(public name: string, bytes: Uint8Array = new Uint8Array(0)) {
+    this.bytes = bytes;
+  }
+  async getFile(): Promise<{ size: number; arrayBuffer(): Promise<ArrayBuffer> }> {
+    return {
+      size: this.bytes.byteLength,
+      arrayBuffer: async () => this.bytes.buffer as ArrayBuffer,
+    };
+  }
+  // OpfsStore.putImage writes a Blob through createWritable(); capture its
+  // bytes so getFile()/getImage round-trip the real adapter code.
+  async createWritable(): Promise<{ write(b: Blob): Promise<void>; close(): Promise<void> }> {
+    return {
+      write: async (blob: Blob) => {
+        this.bytes = new Uint8Array(await blob.arrayBuffer());
+      },
+      close: async () => {},
+    };
+  }
+}
+
+class FakeDirHandle {
+  kind = 'directory' as const;
+  files = new Map<string, FakeFileHandle>();
+  dirs = new Map<string, FakeDirHandle>();
+  constructor(public name = '') {}
+
+  async getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FakeDirHandle> {
+    let d = this.dirs.get(name);
+    if (!d) {
+      if (!opts?.create) throw new DOMException('NotFound', 'NotFoundError');
+      d = new FakeDirHandle(name);
+      this.dirs.set(name, d);
+    }
+    return d;
+  }
+
+  async getFileHandle(name: string, opts?: { create?: boolean }): Promise<FakeFileHandle> {
+    let f = this.files.get(name);
+    if (!f) {
+      if (!opts?.create) throw new DOMException('NotFound', 'NotFoundError');
+      f = new FakeFileHandle(name);
+      this.files.set(name, f);
+    }
+    return f;
+  }
+}
+
+describe('WebDownloadStore (OPFS) imageExists', () => {
+  let root: FakeDirHandle;
+  let store: import('../adapters/web').WebDownloadStore;
+
+  beforeEach(async () => {
+    root = new FakeDirHandle();
+    const { WebDownloadStore } = await import('../adapters/web');
+    // Stub navigator.storage.getDirectory to hand back our fake root, so
+    // WebDownloadStore.create() picks the OPFS backend, and Blob so the
+    // adapter's createWritable().write(new Blob([...])) works in node.
+    vi.stubGlobal('navigator', {
+      storage: { getDirectory: async () => root as unknown as FileSystemDirectoryHandle },
+    });
+    store = await WebDownloadStore.create();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('round-trips a page and reports it present (size>0)', async () => {
+    await store.putImage(100, 0, makeBytes(16, 0xff), 'webp');
+    expect(await store.getImage(100, 0, 'webp')).toEqual(makeBytes(16, 0xff));
+    expect(await store.imageExists(100, 0, 'webp')).toBe(true);
+  });
+
+  it('reports a missing page as not present', async () => {
+    expect(await store.imageExists(100, 9, 'webp')).toBe(false);
+  });
+
+  it('reports a zero-byte page as missing (torn write)', async () => {
+    await store.putImage(100, 1, makeBytes(0), 'webp');
+    expect(await store.imageExists(100, 1, 'webp')).toBe(false);
+  });
+
+  it('reports a page missing when the ext does not match the stored file', async () => {
+    await store.putImage(100, 2, makeBytes(8), 'webp');
+    expect(await store.imageExists(100, 2, 'jpg')).toBe(false);
+  });
+});
 
 // ── Filename helpers unit tests ────────────────────────────────────────────
 

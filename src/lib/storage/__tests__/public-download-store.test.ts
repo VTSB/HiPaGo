@@ -217,6 +217,27 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
     expect(result).toBeNull();
   });
 
+  // imageExists (stat-backed, size>0)
+
+  it('imageExists returns true for a present non-empty page', async () => {
+    await store.putImage(100, 0, makeBytes(16, 0xff), 'webp');
+    expect(await store.imageExists(100, 0, 'webp')).toBe(true);
+  });
+
+  it('imageExists returns false for a missing page', async () => {
+    expect(await store.imageExists(999, 0, 'webp')).toBe(false);
+  });
+
+  it('imageExists treats a zero-byte page as missing', async () => {
+    await store.putImage(100, 1, makeBytes(0), 'webp');
+    expect(await store.imageExists(100, 1, 'webp')).toBe(false);
+  });
+
+  it('imageExists returns false when the ext differs', async () => {
+    await store.putImage(100, 2, makeBytes(8), 'webp');
+    expect(await store.imageExists(100, 2, 'jpg')).toBe(false);
+  });
+
   it('putImage overwrites an existing file', async () => {
     const original = makeBytes(8, 0x01);
     const updated = makeBytes(8, 0x02);
