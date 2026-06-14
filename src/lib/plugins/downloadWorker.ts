@@ -39,6 +39,19 @@ export interface DownloadWorkerPlugin {
    * work-orders.
    */
   cancel(options: { galleryId: string }): Promise<{ remaining: number }>;
+
+  /**
+   * Read one gallery's live download progress, published by the worker to
+   * `filesDir/dl-progress/<galleryId>.json`. Resolves `{current, total}` while the
+   * gallery is actively downloading; resolves `{current: null}` (a sentinel the TS
+   * poller maps to `null`) when no progress file exists (not started, or already
+   * completed/cleared).
+   *
+   * Android-only: the native worker is the sole downloader on Android. iOS omits
+   * this method (its foreground download is already in-process), so the TS poller
+   * is isAndroid-gated and never calls it on iOS.
+   */
+  getProgress(options: { galleryId: string }): Promise<{ current: number; total: number } | { current: null }>;
 }
 
 export const DownloadWorker = registerPlugin<DownloadWorkerPlugin>('DownloadWorker');

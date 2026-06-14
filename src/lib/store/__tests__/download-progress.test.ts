@@ -155,6 +155,11 @@ const workerCancels: string[] = [];
 // Steerable: when true, writeWorkOrder rejects so the iOS backstop scheduling
 // failure path can be exercised (it must NOT fail the foreground download).
 const workerWriteThrows = { value: false };
+// Steers DownloadWorker.getProgress for the poller tests (in-app progress bridge).
+// Default: no progress file yet ({current:null}) so handoff tests' polls are inert.
+const workerProgress: { value: { current: number; total: number } | { current: null } } = {
+  value: { current: null },
+};
 vi.mock('@/lib/plugins/downloadWorker', () => ({
   DownloadWorker: {
     writeWorkOrder: vi.fn(async (o: { galleryId: string; json: string }) => {
@@ -168,6 +173,9 @@ vi.mock('@/lib/plugins/downloadWorker', () => ({
       workerCancels.push(o.galleryId);
       return { remaining: 0 };
     }),
+    // Steerable per-test (in-app progress bridge). Default: no progress file yet
+    // ({current:null}) so the handoff tests' poll ticks are inert no-ops.
+    getProgress: vi.fn(async () => workerProgress.value),
   },
 }));
 
@@ -215,7 +223,13 @@ vi.mock('@/lib/utils/network', () => ({
   isUnmeteredNetwork: () => unmetered(),
 }));
 
-import { processQueue, useDownloadProgressStore } from '../download-progress';
+import {
+  processQueue,
+  useDownloadProgressStore,
+  startAndroidProgressPoll,
+  stopAndroidProgressPoll,
+} from '../download-progress';
+import { DownloadWorker } from '@/lib/plugins/downloadWorker';
 import * as queueOps from '@/lib/db/download-queue';
 
 beforeEach(async () => {
@@ -233,6 +247,9 @@ beforeEach(async () => {
   workerEnqueues.length = 0;
   workerCancels.length = 0;
   workerWriteThrows.value = false;
+  workerProgress.value = { current: null };
+  vi.mocked(DownloadWorker.getProgress).mockClear();
+  stopAndroidProgressPoll();
   androidFlag = false;
   iosFlag = false;
   dl.mockReset();
@@ -389,6 +406,156 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(workerCancels).toContain('100');
+  });
+});
+
+// ── Android in-app live-progress poller (in-app progress bridge, AC-003) ──────
+describe('Android live-progress poller (AC-003)', () => {
+  it('updates entries[id].progress over poll ticks from getProgress', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      // Seed an active downloading entry (as the handoff branch would).
+      useDownloadProgressStore.setState({
+        entries: { 500: { progress: { current: 0, total: 10 }, error: null } },
+      });
+
+      workerProgress.value = { current: 3, total: 10 };
+      startAndroidProgressPoll(500);
+      // Immediate first read + let its await settle.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useDownloadProgressStore.getState().entries[500]?.progress).toEqual({
+        current: 3,
+        total: 10,
+      });
+
+      // Next tick advances further.
+      workerProgress.value = { current: 7, total: 10 };
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(useDownloadProgressStore.getState().entries[500]?.progress).toEqual({
+        current: 7,
+        total: 10,
+      });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the last known progress when getProgress returns {current:null}', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      useDownloadProgressStore.setState({
+        entries: { 501: { progress: { current: 4, total: 8 }, error: null } },
+      });
+      workerProgress.value = { current: 4, total: 8 };
+      startAndroidProgressPoll(501);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // File temporarily absent → null this tick; the prior value must stick.
+      workerProgress.value = { current: null };
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(useDownloadProgressStore.getState().entries[501]?.progress).toEqual({
+        current: 4,
+        total: 8,
+      });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops polling once the entry clears (completion/removal)', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      useDownloadProgressStore.setState({
+        entries: { 502: { progress: { current: 1, total: 5 }, error: null } },
+      });
+      workerProgress.value = { current: 1, total: 5 };
+      startAndroidProgressPoll(502);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Completion clears the entry (reconcile/cancel does this in production).
+      useDownloadProgressStore.setState({ entries: {} });
+      const callsBefore = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
+      // The next tick sees no entry → self-stops; further ticks make no calls.
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(5000);
+      const callsAfter = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
+      // At most one more call (the tick that detected the cleared entry); then quiet.
+      expect(callsAfter - callsBefore).toBeLessThanOrEqual(1);
+      const settled = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBe(settled);
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses a SINGLE timer: retargeting to a new id does not leak the old one', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      useDownloadProgressStore.setState({
+        entries: {
+          600: { progress: { current: 0, total: 3 }, error: null },
+          601: { progress: { current: 0, total: 4 }, error: null },
+        },
+      });
+      startAndroidProgressPoll(600);
+      await vi.advanceTimersByTimeAsync(0);
+      // Retarget to a different gallery (e.g. the next handoff).
+      startAndroidProgressPoll(601);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Only the latest gallery is polled going forward.
+      vi.mocked(DownloadWorker.getProgress).mockClear();
+      await vi.advanceTimersByTimeAsync(1000);
+      const polledIds = vi
+        .mocked(DownloadWorker.getProgress)
+        .mock.calls.map((c) => (c[0] as { galleryId: string }).galleryId);
+      expect(polledIds.every((g) => g === '601')).toBe(true);
+      expect(polledIds).toContain('601');
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not poll on non-Android platforms', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = false;
+      useDownloadProgressStore.setState({
+        entries: { 700: { progress: { current: 0, total: 2 }, error: null } },
+      });
+      startAndroidProgressPoll(700);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(vi.mocked(DownloadWorker.getProgress)).not.toHaveBeenCalled();
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('the Android handoff starts the poller for the handed-off gallery', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      queue.push({ id: 800, pageCount: 0 });
+      workerProgress.value = { current: 1, total: 1 };
+
+      await processQueue();
+      // The handoff set a placeholder entry and started polling; a tick reads it.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.mocked(DownloadWorker.getProgress)).toHaveBeenCalledWith({ galleryId: '800' });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
   });
 });
 

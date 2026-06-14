@@ -148,6 +148,8 @@ let storeApi: {
   markDownloaded: (id: number) => void;
   refreshQueue: () => void;
   armAutoRetryTimer: () => void;
+  /** True iff a store entry exists for `id` (the Android poller's stop signal). */
+  hasEntry: (id: number) => boolean;
 } | null = null;
 
 /**
@@ -233,6 +235,111 @@ export async function fireDueAutoRetries(): Promise<void> {
   // Always re-arm: metered → wait for the next window; unmetered → any rows that
   // were not due yet still need a timer.
   armAutoRetryTimer();
+}
+
+// ── Android in-app live-progress poller (in-app progress bridge) ──────────────
+//
+// On Android the gallery downloads in the native WorkManager worker, so the TS
+// side has no in-process progress callback. The worker publishes live progress
+// to a per-gallery file; while the app is foreground we poll DownloadWorker
+// .getProgress(galleryId) (~1s) and push it into the store so the active card
+// shows advancing current/total · %.
+//
+// A SINGLE module-level interval ever exists (mirrors the running/controllers/
+// autoRetryTimer module-singleton pattern). It tracks the one active galleryId;
+// any start clears+rearms it, so it can never leak. It stops on completion (the
+// entry clears), when no Android download is active, or when the document is
+// hidden (backgrounded); it resumes on 'visible' if a handoff is still active.
+const PROGRESS_POLL_INTERVAL_MS = 1000;
+
+let progressPollTimer: ReturnType<typeof setInterval> | null = null;
+// The galleryId the poller is currently driving (null when idle). Kept so a
+// visibility 'visible' event can resume polling the same gallery.
+let progressPollGalleryId: number | null = null;
+
+/** Clear the single poll interval (does NOT forget which gallery was active). */
+function clearProgressPollTimer(): void {
+  if (progressPollTimer !== null) {
+    clearInterval(progressPollTimer);
+    progressPollTimer = null;
+  }
+}
+
+/** One poll tick: read the worker's progress file and push it into the store. */
+async function pollAndroidProgressOnce(id: number): Promise<void> {
+  // The gallery is done/cancelled when its store entry is gone — stop polling.
+  if (storeApi === null || !storeApi.hasEntry(id)) {
+    stopAndroidProgressPoll();
+    return;
+  }
+  let res: Awaited<ReturnType<typeof DownloadWorker.getProgress>> | null;
+  try {
+    res = await DownloadWorker.getProgress({ galleryId: String(id) });
+  } catch {
+    // Plugin unavailable / rejected this tick — leave the last known value.
+    return;
+  }
+  // A still-active poller may have been stopped/retargeted while we awaited.
+  if (progressPollGalleryId !== id) return;
+  if (res && typeof (res as { current: number | null }).current === 'number') {
+    const { current, total } = res as { current: number; total: number };
+    storeApi?.setEntry(id, { progress: { current, total }, error: null });
+    storeApi?.refreshQueue();
+  }
+  // current === null → no progress file yet (or completed); keep last value.
+}
+
+/**
+ * Start polling the Android worker's live progress for `id`. Idempotent for the
+ * same id; retargets (clear + rearm) for a different id. No-op off Android, when
+ * the document is hidden, or with no DOM. Called from the Android handoff branch.
+ */
+export function startAndroidProgressPoll(id: number): void {
+  if (!isAndroid()) return;
+  progressPollGalleryId = id;
+  // Don't poll while backgrounded (the notification carries progress there); the
+  // visibilitychange listener resumes it on foreground.
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    clearProgressPollTimer();
+    return;
+  }
+  clearProgressPollTimer();
+  // Immediate first read so the card leaves 0/total without waiting a full tick.
+  void pollAndroidProgressOnce(id);
+  progressPollTimer = setInterval(() => {
+    if (progressPollGalleryId === null) {
+      clearProgressPollTimer();
+      return;
+    }
+    void pollAndroidProgressOnce(progressPollGalleryId);
+  }, PROGRESS_POLL_INTERVAL_MS);
+}
+
+/** Stop the poller entirely and forget the active gallery (completion/no work). */
+export function stopAndroidProgressPoll(): void {
+  clearProgressPollTimer();
+  progressPollGalleryId = null;
+}
+
+// Pause polling while backgrounded; resume on foreground if a gallery is still
+// active. Registered once at module load (guarded for non-DOM/test/SSR envs).
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', () => {
+    if (progressPollGalleryId === null) return;
+    if (document.visibilityState === 'hidden') {
+      // Stop ticking but remember the gallery so 'visible' can resume it.
+      clearProgressPollTimer();
+    } else {
+      // Foreground again — resume polling the still-active gallery if its entry
+      // survives (it cleared while away → completion reconciled, nothing to poll).
+      const id = progressPollGalleryId;
+      if (storeApi?.hasEntry(id)) {
+        startAndroidProgressPoll(id);
+      } else {
+        stopAndroidProgressPoll();
+      }
+    }
+  });
 }
 
 /**
@@ -367,10 +474,13 @@ export async function processQueue(): Promise<void> {
             queuePosition: null,
             lastError: null,
           });
-          // Surface a "downloading (background)" entry: no live progress here
-          // (the worker reports via its notification; completion reconciles on
-          // open), so progress is a 0/total placeholder.
+          // Surface a "downloading (background)" entry with a 0/total placeholder,
+          // then start the in-app live-progress poller: while the app is
+          // foreground it reads the worker's progress file (~1s) and advances this
+          // entry's current/total in step with the notification. The poller stops
+          // on completion (entry cleared) / hidden / no active download.
           storeApi?.setEntry(id, { progress: { current: 0, total: files.length }, error: null });
+          startAndroidProgressPoll(id);
         } catch (e) {
           console.error('Queue: failed to hand off to Android worker', id, e);
           await removeFromQueue(id);
@@ -559,6 +669,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
     markDownloaded,
     refreshQueue: () => void refreshQueue(),
     armAutoRetryTimer,
+    hasEntry: (id: number) => get().entries[id] !== undefined,
   };
 
   return {
@@ -624,6 +735,8 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           .finally(() => void refreshQueue());
         fileCache.delete(id);
         setEntry(id, null);
+        // Stop the live-progress poller if it was driving this gallery.
+        if (progressPollGalleryId === id) stopAndroidProgressPoll();
       } else {
         // Queued/paused but not yet started → drop it from the queue.
         void removeFromQueue(id)

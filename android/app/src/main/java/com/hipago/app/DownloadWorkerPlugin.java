@@ -14,7 +14,10 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import org.json.JSONObject;
+
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 
 /**
@@ -99,6 +102,53 @@ public class DownloadWorkerPlugin extends Plugin {
             call.resolve();
         } catch (Exception e) {
             call.reject("enqueue error: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+        }
+    }
+
+    /**
+     * Read one gallery's live progress, written by the worker to
+     * {@code filesDir/dl-progress/<galleryId>.json = {"current":N,"total":M}}.
+     * Resolves {@code {current, total}} when the file is present and parseable;
+     * resolves {@code {current: null}} (a "no progress yet" sentinel) when the file
+     * is absent or unreadable. The TS poller treats a null current as "leave the
+     * last known value". The in-app poller only runs on Android, so iOS omits this
+     * method (the TS caller is isAndroid-gated).
+     *
+     * DEVICE-PENDING: verified by code review here; smoke-test on a device that the
+     * advancing values reach the in-app card and that a completed gallery reads
+     * absent (null) after the worker deletes the file.
+     */
+    @PluginMethod
+    public void getProgress(PluginCall call) {
+        String galleryId = call.getString("galleryId");
+        if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
+        File f = new File(
+                new File(getContext().getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR),
+                galleryId + ".json");
+        JSObject ret = new JSObject();
+        if (!f.exists()) {
+            // Absent → no active progress (not started, or already completed/cleared).
+            ret.put("current", JSObject.NULL);
+            call.resolve(ret);
+            return;
+        }
+        try {
+            byte[] bytes = new byte[(int) f.length()];
+            try (FileInputStream fis = new FileInputStream(f)) {
+                int off = 0;
+                int n;
+                while (off < bytes.length && (n = fis.read(bytes, off, bytes.length - off)) != -1) {
+                    off += n;
+                }
+            }
+            JSONObject obj = new JSONObject(new String(bytes, "UTF-8"));
+            ret.put("current", obj.getInt("current"));
+            ret.put("total", obj.getInt("total"));
+            call.resolve(ret);
+        } catch (Throwable t) {
+            // Unparseable / torn write → treat as no progress this tick.
+            ret.put("current", JSObject.NULL);
+            call.resolve(ret);
         }
     }
 

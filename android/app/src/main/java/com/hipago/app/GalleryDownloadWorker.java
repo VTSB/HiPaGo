@@ -65,9 +65,15 @@ public class GalleryDownloadWorker extends Worker {
 
     public static final String UNIQUE_WORK_NAME = "hipago-downloads";
     public static final String HANDOFF_DIR = "dl-queue";
+    /** Per-gallery live progress files: {@code filesDir/dl-progress/<galleryId>.json}. */
+    public static final String PROGRESS_DIR = "dl-progress";
 
     private static final String CHANNEL_ID = "hipago-downloads";
     private static final int NOTIFICATION_ID = 4201;
+
+    /** Min interval between progress-file writes per gallery, to bound IO on big
+     *  galleries. The in-app poller reads at ~1s, so once/second is plenty. */
+    private static final long PROGRESS_WRITE_THROTTLE_MS = 1000L;
 
     private final SafLibrary saf;
 
@@ -92,6 +98,13 @@ public class GalleryDownloadWorker extends Worker {
 
         File handoffDir = new File(getApplicationContext().getFilesDir(), HANDOFF_DIR);
         File[] orderFiles = handoffDir.listFiles((dir, name) -> name.endsWith(".json"));
+
+        // Best-effort prune of stale progress files: any dl-progress/<id>.json whose
+        // gallery no longer has a work-order in dl-queue is orphaned (a prior run
+        // crashed before cleanup). The in-app getProgress returns null for these,
+        // but pruning keeps the dir small. Failure here must not affect downloads.
+        pruneStaleProgress(orderFiles);
+
         if (orderFiles == null || orderFiles.length == 0) {
             return Result.success();
         }
@@ -144,9 +157,13 @@ public class GalleryDownloadWorker extends Worker {
      */
     private boolean processGallery(JSONObject order) {
         String title = order.optString("title", "");
+        // galleryId names the live-progress file the in-app poller reads. TS writes
+        // numeric galleryIds; fall back to a string so a malformed id still works.
+        String galleryId = order.optString("galleryId", null);
         JSONArray pages = order.optJSONArray("pages");
         if (pages == null || pages.length() == 0) {
             // Nothing to download — treat as complete so the work-order is cleared.
+            deleteProgress(galleryId);
             return true;
         }
 
@@ -157,20 +174,37 @@ public class GalleryDownloadWorker extends Worker {
         // on disk so an interrupted gallery resumes with a correct manifest.
         String[] exts = new String[total];
 
+        // Last time we wrote the live-progress file for this gallery (throttle).
+        long lastProgressWrite = 0L;
+
         for (int i = 0; i < total; i++) {
-            if (isStopped()) return false;
+            if (isStopped()) {
+                // Cancelled mid-gallery — drop the stale progress file.
+                deleteProgress(galleryId);
+                return false;
+            }
 
             JSONObject page = pages.optJSONObject(i);
-            if (page == null) return false; // malformed — leave the gallery partial
+            if (page == null) {
+                deleteProgress(galleryId); // malformed — leave the gallery partial
+                return false;
+            }
 
             String relPath = page.optString("relPath", null);
             String url = page.optString("url", null);
             String ext = page.optString("ext", "webp");
-            if (relPath == null || url == null) return false;
+            if (relPath == null || url == null) {
+                deleteProgress(galleryId);
+                return false;
+            }
 
             exts[i] = ext;
 
             updateNotification(title, i + 1, total);
+            // Publish live progress (throttled) so the in-app poller can show
+            // current/total while the app is foreground. Best-effort; an IO failure
+            // here must never fail the download.
+            lastProgressWrite = maybeWriteProgress(galleryId, i + 1, total, lastProgressWrite);
 
             // Resume: skip a page already written to the SAF tree.
             if (saf.exists(relPath)) {
@@ -186,7 +220,9 @@ public class GalleryDownloadWorker extends Worker {
                 saf.copyFromFile(temp.getAbsolutePath(), relPath);
             } catch (Throwable t) {
                 // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
-                // gallery partial; TS re-resolves / reconciles on next open.
+                // gallery partial; TS re-resolves / reconciles on next open. Drop the
+                // progress file so a frozen value is not polled forever.
+                deleteProgress(galleryId);
                 return false;
             } finally {
                 if (temp.exists()) {
@@ -206,7 +242,105 @@ public class GalleryDownloadWorker extends Worker {
         // and report success.
         String anyRelPath = pages.optJSONObject(0).optString("relPath", null);
         if (anyRelPath != null) writeManifest(anyRelPath, exts, total);
+        // Gallery complete → remove its live-progress file (the poller then reads
+        // null and the row reconciles to 'complete').
+        deleteProgress(galleryId);
         return true;
+    }
+
+    // -----------------------------------------------------------------------
+    // Live progress file (in-app progress bridge)
+    //
+    // DEVICE-PENDING: Java is not compiled in the sandbox; the progress-file
+    // write/throttle/cleanup + DownloadWorkerPlugin.getProgress read are verified
+    // by code review here and must be smoke-tested on a device (advancing %
+    // in-app while foreground, file removed on completion/cancel/failure).
+    // -----------------------------------------------------------------------
+
+    /** {@code filesDir/dl-progress} (created on demand). */
+    private File progressDir() {
+        File dir = new File(getApplicationContext().getFilesDir(), PROGRESS_DIR);
+        if (!dir.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
+    /**
+     * Write {@code dl-progress/<galleryId>.json = {"current":N,"total":M}} at most
+     * once per {@link #PROGRESS_WRITE_THROTTLE_MS}. The first page (lastWrite == 0)
+     * and the final page always write so the bar starts and lands exactly. Returns
+     * the timestamp of the most recent write so the caller can carry the throttle
+     * clock. Best-effort: any failure is swallowed (never fails the download).
+     */
+    private long maybeWriteProgress(String galleryId, int current, int total, long lastWrite) {
+        if (galleryId == null || galleryId.isEmpty()) return lastWrite;
+        long now = System.currentTimeMillis();
+        boolean isFirstOrLast = lastWrite == 0L || current >= total;
+        if (!isFirstOrLast && (now - lastWrite) < PROGRESS_WRITE_THROTTLE_MS) {
+            return lastWrite;
+        }
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("current", current);
+            obj.put("total", total);
+            File f = new File(progressDir(), galleryId + ".json");
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
+                fos.write(obj.toString().getBytes("UTF-8"));
+                fos.flush();
+            }
+        } catch (Throwable t) {
+            // Progress is advisory; a failed write just leaves the last value.
+            return lastWrite;
+        }
+        return now;
+    }
+
+    /** Remove a gallery's live-progress file (completion/cancel/failure). Best-effort. */
+    private void deleteProgress(String galleryId) {
+        if (galleryId == null || galleryId.isEmpty()) return;
+        try {
+            File f = new File(progressDir(), galleryId + ".json");
+            if (f.exists()) {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        } catch (Throwable ignored) {
+            // Best-effort cleanup; a stale file just reads as the last value until
+            // the next run prunes it (pruneStaleProgress) or getProgress returns it.
+        }
+    }
+
+    /**
+     * On worker start, delete any {@code dl-progress/<id>.json} whose gallery has
+     * no matching work-order in {@code dl-queue} — orphans from a crashed run.
+     * Best-effort; never affects the download.
+     */
+    private void pruneStaleProgress(File[] orderFiles) {
+        try {
+            File dir = new File(getApplicationContext().getFilesDir(), PROGRESS_DIR);
+            File[] progressFiles = dir.listFiles((d, name) -> name.endsWith(".json"));
+            if (progressFiles == null || progressFiles.length == 0) return;
+
+            java.util.Set<String> activeIds = new java.util.HashSet<>();
+            if (orderFiles != null) {
+                for (File o : orderFiles) {
+                    String name = o.getName();
+                    activeIds.add(name.substring(0, name.length() - ".json".length()));
+                }
+            }
+            for (File p : progressFiles) {
+                String name = p.getName();
+                String id = name.substring(0, name.length() - ".json".length());
+                if (!activeIds.contains(id)) {
+                    //noinspection ResultOfMethodCallIgnored
+                    p.delete();
+                }
+            }
+        } catch (Throwable ignored) {
+            // Pruning is housekeeping only.
+        }
     }
 
     /**
