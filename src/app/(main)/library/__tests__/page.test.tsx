@@ -57,11 +57,30 @@ vi.mock('@/lib/db/download-queue', () => ({
   enqueueDownload: vi.fn(async () => 1),
 }));
 
-vi.mock('@/lib/store/download-progress', () => ({
-  processQueue: vi.fn(async () => {}),
-  useDownloadProgressStore: (sel: (s: { entries: Record<number, unknown> }) => unknown) =>
-    sel({ entries: {} }),
-}));
+vi.mock('@/lib/store/download-progress', () => {
+  // Full-enough store shape: DownloadQueueView (mounted atop DownloadsView since
+  // Task B) reads queue/globalPaused + action selectors, and renders nothing when
+  // queue is empty — so an empty queue keeps this a pure library-list render test.
+  const state = {
+    entries: {},
+    downloaded: {},
+    queue: [],
+    globalPaused: false,
+    start: vi.fn(async () => {}),
+    cancel: vi.fn(),
+    refreshDownloaded: vi.fn(async () => {}),
+    refreshQueue: vi.fn(async () => {}),
+    reorder: vi.fn(async () => {}),
+    pause: vi.fn(async () => {}),
+    resume: vi.fn(async () => {}),
+    pauseAll: vi.fn(async () => {}),
+    resumeAll: vi.fn(async () => {}),
+  };
+  return {
+    processQueue: vi.fn(async () => {}),
+    useDownloadProgressStore: (sel: (s: typeof state) => unknown) => sel(state),
+  };
+});
 
 vi.mock('@/lib/storage/download-store', () => ({
   createDownloadStore: () => mockCreateDownloadStore(),
