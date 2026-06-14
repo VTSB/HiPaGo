@@ -20,25 +20,31 @@ import { listDueAutoRetries } from '@/lib/db/download-retry';
 import { deserializeTags, getDownload, upsertDownload } from '@/lib/db/download';
 import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
-import { isAndroid } from '@/lib/utils/platform';
+import { isAndroid, isIos } from '@/lib/utils/platform';
 import { processQueue, armAutoRetryTimer } from './download-progress';
 
 let started = false;
 
 /**
- * Android worker reconcile (Task C, AC-006).
+ * Native background-download reconcile (Android Task C AC-006; iOS Task D).
  *
- * The native WorkManager worker writes images + the 0000.json manifest directly
- * into the SAF tree but is DB-decoupled (it cannot write the app's SQLite). So on
- * app open we reconcile DB status from the on-disk manifest: a 'downloading' row
- * whose manifest now lists at least `pageCount` pages (the recorded target) is
- * marked 'complete'. Unfinished rows are left 'downloading' so the generic zombie
- * step re-enqueues them — on Android processQueue hands them back to the worker,
- * which skips already-present pages (resume).
+ * Both native background downloaders write images + the 0000.json manifest
+ * directly into the platform store but are DB-decoupled (they cannot write the
+ * app's SQLite): Android's WorkManager worker into the SAF tree, iOS's
+ * BGProcessingTask into `Directory.Data` (the numeric `downloads/<id>/` layout).
+ * So on app open we reconcile DB status from the on-disk manifest — read through
+ * `getDownloadedGalleryPages` → `createDownloadStore()`, which resolves the right
+ * adapter per platform (AndroidPublicDownloadStore / CapacitorDownloadStore), so
+ * the SAME logic covers both folder layouts. A 'downloading' row whose manifest
+ * now lists at least `pageCount` pages (the recorded target) is marked
+ * 'complete'. Unfinished rows are left 'downloading' so the generic zombie step
+ * re-enqueues them — on Android processQueue hands them back to the worker; on
+ * iOS the in-process foreground downloader resumes them (skipping pages already
+ * on disk) and reschedules its own background backstop.
  *
  * Best-effort: any per-row failure is swallowed so boot never breaks.
  */
-async function reconcileAndroidWorkerDownloads(): Promise<void> {
+async function reconcileNativeBackgroundDownloads(): Promise<void> {
   let db;
   try {
     db = await ensureDb();
@@ -89,13 +95,14 @@ export async function reconcileQueue(): Promise<void> {
   try {
     const db = await ensureDb();
 
-    // Android (Task C): the background worker is DB-decoupled, so first reconcile
-    // DB status from the on-disk manifest — galleries the worker finished while
-    // the app was gone are marked 'complete' here. Unfinished ones stay
-    // 'downloading' and fall through to the zombie re-enqueue below, which on
-    // Android hands them back to the worker (resume).
-    if (isAndroid()) {
-      await reconcileAndroidWorkerDownloads();
+    // Android (Task C) + iOS (Task D): the native background downloader is
+    // DB-decoupled, so first reconcile DB status from the on-disk manifest —
+    // galleries finished while the app was gone are marked 'complete' here.
+    // Unfinished ones stay 'downloading' and fall through to the zombie
+    // re-enqueue below (Android hands them back to the worker; iOS resumes them
+    // in-process, skipping pages already on disk).
+    if (isAndroid() || isIos()) {
+      await reconcileNativeBackgroundDownloads();
     }
 
     // Zombie 'downloading' rows with stored pages → re-enqueue with resume

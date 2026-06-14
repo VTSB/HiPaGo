@@ -25,8 +25,8 @@ import {
   earliestNextRetryAt,
 } from '@/lib/db/download-retry';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
-import { isAndroid } from '@/lib/utils/platform';
-import { buildWorkOrder } from '@/lib/utils/work-order';
+import { isAndroid, isIos } from '@/lib/utils/platform';
+import { buildWorkOrder, buildIosWorkOrder } from '@/lib/utils/work-order';
 import { DownloadWorker } from '@/lib/plugins/downloadWorker';
 import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
 import type { GalleryFile } from '@/lib/utils/types';
@@ -262,6 +262,40 @@ async function handOffToAndroidWorker(
 }
 
 /**
+ * iOS best-effort background backstop (Task D).
+ *
+ * Unlike Android, iOS does NOT replace the in-process foreground downloader —
+ * it ADDS a backstop: while the app is open the in-process
+ * `downloadGalleryToLibrary` runs as today, AND we persist a work-order +
+ * schedule a `BGProcessingTask` so a backgrounding app can resume the SAME
+ * gallery for whatever time iOS grants (best-effort, OS-governed, not
+ * guaranteed). Foreground JS suspends while backgrounded, so the two paths never
+ * truly run concurrently; the native task's per-page resume-skip (a page already
+ * on disk is skipped) makes the overlap idempotent.
+ *
+ * Best-effort: a scheduling failure (e.g. simulator, missing capability) must
+ * NOT fail the foreground download, so this never throws — it logs and returns.
+ * The iOS work-order targets the numeric `downloads/<id>/NNNN.ext` layout the
+ * `CapacitorDownloadStore` reader uses (see {@link buildIosWorkOrder}).
+ */
+async function scheduleIosBackgroundBackstop(
+  id: number,
+  title: string,
+  files: GalleryFile[],
+): Promise<void> {
+  try {
+    const config = await getGgConfig();
+    const order = buildIosWorkOrder(id, title, files, config);
+    const galleryId = String(id);
+    await DownloadWorker.writeWorkOrder({ galleryId, json: JSON.stringify(order) });
+    await DownloadWorker.enqueue({ galleryId });
+  } catch (e) {
+    // Backstop only — the in-process foreground download is the primary path.
+    console.warn('[ios-bg] failed to schedule background backstop', id, e);
+  }
+}
+
+/**
  * Drive the queue sequentially. Synchronous `running` guard ensures only one
  * active download at a time. After each item completes/fails/pauses, re-checks
  * for the next 'queued' item and continues until the queue is empty.
@@ -361,6 +395,16 @@ export async function processQueue(): Promise<void> {
       // the reactive queue to surface it as the active item.
       storeApi?.refreshQueue();
 
+      // ── iOS background backstop (Task D) ──────────────────────────────────
+      // iOS keeps the in-process downloader below (web/Tauri unchanged) but ALSO
+      // persists a work-order + schedules a BGProcessingTask so a backgrounding
+      // app can resume this gallery best-effort. Done BEFORE awaiting the
+      // download so the work-order is already on disk if the user backgrounds
+      // immediately. Never blocks/fails the foreground path (it swallows errors).
+      if (isIos()) {
+        await scheduleIosBackgroundBackstop(id, next.title, files);
+      }
+
       try {
         const config = await getGgConfig();
         await downloadGalleryToLibrary(
@@ -378,6 +422,12 @@ export async function processQueue(): Promise<void> {
         await removeFromQueue(id);
         storeApi?.setEntry(id, null);
         storeApi?.markDownloaded(id);
+        // iOS (Task D): the foreground download finished, so drop the background
+        // backstop work-order (and cancel the pending BGProcessingTask when no
+        // other galleries remain) — there is nothing left for it to resume.
+        if (isIos()) {
+          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+        }
       } catch (e) {
         if (e instanceof DownloadPausedError) {
           // Paused: row left 'paused' (resumable) by download-zip; keep it in the
@@ -557,6 +607,12 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       if (controller) {
         // Active run → genuine cancel (NOT a pause).
         controller.abort();
+        // iOS (Task D): also drop the background backstop work-order so the
+        // BGProcessingTask does not later resume a cancelled gallery (and cancels
+        // the pending request when the handoff queue empties).
+        if (isIos()) {
+          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+        }
       } else if (isAndroid()) {
         // Android: the gallery may have been handed off to the native worker
         // (no controller, not in the TS queue). Drop its work-order so the

@@ -113,4 +113,38 @@ describe('platform detection', () => {
       expect(isAndroid()).toBe(false);
     });
   });
+
+  describe('isIos (Task D)', () => {
+    it('returns true on Capacitor iOS (native, non-Android)', async () => {
+      vi.stubGlobal('window', {
+        Capacitor: { isNativePlatform: () => true, getPlatform: () => 'ios' },
+      });
+      vi.resetModules();
+      const { isIos } = await import('../platform');
+      expect(isIos()).toBe(true);
+    });
+
+    it('returns false on Capacitor Android', async () => {
+      vi.stubGlobal('window', {
+        Capacitor: { isNativePlatform: () => true, getPlatform: () => 'android' },
+      });
+      vi.resetModules();
+      const { isIos } = await import('../platform');
+      expect(isIos()).toBe(false);
+    });
+
+    it('returns false on the web shim (not native)', async () => {
+      vi.stubGlobal('window', {
+        Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' },
+      });
+      vi.resetModules();
+      const { isIos } = await import('../platform');
+      expect(isIos()).toBe(false);
+    });
+
+    it('returns false when window is undefined (SSR)', async () => {
+      const { isIos } = await import('../platform');
+      expect(isIos()).toBe(false);
+    });
+  });
 });

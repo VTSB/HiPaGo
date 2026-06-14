@@ -41,3 +41,15 @@ export function isAndroid(): boolean {
   const cap = (window as { Capacitor?: { getPlatform?: () => string } }).Capacitor;
   return cap?.getPlatform?.() === 'android';
 }
+
+/**
+ * True only on Capacitor iOS. Used by the download queue (Task D) to add the
+ * best-effort background-task backstop: iOS keeps the in-process foreground
+ * downloader AND schedules a BGProcessingTask. Defined as `isCapacitor() &&
+ * !isAndroid()` so it is false on web/Tauri/Android. (Capacitor's getPlatform()
+ * returns 'ios' on iOS, but routing through isCapacitor keeps the web guard —
+ * window.Capacitor exists on plain web after registerPlugin.)
+ */
+export function isIos(): boolean {
+  return isCapacitor() && !isAndroid();
+}

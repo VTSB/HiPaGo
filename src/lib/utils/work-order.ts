@@ -92,3 +92,44 @@ export function buildWorkOrder(
   }));
   return { galleryId, title, folderName, pages };
 }
+
+/**
+ * iOS subdir of `Directory.Data` the gallery images live under
+ * (`CapacitorDownloadStore` DOWNLOADS_DIR). Kept here so the iOS work-order's
+ * `relPath` matches the Swift `DownloadBackgroundTask` layout exactly.
+ */
+const IOS_DOWNLOADS_DIR = 'downloads';
+
+/**
+ * Build the handoff work-order for the iOS best-effort background task (Task D).
+ *
+ * Differs from {@link buildWorkOrder} (Android) ONLY in the per-page destination
+ * layout: iOS stores galleries at `downloads/<galleryId>/NNNN.ext` under
+ * `@capacitor/filesystem` `Directory.Data` — a NUMERIC-only folder (no title),
+ * matching `CapacitorDownloadStore` (src/lib/storage/adapters/capacitor.ts). The
+ * Swift task actually rebuilds the absolute path itself from galleryId + index +
+ * ext, so `relPath` here is documentary/self-describing (the Swift parser ignores
+ * it); we still emit the correct iOS-relative path rather than Android's
+ * `HiPaGo/<id title>/…` so the JSON is not misleading.
+ *
+ * `title` is retained in the order for parity with the Android shape but is not
+ * used in the iOS path (numeric folder).
+ */
+export function buildIosWorkOrder(
+  galleryId: number,
+  title: string,
+  files: GalleryFile[],
+  ggConfig: GgConfig,
+): WorkOrder {
+  const headers = getNativeHeaders();
+  const items = resolveWorkOrder(files, ggConfig);
+  const pages: WorkOrderPage[] = items.map((item) => ({
+    ...item,
+    // downloads/<id>/NNNN.ext — 1-based, zero-padded to 4 digits (imageFileName).
+    relPath: `${IOS_DOWNLOADS_DIR}/${galleryId}/${String(item.index + 1).padStart(4, '0')}.${item.ext}`,
+    headers,
+  }));
+  // folderName is the numeric-only iOS gallery folder (galleryFolderName in
+  // download-store.ts = String(galleryId)).
+  return { galleryId, title, folderName: String(galleryId), pages };
+}

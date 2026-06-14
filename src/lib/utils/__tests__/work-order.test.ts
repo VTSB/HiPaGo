@@ -5,7 +5,7 @@
  * the inline logic did (getImageUrl 'auto' + urlExt split).
  */
 import { describe, it, expect } from 'vitest';
-import { resolveWorkOrder, buildWorkOrder } from '../work-order';
+import { resolveWorkOrder, buildWorkOrder, buildIosWorkOrder } from '../work-order';
 import { getImageUrl } from '../image-url';
 import { galleryFolderName, LIBRARY_ROOT } from '@/lib/storage/base-path-resolver';
 import type { GalleryFile, GgConfig } from '../types';
@@ -97,6 +97,46 @@ describe('buildWorkOrder (Task C handoff)', () => {
 
   it('empty file list yields an empty pages array', () => {
     const order = buildWorkOrder(9, 'T', [], ggConfig);
+    expect(order.pages).toEqual([]);
+  });
+});
+
+describe('buildIosWorkOrder (Task D backstop)', () => {
+  it('uses the NUMERIC downloads/<id>/ layout (no title), unlike the Android HiPaGo/<id title>/', () => {
+    const files = [file({ haswebp: 1 }), file({ hash: 'b'.repeat(64) })];
+    const order = buildIosWorkOrder(12345, 'My Title', files, ggConfig);
+    expect(order.galleryId).toBe(12345);
+    // Numeric-only folder (CapacitorDownloadStore galleryFolderName = String(id)).
+    expect(order.folderName).toBe('12345');
+    expect(order.pages).toHaveLength(2);
+    expect(order.pages[0].relPath).toBe(`downloads/12345/0001.${order.pages[0].ext}`);
+    expect(order.pages[1].relPath).toBe(`downloads/12345/0002.${order.pages[1].ext}`);
+    // Must NOT carry the Android SAF prefix.
+    expect(order.pages[0].relPath).not.toMatch(/^HiPaGo\//);
+  });
+
+  it('title with FS-unsafe chars never leaks into the iOS numeric path', () => {
+    const order = buildIosWorkOrder(777, 'A/B:C?', [file()], ggConfig);
+    expect(order.folderName).toBe('777');
+    expect(order.pages[0].relPath).toBe(`downloads/777/0001.${order.pages[0].ext}`);
+  });
+
+  it('each page carries the same url/ext/index as resolveWorkOrder (no drift vs Android)', () => {
+    const files = [file({ haswebp: 1, hasavif: 0 })];
+    const order = buildIosWorkOrder(1, 'T', files, ggConfig);
+    const flat = resolveWorkOrder(files, ggConfig);
+    expect(order.pages[0].url).toBe(flat[0].url);
+    expect(order.pages[0].ext).toBe(flat[0].ext);
+    expect(order.pages[0].index).toBe(0);
+  });
+
+  it('headers default to {} off-native (getNativeHeaders is empty in node env)', () => {
+    const order = buildIosWorkOrder(1, 'T', [file()], ggConfig);
+    expect(order.pages[0].headers).toEqual({});
+  });
+
+  it('empty file list yields an empty pages array', () => {
+    const order = buildIosWorkOrder(9, 'T', [], ggConfig);
     expect(order.pages).toEqual([]);
   });
 });

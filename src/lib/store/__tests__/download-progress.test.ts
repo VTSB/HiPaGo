@@ -137,8 +137,11 @@ function queueRef(): { id: number; pageCount: number; paused?: boolean; pos?: nu
 // isAndroid() is steered per-test; the DownloadWorker plugin is fully mocked so
 // no native call happens. buildWorkOrder/galleryFolderName run for real (pure).
 let androidFlag = false;
+let iosFlag = false;
 vi.mock('@/lib/utils/platform', () => ({
   isAndroid: () => androidFlag,
+  // iOS (Task D): keeps the in-process downloader AND schedules a BG backstop.
+  isIos: () => iosFlag,
   // url-resolver (pulled in by buildWorkOrder → getNativeHeaders) imports
   // isNativePlatform; keep it false so headers default to {} in the test.
   isNativePlatform: () => false,
@@ -149,9 +152,13 @@ vi.mock('@/lib/utils/platform', () => ({
 const workOrderWrites: { galleryId: string; json: string }[] = [];
 const workerEnqueues: string[] = [];
 const workerCancels: string[] = [];
+// Steerable: when true, writeWorkOrder rejects so the iOS backstop scheduling
+// failure path can be exercised (it must NOT fail the foreground download).
+const workerWriteThrows = { value: false };
 vi.mock('@/lib/plugins/downloadWorker', () => ({
   DownloadWorker: {
     writeWorkOrder: vi.fn(async (o: { galleryId: string; json: string }) => {
+      if (workerWriteThrows.value) throw new Error('writeWorkOrder failed');
       workOrderWrites.push(o);
     }),
     enqueue: vi.fn(async (o: { galleryId: string }) => {
@@ -225,7 +232,9 @@ beforeEach(async () => {
   workOrderWrites.length = 0;
   workerEnqueues.length = 0;
   workerCancels.length = 0;
+  workerWriteThrows.value = false;
   androidFlag = false;
+  iosFlag = false;
   dl.mockReset();
   unmetered.mockReset();
   unmetered.mockResolvedValue(true);
@@ -380,6 +389,116 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(workerCancels).toContain('100');
+  });
+});
+
+// ── iOS best-effort background backstop (Task D, AC-004/AC-005) ────────────────
+describe('iOS background backstop (Task D)', () => {
+  it('runs the in-process downloader AND schedules the BG backstop', async () => {
+    iosFlag = true;
+    queue.push({ id: 400, pageCount: 0 });
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+    });
+
+    await processQueue();
+
+    // The in-process foreground downloader IS still invoked on iOS.
+    expect(order).toEqual([400]);
+    // AND the work-order was written + the BG task enqueued as a backstop.
+    expect(workOrderWrites.map((w) => w.galleryId)).toContain('400');
+    expect(workerEnqueues).toContain('400');
+  });
+
+  it('iOS work-order JSON uses the numeric downloads/<id>/ layout (not HiPaGo/<id title>)', async () => {
+    iosFlag = true;
+    queue.push({ id: 401, pageCount: 0 });
+    dl.mockResolvedValue(undefined);
+
+    await processQueue();
+
+    const write = workOrderWrites.find((w) => w.galleryId === '401');
+    expect(write).toBeTruthy();
+    const orderJson = JSON.parse(write!.json);
+    expect(orderJson.galleryId).toBe(401);
+    expect(orderJson.folderName).toBe('401'); // numeric-only, no title
+    expect(orderJson.pages).toHaveLength(1);
+    const page = orderJson.pages[0];
+    expect(page).toHaveProperty('index', 0);
+    expect(page).toHaveProperty('url');
+    expect(page).toHaveProperty('ext');
+    expect(page).toHaveProperty('headers');
+    // iOS layout: downloads/<id>/NNNN.ext — NOT the Android HiPaGo/<id title>/.
+    expect(page.relPath).toMatch(/^downloads\/401\/0001\./);
+    expect(page.relPath).not.toMatch(/^HiPaGo\//);
+  });
+
+  it('on successful in-process download, drops the iOS backstop work-order', async () => {
+    iosFlag = true;
+    queue.push({ id: 402, pageCount: 0 });
+    dl.mockResolvedValue(undefined);
+
+    await processQueue();
+
+    // Completion clears the backstop (DownloadWorker.cancel) so the BG task does
+    // not re-download an already-complete gallery.
+    expect(workerCancels).toContain('402');
+    expect(useDownloadProgressStore.getState().downloaded[402]).toBe(true);
+  });
+
+  it('a backstop scheduling failure does NOT fail the foreground download', async () => {
+    iosFlag = true;
+    queue.push({ id: 403, pageCount: 0 });
+    // The plugin throws on writeWorkOrder; the foreground download must still run
+    // and complete (the backstop is best-effort).
+    workerWriteThrows.value = true;
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+    });
+
+    await processQueue();
+
+    expect(order).toEqual([403]);
+    expect(removed).toContain(403);
+    expect(useDownloadProgressStore.getState().downloaded[403]).toBe(true);
+  });
+
+  it('non-iOS (web/Tauri) does NOT schedule a backstop', async () => {
+    iosFlag = false;
+    androidFlag = false;
+    queue.push({ id: 404, pageCount: 0 });
+    dl.mockResolvedValue(undefined);
+
+    await processQueue();
+
+    expect(workOrderWrites).toEqual([]);
+    expect(workerEnqueues).toEqual([]);
+  });
+
+  it('cancel of an active iOS download drops the backstop work-order', async () => {
+    iosFlag = true;
+    queue.push({ id: 405, pageCount: 2 });
+    // Hold the download open so a controller exists when we cancel: the mock
+    // resolves only after the cancel side-effect has been asserted.
+    const deferred: { resolve: () => void } = { resolve: () => {} };
+    dl.mockImplementation(
+      () =>
+        new Promise<void>((res) => {
+          deferred.resolve = res;
+        }),
+    );
+
+    const run = processQueue();
+    await new Promise((r) => setTimeout(r, 1));
+    useDownloadProgressStore.getState().cancel(405);
+    await Promise.resolve();
+    // The active-controller cancel branch drops the iOS backstop work-order.
+    expect(workerCancels).toContain('405');
+    // Let the (aborted) download settle so processQueue can finish.
+    deferred.resolve();
+    await run;
   });
 });
 
@@ -648,6 +767,27 @@ describe('reconcileQueue (AC-007)', () => {
 
     const completed = upsertedRows.find(
       (r) => (r as { galleryId: number }).galleryId === 55,
+    ) as { status: string } | undefined;
+    expect(completed?.status).toBe('complete');
+  });
+
+  it('iOS: marks a gallery complete when its manifest covers all pages', async () => {
+    iosFlag = true;
+    // A 'downloading' row targeting 2 pages; the BGProcessingTask finished it
+    // while the app was closed (DB-decoupled, like Android).
+    adapterRows.push({ galleryId: 57, title: 'I', thumbnail: '/tn', tags: '{}', pageCount: 2, status: 'downloading' });
+    manifestPages.set(57, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const completed = upsertedRows.find(
+      (r) => (r as { galleryId: number }).galleryId === 57,
     ) as { status: string } | undefined;
     expect(completed?.status).toBe('complete');
   });
