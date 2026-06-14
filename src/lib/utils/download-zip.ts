@@ -1,5 +1,6 @@
 import { zipSync } from 'fflate';
 import { getImageUrl } from './image-url';
+import { resolveWorkOrder } from './work-order';
 import { apiClient, ApiError } from '@/lib/api/client';
 import type { GalleryFile, GgConfig } from './types';
 import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
@@ -8,6 +9,7 @@ import {
   upsertDownload,
   updateDownloadProgress,
   setDownloadError,
+  updateDownloadStatus,
   serializeTags,
 } from '@/lib/db/download';
 import { parseRetryAfter } from '@/lib/api/tag-fetcher';
@@ -26,6 +28,19 @@ function padIndex(idx: number, total: number): string {
 export interface DownloadProgress {
   current: number;
   total: number;
+}
+
+/**
+ * Thrown when a download is aborted because the user (or the queue processor)
+ * PAUSED it — as opposed to a genuine cancel. The download row is left as
+ * 'paused' (resumable, no lastError) and partial pages are retained. The queue
+ * processor treats this distinctly from an AbortError cancel.
+ */
+export class DownloadPausedError extends Error {
+  constructor(message = 'Download paused') {
+    super(message);
+    this.name = 'DownloadPausedError';
+  }
 }
 
 /** Derive the actual file extension from the HTTP response content-type and file metadata. */
@@ -241,7 +256,7 @@ export async function downloadGalleryToLibrary(
   tags: Record<string, string[]>,
   onProgress?: (p: DownloadProgress) => void,
   signal?: AbortSignal,
-  opts?: { resume?: boolean },
+  opts?: { resume?: boolean; isPauseSignal?: () => boolean },
 ): Promise<void> {
   const total = files.length;
   const now = new Date().toISOString();
@@ -268,6 +283,11 @@ export async function downloadGalleryToLibrary(
   // no image bytes through the JS heap. Web omits putImageFromFile (and its
   // cache is a no-op), so it always fetches.
   const imageCache = store.putImageFromFile ? await getImageCache().catch(() => null) : null;
+
+  // Pre-resolve the per-page URL + ext once (pure). The network path may still
+  // refine ext from the response content-type; this is the URL-derived ext used
+  // for the cache-copy path + its manifest entry (behavior identical to before).
+  const workOrder = resolveWorkOrder(files, ggConfig);
 
   const pageExts: string[] = [];
   let totalBytes = 0;
@@ -319,11 +339,8 @@ export async function downloadGalleryToLibrary(
       // 'auto' (avif > webp > original) mirrors the reader. Hardcoding 'webp'
       // breaks avif-only galleries (no haswebp): getImageUrl falls back to the
       // original .jpg, which the CDN does not serve, so every page 404s/fails.
-      const url = getImageUrl(file, ggConfig, 'auto');
-      // The ext the 'auto' URL actually points at (avif/webp/jpg/…), used both
-      // for the cache-copy filename and its manifest entry so offline reads
-      // resolve the right file.
-      const urlExt = url.split('?')[0].split('.').pop() || 'webp';
+      // Resolved once up front by resolveWorkOrder (AC-004) — same URL/ext.
+      const { url, ext: urlExt } = workOrder[i];
 
       let pageWritten = false;
 
@@ -400,7 +417,18 @@ export async function downloadGalleryToLibrary(
     });
   } catch (err) {
     const e = err as Error;
-    const isCancel = e.name === 'AbortError' || err instanceof DownloadCancelledError;
+    const isAbort = e.name === 'AbortError' || err instanceof DownloadCancelledError;
+    // An abort that the caller marked as a PAUSE (not a cancel): leave the row
+    // 'paused' (resumable, partial pages retained, no lastError) and rethrow a
+    // DownloadPausedError so the queue processor can tell the two apart.
+    const isPause = isAbort && opts?.isPauseSignal?.() === true;
+
+    if (isPause) {
+      if (rowCreated) await updateDownloadStatus(galleryId, 'paused');
+      throw new DownloadPausedError();
+    }
+
+    const isCancel = isAbort;
 
     if (isCancel) {
       // User cancel. If pages were already written, leave a resumable 'failed'

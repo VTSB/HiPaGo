@@ -32,8 +32,8 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
   const db = await ensureDb();
   await db.execute(
     `INSERT OR REPLACE INTO download
-       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.galleryId,
       row.title,
@@ -46,6 +46,7 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
       row.folderName ?? null,
       row.migratedAt ?? null,
       row.lastError ?? null,
+      row.queuePosition ?? null,
     ],
   );
   await persistDb();
@@ -151,7 +152,7 @@ export async function deleteDownload(galleryId: number): Promise<void> {
 export async function getDownload(galleryId: number): Promise<DBDownload | null> {
   const db = await ensureDb();
   const rows = await db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError FROM download WHERE galleryId = ?',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition FROM download WHERE galleryId = ?',
     [galleryId],
   );
   return rows[0] ?? null;
@@ -163,7 +164,25 @@ export async function getDownload(galleryId: number): Promise<DBDownload | null>
 export async function listDownloads(): Promise<DBDownload[]> {
   const db = await ensureDb();
   return db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError FROM download ORDER BY downloadedAt DESC',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition FROM download ORDER BY downloadedAt DESC',
+  );
+}
+
+/**
+ * List the rows that belong in the offline LIBRARY view: completed, actively
+ * downloading, or failed downloads — ordered by most recently downloaded first.
+ *
+ * Queue-only states ('queued'/'paused') are excluded so they never leak into the
+ * library list as phantom rows (they surface in the download-manager UI instead).
+ * This keeps the library list visually identical to the pre-queue behavior.
+ */
+export async function listLibraryDownloads(): Promise<DBDownload[]> {
+  const db = await ensureDb();
+  return db.query<DBDownload>(
+    `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition
+       FROM download
+      WHERE status IN ('complete', 'downloading', 'failed')
+      ORDER BY downloadedAt DESC`,
   );
 }
 
@@ -199,7 +218,7 @@ export async function searchDownloads(options: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError FROM download ${where} ORDER BY downloadedAt DESC`;
+  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition FROM download ${where} ORDER BY downloadedAt DESC`;
 
   return db.query<DBDownload>(sql, params);
 }

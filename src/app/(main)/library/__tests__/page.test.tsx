@@ -35,6 +35,9 @@ const mockCreateDownloadStore = vi.fn();
 
 vi.mock('@/lib/db/download', () => ({
   listDownloads: () => mockListDownloads(),
+  // DownloadsView now reads the LIBRARY-filtered list; point it at the same
+  // mock so existing assertions (which seed mockListDownloads) keep working.
+  listLibraryDownloads: () => mockListDownloads(),
   searchDownloads: (opts: { query?: string }) => mockSearchDownloads(opts),
   deleteDownload: (id: number) => mockDeleteDownload(id),
   // The redesigned card deserializes tags at render time (not just in retry),
@@ -46,6 +49,18 @@ vi.mock('@/lib/db/download', () => ({
       return {};
     }
   },
+}));
+
+// The queue layer + processor are pulled in by the rewired retry path; stub them
+// so the page test stays a pure UI render test (no DB adapter / network).
+vi.mock('@/lib/db/download-queue', () => ({
+  enqueueDownload: vi.fn(async () => 1),
+}));
+
+vi.mock('@/lib/store/download-progress', () => ({
+  processQueue: vi.fn(async () => {}),
+  useDownloadProgressStore: (sel: (s: { entries: Record<number, unknown> }) => unknown) =>
+    sel({ entries: {} }),
 }));
 
 vi.mock('@/lib/storage/download-store', () => ({

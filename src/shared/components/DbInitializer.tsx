@@ -25,14 +25,20 @@ export function DbInitializer() {
     ran.current = true;
 
     initializeDatabase()
-      .then(() => {
+      .then(async () => {
         // Android-only: run one-time Data→public migration + reconciliation
         // after DB is ready. Best-effort — never propagates errors into boot.
         if (isAndroid()) {
-          import('@/lib/storage/migrate-downloads')
+          await import('@/lib/storage/migrate-downloads')
             .then(({ migrateDownloadsToPublic }) => migrateDownloadsToPublic())
             .catch((e) => console.warn('[migrate] Data→public migration failed:', e));
         }
+        // Download-queue reconciliation: re-enqueue zombie 'downloading' rows
+        // and kick the processor when unmetered. Chained AFTER the migration so
+        // it never races the library reconcile. Best-effort — never throws.
+        await import('@/lib/store/reconcile-queue')
+          .then(({ reconcileQueue }) => reconcileQueue())
+          .catch((e) => console.warn('[queue] reconcile failed:', e));
         return checkDbReady();
       })
       .then((ready) => {

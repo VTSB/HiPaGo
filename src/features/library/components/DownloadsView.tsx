@@ -8,15 +8,15 @@ import { AbortableImage } from '@/shared/components/AbortableImage';
 import { TagChip } from '@/shared/components/TagChip';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
-import { listDownloads, searchDownloads, deleteDownload, deserializeTags } from '@/lib/db/download';
-import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
+import { listLibraryDownloads, searchDownloads, deleteDownload, deserializeTags } from '@/lib/db/download';
+import { enqueueDownload } from '@/lib/db/download-queue';
+import { processQueue, useDownloadProgressStore } from '@/lib/store/download-progress';
+import { createDownloadStore } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
 import type { TagType } from '@/lib/utils/types';
 import { galleryHref } from '@/lib/utils/routes';
-import { getGgConfig } from '@/lib/api/client';
-import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
-import { downloadGalleryToLibrary, type DownloadProgress } from '@/lib/utils/download-zip';
+import type { DownloadProgress } from '@/lib/utils/download-zip';
 
 // Match the gallery-list grid (GalleryGrid GRID_AUTO) so downloaded items read
 // as the same cover-forward cards.
@@ -340,9 +340,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const [rawQuery, setRawQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Foreground retry (resume) state — one item at a time.
-  const [retryingId, setRetryingId] = useState<number | null>(null);
-  const [retryProgress, setRetryProgress] = useState<DownloadProgress | null>(null);
+  // Live per-gallery download progress from the queue processor (store). The
+  // processor is the SOLE download authority now — no second single-flight here.
+  const storeEntries = useDownloadProgressStore((s) => s.entries);
 
   const handleQueryChange = useCallback((v: string) => {
     setRawQuery(v);
@@ -356,13 +356,20 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
 
   const { data: allItems, isLoading } = useQuery({
     queryKey: ['library-list'],
-    queryFn: () => listDownloads(),
+    queryFn: () => listLibraryDownloads(),
     staleTime: 0,
   });
 
+  // Search shares the library surface, so exclude queue-only states here too —
+  // keeps the searched list visually identical to the unfiltered library list.
   const { data: filteredItems, isLoading: isFilterLoading } = useQuery({
     queryKey: ['library-search', debouncedQuery],
-    queryFn: () => searchDownloads({ query: debouncedQuery }),
+    queryFn: async () => {
+      const rows = await searchDownloads({ query: debouncedQuery });
+      return rows.filter(
+        (r) => r.status === 'complete' || r.status === 'downloading' || r.status === 'failed',
+      );
+    },
     enabled: hasQuery,
     staleTime: 0,
   });
@@ -396,42 +403,33 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     await exportGalleryZip(galleryId, title);
   }, []);
 
-  // Retry a failed download by RESUMING it: re-fetch the gallery's file list
-  // (not stored on the row) + gg config, then download only the missing pages.
-  // download-zip updates the row's status/lastError; we just refresh on finish.
+  // Retry a failed download by RESUMING it THROUGH THE QUEUE: enqueue the row
+  // (userInitiated → front of queue) and kick the processor. The processor
+  // re-fetches the gallery's file list (not stored on the row), resumes from the
+  // partial pages, and pushes live progress into the store. This unifies retry
+  // with the single download authority — no separate single-flight here.
   const handleRetry = useCallback(async (item: DBDownload) => {
-    if (retryingId !== null) return; // one retry at a time
-    setRetryingId(item.galleryId);
-    setRetryProgress(null);
+    // The processor already single-flights per gallery; a live entry means it's
+    // in flight, so ignore a duplicate tap.
+    if (storeEntries[item.galleryId]?.progress) return;
     try {
-      const [{ files }, config] = await Promise.all([
-        resolveGalleryDetail(item.galleryId),
-        getGgConfig(),
-      ]);
-      await downloadGalleryToLibrary(
-        item.galleryId,
-        item.title,
-        item.thumbnail,
-        files,
-        config,
-        deserializeTags(item.tags),
-        setRetryProgress,
-        undefined,
-        { resume: true },
+      await enqueueDownload(
+        {
+          galleryId: item.galleryId,
+          title: item.title,
+          thumbnail: item.thumbnail,
+          tags: deserializeTags(item.tags),
+        },
+        { userInitiated: true },
       );
+      void processQueue();
     } catch (e) {
-      // Cancels are silent. Genuine failures already wrote lastError onto the
-      // row inside download-zip; the query refresh below surfaces the new reason.
-      if (!(e instanceof DownloadCancelledError) && !(e instanceof DOMException && e.name === 'AbortError')) {
-        console.error('Retry failed:', e);
-      }
+      console.error('Retry failed to enqueue:', e);
     } finally {
-      setRetryingId(null);
-      setRetryProgress(null);
       queryClient.invalidateQueries({ queryKey: ['library-list'] });
       queryClient.invalidateQueries({ queryKey: ['library-search'] });
     }
-  }, [retryingId, queryClient]);
+  }, [storeEntries, queryClient]);
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);
 
@@ -483,17 +481,21 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : (
         <div className={GRID_CLASS}>
-          {(activeItems ?? []).map((item) => (
-            <LibraryCard
-              key={item.galleryId}
-              item={item}
-              onDelete={handleDelete}
-              onExport={handleExport}
-              onRetry={handleRetry}
-              isRetrying={retryingId === item.galleryId}
-              retryProgress={retryingId === item.galleryId ? retryProgress : null}
-            />
-          ))}
+          {(activeItems ?? []).map((item) => {
+            const entry = storeEntries[item.galleryId];
+            const isRetrying = !!entry?.progress;
+            return (
+              <LibraryCard
+                key={item.galleryId}
+                item={item}
+                onDelete={handleDelete}
+                onExport={handleExport}
+                onRetry={handleRetry}
+                isRetrying={isRetrying}
+                retryProgress={entry?.progress ?? null}
+              />
+            );
+          })}
         </div>
       )}
     </>

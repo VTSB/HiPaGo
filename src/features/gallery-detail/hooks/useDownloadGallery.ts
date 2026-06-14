@@ -36,6 +36,9 @@ export function useDownloadGallery(
     progress: entry?.progress ?? null,
     error: entry?.error ?? null,
     isDownloaded,
+    /** The gallery's queue position while it is queued-but-not-yet-started, else null.
+     *  Lets the button render "Queued (#N)" instead of a dead/disabled state. */
+    queuedPosition: entry?.queued ? (entry.position ?? null) : null,
     start,
     cancel,
   };

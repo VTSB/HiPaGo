@@ -322,7 +322,7 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     await runMigrations(adapter);
 
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
-    expect(LATEST_VERSION).toBe(5);
+    expect(LATEST_VERSION).toBe(6);
   });
 
   it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {
@@ -460,5 +460,113 @@ describe('runMigrations: migration v5 adds lastError to download', () => {
     expect(colNames.has('folderName')).toBe(true);
     expect(colNames.has('migratedAt')).toBe(true);
     expect(colNames.has('lastError')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Migration v6: adds queuePosition column + idx_download_queue index
+// ---------------------------------------------------------------------------
+
+// Simulate a v5 DB: download table with folderName + migratedAt + lastError but
+// no queuePosition column.
+const SCHEMA_V5_DOWNLOAD = `
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT,
+  lastError TEXT
+);
+`;
+
+describe('runMigrations: migration v6 adds queuePosition + queue index to download', () => {
+  let adapter: PragmaTestAdapter;
+
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('adds queuePosition column when upgrading from v5', async () => {
+    await adapter.exec(SCHEMA_V5_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 5');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('queuePosition')).toBe(true);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+  });
+
+  it('creates the idx_download_queue index when upgrading from v5', async () => {
+    await adapter.exec(SCHEMA_V5_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 5');
+
+    await runMigrations(adapter);
+
+    const indexes = await adapter.query<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_download_queue'",
+    );
+    expect(indexes).toHaveLength(1);
+  });
+
+  it('is idempotent: queuePosition column appears exactly once after running twice', async () => {
+    await adapter.exec(SCHEMA_V5_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 5');
+
+    await runMigrations(adapter);
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = cols.map((c) => c.name);
+    expect(colNames.filter((n) => n === 'queuePosition')).toHaveLength(1);
+  });
+
+  it('does not throw when queuePosition already exists but user_version is stuck at 5', async () => {
+    await adapter.exec(`
+      CREATE TABLE IF NOT EXISTS download (
+        galleryId INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        thumbnail TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '{}',
+        pageCount INTEGER NOT NULL DEFAULT 0,
+        totalBytes INTEGER NOT NULL DEFAULT 0,
+        downloadedAt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'downloading',
+        folderName TEXT,
+        migratedAt TEXT,
+        lastError TEXT,
+        queuePosition INTEGER
+      )
+    `);
+    await adapter.exec('PRAGMA user_version = 5');
+
+    await expect(runMigrations(adapter)).resolves.toBeUndefined();
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    expect(new Set(cols.map((c) => c.name)).has('queuePosition')).toBe(true);
+  });
+
+  it('full upgrade from v3 lands v4, v5 and v6 columns', async () => {
+    await adapter.exec(SCHEMA_V3_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('folderName')).toBe(true);
+    expect(colNames.has('migratedAt')).toBe(true);
+    expect(colNames.has('lastError')).toBe(true);
+    expect(colNames.has('queuePosition')).toBe(true);
   });
 });

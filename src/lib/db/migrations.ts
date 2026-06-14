@@ -90,6 +90,24 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 6,
+    description: 'Add queuePosition column + queue index to download (download-queue foundation)',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+      // download table is created by migration v3; if it is somehow absent
+      // (PRAGMA returns no rows), there is nothing to alter — skip rather than
+      // fail with "no such table".
+      if (cols.length === 0) return;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has('queuePosition')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN queuePosition INTEGER');
+      }
+      await adapter.exec(
+        'CREATE INDEX IF NOT EXISTS idx_download_queue ON download(status, queuePosition)',
+      );
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

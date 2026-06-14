@@ -92,7 +92,7 @@ export interface DBGalleryImage {
   hash: string;
 }
 
-export type DownloadStatus = 'downloading' | 'complete' | 'failed';
+export type DownloadStatus = 'downloading' | 'complete' | 'failed' | 'queued' | 'paused';
 
 export interface DBDownload {
   galleryId: number;    // PK
@@ -107,6 +107,9 @@ export interface DBDownload {
   migratedAt?: string | null;
   /** Last failure reason (real error message), set when status is 'failed'. NULL otherwise. */
   lastError?: string | null;
+  /** Ordering position within the download queue. Set when status is 'queued'/'paused',
+   *  NULL when the row is not part of the queue (downloading/complete/failed). */
+  queuePosition?: number | null;
 }
 
 // === Database Initialization ===
