@@ -14,7 +14,7 @@ import type { DBDownload } from './schema';
 import { upsertDownload, getDownload, serializeTags } from './download';
 
 const SELECT_COLS =
-  'galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition';
+  'galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt';
 
 /** The metadata needed to create a queue entry for a gallery. */
 export interface EnqueueMeta {
@@ -53,10 +53,15 @@ async function maxQueuePosition(): Promise<number | null> {
  * row), it is updated in place to status 'queued' with the new position; its
  * partial pages and folderName are preserved by reading the existing row first.
  * Returns the assigned queuePosition.
+ *
+ * Auto-retry state (retryCount/nextRetryAt) is RESET by default: a manual retry
+ * or any plain (re-)queue gives the gallery a fresh set of automatic attempts.
+ * The scheduler's auto-requeue path passes `keepRetryState: true` so escalating
+ * backoff is preserved across automatic attempts (Task E).
  */
 export async function enqueueDownload(
   meta: EnqueueMeta,
-  opts: { userInitiated?: boolean } = {},
+  opts: { userInitiated?: boolean; keepRetryState?: boolean } = {},
 ): Promise<number> {
   const existing = await getDownload(meta.galleryId);
 
@@ -80,6 +85,11 @@ export async function enqueueDownload(
     // Clear any stale failure reason when (re-)queuing.
     lastError: null,
     queuePosition: position,
+    // Auto-retry bookkeeping: keep the escalating-backoff counter for an
+    // automatic requeue; reset it (fresh attempts) for a manual retry / plain
+    // enqueue. nextRetryAt is always cleared — the row is no longer 'failed'.
+    retryCount: opts.keepRetryState ? (existing?.retryCount ?? 0) : 0,
+    nextRetryAt: null,
   });
 
   return position;

@@ -110,6 +110,12 @@ export interface DBDownload {
   /** Ordering position within the download queue. Set when status is 'queued'/'paused',
    *  NULL when the row is not part of the queue (downloading/complete/failed). */
   queuePosition?: number | null;
+  /** Number of automatic restart attempts used so far for a 'failed' row.
+   *  NULL/0 = fresh (no auto-retry consumed yet). Reset to 0/NULL on manual retry. */
+  retryCount?: number | null;
+  /** ISO timestamp when the next automatic retry of a 'failed' row is due.
+   *  NULL when no auto-retry is scheduled (never failed, cap exhausted, or queued). */
+  nextRetryAt?: string | null;
 }
 
 // === Database Initialization ===

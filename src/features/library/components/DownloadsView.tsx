@@ -11,6 +11,7 @@ import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import { listLibraryDownloads, searchDownloads, deleteDownload, deserializeTags } from '@/lib/db/download';
 import { enqueueDownload } from '@/lib/db/download-queue';
+import { clearAutoRetry, AUTO_RETRY_MAX } from '@/lib/db/download-retry';
 import { processQueue, useDownloadProgressStore } from '@/lib/store/download-progress';
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
@@ -43,18 +44,29 @@ function formatBytes(bytes: number): string {
 function CoverBadge({
   status,
   progressLabel,
+  autoRetryLabel,
 }: {
   status: DBDownload['status'];
   progressLabel?: string | null;
+  /** When set on a failed row, shows the staged-auto-restart annotation
+   *  ("Auto-retry in <time> (attempt k/3)") in amber instead of a red Failed. */
+  autoRetryLabel?: string | null;
 }) {
   const t = useT();
   if (status === 'complete') return null;
 
   const isDownloading = status === 'downloading';
-  const colorClass = isDownloading ? 'bg-blue-600/90 text-white' : 'bg-red-600/90 text-white';
+  const isAutoRetry = !isDownloading && !!autoRetryLabel;
+  const colorClass = isDownloading
+    ? 'bg-blue-600/90 text-white'
+    : isAutoRetry
+      ? 'bg-amber-500/90 text-white'
+      : 'bg-red-600/90 text-white';
   const label = isDownloading
     ? (progressLabel ?? t('library.status.downloading'))
-    : t('library.status.failed');
+    : isAutoRetry
+      ? autoRetryLabel
+      : t('library.status.failed');
 
   return (
     <span
@@ -64,6 +76,54 @@ function CoverBadge({
       {label}
     </span>
   );
+}
+
+/**
+ * Format an ISO due-time into a short relative string ("30s", "5m") using the
+ * localized minute/second units. Returns null when the row is not awaiting an
+ * auto-retry (no future nextRetryAt, or the attempt cap is exhausted).
+ */
+function useAutoRetryLabel(item: DBDownload): string | null {
+  const t = useT();
+  const nextRetryAt = item.nextRetryAt;
+  const retryCount = item.retryCount ?? 0;
+  const pending = item.status === 'failed' && !!nextRetryAt && retryCount < AUTO_RETRY_MAX;
+
+  // Tick `now` every second so the countdown updates. Date.now() / setNow are
+  // called only inside timer callbacks (never synchronously in render or the
+  // effect body) to satisfy react-hooks purity + set-state-in-effect rules.
+  const [now, setNow] = useState<number>(0);
+  useEffect(() => {
+    if (!pending) return;
+    const prime = setTimeout(() => setNow(Date.now()), 0);
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      clearTimeout(prime);
+      clearInterval(id);
+    };
+  }, [pending]);
+
+  // now === 0 means the priming tick has not run yet (first paint); show the
+  // plain failed badge until the next frame supplies a real clock reading.
+  if (!pending || !nextRetryAt || now === 0) return null;
+
+  const msLeft = new Date(nextRetryAt).getTime() - now;
+  let timeStr: string;
+  if (msLeft <= 0) {
+    return t('library.retry.now') + ` (${t('library.retry.attempt').replace('{k}', String(retryCount)).replace('{max}', String(AUTO_RETRY_MAX))})`;
+  }
+  const totalSec = Math.ceil(msLeft / 1000);
+  if (totalSec >= 60) {
+    const min = Math.ceil(totalSec / 60);
+    timeStr = `${min}${t('library.retry.unit.minute')}`;
+  } else {
+    timeStr = `${totalSec}${t('library.retry.unit.second')}`;
+  }
+  const inStr = t('library.retry.autoIn').replace('{time}', timeStr);
+  const attemptStr = t('library.retry.attempt')
+    .replace('{k}', String(retryCount))
+    .replace('{max}', String(AUTO_RETRY_MAX));
+  return `${inStr} (${attemptStr})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +137,9 @@ interface LibraryCardProps {
   onRetry: (item: DBDownload) => void;
   isRetrying: boolean;
   retryProgress: DownloadProgress | null;
+  /** Live "auto-retry pending" state from the store, fresher than the DB row on
+   *  a just-failed item (the library-list query may not have refetched yet). */
+  retryOverride?: { retryAt?: string | null; attempt?: number | null } | null;
 }
 
 interface MenuAction {
@@ -160,10 +223,18 @@ function useDownloadedCoverUrl(galleryId: number): string | null {
   return data ?? null;
 }
 
-function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgress }: LibraryCardProps) {
+function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgress, retryOverride }: LibraryCardProps) {
   const t = useT();
   const isFailed = item.status === 'failed';
   const showDownloading = item.status === 'downloading' || isRetrying;
+
+  // The live store entry (retryOverride) is fresher than the DB row on a
+  // just-failed item, so prefer it for the auto-retry annotation.
+  const effectiveItem: DBDownload =
+    retryOverride?.retryAt
+      ? { ...item, nextRetryAt: retryOverride.retryAt, retryCount: retryOverride.attempt ?? item.retryCount }
+      : item;
+  const autoRetryLabel = useAutoRetryLabel(effectiveItem);
 
   // Prefer the locally downloaded first page (offline, no network) and fall back
   // to the network thumbnail when there is no local file (or on web).
@@ -228,7 +299,11 @@ function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgr
           {/* Status overlay (top-left) — a badge, not buttons. */}
           {(showDownloading || isFailed) && (
             <div className="absolute left-1.5 top-1.5">
-              <CoverBadge status={isFailed ? 'failed' : 'downloading'} progressLabel={progressLabel} />
+              <CoverBadge
+                status={isFailed ? 'failed' : 'downloading'}
+                progressLabel={progressLabel}
+                autoRetryLabel={isFailed && !isRetrying ? autoRetryLabel : null}
+              />
             </div>
           )}
 
@@ -414,6 +489,11 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     // in flight, so ignore a duplicate tap.
     if (storeEntries[item.galleryId]?.progress) return;
     try {
+      // Manual retry resets the auto-restart attempt counter — a fresh set of
+      // automatic attempts thereafter. enqueueDownload (default path) also
+      // resets it, but clear explicitly so the reset holds even if the enqueue
+      // is later changed, and clear the store's "retry pending" entry now.
+      await clearAutoRetry(item.galleryId);
       await enqueueDownload(
         {
           galleryId: item.galleryId,
@@ -423,6 +503,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         },
         { userInitiated: true },
       );
+      useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
       void processQueue();
     } catch (e) {
       console.error('Retry failed to enqueue:', e);
@@ -498,6 +579,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 onRetry={handleRetry}
                 isRetrying={isRetrying}
                 retryProgress={entry?.progress ?? null}
+                retryOverride={
+                  entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
+                }
               />
             );
           })}

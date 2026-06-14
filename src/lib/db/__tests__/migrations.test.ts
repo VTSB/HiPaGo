@@ -322,7 +322,7 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     await runMigrations(adapter);
 
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
-    expect(LATEST_VERSION).toBe(6);
+    expect(LATEST_VERSION).toBe(7);
   });
 
   it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {
@@ -568,5 +568,109 @@ describe('runMigrations: migration v6 adds queuePosition + queue index to downlo
     expect(colNames.has('migratedAt')).toBe(true);
     expect(colNames.has('lastError')).toBe(true);
     expect(colNames.has('queuePosition')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Migration v7: adds retryCount + nextRetryAt to download (staged auto-restart)
+// ---------------------------------------------------------------------------
+
+// Simulate a v6 DB: download table with all prior columns but no retry columns.
+const SCHEMA_V6_DOWNLOAD = `
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT,
+  lastError TEXT,
+  queuePosition INTEGER
+);
+`;
+
+describe('runMigrations: migration v7 adds retryCount + nextRetryAt to download', () => {
+  let adapter: PragmaTestAdapter;
+
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('adds retryCount and nextRetryAt columns when upgrading from v6', async () => {
+    await adapter.exec(SCHEMA_V6_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 6');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('retryCount')).toBe(true);
+    expect(colNames.has('nextRetryAt')).toBe(true);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+  });
+
+  it('is idempotent: retry columns appear exactly once after running twice', async () => {
+    await adapter.exec(SCHEMA_V6_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 6');
+
+    await runMigrations(adapter);
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = cols.map((c) => c.name);
+    expect(colNames.filter((n) => n === 'retryCount')).toHaveLength(1);
+    expect(colNames.filter((n) => n === 'nextRetryAt')).toHaveLength(1);
+  });
+
+  it('does not throw when retry columns already exist but user_version is stuck at 6', async () => {
+    await adapter.exec(`
+      CREATE TABLE IF NOT EXISTS download (
+        galleryId INTEGER PRIMARY KEY,
+        title TEXT NOT NULL,
+        thumbnail TEXT NOT NULL,
+        tags TEXT NOT NULL DEFAULT '{}',
+        pageCount INTEGER NOT NULL DEFAULT 0,
+        totalBytes INTEGER NOT NULL DEFAULT 0,
+        downloadedAt TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'downloading',
+        folderName TEXT,
+        migratedAt TEXT,
+        lastError TEXT,
+        queuePosition INTEGER,
+        retryCount INTEGER,
+        nextRetryAt TEXT
+      )
+    `);
+    await adapter.exec('PRAGMA user_version = 6');
+
+    await expect(runMigrations(adapter)).resolves.toBeUndefined();
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('retryCount')).toBe(true);
+    expect(colNames.has('nextRetryAt')).toBe(true);
+  });
+
+  it('full upgrade from v3 lands v4, v5, v6 and v7 columns', async () => {
+    await adapter.exec(SCHEMA_V3_DOWNLOAD);
+    await adapter.exec('PRAGMA user_version = 3');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    const colNames = new Set(cols.map((c) => c.name));
+    expect(colNames.has('folderName')).toBe(true);
+    expect(colNames.has('migratedAt')).toBe(true);
+    expect(colNames.has('lastError')).toBe(true);
+    expect(colNames.has('queuePosition')).toBe(true);
+    expect(colNames.has('retryCount')).toBe(true);
+    expect(colNames.has('nextRetryAt')).toBe(true);
   });
 });

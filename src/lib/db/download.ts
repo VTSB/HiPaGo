@@ -32,8 +32,8 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
   const db = await ensureDb();
   await db.execute(
     `INSERT OR REPLACE INTO download
-       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.galleryId,
       row.title,
@@ -47,6 +47,8 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
       row.migratedAt ?? null,
       row.lastError ?? null,
       row.queuePosition ?? null,
+      row.retryCount ?? null,
+      row.nextRetryAt ?? null,
     ],
   );
   await persistDb();
@@ -152,7 +154,7 @@ export async function deleteDownload(galleryId: number): Promise<void> {
 export async function getDownload(galleryId: number): Promise<DBDownload | null> {
   const db = await ensureDb();
   const rows = await db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition FROM download WHERE galleryId = ?',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt FROM download WHERE galleryId = ?',
     [galleryId],
   );
   return rows[0] ?? null;
@@ -164,7 +166,7 @@ export async function getDownload(galleryId: number): Promise<DBDownload | null>
 export async function listDownloads(): Promise<DBDownload[]> {
   const db = await ensureDb();
   return db.query<DBDownload>(
-    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition FROM download ORDER BY downloadedAt DESC',
+    'SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt FROM download ORDER BY downloadedAt DESC',
   );
 }
 
@@ -179,7 +181,7 @@ export async function listDownloads(): Promise<DBDownload[]> {
 export async function listLibraryDownloads(): Promise<DBDownload[]> {
   const db = await ensureDb();
   return db.query<DBDownload>(
-    `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition
+    `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
        FROM download
       WHERE status IN ('complete', 'downloading', 'failed')
       ORDER BY downloadedAt DESC`,
@@ -218,7 +220,7 @@ export async function searchDownloads(options: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition FROM download ${where} ORDER BY downloadedAt DESC`;
+  const sql = `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt FROM download ${where} ORDER BY downloadedAt DESC`;
 
   return db.query<DBDownload>(sql, params);
 }

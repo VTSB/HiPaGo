@@ -113,6 +113,13 @@ const translations = {
   'library.confirmDelete': { en: 'Delete this download?', ko: '이 다운로드를 삭제하시겠습니까?' },
   'library.retry': { en: 'Retry', ko: '재시도' },
   'library.retrying': { en: 'Retrying', ko: '재시도 중' },
+  // Staged auto-restart of failed downloads (Task E). `{time}`/`{k}`/`{max}` are
+  // interpolated by the caller (the t() helper does plain key lookup only).
+  'library.retry.autoIn': { en: 'Auto-retry in {time}', ko: '{time} 후 자동 재시도' },
+  'library.retry.attempt': { en: 'attempt {k}/{max}', ko: '시도 {k}/{max}' },
+  'library.retry.now': { en: 'Auto-retry imminent', ko: '곧 자동 재시도' },
+  'library.retry.unit.minute': { en: 'm', ko: '분' },
+  'library.retry.unit.second': { en: 's', ko: '초' },
   'library.errorPrefix': { en: 'Error', ko: '오류' },
   'library.more': { en: 'More actions', ko: '더보기' },
   'library.status.downloading': { en: 'Downloading', ko: '다운로드 중' },

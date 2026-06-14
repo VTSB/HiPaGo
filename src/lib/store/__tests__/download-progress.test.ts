@@ -91,6 +91,9 @@ vi.mock('@/lib/db/download-queue', () => ({
   }),
 }));
 
+// getDownload returns a row whose retryCount we can steer per-test (the genuine-
+// failure branch reads it to decide whether to schedule another auto-retry).
+const downloadRows = new Map<number, { retryCount: number }>();
 vi.mock('@/lib/db/download', () => ({
   getDownload: vi.fn(async (id: number) => ({
     galleryId: id,
@@ -100,9 +103,26 @@ vi.mock('@/lib/db/download', () => ({
     pageCount: 0,
     totalBytes: 0,
     downloadedAt: '',
-    status: 'downloading',
+    status: 'failed',
+    retryCount: downloadRows.get(id)?.retryCount ?? 0,
   })),
   deserializeTags: vi.fn(() => ({})),
+}));
+
+// Auto-retry helpers (Task E). scheduleAutoRetry records calls; the due-list +
+// earliest are steered per-test.
+const scheduled: { id: number; attempt: number; dueAt: string }[] = [];
+let dueRows: { galleryId: number; title: string; thumbnail: string; tags: string }[] = [];
+let earliest: string | null = null;
+vi.mock('@/lib/db/download-retry', () => ({
+  AUTO_RETRY_BACKOFF_MS: [30_000, 300_000, 1_800_000],
+  AUTO_RETRY_MAX: 3,
+  scheduleAutoRetry: vi.fn(async (id: number, attempt: number, dueAt: string) => {
+    scheduled.push({ id, attempt, dueAt });
+  }),
+  listDueAutoRetries: vi.fn(async () => dueRows),
+  earliestNextRetryAt: vi.fn(async () => earliest),
+  clearAutoRetry: vi.fn(async () => {}),
 }));
 
 vi.mock('@/lib/api/client', () => ({
@@ -141,6 +161,10 @@ beforeEach(async () => {
   removed.length = 0;
   enqueued.length = 0;
   adapterRows.length = 0;
+  scheduled.length = 0;
+  dueRows = [];
+  earliest = null;
+  downloadRows.clear();
   dl.mockReset();
   unmetered.mockReset();
   unmetered.mockResolvedValue(true);
@@ -233,6 +257,122 @@ describe('cancel (AC-005)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(removed).toContain(42);
+  });
+});
+
+// ── Auto-restart of failed downloads (Task E) ───────────────────────────────
+
+describe('auto-retry scheduling on genuine failure (AC-003)', () => {
+  it('schedules the next auto-retry on a genuine failure when attempts remain', async () => {
+    queue.push({ id: 1, pageCount: 0 });
+    downloadRows.set(1, { retryCount: 0 }); // fresh: 0 attempts used
+    dl.mockImplementationOnce(async () => {
+      throw new Error('boom');
+    });
+
+    await processQueue();
+
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].id).toBe(1);
+    expect(scheduled[0].attempt).toBe(1); // retryCount + 1
+    // Store entry surfaces the pending retry (retryAt + attempt).
+    const entry = useDownloadProgressStore.getState().entries[1];
+    expect(entry?.error).toBe('boom');
+    expect(entry?.retryAt).toBe(scheduled[0].dueAt);
+    expect(entry?.attempt).toBe(1);
+  });
+
+  it('escalates the attempt number from the existing retryCount', async () => {
+    queue.push({ id: 1, pageCount: 2 });
+    downloadRows.set(1, { retryCount: 1 }); // already used 1 auto-attempt
+    dl.mockImplementationOnce(async () => {
+      throw new Error('boom2');
+    });
+
+    await processQueue();
+
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].attempt).toBe(2);
+  });
+
+  it('does NOT schedule once the attempt cap (AUTO_RETRY_MAX) is reached', async () => {
+    queue.push({ id: 1, pageCount: 2 });
+    downloadRows.set(1, { retryCount: 3 }); // === AUTO_RETRY_MAX → exhausted
+    dl.mockImplementationOnce(async () => {
+      throw new Error('boom');
+    });
+
+    await processQueue();
+
+    expect(scheduled).toHaveLength(0);
+    // Plain failed entry, no retryAt.
+    const entry = useDownloadProgressStore.getState().entries[1];
+    expect(entry?.error).toBe('boom');
+    expect(entry?.retryAt == null).toBe(true);
+  });
+
+  it('does NOT schedule on a user cancel (AbortError)', async () => {
+    queue.push({ id: 1, pageCount: 2 });
+    downloadRows.set(1, { retryCount: 0 });
+    dl.mockImplementationOnce(async () => {
+      throw new DOMException('Aborted', 'AbortError');
+    });
+
+    await processQueue();
+
+    expect(scheduled).toHaveLength(0);
+  });
+});
+
+describe('auto-retry scheduler timer (AC-004)', () => {
+  it('fires due rows and re-enqueues them (keepRetryState) when unmetered', async () => {
+    vi.useFakeTimers();
+    try {
+      const { armAutoRetryTimer } = await import('../download-progress');
+      unmetered.mockResolvedValue(true);
+      // One row due ~30s out; the timer should fire it.
+      earliest = new Date(Date.now() + 30_000).toISOString();
+      dueRows = [{ galleryId: 77, title: 'G77', thumbnail: '/tn', tags: '{}' }];
+      dl.mockResolvedValue(undefined);
+
+      armAutoRetryTimer();
+      // Let the async earliestNextRetryAt() resolve so the timer is set.
+      await vi.advanceTimersByTimeAsync(0);
+      // Advance past the due time → handler fires.
+      await vi.advanceTimersByTimeAsync(31_000);
+      // Flush the fire handler's awaits.
+      await vi.advanceTimersByTimeAsync(0);
+
+      const autoRequeue = enqueued.find(
+        (e) => (e.meta as { galleryId: number }).galleryId === 77,
+      );
+      expect(autoRequeue).toBeTruthy();
+      expect((autoRequeue!.opts as { keepRetryState?: boolean }).keepRetryState).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds (does NOT re-enqueue) due rows when metered', async () => {
+    vi.useFakeTimers();
+    try {
+      const { armAutoRetryTimer } = await import('../download-progress');
+      unmetered.mockResolvedValue(false);
+      earliest = new Date(Date.now() + 30_000).toISOString();
+      dueRows = [{ galleryId: 88, title: 'G88', thumbnail: '/tn', tags: '{}' }];
+
+      armAutoRetryTimer();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const autoRequeue = enqueued.find(
+        (e) => (e.meta as { galleryId: number }).galleryId === 88,
+      );
+      expect(autoRequeue).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

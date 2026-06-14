@@ -108,6 +108,25 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    version: 7,
+    description:
+      'Add retryCount + nextRetryAt columns to download (staged auto-restart of failed downloads)',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+      // download table is created by migration v3; if it is somehow absent
+      // (PRAGMA returns no rows), there is nothing to alter — skip rather than
+      // fail with "no such table".
+      if (cols.length === 0) return;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has('retryCount')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN retryCount INTEGER');
+      }
+      if (!colNames.has('nextRetryAt')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN nextRetryAt TEXT');
+      }
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time
