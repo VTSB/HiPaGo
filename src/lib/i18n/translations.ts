@@ -63,6 +63,8 @@ const translations = {
   },
   'detail.invalidId': { en: 'Invalid gallery ID', ko: '잘못된 갤러리 ID' },
   'detail.download': { en: 'Download', ko: '다운로드' },
+  'detail.downloaded': { en: 'Downloaded', ko: '다운로드됨' },
+  'detail.redownload': { en: 'Download again', ko: '다시 다운로드' },
   'detail.copyId': { en: 'Copy ID', ko: 'ID 복사' },
   'detail.copied': { en: 'ID copied!', ko: 'ID 복사됨!' },
 
