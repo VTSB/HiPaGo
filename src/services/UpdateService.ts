@@ -132,7 +132,18 @@ async function checkAndroid(): Promise<CheckResult> {
 
 async function checkIos(): Promise<CheckResult> {
   // iOS sideload cannot self-install: surface a release URL only.
-  const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`);
+  //
+  // `cache: 'no-store'` is REQUIRED. With the default fetch cache mode the
+  // WKWebView HTTP cache honours GitHub's `Cache-Control: ... max-age` on
+  // /releases/latest, so a manual "Check for updates" tap inside the same app
+  // session keeps replaying the FIRST response of that session (e.g. taken
+  // before the release was published) — the update only appears after an app
+  // restart clears the in-process cache. A user-initiated check must always hit
+  // the network fresh.
+  const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/vnd.github+json', 'Cache-Control': 'no-cache' },
+  });
   if (!res.ok) return { available: false };
   const json = (await res.json()) as { tag_name?: string; html_url?: string; body?: string };
   const tag = json.tag_name;

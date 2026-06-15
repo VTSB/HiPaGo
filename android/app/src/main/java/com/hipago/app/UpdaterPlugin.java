@@ -66,6 +66,13 @@ public class UpdaterPlugin extends Plugin {
                 URL url = new URL("https://api.github.com/repos/" + owner + "/" + repo + "/releases/latest");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
+                // A user-initiated "Check for updates" must always hit the network
+                // fresh — never serve a cached "no newer version" body that only
+                // clears on app restart. Disable any HTTP response cache (a default
+                // one is absent today but may be installed later / by some OEMs) and
+                // ask intermediaries to revalidate.
+                conn.setUseCaches(false);
+                conn.setRequestProperty("Cache-Control", "no-cache");
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(15000);
 

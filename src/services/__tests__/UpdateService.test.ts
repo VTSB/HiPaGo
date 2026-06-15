@@ -45,6 +45,36 @@ beforeEach(() => {
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
+describe('UpdateService iOS check bypasses the HTTP cache', () => {
+  // Regression: a manual "Check for updates" must hit the network fresh.
+  // With the default fetch cache mode the WKWebView replays the first cached
+  // /releases/latest response of the session, so a newly published release only
+  // appears after an app restart. checkIos() must pass cache: 'no-store'.
+  beforeEach(() => {
+    (window as unknown as { Capacitor?: unknown }).Capacitor = { getPlatform: () => 'ios' };
+  });
+
+  it('fetches releases/latest with cache: no-store', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ tag_name: 'v999.0.0', html_url: 'https://gh/r', body: 'notes' }),
+    })) as unknown as typeof fetch;
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await UpdateService.checkForUpdate();
+
+    expect(res.available).toBe(true);
+    expect(res.version).toBe('999.0.0');
+    expect(res.releaseUrl).toBe('https://gh/r');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = (fetchMock as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0];
+    expect(init?.cache).toBe('no-store');
+
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('UpdateService Android download progress', () => {
   it('forwards downloadProgress events to onProgress and removes the listener on success', async () => {
     const d = deferred<{ status: 'installer_started' }>();
