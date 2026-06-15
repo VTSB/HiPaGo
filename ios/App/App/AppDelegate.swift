@@ -1,6 +1,5 @@
 import UIKit
 import Capacitor
-import BackgroundTasks
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -8,27 +7,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Task D — register the best-effort background download task BEFORE the
-        // launch sequence finishes. iOS requires every BGTaskScheduler identifier
-        // to be registered during `didFinishLaunchingWithOptions` (and declared in
-        // Info.plist `BGTaskSchedulerPermittedIdentifiers`); registering later — or
-        // submitting an unregistered/undeclared identifier — throws. The launch
-        // handler simply forwards the granted `BGProcessingTask` to
-        // DownloadBackgroundTask (see DownloadBackgroundTask.swift).
-        BGTaskScheduler.shared.register(
-            forTaskWithIdentifier: DownloadBackgroundTask.taskIdentifier,
-            using: nil
-        ) { task in
-            // The system only ever hands us a BGProcessingTask for this identifier
-            // (we submit a BGProcessingTaskRequest). Guard the cast so a future
-            // misconfiguration fails the task cleanly instead of crashing.
-            if let processingTask = task as? BGProcessingTask {
-                DownloadBackgroundTask.shared.run(task: processingTask)
-            } else {
-                task.setTaskCompleted(success: false)
-            }
-        }
-
         // Override point for customization after application launch.
         return true
     }

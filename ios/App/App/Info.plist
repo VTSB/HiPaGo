@@ -45,35 +45,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<!--
-	  Task D (iOS best-effort background download).
-
-	  UIBackgroundModes / `processing` lets iOS run our registered
-	  BGProcessingTask ("com.hipago.app.download") while the app is backgrounded,
-	  so pending gallery downloads can make best-effort progress via the Rust
-	  bypass core (see DownloadBackgroundTask.swift / DownloadWorkerPlugin.swift).
-	  `fetch` is added so a short BGAppRefreshTask-style opportunistic window can
-	  also kick the same scheduler if the OS prefers to grant that instead.
-
-	  BGTaskSchedulerPermittedIdentifiers MUST list every identifier we submit to
-	  BGTaskScheduler — iOS rejects (and crashes on register of) any identifier
-	  not declared here. It must match the constant used in AppDelegate.register
-	  and DownloadBackgroundTask.taskIdentifier exactly.
-
-	  DEVICE-PENDING: the Xcode project's "Background Modes" *capability*
-	  (Signing & Capabilities → Background Modes → Background processing /
-	  Background fetch) must ALSO be enabled in the .xcodeproj — that toggle is a
-	  build-setting/entitlement that cannot be set from this Info.plist alone and
-	  cannot be configured in the sandbox. Verify it on-device during QA.
-	-->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>processing</string>
-		<string>fetch</string>
-	</array>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.hipago.app.download</string>
-	</array>
 </dict>
 </plist>
