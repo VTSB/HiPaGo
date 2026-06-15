@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { GalleryBlockType, type TagType } from '@/lib/utils/types';
 import { tagFromGalleryEntry, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { AbortableImage } from '@/shared/components/AbortableImage';
-import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
+import { resolveThumbnailUrl, toBigThumbnailUrl } from '@/lib/api/url-resolver';
 import { useGalleryBlock } from '../hooks/useGalleryBlock';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
@@ -92,6 +92,15 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     return all;
   }, [block.tags, block.type]);
 
+  // Prefer the BIG thumbnail (hitomi list markup serves the small one); fall back
+  // to the small URL if the big variant fails to load (toBigThumbnailUrl).
+  const smallThumb = block.thumbnail ? resolveThumbnailUrl(block.thumbnail) : '';
+  const bigThumb = toBigThumbnailUrl(smallThumb);
+  const [thumbSrc, setThumbSrc] = useState(bigThumb);
+  useEffect(() => {
+    setThumbSrc(bigThumb);
+  }, [bigThumb]);
+
   if (block.type === GalleryBlockType.LOADING) {
     return <CardSkeleton />;
   }
@@ -128,14 +137,20 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:bg-zinc-800 sm:hover:shadow-lg">
         {block.thumbnail ? (
           <AbortableImage
-            src={resolveThumbnailUrl(block.thumbnail)}
+            src={thumbSrc}
             alt={block.title}
             draggable={false}
             className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`}
             loading="lazy"
             onPermanentError={() => {
-              // Thumbnail URL is stale/dead — invalidate the block cache so it re-fetches with fresh URL
-              queryClient.invalidateQueries({ queryKey: ['gallery-block', block.id] });
+              if (thumbSrc !== smallThumb && smallThumb) {
+                // Big thumbnail variant not available — fall back to the small one.
+                setThumbSrc(smallThumb);
+              } else {
+                // Small thumbnail also dead — URL is stale; invalidate the block
+                // cache so it re-fetches with a fresh URL.
+                queryClient.invalidateQueries({ queryKey: ['gallery-block', block.id] });
+              }
             }}
           />
         ) : (
