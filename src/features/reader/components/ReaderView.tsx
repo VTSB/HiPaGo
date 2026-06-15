@@ -116,12 +116,14 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
         ? Array.from({ length: offlineCount }, (_, i) => ({
             name: '',
             hash: `offline-${i}`,
-            width: 0,
-            height: 0,
+            // Real aspect ratio read from the downloaded image bytes (offline.dims);
+            // 0/0 only if a page's dims couldn't be decoded → natural-size fallback.
+            width: offline.dims?.[i]?.width ?? 0,
+            height: offline.dims?.[i]?.height ?? 0,
             types: new Set<ImageType>(),
           }))
         : reader.images,
-    [offlineCount, reader.images],
+    [offlineCount, reader.images, offline.dims],
   );
 
   // Seed the reader store from the manifest so totalPages / navigation / the
