@@ -9,6 +9,7 @@ import { tagFromGalleryEntry, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { resolveThumbnailUrl, toBigThumbnailUrl } from '@/lib/api/url-resolver';
+import { getImageCache } from '@/lib/cache/image-cache';
 import { useGalleryBlock } from '../hooks/useGalleryBlock';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
@@ -92,14 +93,32 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     return all;
   }, [block.tags, block.type]);
 
-  // Prefer the BIG thumbnail (hitomi list markup serves the small one); fall back
-  // to the small URL if the big variant fails to load (toBigThumbnailUrl).
+  // Use the BIG image only if it is ALREADY in the persistent image cache (e.g.
+  // cached after viewing the detail page) — served from disk, no network. Never
+  // fetch the big variant over the network for the list; otherwise show small.
   const smallThumb = block.thumbnail ? resolveThumbnailUrl(block.thumbnail) : '';
   const bigThumb = toBigThumbnailUrl(smallThumb);
-  const [thumbSrc, setThumbSrc] = useState(bigThumb);
+  // Holds the big URL once confirmed cached FOR THE CURRENT bigThumb. Derived
+  // thumbSrc falls back to small whenever it doesn't match (block change / miss),
+  // so the effect never calls setState synchronously.
+  const [cachedBig, setCachedBig] = useState<string | null>(null);
+  const thumbSrc = bigThumb && cachedBig === bigThumb ? bigThumb : smallThumb;
   useEffect(() => {
-    setThumbSrc(bigThumb);
-  }, [bigThumb]);
+    if (!bigThumb || bigThumb === smallThumb) return;
+    let cancelled = false;
+    // Hit-only cache lookup (fileUrl never downloads). Prefer a cached big image.
+    getImageCache()
+      .then((cache) => cache.fileUrl(bigThumb))
+      .then((hit) => {
+        if (!cancelled && hit) setCachedBig(bigThumb);
+      })
+      .catch(() => {
+        /* cache unavailable → keep the small thumbnail */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [smallThumb, bigThumb]);
 
   if (block.type === GalleryBlockType.LOADING) {
     return <CardSkeleton />;
@@ -144,8 +163,8 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
             loading="lazy"
             onPermanentError={() => {
               if (thumbSrc !== smallThumb && smallThumb) {
-                // Big thumbnail variant not available — fall back to the small one.
-                setThumbSrc(smallThumb);
+                // The cached big image failed to load — drop back to the small one.
+                setCachedBig(null);
               } else {
                 // Small thumbnail also dead — URL is stale; invalidate the block
                 // cache so it re-fetches with a fresh URL.
