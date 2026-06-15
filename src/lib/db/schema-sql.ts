@@ -102,5 +102,11 @@ CREATE TABLE IF NOT EXISTS download (
 );
 CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt);
 CREATE INDEX IF NOT EXISTS idx_download_status ON download(status);
-CREATE INDEX IF NOT EXISTS idx_download_queue ON download(status, queuePosition);
+-- NOTE: idx_download_queue references queuePosition, a migration-added column
+-- (migration v6). SCHEMA_SQL runs BEFORE runMigrations, so on an upgrade the
+-- pre-existing 'download' table has no queuePosition yet and this index would
+-- fail with "no such column: queuePosition", aborting DB init and breaking the
+-- app after update. The index is created idempotently by migration v6 (which
+-- guarantees the column first), covering both fresh installs and upgrades.
+-- Do NOT add indexes on migration-added columns here.
 `;
