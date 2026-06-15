@@ -239,6 +239,12 @@
     "attempts": 1,
     "reason": "confidence is none; no reliable Korean localized character name found"
   },
+  "character:aromalilith rosemary": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 확립된 한국어 표기를 확인하기 어려워 음역 처리함"
+  },
   "character:arsalan": {
     "tried": "2026-06-08",
     "verdict": "REJECT",
@@ -881,6 +887,12 @@
     "attempts": 1,
     "reason": "confidence is none; no Korean localized character name was found"
   },
+  "character:dermail catalonia": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 원전과 확립 표기가 불명확해 음역 표기는 검토 필요"
+  },
   "character:deux murasame": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -1450,6 +1462,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:gobbles": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 음역은 가능하지만 어떤 작품의 캐릭터인지 맥락이 부족해 확립 표기 여부를 확인할 수 없습니다."
   },
   "character:goemon hachisuka": {
     "tried": "2026-06-08",
@@ -5500,6 +5518,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"타이세이 오나리\" already used by character:taisei oonari in the same category"
   },
+  "character:taiyi gengchen": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Chinese romanized proper noun is transliterated, but exact established Korean reading could not be verified from the tag alone."
+  },
   "character:taketo aida": {
     "tried": "2026-06-08",
     "verdict": "_NEEDS_REVIEW",
@@ -5817,6 +5841,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:ult": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Short proper noun is ambiguous and the exact established Korean name is unverifiable from the tag alone."
   },
   "character:ume": {
     "tried": "2026-06-14",
@@ -12954,11 +12984,587 @@
     "attempts": 1,
     "reason": "confidence none; no official Korean localized series title found"
   },
+  "tag:&#39;00.5.5.shounen-kei!!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "날짜/이벤트명처럼 보이나 shounen-kei의 정확한 고유명 여부가 불명확합니다."
+  },
+  "tag:(uten plus": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이는 태그를 음역했지만 입력에 여는 괄호만 있어 원 표기 확인이 필요합니다."
+  },
+  "tag:0828# chou airboo natsu 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기 고유명사 조합으로 추정되지만 chou/airboo/natsu의 정확한 공식 표기를 확인하기 어렵습니다."
+  },
+  "tag:0[ind]butagoya (kemigawa mondo": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "괄호가 닫히지 않은 불완전한 태그이며 고유명 확인이 어렵습니다."
+  },
+  "tag:101": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "숫자 전용 태그라 번역할 의미 요소가 없어 원문 유지가 적절합니다."
+  },
+  "tag:1010 # airboo 2021": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "숫자와 고유명사 조합으로 추정되지만 airboo의 공식 한국어 표기를 확인하기 어렵습니다."
+  },
+  "tag:105": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "숫자 전용 태그라 번역할 의미 요소가 없어 원문 유지가 적절합니다."
+  },
+  "tag:106": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "숫자 전용 태그라 번역할 의미 요소가 없어 원문 유지가 적절합니다."
+  },
+  "tag:13*∞": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "기호식 태그로 의미를 안정적으로 한국어화할 수 없어 원문 유지가 적절함"
+  },
+  "tag:18master": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명 또는 계정/작품명일 가능성이 있어 음역은 가능하지만 의미 검증이 필요함"
+  },
+  "tag:1995 nen haru revo": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어식 제목으로 보이며 '1995년 봄'은 해석 가능하나 revo의 정체가 불명확함"
+  },
+  "tag:19980614": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Numeric-only date/code tag should remain untranslated."
+  },
+  "tag:2 bounties 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품명 또는 말장난일 가능성이 있어 단순 음역 적용 전 확인이 필요함"
+  },
+  "tag:20080131": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "날짜/숫자 식별자 태그로 번역 대상이 아니며 원문 유지가 적절함"
+  },
+  "tag:2011-03": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "날짜/숫자 식별자 태그로 번역 대상이 아니며 원문 유지가 적절함"
+  },
+  "tag:2011-05": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "날짜/숫자 식별자 태그로 번역 대상이 아니며 원문 유지가 적절함"
+  },
+  "tag:20120204": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "날짜/숫자 식별자 태그로 번역 대상이 아니며 원문 유지가 적절함"
+  },
+  "tag:2018 fusou-kai no senkou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어식 제목으로 추정되며 가능한 번역은 있으나 고유명/공식 표기 확인이 필요함"
+  },
+  "tag:2023ace": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "알파벳 약어 또는 고유 식별자일 가능성이 있어 의미를 확인해야 합니다."
+  },
+  "tag:2023aga": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "aga의 의미가 불명확한 약어 또는 고유명사일 가능성이 있어 확인이 필요합니다."
+  },
+  "tag:2024 beastages": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "beastages가 고유명사로 보이며 확립된 한국어 표기를 확인해야 합니다."
+  },
+  "tag:3": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "숫자만 있는 태그이므로 번역하지 않는 것이 적절합니다."
+  },
+  "tag:3-tsu kazoete sono mirai e 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 구문 또는 작품명일 수 있어 자연어 번역 적용 전 맥락 확인이 필요합니다."
+  },
+  "tag:3000krw": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"3,000원\" already used by tag:3000 krw in the same category"
+  },
+  "tag:3sh moyo": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unclear proper noun or stylized tag; transliteration is possible but meaning is not verifiable."
+  },
+  "tag:40010prototype": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "숫자 코드와 prototype이 결합된 고유 식별자일 가능성이 있어 확인이 필요합니다."
+  },
+  "tag:442b": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "알파벳과 숫자로 된 코드형 태그이므로 번역하지 않는 것이 적절합니다."
+  },
+  "tag:45th root 4 to 5": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미가 불명확한 이벤트명 또는 고유명으로 보이며 직역 적용 전 확인이 필요합니다."
+  },
+  "tag:5 with u... 02": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "축약과 말줄임표가 포함된 고유명으로 보이며 정확한 의도 확인이 필요합니다."
+  },
+  "tag:6teki no jishuren!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "6teki의 정확한 읽기와 의미가 불확실해 음역 기반 번역은 검토 필요"
+  },
+  "tag:7ten paoki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "불명확한 고유명 음역으로, 원 표기 의도 확인이 필요합니다."
+  },
+  "tag:80085 夏威夷地獄狗阿明": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "한자 고유명과 숫자가 섞인 태그로, 의미 번역과 고유명 음역의 정확성 확인이 필요합니다."
+  },
+  "tag:81": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "숫자만 있는 태그라 번역 대상이 아니며 원문 유지가 적절합니다."
+  },
+  "tag:8wora": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미나 원어가 불명확한 고유명으로 보이며 음차만 가능해 확인이 필요합니다."
+  },
+  "tag:9kv lan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "약어와 고유명이 섞인 불명확한 태그로, lan의 의미 확인이 필요합니다."
+  },
+  "tag:@white12071997": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "사용자 핸들/계정명으로 보이며 번역하지 않고 원문 유지가 적절합니다."
+  },
+  "tag:[hiro] xìng zhuǎng de lì yīyàng kěyǐ ài ài(sk8 the infinity": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "중국어 병음으로 보이나 원문 한자와 의미 확인이 어려워 음역만으로는 검증이 필요함"
+  },
+  "tag:[kiku-ka fuki zoku[fuki notowoko]] ni ~yota yashiki-san! !i(sk8 the infinity": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기가 깨지거나 불완전해 정확한 의미 확인이 필요함"
+  },
+  "tag:[toraweb] relafeslover&#39;sday": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "HTML 엔티티와 합성어가 포함된 제목으로 원래 표기 확인이 필요함"
+  },
   "tag:[青いストロー] たび": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:a kyō": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기 고유명으로 보이나 정확한 한국어 표기 확인이 필요합니다."
+  },
+  "tag:a o tsuba-me] [web sairoku] mayonaka (bna: brand new animal": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "입력 태그가 괄호와 구분자가 깨진 형태라 정확한 고유명/제목 확인이 필요함"
+  },
+  "tag:a3": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "약어형 고유명사로 번역하지 않고 원문 표기를 유지하는 것이 적절함."
+  },
+  "tag:a40": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "영문자와 숫자로 된 코드형 태그라 번역하지 않고 유지하는 것이 적절함"
+  },
+  "tag:abandonne": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "프랑스어 일반어일 수도 있고 고유명일 수도 있어 의미 번역 여부 확인이 필요함"
+  },
+  "tag:abc 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "ABC가 약어인지 고유 이벤트명인지 의미를 확인하기 어려워 보존 표기만 제안합니다."
+  },
+  "tag:abc 5": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "약어 태그라 의미를 확인할 수 없어 번역하지 않는 것이 안전함"
+  },
+  "tag:abcd!": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "알파벳 약어/제목형 태그라 번역하지 않고 원문 유지가 적절함"
+  },
+  "tag:abe inoried gu da ♀ log ( 8": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "입력 태그가 깨진 문장처럼 보여 정확한 원문 확인이 필요함"
+  },
+  "tag:abnormalcomicday!4": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"어브노멀 코믹 데이! 4\" already used by tag:abnormal comic day! 4 in the same category"
+  },
+  "tag:ac": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 약어로 의미가 불명확해 안전하게 확정하기 어렵습니다."
+  },
+  "tag:ac2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 약어라 특정 작품, 행사, 장르 등을 확정하기 어려워 원문 보존 외 번역 적용은 검토가 필요합니다."
+  },
+  "tag:ac3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 약어형 고유명사로 정확한 확장명이나 행사명을 확인하기 어려움"
+  },
+  "tag:accter": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "오탈자 또는 고유명 여부가 불명확해 음역 적용 전 확인이 필요함"
+  },
+  "tag:act-fanser": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 조어로 보이며 검증 가능한 정식 한국어명이 불명확합니다."
+  },
+  "tag:affect 3d": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목 또는 브랜드성 태그로 보이며 의미 번역보다 음역이 적절할 수 있으나 정식 명칭 확인이 필요합니다."
+  },
+  "tag:aftermatch function 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유 제목으로 보이며 정식 한국어명이 확인되지 않아 음역 처리했습니다."
+  },
+  "tag:agentmeeting7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 시리즈명으로 보이며 띄어쓰기와 정식 표기가 불명확합니다."
+  },
+  "tag:agero": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "단독 로마자 표기로 의미형 번역인지 고유명 음역인지 확인이 필요함"
+  },
+  "tag:aggregate 05": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유 제목 또는 시리즈명으로 보이며 정식 한국어명이 확인되지 않았습니다."
+  },
+  "tag:ai to iu na no imi o oshiete": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기로 보이나 ai가 이름, 사랑, AI 중 무엇인지 모호해 음역 처리했습니다."
+  },
+  "tag:air comike 2": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"에어 코미케 2\" already used by tag:air comiket 2 in the same category"
+  },
+  "tag:aisa re kitsu! jb2024": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "문구 구조와 고유명 여부가 불명확해 확정 적용 전 확인이 필요함"
+  },
+  "tag:aishi inorishi.": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기만으로 원문 한자/의미 확인이 어려워 음역은 가능하지만 확정 번역은 검토 필요함"
+  },
+  "tag:aishi no oshiego dr2021": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 제목으로 보이나 정확한 공식 표기와 문맥 확인이 필요합니다."
+  },
+  "tag:aishi no oshiego dr2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "aishi의 원문 의미가 불명확해 번역이 불확실하며 dr2023 접미사만 보존됨"
+  },
+  "tag:aishi no oshiego hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품명으로 보이나 고유명사와 제목 표기의 공식 한국어명을 확인할 수 없어 검토가 필요합니다."
+  },
+  "tag:aisubeki idol de sushi!! 3sarame": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 말장난 또는 작품 제목으로 보이며 자연 번역은 가능하지만 공식 표기 확인이 필요합니다."
+  },
+  "tag:akai kono heart dr2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 구문이 불완전하고 dr2022의 의미가 불명확해 확인 필요"
+  },
+  "tag:akaihoho ]": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 닫는 대괄호만 포함된 형태가 비정상적이라 확인 필요"
+  },
+  "tag:akaihoho ]ten&#39;nyūsei-kun wa inokorida yo ne?": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사와 제목이 붙은 듯한 비정상 형식이며 HTML 엔티티와 괄호가 포함되어 확인 필요"
+  },
+  "tag:akatsuki no utage san": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아카츠키의 연회 3\" already used by tag:akatsuki no utage 3 in the same category"
+  },
+  "tag:aoi] siren (bleach": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Tag appears malformed with unmatched bracket/parenthesis, so translation should be reviewed before applying."
+  },
+  "tag:aqua atrium [mizutani] giru-kun to onsen de higoro no tsukare o iyasu hanashi.(fate/grand order": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Long work/title tag with creator and franchise markers plus malformed punctuation; translation is plausible but should be reviewed."
+  },
+  "tag:arcade vg ss": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "vg와 ss 약어의 의미가 불명확해 부분 번역만으로는 안전 적용 여부를 판단하기 어렵습니다."
+  },
+  "tag:are ga yattsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 구절로 보이나 원제 의도와 표기가 모호해 확인이 필요합니다."
+  },
+  "tag:arino to watari": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Looks like a Japanese proper noun or title; transliteration is plausible but exact reference is ambiguous."
+  },
+  "tag:arishi hi yo, junzentare jb 2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a specific Japanese title/event string; transliteration is safe but exact official Korean title is unverifiable."
+  },
+  "tag:arittake no yume o misete 5": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Japanese title phrase translated semantically, but official title context is ambiguous and should be reviewed."
+  },
+  "tag:asa yohoki y fellatrix": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "복합 고유명사로 보이나 구성 요소와 의도가 불명확해 검토가 필요합니다."
+  },
+  "tag:asagamisai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "행사명 또는 고유명으로 보이나 공식 표기와 분절을 확인할 수 없어 검토가 필요합니다."
+  },
+  "tag:asou kiyokoi]5/ 3 supakomi shinkan/ ichiruki umi-gaku paro 〔r 18〕 (bleach": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "태그가 긴 작품 설명처럼 보이고 괄호·기호가 손상된 형태라 의미와 경계를 검증하기 어렵습니다."
+  },
+  "tag:asuwawagami dabuki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified romanized proper noun; transliteration is plausible but not confirmable."
+  },
+  "tag:atamawari dayo! hikasen shuugou 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "이벤트명으로 보이나 hikasen 등 팬덤 용어의 공식 한국어 표기를 확인할 수 없어 검토가 필요합니다."
+  },
+  "tag:atelirhachihukuan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanization appears irregular or possibly misspelled; transliteration is uncertain."
+  },
+  "tag:au79": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Alphanumeric identifier/code tag has no semantic Korean translation and should remain unchanged."
+  },
+  "tag:aue oka": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely proper noun but word order and origin are ambiguous; transliteration may need human verification."
+  },
+  "tag:authorbrendong": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Compound username/tag with semantic prefix and proper-name component; Korean rendering may not match intended tag convention."
+  },
+  "tag:ax2015": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Alphanumeric event/code-like tag has no clear semantic Korean translation and should remain unchanged."
+  },
+  "tag:ayameru toki mo sukuitaru toki mo hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품/이벤트명으로 보이나 원문 표기와 의미가 확정되지 않아 음역 적용 전 검토가 필요합니다."
+  },
+  "tag:azuki mayo don dr2021": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "여러 고유명 요소가 결합된 태그로 보이나 정확한 분절과 의미가 불명확해 검토가 필요합니다."
+  },
+  "tag:azulan gakuen koubaibu 12": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Mixed romanized Japanese/event-style name; semantic translation is plausible but source identity is uncertain."
+  },
+  "tag:azulan gakuen koubaibu 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 azulan의 공식 한국어 표기가 불확실합니다."
+  },
+  "tag:azulan musou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "azulan의 원 표기와 공식 한국어 표기가 불확실해 검토가 필요합니다."
+  },
+  "tag:azulan musou 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a proper noun/event title; transliteration is plausible but not independently verified."
+  },
+  "tag:azulan musou 5": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품/행사명으로 보이나 azulan의 원표기 확인이 어려워 검토가 필요합니다."
+  },
+  "tag:azuma minatu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "인명 또는 서클명으로 보이나 minatu의 정확한 한국어 표기 확인이 필요함"
   },
   "tag:beat4u!": {
     "tried": "2026-06-14",
@@ -12972,11 +13578,107 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:bisuke] `mutsugoto&#39; hakuyona(akatsuki no yona": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "여러 고유명과 불완전한 괄호가 섞인 태그라 정확한 분절과 공식 표기 확인 필요"
+  },
   "tag:bjcd7": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:bna_v5": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Versioned identifier/code-like tag; safest to keep unchanged."
+  },
+  "tag:boderline osaka 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely proper event/title tag, but source appears misspelled or ambiguous; transliteration may need confirmation."
+  },
+  "tag:bokennosho. 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese proper title is ambiguous; transliteration preserves the tag but should be reviewed."
+  },
+  "tag:boku dake ni kikasete rinki no melody dr2021": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Long romanized Japanese proper title is ambiguous; transliteration preserves the tag but should be reviewed."
+  },
+  "tag:boku-tachi ni kyoumi ga aru no? 4senme": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 제목의 의미는 추정 가능하지만 4senme의 정확한 행사 표기 관례가 불확실합니다."
+  },
+  "tag:bokura no grandorder": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"우리들의 그랜드 오더\" already used by tag:bokura no grand order in the same category"
+  },
+  "tag:bokura no love live! [zuisetsu] kuro serra fuku ga mi tain da yo !(lovelive! hasunosora jogakuin school idol club": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "긴 태그가 괄호 미종결 상태이고 'serra/mi tain'처럼 오탈자 가능성이 있어 원문 확인이 필요함."
+  },
+  "tag:bokutachi chou shinkakei 2019": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "shinkakei의 원어 표기와 의미가 불명확해 음역으로 처리했으나 확정 번역은 검토 필요"
+  },
+  "tag:bokutachi shinkakei": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "shinkakei의 원어 표기와 의미가 불명확해 음역으로 처리했으나 확정 번역은 검토 필요"
+  },
+  "tag:bokutachi shinkakei 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "shinkakei의 원어 표기와 의미가 불명확해 음역으로 처리했으나 확정 번역은 검토 필요"
+  },
+  "tag:bokutachi shinkakei vg2025": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "shinkakei 및 vg2025의 정확한 고유명사 표기가 확인되지 않아 검토 필요"
+  },
+  "tag:bon][[tsukika yūsei 6] shinkan sanpuru 1 (bishoujo senshi sailor moon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "태그 문자열이 괄호와 구분자 면에서 손상된 형태이며 일부만 의미가 명확함"
+  },
+  "tag:bonjou no souzoushyu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "souzoushyu는 창조주로 해석 가능하지만 bonjou의 원어 표기가 확실하지 않아 검토 필요"
+  },
+  "tag:bonjou no souzoushyu 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "souzoushyu는 창조주로 해석 가능하지만 bonjou의 원어 표기가 확실하지 않아 검토 필요"
+  },
+  "tag:boost !": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"부스트!\" already used by tag:boost! in the same category"
   },
   "tag:btb-25": {
     "tried": "2026-06-14",
@@ -13037,6 +13739,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:c104 [elheart&#39;s (ibuki pon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Truncated or malformed title/proper-noun tag; transliteration is only a draft."
   },
   "tag:c105": {
     "tried": "2026-06-14",
@@ -13211,6 +13919,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:c4-621": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "식별자/코드형 태그라 번역하지 않고 원문 유지가 적절함."
   },
   "tag:c40": {
     "tried": "2026-06-14",
@@ -13475,6 +14189,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:c82 [nwa] neo-queendom vol.6 [zunta] - she&#39;s lost control (english": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Mixed proper title and descriptor with truncated parenthesis; translation should be verified before applying."
   },
   "tag:c83": {
     "tried": "2026-06-14",
@@ -14250,6 +14970,102 @@
     "attempts": 1,
     "reason": "duplicate translation \"키마이라\" already used by tag:kimaira in the same category"
   },
+  "tag:chinetsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized term or proper noun; transliteration is not independently verifiable."
+  },
+  "tag:chinmi chinmi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely proper noun or romanized name; transliteration is not independently verifiable."
+  },
+  "tag:chinpero": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely romanized proper noun; transliteration is not independently verifiable."
+  },
+  "tag:chinpoki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely romanized proper noun; transliteration is not independently verifiable."
+  },
+  "tag:chinzuriina": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "낮은 빈도의 고유명사/조어로 보이나 원어 의미 확인이 어려워 검토 필요"
+  },
+  "tag:chiraket": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely romanized proper noun; transliteration is not independently verifiable."
+  },
+  "tag:chishikan! kyoudou sakusen no jikan desu! 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "문장형 제목의 의미는 대체로 해석되지만 chishikan의 정체가 불명확합니다."
+  },
+  "tag:chitei no dokushin saiban": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 의미 번역은 가능하지만 원제 표기와 맥락 확인이 필요합니다."
+  },
+  "tag:chitsu kara liver": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자만으로 원어와 의도가 불명확해 의미 번역을 확정하기 어려움."
+  },
+  "tag:cho open the gate! 2022": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"초 오픈 더 게이트! 2022\" already used by tag:chou open the gate! 2022 in the same category"
+  },
+  "tag:chou medal e no kassou 2026": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 제목의 의미 번역 가능성이 있으나 정확한 공식 표기 확인이 어려움"
+  },
+  "tag:chō kai ★ kaigi 2024": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "행사명 또는 제목일 가능성이 있어 kai의 의미와 공식 표기 확인이 필요합니다."
+  },
+  "tag:cobura no oyatsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "cobura가 cobra의 변형인지 고유명사인지 불확실합니다."
+  },
+  "tag:code:1122 jb2024": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "코드/식별자 형식이라 번역하지 않고 원문 유지가 적절합니다."
+  },
+  "tag:coffee jelly de te o utou 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 제목으로 보이나 원문 의도와 정식 표기를 확인하기 어렵습니다."
+  },
+  "tag:coffee jelly de te o utou 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "혼합 언어 제목형 태그로 보이나 de te o utou의 정확한 의미와 분절이 불확실합니다."
+  },
   "tag:comitia100": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -14688,6 +15504,150 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:da no kyuujitsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기만으로 'da'의 의미나 고유명사 여부가 불명확합니다."
+  },
+  "tag:dachou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기라면 '타조' 의미일 수 있으나 고유명일 수도 있어 확인이 필요합니다."
+  },
+  "tag:dadoujinya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명으로 보이나 확립된 한국어 표기를 확인할 수 없어 음역 검토가 필요합니다."
+  },
+  "tag:daemon slave": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반어 번역과 고유명 음역 가능성이 모두 있어 맥락 확인이 필요합니다."
+  },
+  "tag:dafei": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "인명 또는 고유명으로 보이나 확립된 한국어 표기를 확인할 수 없어 음역 검토가 필요합니다."
+  },
+  "tag:dai 128 ki bunbun maru shinbun tomo no kai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 이벤트명으로 추정되지만 ki와 bunbun maru 표기의 정확한 한자/공식 표기 확인이 필요합니다."
+  },
+  "tag:dai 128 ki bunbun. maru shinbun tomo no kai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 행사명으로 보이나 'bunbun. maru' 구분이 불확실해 원 표기 확인이 필요합니다."
+  },
+  "tag:dai 128 ki bunbunmaru shinbun tomo no kai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 이벤트명으로 추정되지만 ki와 bunbunmaru 표기의 정확한 한자/공식 표기 확인이 필요합니다."
+  },
+  "tag:dai 29 sen": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 로마자 표기로 원어와 의미가 불명확하여 안전 적용 전 확인이 필요합니다."
+  },
+  "tag:dai 31 kai hekigai chousa haku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese event title meaning 제31회 벽외 조사 박람회, but exact established Korean event name is not verified."
+  },
+  "tag:dai 32 kai hekigai chousa haku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 이벤트명으로 추정되지만 공식 한국어 표기 여부 확인이 필요합니다."
+  },
+  "tag:dai 5 kai chikashiki shinkou no tame no doujinshi kouzu kai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese phrase is ambiguous and may contain a specific title/name; translation should be verified before applying."
+  },
+  "tag:dai 6 kai chikashiki shinkou no tame no doujinshi kouzu kai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Long Japanese event title is ambiguous and the exact source kanji or established Korean title is unverifiable from romanization alone."
+  },
+  "tag:dai 6 kai hekigai chousa haku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese event title meaning 제6회 벽외 조사 박람회, but exact established Korean event name is not verified."
+  },
+  "tag:dai 7 kai chikashiki shinkou no tame no doujinshi kouzu kai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "긴 로마자 일본어 행사명으로 원문 한자나 공식 한국어 표기를 확인할 수 없어 음역 처리했지만 검토가 필요합니다."
+  },
+  "tag:dai ikkan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "dai ikkan은 일반적으로 제1권으로 해석 가능하지만, 문맥에 따라 고유명일 수 있어 확인이 필요합니다."
+  },
+  "tag:dai moru ya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원어 의미나 고유명 여부가 불명확해 음차는 가능하지만 검토가 필요함"
+  },
+  "tag:dai-128-ki bunbunmaru. shinbun tomo no kai": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"제128기 분분마루 신문 친구 모임\" already used by tag:dai-128-ki bunbunmaru shinbun tomo no kai in the same category"
+  },
+  "tag:dai250ho hoheli suidan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "hoheli suidan의 의미와 고유명 여부가 불명확해 확정 번역에는 검토가 필요합니다."
+  },
+  "tag:dai_quoc": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "베트남어권 고유명 또는 의미 번역 가능성이 있어 단순 음역만으로 확정 적용하기 어렵습니다."
+  },
+  "tag:daichi yasuragu kaze no koe dr2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a romanized Japanese title; semantic translation is plausible but not independently verified."
+  },
+  "tag:daigaijin": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "문맥에 따라 고유명 또는 조어일 수 있어 음차는 가능하지만 의미 번역은 검토가 필요함"
+  },
+  "tag:daigaykuten-gou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a proper noun or romanized coined name; transliteration is plausible but the source spelling is ambiguous."
+  },
+  "tag:daimanji": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미가 불명확한 고유명사로 보여 음역은 가능하지만 정확한 원어 표기가 검증되지 않았다."
+  },
   "tag:digitange": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -14705,6 +15665,48 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:douyara deban no you da! 19": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아무래도 나설 차례인 것 같다! 19\" already used by tag:douyara deban no youda! 19 in the same category"
+  },
+  "tag:douyara deban no you da! 21": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아무래도 나설 차례인 것 같다! 21\" already used by tag:douyara deban no youda! 21 in the same category"
+  },
+  "tag:douzin si": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의도한 원어가 doujinshi/동인지인지, 고유명사 음차인지 불명확합니다."
+  },
+  "tag:drunk in long night jb2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "문구가 어색하고 jb2023의 의미를 확인할 수 없어 제목/고유 태그 여부 검토가 필요합니다."
+  },
+  "tag:dulce report": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "dulce가 고유명인지 일반 의미인지 불명확해 음역 적용 전 검토가 필요합니다."
+  },
+  "tag:dwull dwull drill": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미가 불분명한 조어로 보여 음역은 가능하지만 원 의도 확인이 필요합니다."
+  },
+  "tag:dynamis toushou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명으로 보이나 toushou의 확정 표기를 확인할 수 없어 검토가 필요합니다."
   },
   "tag:ff16": {
     "tried": "2026-06-14",
@@ -14898,6 +15900,114 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:gohasen382 &amp; thorpass08": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "사용자명 조합으로 보이며 번역하지 않고 원문을 유지하는 것이 적절합니다."
+  },
+  "tag:gomen nasai": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"죄송합니다\" already used by tag:gomenasai in the same category"
+  },
+  "tag:gomen! futari de shiawase de 2-night": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 일본어와 영어 말장난이 섞인 제목형 태그라 정확한 의도 확인이 필요합니다."
+  },
+  "tag:good comic24 city 24": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a proper event tag but the embedded comic24 token is unusual, so exact intended naming is ambiguous."
+  },
+  "tag:good20": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Short alphanumeric tag is ambiguous and cannot be confidently identified as semantic text or a proper noun."
+  },
+  "tag:goraku dai 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Could be a romanized proper noun/title or Japanese semantic phrase; transliteration is possible but intended meaning is unverifiable."
+  },
+  "tag:gordenbania": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 정확한 원어/공식 표기를 확인하기 어려워 음역 적용 전 검토가 필요합니다."
+  },
+  "tag:gossa": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or coined term; transliteration is plausible but may not be established."
+  },
+  "tag:graket 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable title or coined term with number; transliteration is plausible but not confirmed."
+  },
+  "tag:graket 8": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Proper noun or coined term; transliteration is plausible but meaning/source is unverifiable."
+  },
+  "tag:grassens war": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely title/proper noun; semantic translation is plausible but the exact established Korean title is unverifiable."
+  },
+  "tag:green tea for hausumaijanru": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Mixed semantic phrase and unclear proper noun; translation is plausible but source meaning is not fully verifiable."
+  },
+  "tag:gummy soft": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Phrase is somewhat ambiguous between texture description and proper noun; translation is plausible but not fully verifiable."
+  },
+  "tag:gunreibu shuho 2022 spring": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a proper title or event phrase with unclear Japanese components; transliteration is plausible but should be checked."
+  },
+  "tag:gyaku kaiten yarou": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"역회전 녀석\" already used by tag:gyakukaiten yarou in the same category"
+  },
+  "tag:gyoen jogakuen bunkasai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese school festival title; translation is plausible but source kanji/official Korean form is unverifiable."
+  },
+  "tag:gyupaibyu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미나 고유명사 여부를 확인할 수 없어 음차만 가능하며 검토가 필요합니다."
+  },
+  "tag:gōma (go uma": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문 태그가 괄호가 닫히지 않은 형태로 손상되었거나 의미가 불명확해 안전 적용 여부 확인이 필요함"
+  },
   "tag:h.p.c": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -14922,11 +16032,803 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:hatten tojounin": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 고유명/제목으로 추정되지만 원 표기 확인이 어려워 음역은 가능하나 검토가 필요함."
+  },
+  "tag:hawknuf": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or coined term; transliteration is plausible but may not be established."
+  },
+  "tag:hcc32": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "코드형 태그로 의미 번역 대상이 아니며 원문 유지가 적절합니다."
+  },
+  "tag:hcc8": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "코드형 태그로 의미 번역 대상이 아니며 원문 유지가 적절합니다."
+  },
+  "tag:heart of mind": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "문맥에 따라 작품명 또는 관용적 제목일 수 있어 의미 번역 확정이 어렵습니다."
+  },
+  "tag:heikatsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized/proper-noun-like tag; transliteration is plausible but meaning is unverifiable."
+  },
+  "tag:heimen hanaya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized/proper-noun-like tag; transliteration is plausible but established meaning is unverifiable."
+  },
+  "tag:hekigai chousa haku 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese event/title phrase, but exact established Korean rendering is uncertain."
+  },
+  "tag:heroin mix sep.28": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Could be a title/event tag and may also be confused with heroine; date expansion is plausible but needs review."
+  },
+  "tag:herorine": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely misspelling or coined proper noun; transliteration is plausible but unverifiable."
+  },
+  "tag:hey hey hey! fukurou daishuugou!!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese title; literal Korean translation is understandable but may not match an established title."
+  },
+  "tag:hff": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Initialism is ambiguous and may be better left as-is depending on tag identity."
+  },
+  "tag:hh": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Initialism is ambiguous and may be better left as-is depending on tag identity."
+  },
+  "tag:higashikou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명 또는 약칭일 수 있어 의미 번역보다 음역을 적용했지만 원 표기 확인이 필요함."
+  },
+  "tag:hikiau unmei 6th": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 제목으로 추정되어 의미 번역했으나 원문 표기와 공식 번역 확인이 필요함."
+  },
+  "tag:himitsu no ura kagyou 13": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese title; semantic translation is plausible but exact meaning/title is ambiguous."
+  },
+  "tag:hinemotsu notari": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 구절 또는 작품명일 수 있어 음역은 가능하지만 정확한 원문과 의미 확인이 필요합니다."
+  },
+  "tag:hiru": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 일반어의 의미가 여러 가지일 수 있고 고유명사일 수도 있어 문맥 확인이 필요합니다."
+  },
+  "tag:holokle 2nd": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely an event or series title; transliteration with ordinal is plausible but not independently verified."
+  },
+  "tag:holokle 3rd": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely an event or series title; transliteration with ordinal is plausible but not independently verified."
+  },
+  "tag:holokle 4th": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely an event or series title; transliteration with ordinal is plausible but not independently verified."
+  },
+  "tag:holokle 9th": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely an event or series title; transliteration with ordinal is plausible but not independently verified."
+  },
+  "tag:hope studio": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Could be a proper studio/circle name; Korean transliteration is plausible but the official form is unverified."
+  },
+  "tag:horarezonu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Uncommon proper noun or romanized term; transliteration is plausible but meaning/official Korean form is unverified."
+  },
+  "tag:horsetail": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "식물 속새, 말꼬리, 또는 외형 태그일 수 있어 맥락 확인이 필요합니다."
+  },
+  "tag:hoshi ni nagai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반적으로 'hoshi ni negai o'는 '별에 소원을'이지만 원문이 'nagai'로 표기되어 오탈자 가능성이 있어 확인이 필요합니다."
+  },
+  "tag:hoshidaneya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese proper noun or circle name; transliteration is plausible but official Korean form is unverified."
+  },
+  "tag:hoshii shuzou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese personal or circle name; transliteration is plausible but kanji/official Korean form is unverified."
+  },
+  "tag:hoshinin egai wo 2025 - day 1 -": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문 로마자 구분이 불명확하며 'hoshi ni negai wo'의 오표기일 가능성이 있어 확인이 필요합니다."
+  },
+  "tag:houkou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese tag is ambiguous without source kanji or context; transliteration is safest but should be reviewed."
+  },
+  "tag:houraigekisen! yo-i! 38senme": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "행사 고유명사로 음역은 가능하지만 확립된 한국어 표기 여부를 확인하기 어려움"
+  },
+  "tag:houraigekisen! yo-i! 3senme!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 구호와 회차 표현은 해석 가능하지만 공식 한국어 표기 여부가 불명확하다."
+  },
+  "tag:houraigekisen! yo-i! 50senme&amp;gunreibu shuho": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"포뢰격전! 준비! 50전째 & 군령부 주보\" already used by tag:houraigekisen! yooi! 50 senme&amp;gunreibu shuho in the same category"
+  },
+  "tag:hui c": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 고유명사 또는 약칭으로 보이나 정확한 표준 표기와 발음 확인이 어렵습니다."
+  },
+  "tag:hujikuro": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"후지쿠로\" already used by tag:fujikuro in the same category"
+  },
+  "tag:hyattou ryouran ~kimi no heart o shirahadori~ ni": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목형 일본어로 의미 번역은 가능하지만 hyattou ryouran의 원문 한자와 ni가 숫자 2인지 확인이 필요합니다."
+  },
+  "tag:hyattou ryouran ~kimi no heart o shirahadori~ tantou junbi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Title portion is safely transliterated, but 'tantou junbi' may be a work-specific suffix and needs confirmation."
+  },
+  "tag:hyoukai to honou no kyouen hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Semantic title translation is plausible, but exact source title is not verified."
+  },
+  "tag:hyounlim": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이며 원어 표기 확인이 필요합니다."
+  },
+  "tag:hyousou strast": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명/행사명으로 보이나 원 표기와 의미 확인이 어려워 음역은 가능하지만 검토가 필요합니다."
+  },
+  "tag:hyousou strast 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "'strast'의 원어 의도나 공식 표기가 불명확해 단순 음역만으로는 확정 적용하기 어렵다."
+  },
+  "tag:ichigo milk hakkou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "hakkou가 발효/발광/발행 등으로 해석될 수 있어 문맥 확인 필요"
+  },
+  "tag:ichiruki kentei": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "ichiruki는 고유명사로 보이나 kentei가 공식 제목 일부인지 일반 의미인지 확인이 필요합니다."
+  },
+  "tag:idling attacker3": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아이들링 어태커 3\" already used by tag:idling attacker 3 in the same category"
+  },
+  "tag:idumi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본식 이름 또는 고유명사로 보이나 표준 표기를 확인할 수 없어 이즈미로 추정 음역했습니다."
+  },
+  "tag:ierou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 변형 표기일 가능성이 있어 음역은 가능하지만 원뜻 확인이 필요합니다."
+  },
+  "tag:ifuudoudou aratame": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "ifuudoudou는 번역 가능하지만 aratame가 제목 부제인지 개정 의미인지 불명확해 일부 음역했습니다."
+  },
+  "tag:ifuudoudou datsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기 기반의 고유명사로 보이나 정확한 원표기 확인이 어려워 검토 필요"
+  },
+  "tag:ifuudoudou gyou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "ifuudoudou는 번역 가능하지만 gyou의 한자와 의미가 불명확해 음역 처리했습니다."
+  },
+  "tag:ifuudoudou sarani aratame": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 문구/행사명으로 보이나 정확한 원문 분절과 관용 번역 확인이 필요합니다."
+  },
+  "tag:iho": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 약어 또는 고유명일 가능성이 있어 의미를 특정하기 어렵습니다."
+  },
   "tag:iso110410": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:jingi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Can mean duty/honor/justice or be a proper noun/title depending on context; translation may need confirmation."
+  },
+  "tag:jinnoujyou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 원표기와 장음·철자 해석이 불확실해 검토 필요"
+  },
+  "tag:jinragou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이며 원어 표기나 확립된 한국어명이 확인되지 않아 음역만으로는 검토가 필요합니다."
+  },
+  "tag:jinruiken": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미 번역 가능성도 있으나 원어 한자나 맥락이 없어 고유명사 음역으로 검토가 필요합니다."
+  },
+  "tag:jipparisto": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 조어로 보이며 확립된 한국어 표기를 확인할 수 없어 검토가 필요합니다."
+  },
+  "tag:jket 5": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Acronym-style proper noun should remain untranslated; original form is safest."
+  },
+  "tag:jket 9": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "행사명 또는 약어형 고유명사로 보여 번역하지 않고 원문을 유지하는 것이 안전합니다."
+  },
+  "tag:jokerkin}魔士兵繁殖場(@^w^@": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "기호와 한자/일본어가 섞인 비정형 고유 태그라 의미 해석이 불확실함"
+  },
+  "tag:junkie daijin": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명인지 의미 번역 대상인지 불명확하며 daijin의 한자/의도를 확인할 수 없습니다."
+  },
+  "tag:juusha to shujin o koeta saki jb2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese title can be semantically rendered, but exact official Korean title is unverifiable from the tag alone."
+  },
+  "tag:juutan warashi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized Japanese/proper noun; transliteration is possible but official form is unverifiable."
+  },
+  "tag:juzou hiro": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기의 인명 또는 고유명으로 보이며 확정된 한국어 표기를 검증할 수 없어 음역만 가능함"
+  },
+  "tag:jyb": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "약어 또는 핸들로 보이며 의미 번역이나 안전한 한국어 음역을 확정할 수 없어 원문 유지가 적절함"
+  },
+  "tag:jyoji romero": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "인명으로 보이나 일반적인 조지 로메로 표기와 입력 철자가 달라 확정 적용 전 확인이 필요함"
+  },
+  "tag:jyuaji no nabe": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기가 비표준적이며 제목/고유명일 가능성이 있어 의미 번역 확인이 필요합니다."
+  },
+  "tag:jyuji": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 로마자 고유명 또는 음차어로 의미와 정식 표기가 불명확함"
+  },
+  "tag:jyuni": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "단독 로마자 표기로 의미나 지시 대상이 불명확해 검토가 필요합니다."
+  },
+  "tag:jyuwari": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"10할\" already used by tag:juuwari in the same category"
+  },
+  "tag:kaerudouhu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "합성 고유명 또는 서클명으로 보이며 의미 번역보다 음역은 가능하나 정식 표기 확인이 필요함"
+  },
+  "tag:kaga rock": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명 또는 제목으로 보이나 의미와 정식 한국어 표기가 불명확해 음역만으로는 검토가 필요함"
+  },
+  "tag:kageki no utage": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romaji is ambiguous without kanji; 'kageki' could map to multiple meanings, so transliterated/semantic choice needs review."
+  },
+  "tag:kageki no utage 3+1": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "kageki가 과격/가극 등으로 해석될 수 있어 원 의도 확인이 필요합니다."
+  },
+  "tag:kaguya [ichijou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "대괄호가 닫히지 않은 불완전한 태그라 적용 전 확인이 필요합니다."
+  },
+  "tag:kahkitimeyear": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unclear coined proper noun or handle; transliteration is possible but identity is unverifiable."
+  },
+  "tag:kahou wa chou nete matsu 2020gw": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본 속담 변형/제목성 표현으로 보이며 말장난 의도 확인이 필요합니다."
+  },
+  "tag:kahou wa chou nete matsu 2021 natsumatsuri": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "관용구를 변형한 제목으로 보이나 정확한 공식 표기 확인이 필요합니다."
+  },
+  "tag:kahou wa nete matsu 24": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 속담/문구로 해석 가능하지만 숫자가 붙은 고유 제목 또는 시리즈명일 수 있어 적용 전 확인이 필요합니다."
+  },
+  "tag:kahou wa nete matsu 9": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 속담/문구로 해석 가능하지만 숫자가 붙은 고유 제목 또는 시리즈명일 수 있어 적용 전 확인이 필요합니다."
+  },
+  "tag:kaisenn": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자만으로 해산물, 회선, 회전/전투, 고유명 등 원어 의미가 불명확하여 검토 필요"
+  },
+  "tag:kaitou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기만으로는 괴도, 회답 등 원어 한자가 확정되지 않아 의미가 모호함"
+  },
+  "tag:kaitouchuu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기만으로는 원어와 의미가 확실하지 않아 제목/표현 여부 확인이 필요함"
+  },
+  "tag:kaitouchuu.": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romaji is ambiguous without original Japanese spelling; transliteration is possible but semantic meaning cannot be verified."
+  },
+  "tag:kajiba": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반어로는 화재 현장이지만 고유명사일 가능성이 있어 확인이 필요함"
+  },
+  "tag:kakasasu sai 2025": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "카카사스와 축제/행사 의미의 sai로 추정되지만 팬덤 행사명 또는 고유명 표기가 불확실합니다."
+  },
+  "tag:kakashi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "허수아비 일반명사와 캐릭터명 카카시 양쪽 가능성이 있어 문맥 확인이 필요함"
+  },
+  "tag:kakkoi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "kakkoii의 축약/오표기 가능성이 있어 정확한 원어 확인이 필요함"
+  },
+  "tag:kametani]]r e matome[kenka banchour": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Input appears corrupted or contains bracket/romanization noise, so the intended tag cannot be verified safely."
+  },
+  "tag:kami no eichi 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese phrase/title with a volume number; semantic rendering is plausible but title intent is not fully verifiable."
+  },
+  "tag:kami no eichi 30": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese phrase/title with a volume number; semantic rendering is plausible but title intent is not fully verifiable."
+  },
+  "tag:kami no eichi 5": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romaji is semantically plausible but ambiguous without kanji, especially eichi/叡智 or other readings."
+  },
+  "tag:kasanaru te wa ai o sasu 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese title phrase; translation is plausible but the verb sense and title wording are ambiguous."
+  },
+  "tag:katsuhoku dou": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"카츠호쿠도\" already used by tag:katsuhokudou in the same category"
+  },
+  "tag:kesshi no omoi yuu kanari 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely title or mixed phrase/name; semantic parsing of yuu kanari is uncertain."
+  },
+  "tag:kesshi no omoi yuu kanari hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목과 인명/구문이 섞인 긴 태그로 보이나 공식 표기나 의미 분리가 불확실합니다."
+  },
+  "tag:kesshi no omoi yuu kanari jb2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목과 인명/약어가 섞인 태그로 보이나 공식 표기와 약어 의미가 불확실합니다."
+  },
+  "tag:kiiro no souai kasa": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 제목으로 보이나 정확한 원어와 관용 번역 확인이 필요함"
+  },
+  "tag:kiitama": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 추정되지만 출처 확인 없이 음역만 가능함"
+  },
+  "tag:kikkuri": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 추정되지만 확정 가능한 한국어 표기를 확인하기 어려움"
+  },
+  "tag:kiku imo.": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반어로도 해석될 수 있어 작가명/고유명사 여부 확인이 필요함"
+  },
+  "tag:kiku ishimonji": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 ishimonji 표기의 원어 확인이 필요함"
+  },
+  "tag:kikujin": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 추정되지만 출처 확인 없이 음역만 가능함"
+  },
+  "tag:kikunyi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified proper noun; transliteration is plausible but romanization is ambiguous."
+  },
+  "tag:kimi ni zentsu!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기의 원어 한자/의미가 불확실해 의미 번역 검토가 필요합니다."
+  },
+  "tag:kite": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반명사 '연'일 수도 있고 고유명 '카이트'일 수도 있어 의미 확정이 필요합니다."
+  },
+  "tag:knights of blueii": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"나이츠 오브 블루 II\" already used by tag:knights of blue ii in the same category"
+  },
+  "tag:ko9konnan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "숫자가 포함된 양식화된 고유명으로 보여 정확한 공식 표기 확인이 필요합니다."
+  },
+  "tag:kobe kawasaki zousen collection 3": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"고베 가와사키 조선 컬렉션 3\" already used by tag:koube kawasaki zousen collection 3 in the same category"
+  },
+  "tag:kobe kawasaki zousen collection 7": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"고베 가와사키 조선 컬렉션 7\" already used by tag:koube kawasaki zousen collection 7 in the same category"
+  },
+  "tag:kobi niku nemu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified Japanese/proper-noun phrase; transliteration is possible but exact intended reading is ambiguous."
+  },
+  "tag:kobun": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 로마자 태그라 고유명사인지 일반어인지 확인이 필요합니다."
+  },
+  "tag:kobushi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어로 주먹, 식물명, 고유명 등으로 해석될 수 있어 문맥 확인이 필요합니다."
+  },
+  "tag:koeran": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미나 출처가 불명확한 짧은 고유명사형 태그라 확인이 필요합니다."
+  },
+  "tag:kofire": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "영어식 합성어 또는 고유명사일 수 있어 확정 적용 전 확인이 필요합니다."
+  },
+  "tag:koi no tankyu! ichii senshin!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기 제목으로 원문 한자·가나가 없어 의미 확정이 어려운 음역안입니다."
+  },
+  "tag:koi no tougenkyou ~mofumofu paradise~ 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "대략적인 의미 번역은 가능하지만 원제 표기 확인이 없어 제목 고유명사로 검토가 필요합니다."
+  },
+  "tag:koi no tougenkyou ~mofumofu paradise~ 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "대략적인 의미 번역은 가능하지만 원제 표기 확인이 없어 제목 고유명사로 검토가 필요합니다."
+  },
+  "tag:koi o tsmugu mo togeshi nashi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기와 일부 철자가 불확실해 의미 번역 대신 음역했으며 검토가 필요합니다."
+  },
+  "tag:koi wa karatto o sole mio 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "karatto의 원어 표기와 의도가 불명확해 제목 음역은 가능하지만 검토가 필요함"
+  },
+  "tag:koi wa karatto o sole mio 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "혼합 로마자 제목으로 karatto의 의미가 불명확해 음역안 검토가 필요합니다."
+  },
+  "tag:koi wa karatto o sole mio 6": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "혼합 로마자 제목으로 karatto의 의미가 불명확해 음역안 검토가 필요합니다."
+  },
+  "tag:koi wa karatto o sole mio 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "혼합 로마자 제목으로 karatto의 의미가 불명확해 음역안 검토가 필요합니다."
+  },
+  "tag:koi wa osokute mo mattotti 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "mattotti 표기의 원어 확인이 어려워 음역안 검토가 필요합니다."
+  },
+  "tag:koi wa zekkouchou nanda! 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미 번역은 자연스럽지만 원제 표기 확인이 없어 제목 고유명사로 검토가 필요합니다."
+  },
+  "tag:koi wo soujuu shite osaka 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "문장 의미와 osaka가 지명인지 제목 요소인지 불명확해 음역안 검토가 필요합니다."
+  },
+  "tag:kono koe todoke, tsuki made mo roku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "roku가 고유명사인지 문장 일부인지 불명확해 확정 적용 전 검토 필요"
+  },
+  "tag:konpoi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "단독 고유명사 또는 약어로 보이며 의미 확인이 어려워 음역만으로는 검토 필요"
+  },
+  "tag:kouryuseki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자만으로 원어 한자나 정확한 의미를 확인하기 어려워 음역은 가능하지만 검토가 필요함."
+  },
+  "tag:kowane no utage 6-jikai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "kowane가 고유명사인지 일반어인지 불명확하여 전체 번역은 가능하지만 원어 확인이 필요함."
+  },
+  "tag:kut": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Ambiguous acronym or short proper tag; safest to keep original untranslated."
+  },
+  "tag:kyonyuukko 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 조어/행사명 가능성이 있어 의미 번역과 음역 중 어느 쪽이 표준인지 확인이 필요합니다."
+  },
+  "tag:kyou fuku chin douchuu ~hona iko ka~": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일부 어절의 원문 표기와 의미가 불명확해 음역 중심 번역은 가능하지만 검수가 필요함"
   },
   "tag:l.s.": {
     "tried": "2026-06-14",
@@ -14939,6 +16841,42 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:lomanticist": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Possibly stylized proper name or misspelling; transliteration is uncertain."
+  },
+  "tag:lostdragon01": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Username-like alphanumeric tag should remain untranslated."
+  },
+  "tag:lotuslotus": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous between repeated common word and proper-name/handle-like tag; unsafe to apply automatically."
+  },
+  "tag:love→reas∞n dr2024": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "스타일화된 고유 제목으로 보이나 공식 한국어 표기를 확인할 수 없어 검토가 필요합니다."
+  },
+  "tag:love→reas∞n vr2026": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Stylized proper-title-like tag with symbols and version marker; transliteration may be acceptable but is not independently verifiable."
+  },
+  "tag:macxe&#39;s": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Proper-name-like tag with encoded apostrophe; pronunciation is uncertain, so transliteration needs review."
   },
   "tag:malboro": {
     "tried": "2026-06-14",
@@ -14958,6 +16896,54 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:nanpp": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 약어 또는 고유명으로 보이나 정확한 발음과 의미를 검증하기 어렵습니다."
+  },
+  "tag:neko no chouaiisshin ni ari hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기의 일본어 제목으로 보이며 의미와 원표기 확인이 필요합니다."
+  },
+  "tag:neko san team": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "단체명으로 보이나 san의 의미가 불명확해 원표기 확인이 필요합니다."
+  },
+  "tag:neko sensha maryi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 maryi의 표기 확인이 필요합니다."
+  },
+  "tag:night of gales night of gales][[7 tsuki hakkō] shinkan sanpuru ②(bishoujo senshi sailor moon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문 태그가 괄호/대괄호 구조가 깨진 복합 제목이며 일부 일본어 로마자 구간의 의도 확인이 필요합니다."
+  },
+  "tag:night of gales night of gales][my new rebort is my boss&#39;s daughter (bishoujo senshi sailor moon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문 태그가 괄호/대괄호 구조가 깨졌고 rebort가 오탈자 또는 고유표기인지 불명확합니다."
+  },
+  "tag:night of gales night of gales][my new rebort is my boss&#39;s daughter agenda wager (bishoujo senshi sailor moon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문이 여러 제목/괄호가 깨진 형태로 결합되어 있고 'rebort' 등 오탈자 가능성이 있어 의미 번역을 안전하게 확정하기 어렵습니다."
+  },
+  "tag:night of gales night of gales][out of office comic (bishoujo senshi sailor moon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문이 제목/시리즈명이 깨진 형태로 결합되어 있어 음역은 가능하지만 적용 전 확인이 필요합니다."
+  },
   "tag:ntrman": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -14969,6 +16955,198 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:onii samba": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "'onii'가 오니/오빠 등으로 해석될 수 있어 문맥 없이는 안전하게 확정하기 어렵습니다."
+  },
+  "tag:opebedoji": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable romanized proper noun; transliteration is plausible but exact Korean form is not established."
+  },
+  "tag:orarero splash 9": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable romanized title/proper noun; transliteration is plausible but exact meaning is unclear."
+  },
+  "tag:orbg]ic 83 shinkan tsūhan no oshirase(my little sister can&#39;t be this cute": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Malformed mixed tag with bracket/parenthesis issues and partial title reference; translation is plausible but should be reviewed."
+  },
+  "tag:orchid ]mizunoe neko x rogu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Malformed proper-noun tag with stray bracket and multiple names; transliteration is plausible but should be reviewed."
+  },
+  "tag:ore no deban jean! 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Phrase is clear but 'jean' may be a character name or wordplay; review recommended."
+  },
+  "tag:ore p 2-gou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품 또는 캐릭터명형 표기로 보이나 맥락 없이는 정확한 의도 확인이 어려움"
+  },
+  "tag:ore-sama ichuu no aitsu ni muchuu 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "ichuu의 원문 한자 또는 의도가 불명확해 의미 번역을 확정하기 어렵습니다."
+  },
+  "tag:orehigh": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "합성어 또는 고유명으로 보이며 의미를 검증할 수 없어 음역만 가능합니다."
+  },
+  "tag:origianl": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "original의 오타로 보이지만 태그명이 의도된 고유 표기일 가능성을 배제할 수 없습니다."
+  },
+  "tag:oriharu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable romanized proper noun or compound name; transliteration is plausible but not confirmable."
+  },
+  "tag:osananajimi ni goyoushin! seigan 2025": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "goyoushin과 seigan의 정확한 원어 의미 또는 공식 표기를 확인하기 어려워 음역만 적용했습니다."
+  },
+  "tag:oshika": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized proper noun or term; transliteration is plausible but not independently verifiable."
+  },
+  "tag:osuchichi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미가 불명확한 조어 또는 고유명으로 보여 음역했으나 확정 적용 전 확인 필요"
+  },
+  "tag:osuket 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable romanized event/proper noun; transliteration is plausible but exact Korean form is not established."
+  },
+  "tag:osuket 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable romanized event/proper noun; transliteration is plausible but exact Korean form is not established."
+  },
+  "tag:otg! 12": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "약어와 번호만으로 구성되어 의미나 공식 표기를 확인하기 어렵습니다."
+  },
+  "tag:otg! 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "약어와 번호만으로 구성되어 의미나 공식 표기를 확인하기 어렵습니다."
+  },
+  "tag:otoe": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명 가능성이 높아 음역했으나 정확한 원어/대상 확인이 필요함"
+  },
+  "tag:otokojiru no koushaku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Partly semantic Japanese title; translation is plausible but the exact source kanji/context is unverifiable from romanization alone."
+  },
+  "tag:otte koi v": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Phrase/title interpretation is plausible, but exact intended title and V usage are unverifiable from romanization alone."
+  },
+  "tag:ottoseinyan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a proper-name or coined compound based on ottosei plus nyan; transliteration is acceptable but exact intended meaning is unverifiable."
+  },
+  "tag:otu-itimon": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a romanized proper noun or group name; no reliable semantic meaning is identifiable from the tag alone."
+  },
+  "tag:ou no utsuwa grail oath 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "복합 제목으로 보이며 grail oath의 공식 표기가 불확실합니다."
+  },
+  "tag:ou no utsuwa grail oath2": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"왕의 그릇 성배의 맹세 2\" already used by tag:ou no utsuwa grail oath 2 in the same category"
+  },
+  "tag:oudakujiru seisan kikan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원어 표기와 의미가 불명확한 로마자 태그라 일부는 음역하고 일부는 직역했으나 검증이 필요합니다."
+  },
+  "tag:ouji tarumono dr2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "ouji tarumono는 의미 번역이 가능하지만 DR2022의 문맥이 불명확해 적용 전 확인이 필요합니다."
+  },
+  "tag:ounko": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "짧은 로마자 태그로 고유명사인지 일반어인지 불명확하여 음역만 가능함"
+  },
+  "tag:ouou no melody dr2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목형 태그로 보이나 ouou의 원문 한자나 공식 표기를 확인할 수 없어 음역 처리함"
+  },
+  "tag:ouse ran": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "인명 또는 고유명사로 추정되지만 원문 표기를 확인할 수 없어 음역 처리함"
+  },
+  "tag:outou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기가 응답 등으로 해석될 수 있으나 고유명사 가능성이 있어 불확실함"
+  },
+  "tag:owl mimizuku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Could be a proper noun or a semantic phrase; transliteration may be acceptable but meaning is ambiguous."
   },
   "tag:p62-88": {
     "tried": "2026-06-14",
@@ -15102,11 +17280,185 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:reitou kyabetsu": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"냉동 양배추\" already used by tag:reitou cabbage in the same category"
+  },
+  "tag:rekise": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified proper noun or stylized romanization; transliteration is plausible but meaning cannot be confirmed."
+  },
+  "tag:remember day": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반 구문으로는 번역 가능하지만 작품명이나 행사명일 가능성이 있어 확인이 필요합니다."
+  },
+  "tag:remuresu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 로마자 표기일 가능성이 있어 정확한 원어 확인이 필요합니다."
+  },
+  "tag:ren-ai[mi-dō]] shincha to maryoku kyōkyū no tame ni icharabu suru hon.[fate/grand order": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문 태그가 괄호 구조와 로마자 표기가 불안정하고 일부 의미가 불명확해 검토가 필요합니다."
+  },
+  "tag:renai jaws 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely title or pun using 'Jaws/죠스'; transliteration is plausible but semantic intent is ambiguous."
+  },
+  "tag:renai jiyuugata! osaka taikai 3": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"연애 자유형! 오사카 대회 3\" already used by tag:renai free style! osaka taikai 3 in the same category"
+  },
+  "tag:renai jiyuugata!entry5": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"연애 자유형! 엔트리5\" already used by tag:renai jiyuugata! entry5 in the same category"
+  },
+  "tag:renai jiyuugata!entry6": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"연애 자유형! 엔트리6\" already used by tag:renai jiyuugata! entry6 in the same category"
+  },
+  "tag:renai jiyūgata! ōsaka taikai 2": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"연애 자유형! 오사카 대회 2\" already used by tag:renai jiyuugata! osaka taikai 2 in the same category"
+  },
+  "tag:renai shachuation": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "말장난 또는 고유 제목일 가능성이 있어 음역은 가능하지만 정확한 공식 표기 확인이 필요합니다."
+  },
+  "tag:renai shachuation 4": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "'shachuation'의 의도된 말장난 또는 공식 표기가 불명확해 음역은 가능하지만 검토가 필요하다."
+  },
+  "tag:renai shachuation 6": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely stylized or nonstandard title spelling; transliteration is plausible but unverifiable."
+  },
+  "tag:rengasha": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "단독 로마자 고유명으로 보이며 원어 표기나 의미를 확인할 수 없어 음역은 가능하지만 검토가 필요합니다."
+  },
+  "tag:rengesou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 식물명 또는 고유명 가능성이 있어 음역은 가능하지만 의미 확정이 필요함"
+  },
+  "tag:renkaiten": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified proper noun or stylized romanization; transliteration is plausible but meaning cannot be confirmed."
+  },
+  "tag:rerakamu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 원어 표기나 공식 한국어명이 확인되지 않아 음역만 제안합니다."
+  },
+  "tag:retsunetsu kange! hyakusen ranma no oosawagi!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 제목으로 보이나 한자/원문 의미 확인이 어려워 음역만으로는 검토 필요함"
+  },
+  "tag:rewnoss": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 발음과 공식 표기가 불명확해 음역 적용 전 확인이 필요합니다."
+  },
+  "tag:riki]": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "The source tag contains an unmatched closing bracket, so the transliteration is plausible but the tag may be malformed."
+  },
+  "tag:rikukaikuuma goudou enshuu 2senme": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "긴 일본어 로마자 복합어로 분절과 의미가 불확실합니다."
+  },
+  "tag:rikusengata duda": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "duda가 고유명사로 보이며 공식 표기 확인이 필요합니다."
+  },
+  "tag:rin] 5/ 3 supakomi hinoki rei shinkan sanpuru(stand my heroes": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "The source tag appears malformed or truncated with unmatched bracket/parenthesis and mixed event/title details, though the Korean rendering preserves the content."
+  },
+  "tag:ringetsu hakosaku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 제목으로 보이나 원어 표기와 의미를 확인할 수 없어 음역만 가능합니다."
+  },
+  "tag:rinjin bu katsudou nisshi": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"이웃사촌부 활동일지\" already used by tag:rinjinbu katsudou nisshi in the same category"
+  },
+  "tag:rinki ni emimagu koi no tadagoto": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자만으로 원어와 의미가 불확실해 의미 번역은 위험하며 음역 검토가 필요합니다."
+  },
+  "tag:rishu rengou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 단체명으로 보이나 원어 표기와 의미가 불확실해 음역 검토가 필요합니다."
+  },
+  "tag:robokeh": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 추정되어 음역은 가능하지만 원 표기의 정확한 어원이나 공식 표기를 확인하기 어려움"
+  },
   "tag:rokomoko": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"로코모코\" already used by tag:rocomoco in the same category"
+  },
+  "tag:rro.lled": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "양식화된 고유명사로 보이며 정확한 의도나 공식 표기를 확인하기 어려움"
   },
   "tag:rt-517a924": {
     "tried": "2026-06-14",
@@ -15846,6 +18198,18 @@
     "attempts": 1,
     "reason": "duplicate translation \"센카하루 타이사이 히가시 2019\" already used by tag:senka haru taisai higashi 2019 in the same category"
   },
+  "tag:septa": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반명사 격벽의 복수형일 수 있으나 약어 또는 고유명사 가능성이 있어 모호함"
+  },
+  "tag:shinyuu? &quot;lovers&quot; punch ~taiyama kanshasai~": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자와 영어가 섞인 제목으로 일부 어구의 공식 표기 확인이 필요함"
+  },
   "tag:sht2009": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -15966,11 +18330,611 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:ten&#39;nōsuairu[ame chika]": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기가 불명확해 공식 일본어 원문 또는 정식 한국어 표기 확인이 필요함"
+  },
   "tag:teru-bee": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"테루비\" already used by tag:terubee in the same category"
+  },
+  "tag:tetuo": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 철자상 tetuo/tetsuo 여부가 불명확해 확인이 필요합니다."
+  },
+  "tag:tfk14": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "알파벳과 숫자로 된 코드형 태그라 번역하지 않고 원문 유지가 적절합니다."
+  },
+  "tag:thankstar": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 공식 한국어 표기를 확인하기 어려워 음역만 제공함"
+  },
+  "tag:the rook kinkyuu summer 2021": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "이벤트명으로 보이나 'rook'와 'kinkyuu'의 공식 표기가 불명확합니다."
+  },
+  "tag:the suiri": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유 이벤트명 또는 일본어 '추리' 표기일 수 있어 공식 한국어 표기 확인이 필요합니다."
+  },
+  "tag:the voc@loid m@ster14": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"더 보컬로이드 마스터 14\" already used by tag:the voc@loid m@ster 14 in the same category"
+  },
+  "tag:the world 21": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a proper event or title, but the exact referent is ambiguous without context."
+  },
+  "tag:therappy": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a coined proper noun or stylized name; transliteration may not match intended reading."
+  },
+  "tag:thite": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unclear whether this is a typo, coined term, or proper noun; transliteration is tentative."
+  },
+  "tag:thresholdouhu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unclear coined compound or proper noun; Korean reading is not safely verifiable."
+  },
+  "tag:tialah": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or coined term; transliteration is tentative."
+  },
+  "tag:tiaris": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or coined term; transliteration is tentative."
+  },
+  "tag:tiberi salvatori faina": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Appears to be a personal name or proper noun; transliteration is acceptable but unverifiable."
+  },
+  "tag:tidamari sou 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese proper noun or event title; transliteration is plausible but the official Korean form is not verifiable from the tag alone."
+  },
+  "tag:tierra": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일반어 의미(땅/지구)와 고유명사 가능성이 모두 있어 음역 적용 전 확인이 필요함"
+  },
+  "tag:tinkerbell bougumi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "bougumi의 원어/의미가 불명확해 음역은 가능하지만 적용 전 확인이 필요함"
+  },
+  "tag:tiny trans funket 03 fly high jet!! &amp; bumblebee biiki!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "긴 고유 제목이며 일부 단어의 원어·의미가 불명확해 음역 적용 전 확인이 필요함"
+  },
+  "tag:tkmk box": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified proper noun or stylized tag; transliteration is plausible but not confirmed."
+  },
+  "tag:tkmkbox": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverified proper noun or stylized tag; transliteration is plausible but not confirmed."
+  },
+  "tag:tky": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Acronym or short proper code with no reliable Korean expansion; should remain unchanged."
+  },
+  "tag:tmf7": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "Alphanumeric identifier with no clear Korean semantic equivalent; should remain unchanged."
+  },
+  "tag:to-hi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Short romanized proper noun or abbreviation; transliteration is plausible but ambiguous."
+  },
+  "tag:toaru hon&#39;ya no ten&#39;in]birthday 2021!a (bleach": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Malformed composite tag with bracket, event text, and parenthetical franchise marker; unsafe to apply automatically."
+  },
+  "tag:tobaroku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 정식 표기를 확인하기 어려워 음역만 가능함"
+  },
+  "tag:todoroku bakuon rhapsody jb2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese event/title proper noun; transliteration is plausible but the exact official Korean form is not verifiable from the tag alone."
+  },
+  "tag:togaq": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 약어로 보이나 출처와 표준 표기를 확인할 수 없어 음역만 가능함."
+  },
+  "tag:toheartsai2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품명 또는 합성 태그로 보이나 분절과 정식 표기를 확인하기 어려움"
+  },
+  "tag:toheartsai2-e": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "작품명, 모델명, 파일명 또는 코드형 태그일 가능성이 높아 임의 번역이나 음역 적용이 안전하지 않음."
+  },
+  "tag:tokidoki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 부사 '가끔'일 수도 있고 브랜드/고유명사일 수도 있어 문맥 확인이 필요함."
+  },
+  "tag:tokinobutto": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 조어로 보이며 확립된 한국어 표기를 확인할 수 없어 음역만 가능합니다."
+  },
+  "tag:tokipa 6": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "tokipa가 약칭일 가능성이 높지만 원형을 확인할 수 없어 음역 적용 전 검토가 필요합니다."
+  },
+  "tag:tokishuu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 약칭으로 보이나 의미와 확립 표기가 불명확해 음역만으로는 검토가 필요합니다."
+  },
+  "tag:tokkan magasashi musume": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기의 원어와 의미를 확인하기 어려워 음역은 가능하지만 검토가 필요합니다."
+  },
+  "tag:tokkou otome": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기로 의미는 추정 가능하지만 고유명사 여부가 불명확함"
+  },
+  "tag:tokkou yarou ap team": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목/팀명으로 보이나 yarou와 AP team의 정식 한국어 표기를 확인하기 어려움"
+  },
+  "tag:tokkousha": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "tokkousha의 원어 한자와 의미가 불명확해 번역 확정이 어려움"
+  },
+  "tag:toko-sen": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "약칭 또는 고유명사로 보이며 의미 확인이 어려워 음역만 가능함"
+  },
+  "tag:tokori": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"토코리\" already used by tag:tocori in the same category"
+  },
+  "tag:tokubetsu daienshuu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기상 의미 추정은 가능하지만 원문 한자 확인이 없어 검토가 필요합니다."
+  },
+  "tag:tokyo fes feb 2024": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도쿄 페스 2024년 2월\" already used by tag:tokyo fes feb.2024 in the same category"
+  },
+  "tag:tokyo fes feb.2020": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도쿄 페스 2020년 2월\" already used by tag:tokyo fes feb 2020 in the same category"
+  },
+  "tag:tokyo fes jan.2026": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도쿄 페스 2026년 1월\" already used by tag:tokyo fes jan 2026 in the same category"
+  },
+  "tag:tokyo fes sep 2025": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도쿄 페스 2025년 9월\" already used by tag:tokyo fes sep.2025 in the same category"
+  },
+  "tag:tokyo fes sep. 2025": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도쿄 페스 2025년 9월\" already used by tag:tokyo fes sep.2025 in the same category"
+  },
+  "tag:tokyo罹破維武8": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도쿄 리바이브 8\" already used by tag:tokyo revive 8 in the same category"
+  },
+  "tag:tomy f rou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 표기 의도가 불분명해 음역 적용 전 검토가 필요합니다."
+  },
+  "tag:ton piero": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 원어 표기와 의미를 확인하기 어려워 검토가 필요합니다."
+  },
+  "tag:ton ton oniku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기 기반 고유명사로 보이나 원어 표기를 확인할 수 없어 검토가 필요함"
+  },
+  "tag:tonari no minano": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기 기반 고유명사로 보이나 원어 표기를 확인할 수 없어 검토가 필요함"
+  },
+  "tag:tonde aozora hairu natsu no mushi jb 2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "긴 로마자 제목으로 분절과 원어 표기가 불확실해 검토가 필요함"
+  },
+  "tag:tongue-thigh-off": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "하이픈 결합 태그의 의미가 불명확해 직역 적용 전 검토가 필요함"
+  },
+  "tag:tontorotei": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어식 상호 또는 고유명사로 보이나 원어 표기를 확인할 수 없어 검토가 필요함"
+  },
+  "tag:toorisugari kari": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기로 보이나 원어 표기와 의미가 불확실해 검토가 필요합니다."
+  },
+  "tag:tora ga ame": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese phrase or proper noun is ambiguous; transliteration is acceptable but meaning cannot be verified from the tag alone."
+  },
+  "tag:toramatsuri2010": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"토라마츠리 2010\" already used by tag:toramatsuri 2010 in the same category"
+  },
+  "tag:toretama002": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "코드형 고유 태그라 번역하지 않고 원문을 유지하는 것이 안전함"
+  },
+  "tag:torinchi.": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"토린치\" already used by tag:torinchi in the same category"
+  },
+  "tag:toshi○en": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Stylized romanized proper noun with a placeholder symbol; transliteration preserves form but exact intended reading is unverifiable."
+  },
+  "tag:toshokan-jima no kyuujitsu": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"도서관섬의 휴일\" already used by tag:toshokanjima no kyuujitsu in the same category"
+  },
+  "tag:totte": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Single romanized word is ambiguous and could be a common word or proper noun; transliteration is not fully verifiable."
+  },
+  "tag:tou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Very short romanized tag with many possible Japanese meanings or names; transliteration is ambiguous."
+  },
+  "tag:touhou goudou saiji 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "이벤트명으로 보이나 공식 한국어 표기 확인이 필요함"
+  },
+  "tag:touhou kuonkyou tenjin": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "동방 관련 고유 이벤트명으로 보이나 공식 표기 확인이 필요함"
+  },
+  "tag:touhou suikansai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "suikansai의 한자나 공식 표기가 불명확해 음역 검토가 필요함"
+  },
+  "tag:touhou suukeisai": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"동방 숭경제\" already used by tag:touhou suukei sai in the same category"
+  },
+  "tag:touma nigou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "개인명 또는 고유명으로 보이나 한자 표기나 공식 한국어 표기를 확인할 수 없어 음역 검토가 필요합니다."
+  },
+  "tag:tousaku skirt": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "tousaku의 의도 의미가 도촬인지 고유명사인지 모호함"
+  },
+  "tag:tousouya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명인지 일반어인지 불명확하며 의미 번역과 음역 중 선택에 검토가 필요합니다."
+  },
+  "tag:touyousha": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely proper noun or circle/publisher name; transliteration is plausible but exact established Korean form is unverifiable."
+  },
+  "tag:towa ni hagurenu ai no shirube o ii": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기 제목의 원문 표기와 정확한 뉘앙스 확인이 필요합니다."
+  },
+  "tag:tps05": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "영문자와 숫자로 된 코드형 태그라 번역하지 않고 원문 유지가 적절함"
+  },
+  "tag:tps6": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "영문자와 숫자로 된 코드형 태그라 번역하지 않고 원문 유지가 적절함"
+  },
+  "tag:tr5000": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "영문자와 숫자로 된 코드형 태그라 번역하지 않고 원문 유지가 적절함"
+  },
+  "tag:triple attack dan": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Proper-noun-like tag; transliteration is plausible but exact Korean usage is unverifiable."
+  },
+  "tag:troll-trad by @doushitshi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Title plus creator handle; transliteration preserves meaning but exact intended title is unverifiable."
+  },
+  "tag:try&amp;re:save": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Stylized title-like tag; transliteration is plausible but established Korean rendering is unverifiable."
+  },
+  "tag:tsf cafe 2-gouten (ty": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "태그가 괄호와 식별자 부분에서 잘린 형태로 보여 원문 확인이 필요합니다."
+  },
+  "tag:tsubaki mapputatsu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품명 또는 구문일 수 있어 의미 번역 적용 전 원문 확인이 필요합니다."
+  },
+  "tag:tsuili shijyo": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanization is ambiguous and not confidently identifiable as a semantic phrase or proper noun; transliteration is provided but should be reviewed."
+  },
+  "tag:tsuki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Can mean moon/month in Japanese but may also be a proper noun; semantic translation may be unsafe without context."
+  },
+  "tag:tsuki no otodokeya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a title or proper noun; semantic translation is plausible but not independently verifiable from romanization alone."
+  },
+  "tag:tsukuyomi no utage": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"츠쿠요미의 연회\" already used by tag:tsukiyomi no utage in the same category"
+  },
+  "tag:tsunagu aka no issen dr2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Phrase meaning is partially clear, but it appears to be a specific title/event tag and may have an established Korean rendering."
+  },
+  "tag:tsunagu yume to omoi seigan 2025": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Phrase is interpretable but title/event-specific, and 'seigan' is ambiguous without source context."
+  },
+  "tag:tsuya onna semezu to monologue": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원문 표기와 구문이 불확실해 의미 번역보다 음역 처리했으며 확인이 필요함."
+  },
+  "tag:ttb": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "약어만으로 의미를 특정할 수 없어 번역하지 않고 원문 유지가 적절함"
+  },
+  "tag:ttc7": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "영문+숫자 식별자 형태라 번역하지 않고 원문 유지가 적절함."
+  },
+  "tag:tufos": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "의미나 고유명사 여부가 불명확한 저빈도 태그라 음역만 가능함"
+  },
+  "tag:tuki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사일 가능성이 있으나 원어 발음이 투키/츠키 중 불명확함"
+  },
+  "tag:tukibuto hi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어식 고유명사로 보이나 정확한 원어 표기 확인이 필요함"
+  },
+  "tag:turisasu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원어와 의미가 불명확해 음역은 가능하지만 확인이 필요함"
+  },
+  "tag:turudasou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "원어와 의미가 불명확해 음역은 가능하지만 확인이 필요함"
+  },
+  "tag:turutimadokyuun": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "조어 또는 특수 고유명사로 보이나 원 표기 확인 없이는 정확한 음역을 검증하기 어려움"
+  },
+  "tag:tutihige zoku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized proper noun/group name is obscure; transliteration is plausible but not independently verified."
+  },
+  "tag:tuyudaku icchou!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese romanized title; transliteration is plausible, but semantic intent or official Korean title is not verified."
+  },
+  "tag:twinkle mirage 5": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"트윙클 미라주 5\" already used by tag:twinkle mirage5 in the same category"
+  },
+  "tag:tyaran": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized proper noun is ambiguous; transliteration is plausible but not independently verified."
+  },
+  "tag:tyouda ten": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "인명 또는 제목으로 보이나 원 일본어 표기를 확인해야 정확한 한글 표기가 가능함"
+  },
+  "tag:tō sumi tonbo": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese proper noun or title; transliteration is plausible but meaning is not verified."
   },
   "tag:undergroud carnival": {
     "tried": "2026-06-14",
@@ -16008,6 +18972,132 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:wa chi hoshi [yanano": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Malformed or incomplete romanized Japanese/proper noun with bracket; transliteration may be acceptable but is not safely verifiable."
+  },
+  "tag:wa tako": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized phrase/proper noun; transliteration is possible but meaning is unclear."
+  },
+  "tag:wada maunten": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely proper noun or misspelled romanization; transliteration is possible but not safely verifiable."
+  },
+  "tag:wagahai no inu de aru hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목형 로마자 표기로 대략적 의미 번역은 가능하지만 공식 한국어 제목 여부와 문장 경계가 불확실합니다."
+  },
+  "tag:wahitouppe": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사로 보이나 원어와 표준 한국어 표기가 확인되지 않아 음역 적용 전 검토가 필요합니다."
+  },
+  "tag:wakaraseya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a title or coined term; transliteration is plausible but meaning/source is not verified."
+  },
+  "tag:wakerage": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unclear whether this is a coined name, brand, or misspelling; transliteration needs source verification."
+  },
+  "tag:wakusei garaga tsuushi sha": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 제목 또는 단체명으로 보이나 원문 표기와 의미가 불확실해 음역만으로 적용하기에는 검토가 필요합니다."
+  },
+  "tag:wannyaa": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Onomatopoeic or coined proper tag; transliteration is plausible but source meaning is unverifiable."
+  },
+  "tag:wanryoku-san": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "'완력 씨'로 의미 번역할 수 있으나 고유명사일 가능성도 있어 적용 전 검토가 필요합니다."
+  },
+  "tag:warasiya": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"와라시야\" already used by tag:warashiya in the same category"
+  },
+  "tag:ware, yasen ni totsunyuu su! 3 gokuen": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese title; transliteration is provided but exact official Korean title/kanji reading is unverified."
+  },
+  "tag:ware, yasen ni totsunyuu su! 6": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese title; transliteration is provided but exact official Korean title/kanji reading is unverified."
+  },
+  "tag:waru no desu... ouji 19": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "로마자 표기만으로 원제와 의미가 불명확해 안전한 의미 번역을 확정하기 어렵습니다."
+  },
+  "tag:watasoto": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or coined form; transliteration is plausible but meaning is unclear."
+  },
+  "tag:water and bule": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely English phrase with a typo for blue, but the misspelling may be intentional."
+  },
+  "tag:watosu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or coined form; transliteration is plausible but meaning is unclear."
+  },
+  "tag:wayu": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or handle; transliteration is plausible but context is unclear."
+  },
+  "tag:wayu01": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely handle or identifier; transliteration preserves the numeric suffix but should be reviewed."
+  },
+  "tag:wbc": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous acronym; could refer to multiple established meanings and may need to remain unchanged."
+  },
+  "tag:web de tokiruru no furi shite petit": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Mixed romaji/title-like phrase with unclear proper noun tokiruru and petit; translation is tentative."
+  },
   "tag:wry-fes2": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -16032,6 +19122,18 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "tag:xichem": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unverifiable proper noun or brand-like term; transliteration is plausible but ambiguous."
+  },
+  "tag:xiǎojiě] c 95 shinkan sanpuru [vura guda].(fate/grand order": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Malformed mixed-language title/tag with unclear bracket and romanized elements; transliteration is plausible but not fully verifiable."
+  },
   "tag:y.y.land": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -16049,6 +19151,324 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:yousai": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 표기로 여러 의미가 가능해 문맥 없이 의미 번역을 확정하기 어렵다."
+  },
+  "tag:yousei genki!": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "구어적 일본어 로마자 제목으로 '요정은 건강해' 또는 '요정 활기차!' 등 해석 여지가 있다."
+  },
+  "tag:youthful-goya": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "goya가 인명, 식물, 고유명사 중 무엇인지 불명확해 문맥 확인이 필요하다."
+  },
+  "tag:yubi o kurawaba saigo made": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "appears to be a Japanese title or phrase; semantic translation is plausible but may have an established title"
+  },
+  "tag:yude fry teishoku": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "could be a title, circle name, or literal phrase; transliteration is safer but meaning is ambiguous"
+  },
+  "tag:yugure march": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "likely a title; semantic Korean is natural but an established title may differ"
+  },
+  "tag:yuki bokuro": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 특정 작품명일 가능성이 있어 의미 번역보다 음역했지만 원뜻 확인이 필요함"
+  },
+  "tag:yukisakura daiyuuyonshou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Nonstandard romanization for a chapter marker; transliteration is safer than inferring a chapter number."
+  },
+  "tag:yukyutaru shoukei dr2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "일본어 로마자 제목으로 보이나 원 표기 확인이 어려워 의미 번역의 정확성 검토가 필요합니다."
+  },
+  "tag:yumemigotoki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous romanized Japanese/proper-title form; transliteration is plausible but not independently verifiable."
+  },
+  "tag:yun ta yun ko": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unusual spaced romanized name or handle; pronunciation and intended segmentation are uncertain."
+  },
+  "tag:yuuha onnakage": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사 또는 조합어로 보이며 원 표기 확인 없이는 의미 번역이 불확실해 음역만 가능함"
+  },
+  "tag:yuumei sakura 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유명사인지 의미 표현인지 불명확하며 원 표기 확인이 필요함"
+  },
+  "tag:yuushi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "단독 로마자 표기만으로 원어와 의미가 여러 가능성이 있어 음역 외 확정이 어려움"
+  },
+  "tag:yuuyakeiro ni somaru kiba hoshi ni negai o. 2022": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized Japanese title appears semantically translatable, but exact original title segmentation and established Korean rendering are unverified."
+  },
+  "tag:yuuyuu ryouron megusand jb2023": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Proper-noun/event-like romanized tag with unclear segmentation; transliteration is possible but established Korean form is unverified."
+  },
+  "tag:yuzuriha de grulla": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Proper noun with mixed Japanese/Spanish-looking components; transliteration is possible but exact established form is unverified."
+  },
+  "tag:zeals kitchen doushi kenbunroku 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유 제목 요소와 doushi의 정확한 원어 의미가 다소 불명확해 검토가 필요합니다."
+  },
+  "tag:zeals kitchen doushi kenbunroku 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Mostly romanized proper-title components; transliteration is plausible but exact established Korean name is unverifiable."
+  },
+  "tag:zenkou warks": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "warks가 works의 오기인지 고유 표기인지 확인이 필요합니다."
+  },
+  "tag:zenkuu no chou hasha 2019": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "고유 행사명으로 보이나 원어 한자 표기 확인이 어려워 음역 기반 번역입니다."
+  },
+  "tag:zenkuu no chouhasha 2019": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "chouhasha의 원어 한자와 공식 한국어 표기가 확인되지 않아 검토가 필요합니다."
+  },
+  "tag:zenkuu no hasha 10": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese title phrase, but the exact source spelling/meaning is ambiguous without original kanji; needs verification before applying semantically."
+  },
+  "tag:zenkuu no hasha 12": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu no hasha의 공식 표기와 hasha의 의미가 확인되지 않아 검토가 필요합니다."
+  },
+  "tag:zenkuu no hasha 14": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu no hasha의 공식 표기와 hasha의 의미가 확인되지 않아 검토가 필요합니다."
+  },
+  "tag:zenkuu no hasha 15": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu의 한자 표기와 정확한 공식 명칭을 확인할 수 없어 의미 번역이 불확실합니다."
+  },
+  "tag:zenkuu no hasha 2": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu no hasha의 공식 표기와 hasha의 의미가 확인되지 않아 검토가 필요합니다."
+  },
+  "tag:zenkuu no hasha 2019": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu의 한자 표기와 정확한 공식 명칭을 확인할 수 없어 의미 번역이 불확실합니다."
+  },
+  "tag:zenkuu no hasha 3": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu가 특정 작품 세계관의 고유 용어일 수 있어 확정 적용 전 검토가 필요합니다."
+  },
+  "tag:zenkuu no hasha 5": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "작품명으로 보이나 zenkū의 정확한 한자나 공식 표기를 확인할 수 없어 검토가 필요합니다."
+  },
+  "tag:zenkuu no hasha 6": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "제목형 일본어 로마자 표기로 보이나 zenkuu의 정확한 공식 한국어 표기가 불확실함"
+  },
+  "tag:zenkuu no hasha 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanized title is ambiguous; transliteration is plausible but underlying Japanese reading/meaning is not fully verifiable."
+  },
+  "tag:zenkuu no hasha 8": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zenkuu no hasha의 공식 표기와 hasha의 의미가 확인되지 않아 검토가 필요합니다."
+  },
+  "tag:zennin shuuketsu 7": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "zennin의 원문 한자 가능성이 여러 가지라 정확한 의미 확인이 필요함"
+  },
+  "tag:zenraysahiki": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "분절과 원어를 확인할 수 없는 고유명으로 보여 음역은 가능하지만 적용 전 검토가 필요합니다."
+  },
+  "tag:zettai zetsumei(choufuka": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Input appears malformed with an unmatched parenthesis, so applying automatically may propagate a broken title."
+  },
+  "tag:zhao shi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a proper noun or person name; transliteration is plausible but the exact source characters are unverifiable from the romanization alone."
+  },
+  "tag:zijou": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Romanization is ambiguous and could be a misspelling or semantic Japanese word; transliteration is possible but should be reviewed."
+  },
+  "tag:zoukibayashi kunugi": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely a Japanese proper noun; transliteration is plausible but exact reading/characters are unverifiable."
+  },
+  "tag:с50": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Cyrillic-letter code-like tag with unclear semantic meaning; left unchanged."
+  },
+  "tag:с54": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Cyrillic-letter code-like tag with unclear semantic meaning; left unchanged."
+  },
+  "tag:с71": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Cyrillic-letter code-like tag with unclear semantic meaning; left unchanged."
+  },
+  "tag:с72": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Cyrillic-letter code-like tag with unclear semantic meaning; left unchanged."
+  },
+  "tag:с87": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Cyrillic-letter code-like tag with unclear semantic meaning; left unchanged."
+  },
+  "tag:うさぎなごむ": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Likely Japanese phrase about a rabbit being soothed/relaxed, but wording may be a title or name."
+  },
+  "tag:さいおがうま": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "히라가나 표기의 고유명사 또는 문구로 보이나 정확한 의미와 분절이 불확실해 검토 필요"
+  },
+  "tag:しょたふる!": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"쇼타풀!\" already used by tag:shotaful! in the same category"
+  },
+  "tag:だくはん": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Unclear whether this is a name, abbreviation, or semantic term; transliteration may be acceptable but needs verification."
+  },
+  "tag:なし": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Ambiguous between the common meaning 'none' and a possible proper name/readable tag; needs context before applying."
+  },
+  "tag:にょろ": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "Could be an onomatopoeia or proper noun; transliteration is plausible but context is needed."
+  },
+  "tag:ふたけっと34": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"후타켓 34\" already used by tag:futaket 34 in the same category"
+  },
+  "tag:ゆっくり": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"윳쿠리\" already used by tag:yukkuri in the same category"
+  },
+  "tag:るるが]][2 / 23 haru komi shinkan sanpuru] haru-machi supika [karu guda ♀][fate/grand order": {
+    "tried": "2026-06-15",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "괄호가 깨진 긴 혼합언어 제목형 태그로 일부 로마자 구간의 원뜻과 경계가 불명확해 수동 검토가 필요합니다."
   },
   "tag:コミティア154": {
     "tried": "2026-06-14",
@@ -16223,5 +19643,11 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "tag:🟢": {
+    "tried": "2026-06-15",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "이모지 태그는 번역 대상이 아니므로 원문 유지가 적절합니다."
   }
 }
