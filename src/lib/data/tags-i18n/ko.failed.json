@@ -13675,9 +13675,9 @@
     "reason": "souzoushyu는 창조주로 해석 가능하지만 bonjou의 원어 표기가 확실하지 않아 검토 필요"
   },
   "tag:boost !": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"부스트!\" already used by tag:boost! in the same category"
   },
   "tag:btb-25": {
@@ -14965,9 +14965,9 @@
     "reason": "not confident translation"
   },
   "tag:chimaira": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"키마이라\" already used by tag:kimaira in the same category"
   },
   "tag:chinetsu": {
@@ -15547,10 +15547,10 @@
     "reason": "일본어 행사명으로 보이나 'bunbun. maru' 구분이 불확실해 원 표기 확인이 필요합니다."
   },
   "tag:dai 128 ki bunbunmaru shinbun tomo no kai": {
-    "tried": "2026-06-15",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "일본어 이벤트명으로 추정되지만 ki와 bunbunmaru 표기의 정확한 한자/공식 표기 확인이 필요합니다."
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"제128기 분분마루 신문 친구회\" already used by tag:dai 128 ki bunbun maru shinbun tomo no kai in the same category"
   },
   "tag:dai 29 sen": {
     "tried": "2026-06-15",
@@ -15973,10 +15973,10 @@
     "reason": "Mixed semantic phrase and unclear proper noun; translation is plausible but source meaning is not fully verifiable."
   },
   "tag:gummy soft": {
-    "tried": "2026-06-15",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "Phrase is somewhat ambiguous between texture description and proper noun; translation is plausible but not fully verifiable."
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"구미 소프트\" already used by tag:gumi soft in the same category"
   },
   "tag:gunreibu shuho 2022 spring": {
     "tried": "2026-06-15",
@@ -16887,7 +16887,7 @@
   "tag:manga": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"만화\" already used by tag:comic in the same category"
   },
   "tag:mich-kj": {
@@ -17331,7 +17331,7 @@
   "tag:renai jiyuugata!entry6": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"연애 자유형! 엔트리 6\" already used by tag:renai jiyuugata! entry 6 in the same category"
   },
   "tag:renai jiyūgata! ōsaka taikai 2": {
@@ -17533,10 +17533,10 @@
     "reason": "not confident translation"
   },
   "tag:rts!! 5": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"알티에스!! 5\" already used by tag:rts!!5 in the same category"
   },
   "tag:rts!! 7": {
     "tried": "2026-06-14",
@@ -17637,7 +17637,7 @@
   "tag:rts!!7": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"알티에스!! 7\" already used by tag:rts!! 7 in the same category"
   },
   "tag:rts!!8": {
@@ -18223,9 +18223,9 @@
     "reason": "not confident translation"
   },
   "tag:sjinshun kemoket 11": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"신슌 케모켓 11\" already used by tag:shinshun kemoket 11 in the same category"
   },
   "tag:skg": {
@@ -18337,9 +18337,9 @@
     "reason": "로마자 표기가 불명확해 공식 일본어 원문 또는 정식 한국어 표기 확인이 필요함"
   },
   "tag:teru-bee": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"테루비\" already used by tag:terubee in the same category"
   },
   "tag:tetuo": {
@@ -18567,7 +18567,7 @@
   "tag:tokori": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"토코리\" already used by tag:tocori in the same category"
   },
   "tag:tokubetsu daienshuu": {
@@ -18915,7 +18915,7 @@
   "tag:twinkle mirage 5": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"트윙클 미라주 5\" already used by tag:twinkle mirage5 in the same category"
   },
   "tag:tyaran": {
@@ -19497,7 +19497,7 @@
   "tag:同人誌": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"동인지\" already used by tag:doujinshi in the same category"
   },
   "tag:悋気に笑み曲ぐ恋の徒言3": {
@@ -19633,10 +19633,10 @@
     "reason": "not confident translation"
   },
   "tag:関西けもケット10": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"간사이 케모켓 10\" already used by tag:kansai kemoket 10 in the same category"
   },
   "tag:鬼狩奇譚": {
     "tried": "2026-06-14",
