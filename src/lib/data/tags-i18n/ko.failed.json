@@ -14845,10 +14845,10 @@
     "reason": "not confident translation"
   },
   "tag:cctokyo142": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"코믹 시티 도쿄 142\" already used by tag:comic city tokyo 142 in the same category"
   },
   "tag:cctokyo144": {
     "tried": "2026-06-14",
@@ -14869,10 +14869,10 @@
     "reason": "not confident translation"
   },
   "tag:cctokyo147": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"코믹 시티 도쿄 147\" already used by tag:comic city tokyo 147 in the same category"
   },
   "tag:cctokyo148": {
     "tried": "2026-06-14",
@@ -14881,10 +14881,10 @@
     "reason": "not confident translation"
   },
   "tag:cctokyo149": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"코믹 시티 도쿄 149\" already used by tag:comic city tokyo 149 in the same category"
   },
   "tag:cctokyo150": {
     "tried": "2026-06-14",
@@ -15469,10 +15469,10 @@
     "reason": "not confident translation"
   },
   "tag:ct47": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"코믹 트레저 47\" already used by tag:comic treasure 47 in the same category"
   },
   "tag:ct5": {
     "tried": "2026-06-14",
@@ -16885,9 +16885,9 @@
     "reason": "duplicate translation \"말보로\" already used by tag:marlboro in the same category"
   },
   "tag:manga": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"만화\" already used by tag:comic in the same category"
   },
   "tag:mich-kj": {
@@ -17329,10 +17329,10 @@
     "reason": "duplicate translation \"연애 자유형! 엔트리5\" already used by tag:renai jiyuugata! entry5 in the same category"
   },
   "tag:renai jiyuugata!entry6": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "duplicate translation \"연애 자유형! 엔트리6\" already used by tag:renai jiyuugata! entry6 in the same category"
+    "attempts": 2,
+    "reason": "duplicate translation \"연애 자유형! 엔트리 6\" already used by tag:renai jiyuugata! entry 6 in the same category"
   },
   "tag:renai jiyūgata! ōsaka taikai 2": {
     "tried": "2026-06-15",
@@ -17635,10 +17635,10 @@
     "reason": "not confident translation"
   },
   "tag:rts!!7": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"알티에스!! 7\" already used by tag:rts!! 7 in the same category"
   },
   "tag:rts!!8": {
     "tried": "2026-06-14",
@@ -18565,9 +18565,9 @@
     "reason": "약칭 또는 고유명사로 보이며 의미 확인이 어려워 음역만 가능함"
   },
   "tag:tokori": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"토코리\" already used by tag:tocori in the same category"
   },
   "tag:tokubetsu daienshuu": {
@@ -18913,9 +18913,9 @@
     "reason": "Likely Japanese romanized title; transliteration is plausible, but semantic intent or official Korean title is not verified."
   },
   "tag:twinkle mirage 5": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"트윙클 미라주 5\" already used by tag:twinkle mirage5 in the same category"
   },
   "tag:tyaran": {
@@ -19497,7 +19497,7 @@
   "tag:同人誌": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"동인지\" already used by tag:doujinshi in the same category"
   },
   "tag:悋気に笑み曲ぐ恋の徒言3": {
