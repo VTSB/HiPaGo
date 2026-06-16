@@ -141,23 +141,12 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
     return <div className="flex min-h-screen items-center justify-center bg-black"><Spinner size="md" className="border-zinc-600 border-t-white" /></div>;
   if (offlineCount === 0 && reader.error) return <div className="flex min-h-screen items-center justify-center bg-black text-red-400">{reader.error}</div>;
 
-  // Downloaded gallery whose stored files are missing/corrupt.
-  if (offline.missing) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-black text-zinc-400">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-12 w-12 text-zinc-600">
-          <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
-        </svg>
-        <p className="text-sm">Downloaded files are missing or corrupt.</p>
-        <button
-          onClick={reader.goBack}
-          className="rounded-full bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
-        >
-          Go back
-        </button>
-      </div>
-    );
-  }
+  // NOTE: when a downloaded gallery's stored files are missing/corrupt,
+  // useOfflineImages returns urls:null (offlineCount === 0) so we DELIBERATELY
+  // fall through to the normal cache→network reader path above (useReader runs
+  // regardless of download status) rather than showing a dead-end "files
+  // missing" screen. The detail page surfaces the missing-files state at the
+  // download button instead. So there is no `offline.missing` branch here.
 
   // Pass offline blob URLs when available; readers fall back to network when undefined.
   const offlineUrls = offline.urls ?? undefined;
