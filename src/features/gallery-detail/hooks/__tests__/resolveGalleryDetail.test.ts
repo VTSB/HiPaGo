@@ -21,6 +21,21 @@ vi.mock('@/lib/api/parser', () => ({
   galleryInfoToImages: vi.fn(),
 }));
 
+// Offline download-row fallback deps (used when the network fetch fails).
+vi.mock('@/lib/db/download', () => ({
+  getDownload: vi.fn(),
+  deserializeTags: (raw: string) => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  },
+}));
+vi.mock('@/lib/utils/download-zip', () => ({
+  getDownloadedGalleryPages: vi.fn(),
+}));
+
 import {
   getGalleryBlock,
   saveGalleryBlock,
@@ -29,6 +44,8 @@ import {
 } from '@/lib/db/gallery';
 import { fetchGalleryInfo, filesToGalleryImages } from '@/lib/api/gallery';
 import { galleryInfoToBlock, galleryInfoToImages } from '@/lib/api/parser';
+import { getDownload } from '@/lib/db/download';
+import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
 
 const sampleFiles: GalleryFile[] = [
   { width: 1280, height: 1800, haswebp: 1, hasavif: 1, hasavifsmalltn: 1, name: '001.jpg', hash: 'abc' },
@@ -54,6 +71,10 @@ const sampleImages = {
 describe('resolveGalleryDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no download row / no on-disk pages so the fallback is inert
+    // unless a test opts in.
+    vi.mocked(getDownload).mockResolvedValue(null);
+    vi.mocked(getDownloadedGalleryPages).mockResolvedValue([]);
   });
 
   it('returns cached DETAILED block + images WITHOUT calling fetchGalleryInfo', async () => {
@@ -163,5 +184,71 @@ describe('resolveGalleryDetail', () => {
 
     await new Promise(r => setTimeout(r, 10));
     expect(saveGalleryBlock).not.toHaveBeenCalled();
+  });
+
+  // ── Offline download-row fallback (hole 2) ──────────────────────────────────
+  it('falls back to the download row + manifest when the network fetch fails for a downloaded gallery', async () => {
+    vi.mocked(getGalleryBlock).mockResolvedValue(null);
+    vi.mocked(getGalleryImages).mockResolvedValue(null);
+    vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
+    // A downloaded row + 3 pages on disk.
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 12345,
+      title: 'Downloaded Title',
+      thumbnail: '/tn.avif',
+      tags: '{"artist":["a"]}',
+      pageCount: 3,
+      totalBytes: 0,
+      downloadedAt: '2024-05-05T00:00:00.000Z',
+      status: 'complete',
+    } as unknown as Awaited<ReturnType<typeof getDownload>>);
+    vi.mocked(getDownloadedGalleryPages).mockResolvedValue([
+      { index: 2, ext: 'webp' },
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'avif' },
+    ]);
+    const synthImages = { id: 12345, images: [] };
+    vi.mocked(filesToGalleryImages).mockReturnValue(synthImages);
+
+    const result = await resolveGalleryDetail(12345);
+
+    expect(result.block.type).toBe(GalleryBlockType.NOT_DETAILED);
+    expect(result.block.title).toBe('Downloaded Title');
+    expect(result.block.tags).toEqual({ artist: ['a'] });
+    expect(result.files).toHaveLength(3);
+    // files are index-sorted to [0(webp), 1(avif), 2(webp)] → index 1 is the avif page
+    expect(result.files[1].hasavif).toBe(1);
+    expect(result.files[0].haswebp).toBe(1);
+    expect(result.images).toBe(synthImages);
+    // It must NOT pollute the gallery cache with the synthetic block.
+    expect(saveGalleryBlock).not.toHaveBeenCalled();
+  });
+
+  it('re-throws the network error when there is no download row', async () => {
+    vi.mocked(getGalleryBlock).mockResolvedValue(null);
+    vi.mocked(getGalleryImages).mockResolvedValue(null);
+    vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
+    vi.mocked(getDownload).mockResolvedValue(null);
+
+    await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
+  });
+
+  it('re-throws the network error when the download row has no pages on disk', async () => {
+    vi.mocked(getGalleryBlock).mockResolvedValue(null);
+    vi.mocked(getGalleryImages).mockResolvedValue(null);
+    vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 12345,
+      title: 'X',
+      thumbnail: '',
+      tags: '{}',
+      pageCount: 3,
+      totalBytes: 0,
+      downloadedAt: '2024-05-05T00:00:00.000Z',
+      status: 'complete',
+    } as unknown as Awaited<ReturnType<typeof getDownload>>);
+    vi.mocked(getDownloadedGalleryPages).mockResolvedValue([]);
+
+    await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
   });
 });
