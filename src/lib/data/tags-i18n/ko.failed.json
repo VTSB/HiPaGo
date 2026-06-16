@@ -13291,16 +13291,16 @@
     "reason": "짧은 약어로 의미가 불명확해 안전하게 확정하기 어렵습니다."
   },
   "tag:ac2": {
-    "tried": "2026-06-15",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "짧은 약어라 특정 작품, 행사, 장르 등을 확정하기 어려워 원문 보존 외 번역 적용은 검토가 필요합니다."
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"에어 코미케 2\" already used by tag:air comiket 2 in the same category"
   },
   "tag:ac3": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "짧은 약어형 고유명사로 정확한 확장명이나 행사명을 확인하기 어려움"
+    "attempts": 2,
+    "reason": "ambiguous event abbreviation; translation is a phonetic fallback"
   },
   "tag:accter": {
     "tried": "2026-06-15",
@@ -14227,10 +14227,10 @@
     "reason": "not confident translation"
   },
   "tag:c88": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"코믹마켓 88\" already used by tag:(c88 in the same category"
   },
   "tag:c89": {
     "tried": "2026-06-14",
@@ -15751,10 +15751,10 @@
     "reason": "not confident translation"
   },
   "tag:ff23": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"팬시 프론티어 23\" already used by tag:fancy frontier 23 in the same category"
   },
   "tag:ff24": {
     "tried": "2026-06-14",
@@ -15769,10 +15769,10 @@
     "reason": "not confident translation"
   },
   "tag:ff26": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"팬시 프론티어 26\" already used by tag:fancy frontier 26 in the same category"
   },
   "tag:ff27": {
     "tried": "2026-06-14",
@@ -19495,10 +19495,10 @@
     "reason": "not confident translation"
   },
   "tag:同人誌": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "duplicate translation \"동인\" already used by tag:doujin in the same category"
+    "attempts": 2,
+    "reason": "duplicate translation \"동인지\" already used by tag:doujinshi in the same category"
   },
   "tag:悋気に笑み曲ぐ恋の徒言3": {
     "tried": "2026-06-14",
