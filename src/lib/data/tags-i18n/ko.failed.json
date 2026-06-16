@@ -6733,7 +6733,7 @@
   "series:after...": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no Korean-character localized title found"
   },
   "series:ai shimai": {
@@ -6751,7 +6751,7 @@
   "series:aisai nikki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:ajisai no chiru koro ni": {
@@ -6841,7 +6841,7 @@
   "series:anata no shiranai kangofu": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 28,
+    "attempts": 29,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:ane doki": {
@@ -6883,7 +6883,7 @@
   "series:anna millers": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 28,
+    "attempts": 29,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:anne happy": {
@@ -7009,8 +7009,8 @@
   "series:backbeard-sama ga miteru": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:bakkotsu shoujo giri giri purin": {
     "tried": "2026-06-13",
@@ -7039,8 +7039,8 @@
   "series:bakunyuu maid kari": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:bakuretsu muteki bangai-o": {
     "tried": "2026-06-09",
@@ -7087,8 +7087,8 @@
   "series:bijo de yajuu": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:binary pot": {
     "tried": "2026-06-07",
@@ -7243,8 +7243,8 @@
   "series:buta no gotoki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:butterfly affection": {
     "tried": "2026-06-13",
@@ -7261,7 +7261,7 @@
   "series:cafe sourire": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:can can bunny": {
@@ -7315,8 +7315,8 @@
   "series:challenge first-year-student": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:cheer danshi": {
     "tried": "2026-06-09",
@@ -7327,8 +7327,8 @@
   "series:cheerism": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:chicchana moko-chan": {
     "tried": "2026-06-13",
@@ -7381,8 +7381,8 @@
   "series:chocolate melancholy": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:chogattai majutsu robot ginguiser": {
     "tried": "2026-06-13",
@@ -7423,7 +7423,7 @@
   "series:cinderella blade": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 6,
+    "attempts": 7,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:claires quest": {
@@ -7447,7 +7447,7 @@
   "series:clover point": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:cluster edge": {
@@ -7465,7 +7465,7 @@
   "series:cocoro restarter": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:cocoro-navi": {
@@ -7495,8 +7495,8 @@
   "series:concon-collector": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:condorito": {
     "tried": "2026-06-01",
@@ -7543,7 +7543,7 @@
   "series:crystal maidens": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:cucumber quest": {
@@ -7573,8 +7573,8 @@
   "series:d.p.s.": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:da erduo tutu": {
     "tried": "2026-06-09",
@@ -7609,7 +7609,7 @@
   "series:dalk gaiden": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:danchi tomoo": {
@@ -7741,8 +7741,8 @@
   "series:dispatch": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:divine sealing": {
     "tried": "2026-06-13",
@@ -7765,14 +7765,14 @@
   "series:doki doki pretty league": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:dokkin minako-sensei": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:dokkoida": {
     "tried": "2026-06-01",
@@ -7915,8 +7915,8 @@
   "series:enjou genmu tan": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:enzai": {
     "tried": "2026-06-01",
@@ -7927,8 +7927,8 @@
   "series:eonbound": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:erma": {
     "tried": "2026-06-01",
@@ -7969,8 +7969,8 @@
   "series:etsuraku hyakka alegria": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:everlasting summer": {
     "tried": "2026-06-01",
@@ -8005,8 +8005,8 @@
   "series:famicom rocky": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 5,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 6,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:family pet sun-chan": {
     "tried": "2026-06-13",
@@ -8107,8 +8107,8 @@
   "series:fushigi tsuushin toilet no hanako-san": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 6,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 7,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:fushoku no machi": {
     "tried": "2026-06-08",
@@ -8257,8 +8257,8 @@
   "series:gosenzo san-e": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 6,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 7,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:goshuushou-sama ninomiya-kun": {
     "tried": "2026-06-01",
@@ -8317,7 +8317,7 @@
   "series:hajimete no aku": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:hajimete no hitozuma": {
@@ -8335,7 +8335,7 @@
   "series:hajimete no otetsudai": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:haken shain ogin": {
@@ -8443,8 +8443,8 @@
   "series:hatsukoi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:haunted junction": {
     "tried": "2026-06-08",
@@ -8491,7 +8491,7 @@
   "series:hentai heroes": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:heroes": {
@@ -8569,8 +8569,8 @@
   "series:hiseki shinki arcana saber": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:hit o nerae": {
     "tried": "2026-06-13",
@@ -8749,8 +8749,8 @@
   "series:in white": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:inkya lovecome": {
     "tried": "2026-06-13",
@@ -8761,8 +8761,8 @@
   "series:inma kourin devil carnival": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:inuzoribu": {
     "tried": "2026-06-13",
@@ -8833,8 +8833,8 @@
   "series:jimoto saikou": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:jinrou judgement": {
     "tried": "2026-06-09",
@@ -8863,8 +8863,8 @@
   "series:jock studio": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 8,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 9,
+    "reason": "no official Korean localized series title found"
   },
   "series:josou jinja": {
     "tried": "2026-06-13",
@@ -8881,8 +8881,8 @@
   "series:jouki toshi no tantei shoujo": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:jumping rabbit": {
     "tried": "2026-06-13",
@@ -8923,8 +8923,8 @@
   "series:kagura reimeiki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:kaiser spike": {
     "tried": "2026-06-09",
@@ -9073,7 +9073,7 @@
   "series:kokoro navi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:kokuran": {
@@ -9091,8 +9091,8 @@
   "series:konbini shoujo z": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 6,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 7,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:konboku mahjong": {
     "tried": "2026-06-13",
@@ -9187,14 +9187,14 @@
   "series:kuon no kizuna": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:kurai mirai": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:kurama-chan ni guitte shitara pishatte sareta": {
     "tried": "2026-06-13",
@@ -9211,7 +9211,7 @@
   "series:kurukuru rinne": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:kurumi miracle": {
@@ -9229,8 +9229,8 @@
   "series:kuttsukiboshi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:kyoukai no rinne": {
     "tried": "2026-06-07",
@@ -9247,8 +9247,8 @@
   "series:kyuujou lovers": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:kyuuketsu senki vjedogonia": {
     "tried": "2026-06-13",
@@ -9271,8 +9271,8 @@
   "series:kyuushu sentai danjija": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:l no kisetsu": {
     "tried": "2026-06-07",
@@ -9313,8 +9313,8 @@
   "series:legend of queen opala": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:legend of the galactic heroes": {
     "tried": "2026-06-07",
@@ -9427,8 +9427,8 @@
   "series:lover": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:luminous witches": {
     "tried": "2026-06-07",
@@ -9487,7 +9487,7 @@
   "series:magic sword": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:magic-kyun renaissance": {
@@ -9523,8 +9523,8 @@
   "series:magicalo magical": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:magico": {
     "tried": "2026-06-08",
@@ -9565,8 +9565,8 @@
   "series:mahou shoujo neko x": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:mahou shoujo no majo saiban": {
     "tried": "2026-06-01",
@@ -9619,8 +9619,8 @@
   "series:majokko a la mode": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:majokko tickle": {
     "tried": "2026-06-09",
@@ -9679,7 +9679,7 @@
   "series:mantradeva": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:manyuuki": {
@@ -9709,14 +9709,14 @@
   "series:marine a go go": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:maritsu loli succubus youmaen": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:maro mayu": {
     "tried": "2026-06-13",
@@ -9739,7 +9739,7 @@
   "series:matou kitan zankan": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:mattaku saikin no tantei tokitara": {
@@ -9929,8 +9929,8 @@
   "series:misty moon metropolis": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:mitsumete knight": {
     "tried": "2026-06-07",
@@ -10054,8 +10054,8 @@
   "series:mount celeb kaneda-san": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 5,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 6,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:mugen gacha de level 9999": {
     "tried": "2026-06-08",
@@ -10084,7 +10084,7 @@
   "series:muten no kaito": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:mutsuboshi kirari": {
@@ -10185,8 +10185,8 @@
   "series:nanatsu no fushigi no owaru toki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 5,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 6,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:nangoku shounen papuwakun": {
     "tried": "2026-06-08",
@@ -10233,8 +10233,8 @@
   "series:natsu no kumo": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 5,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 6,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:natsuiro high school seishun hakusho": {
     "tried": "2026-06-09",
@@ -10245,14 +10245,14 @@
   "series:natural mi mo kokoro mo": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:nee chanto shiyou yo": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:nejimaki kagyuu": {
     "tried": "2026-06-09",
@@ -10263,7 +10263,7 @@
   "series:neko musume michikusa nikki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:neko no ou": {
@@ -10327,10 +10327,10 @@
     "reason": "confidence is none and translation is non-Korean"
   },
   "series:nikujo no susume": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
-    "reason": "confidence none and empty translation"
+    "attempts": 5,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:ninja hattori-kun": {
     "tried": "2026-06-07",
@@ -10497,8 +10497,8 @@
   "series:ole tower": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:omae gotoki ga maou ni kateru to omouna": {
     "tried": "2026-06-09",
@@ -10653,13 +10653,13 @@
   "series:osana najimi wa bed yakuza": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:osawari island": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:otenki studio": {
@@ -10827,8 +10827,8 @@
   "series:pinkerton": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:pixel maritan": {
     "tried": "2026-06-08",
@@ -11298,8 +11298,8 @@
   "series:sakura musubi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:sakushi shoujo shi o nameteta watashi ga shitta 8-tsu no gijutsu to yuuki no han": {
     "tried": "2026-06-13",
@@ -11328,8 +11328,8 @@
   "series:sasuga no sarutobi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:satsukare": {
     "tried": "2026-06-13",
@@ -11394,7 +11394,7 @@
   "series:seirei kishi aquael": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:seishokuki": {
@@ -11406,14 +11406,14 @@
   "series:seishoujo sentai lakers": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:seitenshi yumieru": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:seito kaichou hikaru": {
     "tried": "2026-06-07",
@@ -11454,14 +11454,14 @@
   "series:sengoku gakuen senki nobunaga": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:sengoku puzzle animal daigassen": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:sengoku taisen": {
     "tried": "2026-06-09",
@@ -11610,8 +11610,8 @@
   "series:shining sword romance": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:shinken zemi koukou kouza": {
     "tried": "2026-06-09",
@@ -11658,8 +11658,8 @@
   "series:shoukan yuusha to f-kei kareshi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:shounen ga otona ni natta natsu": {
     "tried": "2026-06-08",
@@ -11760,7 +11760,7 @@
   "series:soleil": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:soma": {
@@ -11832,7 +11832,7 @@
   "series:sousei tenshi cross emotion": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:spaceship agga ruter": {
@@ -11952,8 +11952,8 @@
   "series:taboo charming mother": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:taiiku kyoushi kiwame": {
     "tried": "2026-06-13",
@@ -12024,8 +12024,8 @@
   "series:tamacolle": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:tanikamen": {
     "tried": "2026-06-09",
@@ -12274,7 +12274,7 @@
   "series:the summoning": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:the thing": {
@@ -12304,7 +12304,7 @@
   "series:thunder claps": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:tibet inu monogatari": {
@@ -12351,8 +12351,8 @@
   "series:tonari no miko-san wa minna warau": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:tonari no onee-san": {
     "tried": "2026-06-13",
@@ -12501,13 +12501,13 @@
   "series:tsukiatte yo satsuki-chan": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:tsukikagerou": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
+    "attempts": 8,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:tsukiuta.": {
@@ -12561,7 +12561,7 @@
   "series:uchuu eiyuu monogatari": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 28,
+    "attempts": 29,
     "reason": "no authoritative Korean localized series title found"
   },
   "series:uchuu kaitou funny bee": {
@@ -12645,8 +12645,8 @@
   "series:various": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:venus and braves": {
     "tried": "2026-06-08",
@@ -12729,8 +12729,8 @@
   "series:with you": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:wolfwalkers": {
     "tried": "2026-06-07",
@@ -12753,8 +12753,8 @@
   "series:x change": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:xenon mugen no shitai": {
     "tried": "2026-06-13",
@@ -12801,8 +12801,8 @@
   "series:yamitsuki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized series title found"
+    "attempts": 8,
+    "reason": "no official Korean localized series title found"
   },
   "series:yancharu moncha": {
     "tried": "2026-06-13",
@@ -12963,8 +12963,8 @@
   "series:zetsubou": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 7,
-    "reason": "No authoritative Korean localized title found during search."
+    "attempts": 8,
+    "reason": "no authoritative Korean localized title found"
   },
   "series:zoids wild zero": {
     "tried": "2026-06-07",
