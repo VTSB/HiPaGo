@@ -63,11 +63,25 @@ export function MobileSearchPage() {
   // local setState into a rAF callback so it is not called synchronously in the
   // effect body (react-hooks/set-state-in-effect — same pattern as Header.tsx).
   useEffect(() => {
-    if (!urlQuery || lastSyncedUrlQueryRef.current === urlQuery) return;
-    lastSyncedUrlQueryRef.current = urlQuery;
-    syncFromQuery(urlQuery);
-    const id = requestAnimationFrame(() => setCommitted(true));
-    return () => cancelAnimationFrame(id);
+    const prev = lastSyncedUrlQueryRef.current;
+    if (urlQuery) {
+      if (prev === urlQuery) return;
+      lastSyncedUrlQueryRef.current = urlQuery;
+      syncFromQuery(urlQuery);
+      const id = requestAnimationFrame(() => setCommitted(true));
+      return () => cancelAnimationFrame(id);
+    }
+    // urlQuery === '' → we're on the bare /search. If prev holds a query we
+    // just came back from a results URL (router.back() from /search?q=…): keep
+    // that term in the box in edit mode so the user can refine it, and drop the
+    // committed results grid. A genuinely fresh /search open has prev === null,
+    // so the idle popular/recent screen still renders with an empty box.
+    if (prev) {
+      lastSyncedUrlQueryRef.current = null;
+      syncFromQuery(prev);
+      const id = requestAnimationFrame(() => setCommitted(false));
+      return () => cancelAnimationFrame(id);
+    }
   }, [urlQuery, syncFromQuery]);
 
   // Auto-fetch of suggestions.
