@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { getGgConfig, ApiError } from '@/lib/api/client';
 import {
   downloadGalleryToLibrary,
+  getDownloadedGalleryPages,
   DownloadPausedError,
   type DownloadProgress,
 } from '@/lib/utils/download-zip';
@@ -265,6 +266,52 @@ function clearProgressPollTimer(): void {
   }
 }
 
+/**
+ * Finalize a native-background download row to 'complete' when the on-disk
+ * manifest already covers every page. SHARED by the Android live-progress poller
+ * (in-app, while the app stays open) and reconcileQueue (on next app open) so the
+ * two use ONE completion rule and cannot drift. A 'downloading' row whose
+ * manifest lists at least its recorded `pageCount` pages is marked 'complete'.
+ * Returns true iff the row is 'complete' after the call. May throw on DB/store
+ * IO — callers decide whether that is fatal (reconcile) or retried next tick
+ * (poller).
+ */
+export async function finalizeDownloadIfComplete(galleryId: number): Promise<boolean> {
+  const current = await getDownload(galleryId);
+  if (!current) return false;
+  if (current.status === 'complete') return true;
+  if (current.status !== 'downloading' || (current.pageCount ?? 0) <= 0) return false;
+  const pages = await getDownloadedGalleryPages(galleryId);
+  if (pages.length > 0 && pages.length >= current.pageCount) {
+    await upsertDownload({ ...current, pageCount: pages.length, status: 'complete', lastError: null });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The Android worker for `id` may have finished (progress reached total, or its
+ * progress file vanished). Confirm via the on-disk manifest and, if complete,
+ * flip the row to 'complete' IN-APP: clear the live entry, mark it downloaded,
+ * refresh the queue, and stop the poll. Without this the row stays 'downloading'
+ * until the next app launch reconciles it — the "all files downloaded but still
+ * shows downloading" bug. No-op when not actually complete (e.g. the progress
+ * file is merely absent because the worker has not started yet).
+ */
+async function finalizeAndroidDownloadIfComplete(id: number): Promise<void> {
+  let done = false;
+  try {
+    done = await finalizeDownloadIfComplete(id);
+  } catch {
+    return; // transient IO — re-checked on the next tick
+  }
+  if (!done) return;
+  storeApi?.setEntry(id, null);
+  storeApi?.markDownloaded(id);
+  storeApi?.refreshQueue();
+  stopAndroidProgressPoll();
+}
+
 /** One poll tick: read the worker's progress file and push it into the store. */
 async function pollAndroidProgressOnce(id: number): Promise<void> {
   // The gallery is done/cancelled when its store entry is gone — stop polling.
@@ -285,8 +332,18 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
     const { current, total } = res as { current: number; total: number };
     storeApi?.setEntry(id, { progress: { current, total }, error: null });
     storeApi?.refreshQueue();
+    // Worker reported every page done — confirm via the manifest and finalize
+    // the row in-app so it leaves "downloading" without waiting for a relaunch.
+    if (total > 0 && current >= total) {
+      await finalizeAndroidDownloadIfComplete(id);
+    }
+    return;
   }
-  // current === null → no progress file yet (or completed); keep last value.
+  // current === null → no progress file: the worker has not started yet OR it
+  // already completed (it deletes the file when done). Disambiguate via the
+  // on-disk manifest — finalize only when it truly covers all pages; otherwise
+  // keep the last known value and keep polling.
+  await finalizeAndroidDownloadIfComplete(id);
 }
 
 /**

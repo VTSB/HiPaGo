@@ -17,11 +17,10 @@ import { ensureDb } from '@/lib/db/adapter';
 import type { DBDownload } from '@/lib/db/schema';
 import { enqueueDownload } from '@/lib/db/download-queue';
 import { listDueAutoRetries } from '@/lib/db/download-retry';
-import { deserializeTags, getDownload, upsertDownload } from '@/lib/db/download';
-import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
+import { deserializeTags } from '@/lib/db/download';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
 import { isAndroid, isIos } from '@/lib/utils/platform';
-import { processQueue, armAutoRetryTimer } from './download-progress';
+import { processQueue, armAutoRetryTimer, finalizeDownloadIfComplete } from './download-progress';
 
 let started = false;
 
@@ -64,19 +63,9 @@ async function reconcileNativeBackgroundDownloads(): Promise<void> {
 
   for (const row of rows) {
     try {
-      const pages = await getDownloadedGalleryPages(row.galleryId);
-      // The manifest lists one ext per stored page. When it covers at least the
-      // recorded target page count, every page is on disk → the worker finished.
-      if (pages.length > 0 && pages.length >= row.pageCount) {
-        const current = await getDownload(row.galleryId);
-        if (!current || current.status === 'complete') continue;
-        await upsertDownload({
-          ...current,
-          pageCount: pages.length,
-          status: 'complete',
-          lastError: null,
-        });
-      }
+      // ONE completion rule, shared with the Android in-app poller: a
+      // 'downloading' row whose manifest now covers all pages → 'complete'.
+      await finalizeDownloadIfComplete(row.galleryId);
     } catch {
       // Leave the row as-is; the zombie re-enqueue path will resume it.
     }
