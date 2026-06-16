@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useReader } from '@/features/reader/hooks/useReader';
 import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
+import type { GalleryImage } from '@/lib/utils/types';
+import { ImageType } from '@/lib/utils/types';
 import { PageReader } from './PageReader';
 import { ScrollReader } from './ScrollReader';
 import { ReaderControls } from './ReaderControls';
@@ -103,26 +105,48 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleNextPage, handlePrevPage]);
 
-  if (reader.isLoading || offline.loading) return <div className="flex min-h-screen items-center justify-center bg-black"><Spinner size="md" className="border-zinc-600 border-t-white" /></div>;
-  if (reader.error) return <div className="flex min-h-screen items-center justify-center bg-black text-red-400">{reader.error}</div>;
+  // A downloaded gallery must read fully offline — its page count comes from the
+  // local manifest (offline.urls), NOT the network detail query. Synthesize an
+  // image list of the right length so the readers + controls work without the
+  // gallery-info fetch (which can never resolve offline → the old infinite spin).
+  const offlineCount = offline.urls?.length ?? 0;
+  const images: GalleryImage[] = useMemo(
+    () =>
+      offlineCount > 0 && reader.images.length !== offlineCount
+        ? Array.from({ length: offlineCount }, (_, i) => ({
+            name: '',
+            hash: `offline-${i}`,
+            // Real aspect ratio read from the downloaded image bytes (offline.dims);
+            // 0/0 only if a page's dims couldn't be decoded → natural-size fallback.
+            width: offline.dims?.[i]?.width ?? 0,
+            height: offline.dims?.[i]?.height ?? 0,
+            types: new Set<ImageType>(),
+          }))
+        : reader.images,
+    [offlineCount, reader.images, offline.dims],
+  );
 
-  // Downloaded gallery whose stored files are missing/corrupt.
-  if (offline.missing) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-black text-zinc-400">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-12 w-12 text-zinc-600">
-          <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zM12 8.25a.75.75 0 01.75.75v3.75a.75.75 0 01-1.5 0V9a.75.75 0 01.75-.75zm0 8.25a.75.75 0 100-1.5.75.75 0 000 1.5z" clipRule="evenodd" />
-        </svg>
-        <p className="text-sm">Downloaded files are missing or corrupt.</p>
-        <button
-          onClick={reader.goBack}
-          className="rounded-full bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
-        >
-          Go back
-        </button>
-      </div>
-    );
-  }
+  // Seed the reader store from the manifest so totalPages / navigation / the
+  // page controls work offline (the network path's seeding never fires offline).
+  const seedGallery = reader.setGallery;
+  useEffect(() => {
+    if (offlineCount > 0 && images !== reader.images) {
+      seedGallery(galleryId, images);
+    }
+  }, [offlineCount, images, reader.images, galleryId, seedGallery]);
+
+  // Wait on the network reader query ONLY when the gallery is not downloaded;
+  // a downloaded gallery renders from local files regardless of network state.
+  if (offline.loading || (offlineCount === 0 && reader.isLoading))
+    return <div className="flex min-h-screen items-center justify-center bg-black"><Spinner size="md" className="border-zinc-600 border-t-white" /></div>;
+  if (offlineCount === 0 && reader.error) return <div className="flex min-h-screen items-center justify-center bg-black text-red-400">{reader.error}</div>;
+
+  // NOTE: when a downloaded gallery's stored files are missing/corrupt,
+  // useOfflineImages returns urls:null (offlineCount === 0) so we DELIBERATELY
+  // fall through to the normal cache→network reader path above (useReader runs
+  // regardless of download status) rather than showing a dead-end "files
+  // missing" screen. The detail page surfaces the missing-files state at the
+  // download button instead. So there is no `offline.missing` branch here.
 
   // Pass offline blob URLs when available; readers fall back to network when undefined.
   const offlineUrls = offline.urls ?? undefined;
@@ -144,8 +168,8 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5"><path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" /></svg>
       </button>
       {reader.mode === 'page'
-        ? <PageReader images={reader.images} currentPage={reader.currentPage} onPageChange={reader.setCurrentPage} offlineUrls={offlineUrls} />
-        : <ScrollReader images={reader.images} initialPage={reader.currentPage} onScrollPositionChange={reader.setScrollPosition} onVisiblePageChange={handleVisiblePageChange} scrollCallbackRef={scrollCallbackRef} scrollNodeRef={scrollNodeRef} offlineUrls={offlineUrls} />}
+        ? <PageReader images={images} currentPage={reader.currentPage} onPageChange={reader.setCurrentPage} offlineUrls={offlineUrls} />
+        : <ScrollReader images={images} initialPage={reader.currentPage} onScrollPositionChange={reader.setScrollPosition} onVisiblePageChange={handleVisiblePageChange} scrollCallbackRef={scrollCallbackRef} scrollNodeRef={scrollNodeRef} offlineUrls={offlineUrls} />}
       <ReaderControls onBack={reader.goBack} currentPage={reader.currentPage} totalPages={reader.totalPages} mode={reader.mode} onModeChange={reader.setMode} onNextPage={handleNextPage} onPrevPage={handlePrevPage} onPageChange={handlePageChange} />
     </div>
   );

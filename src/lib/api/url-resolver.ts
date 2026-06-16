@@ -41,6 +41,19 @@ export function resolveThumbnailUrl(url: string): string {
   return resolveImgUrl(subdomain, restPath);
 }
 
+/**
+ * Rewrite a SMALL gallery thumbnail URL to its BIG variant:
+ *   avifsmalltn → avifbigtn, webpsmalltn → webpbigtn, smalltn → bigtn.
+ * hitomi gallery-block list markup serves the small thumbnail; the big variant
+ * is the same path with the size segment swapped. Returns the input unchanged
+ * when it has no `smalltn` segment (so callers render it as-is). Callers should
+ * fall back to the original small URL if the big variant fails to load.
+ */
+export function toBigThumbnailUrl(url: string): string {
+  if (!url) return url;
+  return url.replace('smalltn', 'bigtn');
+}
+
 export function getNativeHeaders(): Record<string, string> {
   if (!isNativePlatform()) return {};
   return {

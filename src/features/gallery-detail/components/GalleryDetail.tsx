@@ -21,6 +21,7 @@ import { getGgConfig } from '@/lib/api/client';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
+import { useDownloadedFilesPresent } from '@/features/gallery-detail/hooks/useDownloadedFilesPresent';
 import { readerHref } from '@/lib/utils/routes';
 
 const INITIAL_THUMBNAILS = 20;
@@ -163,6 +164,11 @@ export function GalleryDetail({ id }: { id: number }) {
   const handleRedownload = useCallback(() => {
     if (window.confirm(t('detail.redownloadConfirm'))) handleDownload();
   }, [t, handleDownload]);
+
+  // "Downloaded" but the on-disk image files are gone (user deleted them, or a
+  // partial write) → surface it at the download button so the user can restore
+  // with one tap instead of wondering why the reader falls back to network.
+  const { filesMissing } = useDownloadedFilesPresent(id);
 
   const handleShare = useCallback(async () => {
     try {
@@ -343,6 +349,26 @@ export function GalleryDetail({ id }: { id: number }) {
                 >
                   <Spinner size="sm" />
                   {dlProgress.current}/{dlProgress.total}
+                </button>
+              ) : isDownloaded && filesMissing ? (
+                <button
+                  onClick={handleDownload}
+                  title={t('detail.filesMissing')}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-8 py-2.5 text-base font-semibold text-amber-700 active:bg-amber-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.515 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {t('detail.filesMissing')}
                 </button>
               ) : isDownloaded ? (
                 <button

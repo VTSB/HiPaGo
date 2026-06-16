@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { GalleryBlockType, type TagType } from '@/lib/utils/types';
 import { tagFromGalleryEntry, toSearchString } from '@/lib/utils/hitomi-tag';
 import { TagChip } from '@/shared/components/TagChip';
 import { AbortableImage } from '@/shared/components/AbortableImage';
-import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
+import { resolveThumbnailUrl, toBigThumbnailUrl } from '@/lib/api/url-resolver';
+import { getImageCache } from '@/lib/cache/image-cache';
 import { useGalleryBlock } from '../hooks/useGalleryBlock';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
@@ -92,6 +93,33 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
     return all;
   }, [block.tags, block.type]);
 
+  // Use the BIG image only if it is ALREADY in the persistent image cache (e.g.
+  // cached after viewing the detail page) — served from disk, no network. Never
+  // fetch the big variant over the network for the list; otherwise show small.
+  const smallThumb = block.thumbnail ? resolveThumbnailUrl(block.thumbnail) : '';
+  const bigThumb = toBigThumbnailUrl(smallThumb);
+  // Holds the big URL once confirmed cached FOR THE CURRENT bigThumb. Derived
+  // thumbSrc falls back to small whenever it doesn't match (block change / miss),
+  // so the effect never calls setState synchronously.
+  const [cachedBig, setCachedBig] = useState<string | null>(null);
+  const thumbSrc = bigThumb && cachedBig === bigThumb ? bigThumb : smallThumb;
+  useEffect(() => {
+    if (!bigThumb || bigThumb === smallThumb) return;
+    let cancelled = false;
+    // Hit-only cache lookup (fileUrl never downloads). Prefer a cached big image.
+    getImageCache()
+      .then((cache) => cache.fileUrl(bigThumb))
+      .then((hit) => {
+        if (!cancelled && hit) setCachedBig(bigThumb);
+      })
+      .catch(() => {
+        /* cache unavailable → keep the small thumbnail */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [smallThumb, bigThumb]);
+
   if (block.type === GalleryBlockType.LOADING) {
     return <CardSkeleton />;
   }
@@ -128,14 +156,20 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:bg-zinc-800 sm:hover:shadow-lg">
         {block.thumbnail ? (
           <AbortableImage
-            src={resolveThumbnailUrl(block.thumbnail)}
+            src={thumbSrc}
             alt={block.title}
             draggable={false}
             className={`h-full w-full object-cover transition-transform${blurred ? ' blur-xl scale-[1.15]' : ' group-hover:scale-105'}`}
             loading="lazy"
             onPermanentError={() => {
-              // Thumbnail URL is stale/dead — invalidate the block cache so it re-fetches with fresh URL
-              queryClient.invalidateQueries({ queryKey: ['gallery-block', block.id] });
+              if (thumbSrc !== smallThumb && smallThumb) {
+                // The cached big image failed to load — drop back to the small one.
+                setCachedBig(null);
+              } else {
+                // Small thumbnail also dead — URL is stale; invalidate the block
+                // cache so it re-fetches with a fresh URL.
+                queryClient.invalidateQueries({ queryKey: ['gallery-block', block.id] });
+              }
             }}
           />
         ) : (

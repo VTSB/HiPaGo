@@ -17,6 +17,7 @@ import {
   resolveImgUrl,
   getNativeHeaders,
   resolveThumbnailUrl,
+  toBigThumbnailUrl,
 } from '../url-resolver';
 
 describe('url-resolver', () => {
@@ -130,6 +131,30 @@ describe('url-resolver', () => {
       vi.mocked(isNativePlatform).mockReturnValue(true);
       const cdnUrl = 'https://tn.gold-usergeneratedcontent.net/avifsmalltn/4/23/hash.avif';
       expect(resolveThumbnailUrl(cdnUrl)).toBe(cdnUrl);
+    });
+  });
+
+  describe('toBigThumbnailUrl', () => {
+    it('rewrites avifsmalltn → avifbigtn', () => {
+      expect(toBigThumbnailUrl('/api/img/tn/avifsmalltn/a/bc/h.avif')).toBe(
+        '/api/img/tn/avifbigtn/a/bc/h.avif',
+      );
+    });
+    it('rewrites webpsmalltn → webpbigtn', () => {
+      expect(toBigThumbnailUrl('/api/img/tn/webpsmalltn/test.webp')).toBe(
+        '/api/img/tn/webpbigtn/test.webp',
+      );
+    });
+    it('rewrites bare smalltn → bigtn', () => {
+      expect(toBigThumbnailUrl('/api/img/tn/smalltn/x.jpg')).toBe('/api/img/tn/bigtn/x.jpg');
+    });
+    it('leaves a non-smalltn url unchanged', () => {
+      expect(toBigThumbnailUrl('https://example.com/thumb.jpg')).toBe(
+        'https://example.com/thumb.jpg',
+      );
+    });
+    it('leaves an empty url unchanged', () => {
+      expect(toBigThumbnailUrl('')).toBe('');
     });
   });
 });

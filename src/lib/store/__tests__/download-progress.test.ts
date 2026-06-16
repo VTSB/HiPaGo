@@ -96,20 +96,36 @@ vi.mock('@/lib/db/download-queue', () => ({
 
 // getDownload returns a row whose retryCount we can steer per-test (the genuine-
 // failure branch reads it to decide whether to schedule another auto-retry).
-const downloadRows = new Map<number, { retryCount: number }>();
+// Per-test steering for getDownload. Only retryCount was needed by the failure
+// tests; status/pageCount were added for the finalize-on-complete tests (the
+// Android in-app completion bridge). Unset fields fall back to the old defaults
+// (status:'failed', pageCount:0) so existing tests are unaffected.
+const downloadRows = new Map<
+  number,
+  { retryCount?: number; status?: string; pageCount?: number }
+>();
 const upsertedRows: unknown[] = [];
 vi.mock('@/lib/db/download', () => ({
-  getDownload: vi.fn(async (id: number) => ({
-    galleryId: id,
-    title: `G${id}`,
-    thumbnail: '/tn',
-    tags: '{}',
-    pageCount: 0,
-    totalBytes: 0,
-    downloadedAt: '',
-    status: 'failed',
-    retryCount: downloadRows.get(id)?.retryCount ?? 0,
-  })),
+  getDownload: vi.fn(async (id: number) => {
+    // Explicit per-test override wins; otherwise reflect the same row the
+    // reconcile db.query mock returns (adapterRows) so getDownload and the
+    // reconcile query are one consistent source for a table; else old defaults.
+    const o = downloadRows.get(id);
+    const fromAdapter = adapterRows.find(
+      (r) => (r as { galleryId: number }).galleryId === id,
+    ) as { pageCount?: number; status?: string } | undefined;
+    return {
+      galleryId: id,
+      title: `G${id}`,
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: o?.pageCount ?? fromAdapter?.pageCount ?? 0,
+      totalBytes: 0,
+      downloadedAt: '',
+      status: o?.status ?? fromAdapter?.status ?? 'failed',
+      retryCount: o?.retryCount ?? 0,
+    };
+  }),
   deserializeTags: vi.fn(() => ({})),
   serializeTags: vi.fn(() => '{}'),
   upsertDownload: vi.fn(async (row: unknown) => {
@@ -228,6 +244,7 @@ import {
   useDownloadProgressStore,
   startAndroidProgressPoll,
   stopAndroidProgressPoll,
+  finalizeDownloadIfComplete,
 } from '../download-progress';
 import { DownloadWorker } from '@/lib/plugins/downloadWorker';
 import * as queueOps from '@/lib/db/download-queue';
@@ -552,6 +569,105 @@ describe('Android live-progress poller (AC-003)', () => {
       // The handoff set a placeholder entry and started polling; a tick reads it.
       await vi.advanceTimersByTimeAsync(0);
       expect(vi.mocked(DownloadWorker.getProgress)).toHaveBeenCalledWith({ galleryId: '800' });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── Android in-app completion bridge (finalize without relaunch) ──────────────
+// Regression: after the worker finished every page the row stayed 'downloading'
+// (shown as "진행중") until the next app launch reconciled it, because the poller
+// only updated progress and never finalized. The poller now confirms completion
+// from the on-disk manifest and flips the row to 'complete' in-app.
+describe('finalizeDownloadIfComplete (shared completion rule)', () => {
+  it('marks a downloading row complete when the manifest covers all pages', async () => {
+    downloadRows.set(900, { status: 'downloading', pageCount: 3 });
+    manifestPages.set(900, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+      { index: 2, ext: 'webp' },
+    ]);
+    const done = await finalizeDownloadIfComplete(900);
+    expect(done).toBe(true);
+    const upsert = upsertedRows.at(-1) as { galleryId: number; status: string; pageCount: number };
+    expect(upsert).toMatchObject({ galleryId: 900, status: 'complete', pageCount: 3 });
+  });
+
+  it('does NOT finalize when the manifest is short of pageCount', async () => {
+    downloadRows.set(901, { status: 'downloading', pageCount: 5 });
+    manifestPages.set(901, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    const done = await finalizeDownloadIfComplete(901);
+    expect(done).toBe(false);
+    expect(upsertedRows).toHaveLength(0);
+  });
+
+  it('does NOT finalize a not-yet-started row with an empty manifest', async () => {
+    downloadRows.set(902, { status: 'downloading', pageCount: 4 });
+    // manifestPages has no entry for 902 → []
+    const done = await finalizeDownloadIfComplete(902);
+    expect(done).toBe(false);
+    expect(upsertedRows).toHaveLength(0);
+  });
+
+  it('reports already-complete rows as complete without re-upserting', async () => {
+    downloadRows.set(903, { status: 'complete', pageCount: 2 });
+    const done = await finalizeDownloadIfComplete(903);
+    expect(done).toBe(true);
+    expect(upsertedRows).toHaveLength(0);
+  });
+});
+
+describe('Android poller finalizes completion in-app (AC-003)', () => {
+  it('flips the row to complete + clears the entry when progress reaches total', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      downloadRows.set(910, { status: 'downloading', pageCount: 2 });
+      manifestPages.set(910, [
+        { index: 0, ext: 'webp' },
+        { index: 1, ext: 'webp' },
+      ]);
+      useDownloadProgressStore.setState({
+        entries: { 910: { progress: { current: 1, total: 2 }, error: null } },
+      });
+      workerProgress.value = { current: 2, total: 2 };
+      startAndroidProgressPoll(910);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(useDownloadProgressStore.getState().entries[910]).toBeUndefined();
+      expect(useDownloadProgressStore.getState().downloaded[910]).toBe(true);
+      const upsert = upsertedRows.at(-1) as { galleryId: number; status: string };
+      expect(upsert).toMatchObject({ galleryId: 910, status: 'complete' });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('finalizes when getProgress returns {current:null} but the manifest is complete', async () => {
+    // The worker deletes its progress file on completion, so the LAST signal the
+    // poller often sees is {current:null}. This is the exact bug scenario.
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      downloadRows.set(911, { status: 'downloading', pageCount: 1 });
+      manifestPages.set(911, [{ index: 0, ext: 'webp' }]);
+      useDownloadProgressStore.setState({
+        entries: { 911: { progress: { current: 1, total: 1 }, error: null } },
+      });
+      workerProgress.value = { current: null };
+      startAndroidProgressPoll(911);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(useDownloadProgressStore.getState().entries[911]).toBeUndefined();
+      expect(useDownloadProgressStore.getState().downloaded[911]).toBe(true);
+      const upsert = upsertedRows.at(-1) as { galleryId: number; status: string };
+      expect(upsert).toMatchObject({ galleryId: 911, status: 'complete' });
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
