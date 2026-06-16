@@ -13281,7 +13281,7 @@
   "tag:abnormalcomicday!4": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"어브노멀 코믹 데이! 4\" already used by tag:abnormal comic day! 4 in the same category"
   },
   "tag:ac": {
@@ -13353,7 +13353,7 @@
   "tag:air comike 2": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"에어 코미케 2\" already used by tag:air comiket 2 in the same category"
   },
   "tag:aisa re kitsu! jb2024": {
@@ -13677,7 +13677,7 @@
   "tag:boost !": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"부스트!\" already used by tag:boost! in the same category"
   },
   "tag:btb-25": {
@@ -14967,7 +14967,7 @@
   "tag:chimaira": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"키마이라\" already used by tag:kimaira in the same category"
   },
   "tag:chinetsu": {
@@ -15027,7 +15027,7 @@
   "tag:cho open the gate! 2022": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"초 오픈 더 게이트! 2022\" already used by tag:chou open the gate! 2022 in the same category"
   },
   "tag:chou medal e no kassou 2026": {
@@ -15609,8 +15609,8 @@
   "tag:dai-128-ki bunbunmaru. shinbun tomo no kai": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
-    "reason": "duplicate translation \"제128기 분분마루 신문 친구의 모임\" already used by tag:dai 128 ki bunbun. maru shinbun tomo no kai in the same category"
+    "attempts": 3,
+    "reason": "duplicate translation \"제128회 분분마루 신문 친구 모임\" already used by tag:dai 128 ki bunbunmaru shinbun tomo no kai in the same category"
   },
   "tag:dai250ho hoheli suidan": {
     "tried": "2026-06-15",
@@ -15679,10 +15679,10 @@
     "reason": "duplicate translation \"아무래도 나설 차례인 것 같다! 21\" already used by tag:douyara deban no youda! 21 in the same category"
   },
   "tag:douzin si": {
-    "tried": "2026-06-15",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "의도한 원어가 doujinshi/동인지인지, 고유명사 음차인지 불명확합니다."
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"동인지\" already used by tag:doujinshi in the same category"
   },
   "tag:drunk in long night jb2023": {
     "tried": "2026-06-15",
@@ -15975,7 +15975,7 @@
   "tag:gummy soft": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"구미 소프트\" already used by tag:gumi soft in the same category"
   },
   "tag:gunreibu shuho 2022 spring": {
@@ -15985,9 +15985,9 @@
     "reason": "Likely a proper title or event phrase with unclear Japanese components; transliteration is plausible but should be checked."
   },
   "tag:gyaku kaiten yarou": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"역회전 녀석\" already used by tag:gyakukaiten yarou in the same category"
   },
   "tag:gyoen jogakuen bunkasai": {
@@ -16237,9 +16237,9 @@
     "reason": "짧은 고유명사 또는 약칭으로 보이나 정확한 표준 표기와 발음 확인이 어렵습니다."
   },
   "tag:hujikuro": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"후지쿠로\" already used by tag:fujikuro in the same category"
   },
   "tag:hyattou ryouran ~kimi no heart o shirahadori~ ni": {
@@ -16591,9 +16591,9 @@
     "reason": "Romanized Japanese title phrase; translation is plausible but the verb sense and title wording are ambiguous."
   },
   "tag:katsuhoku dou": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"카츠호쿠도\" already used by tag:katsuhokudou in the same category"
   },
   "tag:kesshi no omoi yuu kanari 2": {
@@ -16879,15 +16879,15 @@
     "reason": "Proper-name-like tag with encoded apostrophe; pronunciation is uncertain, so transliteration needs review."
   },
   "tag:malboro": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"말보로\" already used by tag:marlboro in the same category"
   },
   "tag:manga": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 5,
     "reason": "duplicate translation \"만화\" already used by tag:comic in the same category"
   },
   "tag:mich-kj": {
@@ -17281,9 +17281,9 @@
     "reason": "not confident translation"
   },
   "tag:reitou kyabetsu": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"냉동 양배추\" already used by tag:reitou cabbage in the same category"
   },
   "tag:rekise": {
@@ -17317,9 +17317,9 @@
     "reason": "Likely title or pun using 'Jaws/죠스'; transliteration is plausible but semantic intent is ambiguous."
   },
   "tag:renai jiyuugata! osaka taikai 3": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"연애 자유형! 오사카 대회 3\" already used by tag:renai free style! osaka taikai 3 in the same category"
   },
   "tag:renai jiyuugata!entry5": {
@@ -17331,13 +17331,13 @@
   "tag:renai jiyuugata!entry6": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
-    "reason": "duplicate translation \"연애 자유형! 엔트리6\" already used by tag:renai jiyuugata! entry6 in the same category"
+    "attempts": 5,
+    "reason": "duplicate translation \"연애 자유형! 엔트리 6\" already used by tag:renai jiyuugata! entry 6 in the same category"
   },
   "tag:renai jiyūgata! ōsaka taikai 2": {
-    "tried": "2026-06-15",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"연애 자유형! 오사카 대회 2\" already used by tag:renai jiyuugata! osaka taikai 2 in the same category"
   },
   "tag:renai shachuation": {
@@ -17449,9 +17449,9 @@
     "reason": "고유명사로 추정되어 음역은 가능하지만 원 표기의 정확한 어원이나 공식 표기를 확인하기 어려움"
   },
   "tag:rokomoko": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"로코모코\" already used by tag:rocomoco in the same category"
   },
   "tag:rro.lled": {
@@ -17479,10 +17479,10 @@
     "reason": "not confident translation"
   },
   "tag:rts!! 15": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"알티에스!! 15\" already used by tag:rts!!15 in the same category"
   },
   "tag:rts!! 24": {
     "tried": "2026-06-14",
@@ -17535,7 +17535,7 @@
   "tag:rts!! 5": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"알티에스!! 5\" already used by tag:rts!!5 in the same category"
   },
   "tag:rts!! 7": {
@@ -17611,10 +17611,10 @@
     "reason": "not confident translation"
   },
   "tag:rts!!38": {
-    "tried": "2026-06-14",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "not confident translation"
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
+    "reason": "duplicate translation \"알티에스!! 38\" already used by tag:rts!! 38 in the same category"
   },
   "tag:rts!!4": {
     "tried": "2026-06-14",
@@ -17665,21 +17665,21 @@
     "reason": "not confident translation"
   },
   "tag:sagata yojirou": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"사가타 요지로\" already used by tag:sagata yodjirou in the same category"
   },
   "tag:sanjuroh": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"산주로\" already used by tag:sanjuurou in the same category"
   },
   "tag:sanjurou": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"산주로\" already used by tag:sanjuurou in the same category"
   },
   "tag:sc": {
@@ -18339,7 +18339,7 @@
   "tag:teru-bee": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"테루비\" already used by tag:terubee in the same category"
   },
   "tag:tetuo": {
@@ -18567,7 +18567,7 @@
   "tag:tokori": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 5,
     "reason": "duplicate translation \"토코리\" already used by tag:tocori in the same category"
   },
   "tag:tokubetsu daienshuu": {
@@ -19455,13 +19455,13 @@
   "tag:ふたけっと34": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"후타켓 34\" already used by tag:futaket 34 in the same category"
   },
   "tag:ゆっくり": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"윳쿠리\" already used by tag:yukkuri in the same category"
   },
   "tag:るるが]][2 / 23 haru komi shinkan sanpuru] haru-machi supika [karu guda ♀][fate/grand order": {
@@ -19497,7 +19497,7 @@
   "tag:同人誌": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 6,
     "reason": "duplicate translation \"동인지\" already used by tag:doujinshi in the same category"
   },
   "tag:悋気に笑み曲ぐ恋の徒言3": {
@@ -19539,7 +19539,7 @@
   "tag:水龍敬": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"미즈류 케이\" already used by tag:mizuryu kei in the same category"
   },
   "tag:泳池派对-召唤师峡谷的夏天": {
@@ -19569,7 +19569,7 @@
   "tag:眠り子の樹": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"잠자는 아이의 나무\" already used by tag:nemuriko no ki in the same category"
   },
   "tag:福笑い": {
@@ -19623,19 +19623,19 @@
   "tag:関西!けもケット8": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"간사이! 케모켓 8\" already used by tag:kansai! kemoket 8 in the same category"
   },
   "tag:関西comitia61": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 2,
+    "attempts": 3,
     "reason": "duplicate translation \"간사이 코미티아 61\" already used by tag:kansaicomitia61 in the same category"
   },
   "tag:関西けもケット10": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"간사이 케모켓 10\" already used by tag:kansai kemoket 10 in the same category"
   },
   "tag:鬼狩奇譚": {
