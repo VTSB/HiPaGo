@@ -50,8 +50,8 @@
   "character:ai": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:ai hayakawa": {
     "tried": "2026-06-08",
@@ -80,8 +80,8 @@
   "character:akira hayasaka": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:akita toushirou": {
     "tried": "2026-06-14",
@@ -104,8 +104,8 @@
   "character:alchemist": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "generic/ambiguous character tag; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:alcryst": {
     "tried": "2026-06-14",
@@ -146,7 +146,7 @@
   "character:alpha": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:althemia": {
@@ -272,8 +272,8 @@
   "character:asaba tokisaki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "empty translation with confidence none"
   },
   "character:ascoeur": {
     "tried": "2026-06-14",
@@ -338,8 +338,8 @@
   "character:azuma": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:babi": {
     "tried": "2026-06-14",
@@ -1008,10 +1008,10 @@
     "reason": "duplicate translation \"에도마에 루나\" already used by character:lunar edomae in the same category"
   },
   "character:eiko carol": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence is none; Korean localized name was not strongly verified"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:elice": {
     "tried": "2026-06-14",
@@ -1034,8 +1034,8 @@
   "character:elizabeth": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:elle viano": {
     "tried": "2026-06-14",
@@ -1076,8 +1076,8 @@
   "character:emeralda kasim": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:emeraude": {
     "tried": "2026-06-14",
@@ -1124,8 +1124,8 @@
   "character:erinn": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:eris shitogi": {
     "tried": "2026-06-14",
@@ -1136,7 +1136,7 @@
   "character:etsuko toyohara": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:eucliwood hellscythe": {
@@ -1448,8 +1448,8 @@
   "character:gilder": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:gipsy": {
     "tried": "2026-06-14",
@@ -1524,10 +1524,10 @@
     "reason": "duplicate translation \"으르렁거리다\" already used by character:growlmon in the same category"
   },
   "character:guilty": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; no reliable official localized character name found"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:gunbard": {
     "tried": "2026-06-14",
@@ -1706,8 +1706,8 @@
   "character:hina": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:hinata aoi": {
     "tried": "2026-06-14",
@@ -1910,8 +1910,8 @@
   "character:isabelle vouthon": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "empty translation with confidence none"
   },
   "character:isadora finnsdottir": {
     "tried": "2026-06-16",
@@ -1958,8 +1958,8 @@
   "character:iuno": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:iwai mushanokoji": {
     "tried": "2026-06-14",
@@ -1994,8 +1994,8 @@
   "character:jacqli": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:jakurai jinguji": {
     "tried": "2026-06-14",
@@ -2090,7 +2090,7 @@
   "character:jinshi": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"진시\" already used by character:jinhsi in the same category"
   },
   "character:jo": {
@@ -2233,9 +2233,9 @@
   },
   "character:kagero": {
     "tried": "2026-06-16",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "verdict": "REJECT",
+    "attempts": 4,
+    "reason": "duplicate translation \"카게로\" already used by character:kagerou in the same category"
   },
   "character:kaname tanuma": {
     "tried": "2026-06-14",
@@ -2282,8 +2282,8 @@
   "character:kaori": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:kaoru hitachiin": {
     "tried": "2026-06-14",
@@ -2316,10 +2316,10 @@
     "reason": "duplicate translation \"카린\" already used by character:karin in the same category"
   },
   "character:kasuga": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; single-name character tag is ambiguous and translation was intentionally left blank"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:katarina": {
     "tried": "2026-06-14",
@@ -2438,8 +2438,8 @@
   "character:knight": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "generic/ambiguous character tag; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:kobayashi": {
     "tried": "2026-06-14",
@@ -2462,8 +2462,8 @@
   "character:koharu tachibana": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found for this tag"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:kokoro yotsuba": {
     "tried": "2026-06-14",
@@ -2564,19 +2564,19 @@
   "character:kris": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"크리스\" already used by character:chris in the same category"
   },
   "character:kris christopher": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; no authoritative Korean localized character name identified"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:kriss vector": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"벡터\" already used by character:vector in the same category"
   },
   "character:ksg": {
@@ -2773,9 +2773,9 @@
   },
   "character:leona": {
     "tried": "2026-06-16",
-    "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "verdict": "REJECT",
+    "attempts": 4,
+    "reason": "duplicate translation \"레오나\" already used by character:princess leona in the same category"
   },
   "character:leonardo": {
     "tried": "2026-06-14",
@@ -2798,7 +2798,7 @@
   "character:liko": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"리코\" already used by character:riko in the same category"
   },
   "character:likulau": {
@@ -2846,7 +2846,7 @@
   "character:lily": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:lilymon": {
@@ -2870,8 +2870,8 @@
   "character:lion": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "generic/ambiguous character tag; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:lippia": {
     "tried": "2026-06-14",
@@ -2912,7 +2912,7 @@
   "character:llenn": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"렌\" already used by character:len in the same category"
   },
   "character:lobelia carlini": {
@@ -2942,7 +2942,7 @@
   "character:loona": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:louie": {
@@ -2972,14 +2972,14 @@
   "character:lucia": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:lucy": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:lugh": {
     "tried": "2026-06-14",
@@ -3002,7 +3002,7 @@
   "character:luka": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"루카\" already used by character:luca in the same category"
   },
   "character:lumi": {
@@ -3134,7 +3134,7 @@
   "character:magical ruruie": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:magician": {
@@ -3236,8 +3236,8 @@
   "character:mari": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:maria marta cunhel guloso": {
     "tried": "2026-06-08",
@@ -3344,8 +3344,8 @@
   "character:megu": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:megumi ooumi": {
     "tried": "2026-06-14",
@@ -3362,8 +3362,8 @@
   "character:mei": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:mei-mei": {
     "tried": "2026-06-14",
@@ -3428,7 +3428,7 @@
   "character:mian": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:micca": {
@@ -3470,8 +3470,8 @@
   "character:miko mido": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:mikogami nagisa": {
     "tried": "2026-06-14",
@@ -3524,8 +3524,8 @@
   "character:minori": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:minoru kokubunji": {
     "tried": "2026-06-14",
@@ -3572,8 +3572,8 @@
   "character:mix": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:miyako": {
     "tried": "2026-06-14",
@@ -3590,14 +3590,14 @@
   "character:miyu yamano": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:miyuki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:mizuho": {
     "tried": "2026-06-13",
@@ -3644,8 +3644,8 @@
   "character:momoko": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:momoko asahina": {
     "tried": "2026-06-14",
@@ -3662,14 +3662,14 @@
   "character:monk": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:monkshood": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "empty translation with confidence none"
   },
   "character:monna": {
     "tried": "2026-06-14",
@@ -3810,15 +3810,15 @@
     "reason": "not confident translation"
   },
   "character:nanako": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "ambiguous character tag; no authoritative Korean localized name found"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:nanashi mumei": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"나나시 무메이\" already used by character:mumei in the same category"
   },
   "character:naoka ueno": {
@@ -3830,8 +3830,8 @@
   "character:narika shihoudou": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:natasha cioara": {
     "tried": "2026-06-14",
@@ -3854,8 +3854,8 @@
   "character:nene": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:neneko": {
     "tried": "2026-06-14",
@@ -3884,8 +3884,8 @@
   "character:nier": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:nihongou": {
     "tried": "2026-06-14",
@@ -3925,9 +3925,9 @@
   },
   "character:noir": {
     "tried": "2026-06-16",
-    "verdict": "REJECT",
-    "attempts": 3,
-    "reason": "duplicate translation \"느와르\" already used by character:noire in the same category"
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:noiz": {
     "tried": "2026-06-14",
@@ -4094,7 +4094,7 @@
   "character:paine": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"파인\" already used by character:fine in the same category"
   },
   "character:pang": {
@@ -4106,13 +4106,13 @@
   "character:parry": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:pastel": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:pattie": {
@@ -4172,7 +4172,7 @@
   "character:pine": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:pirika usui": {
@@ -4232,8 +4232,8 @@
   "character:princess": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "generic/ambiguous character tag; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:princess gradriel de valendia": {
     "tried": "2026-06-16",
@@ -4351,7 +4351,7 @@
   "character:rapi": {
     "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "duplicate translation \"라피\" already used by character:laffey in the same category"
   },
   "character:rapidash": {
@@ -4369,8 +4369,8 @@
   "character:ray": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:rayne": {
     "tried": "2026-06-14",
@@ -4489,8 +4489,8 @@
   "character:rignetta-san": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:rihoko amaha": {
     "tried": "2026-06-14",
@@ -4597,7 +4597,7 @@
   "character:rockna hiiragi": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:rome": {
@@ -4741,8 +4741,8 @@
   "character:saki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:saki watanabe": {
     "tried": "2026-06-14",
@@ -4777,7 +4777,7 @@
   "character:sarah": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:sarya": {
@@ -4793,16 +4793,16 @@
     "reason": "confidence is none and translation is empty"
   },
   "character:saya-chan": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; no reliable official Korean character localization found"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:sayuka kouenji": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:scarlett": {
     "tried": "2026-06-14",
@@ -4873,8 +4873,8 @@
   "character:seed": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:segawa onpu": {
     "tried": "2026-06-14",
@@ -4933,8 +4933,8 @@
   "character:sen": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:sena": {
     "tried": "2026-06-08",
@@ -4975,7 +4975,7 @@
   "character:seth": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:sette": {
@@ -4985,10 +4985,10 @@
     "reason": "duplicate translation \"세트\" already used by character:sett in the same category"
   },
   "character:shamu meruruusa": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; no authoritative Korean character localization found"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:shanna": {
     "tried": "2026-06-14",
@@ -4999,8 +4999,8 @@
   "character:sharon": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:shaymin": {
     "tried": "2026-06-14",
@@ -5165,10 +5165,10 @@
     "reason": "confidence is none; no reliable official Korean localized character name was found"
   },
   "character:sierra": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; bare character name is ambiguous across works"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:siki": {
     "tried": "2026-06-14",
@@ -5287,19 +5287,19 @@
   "character:solo": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:sophia": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:sophie": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:sou": {
@@ -5737,7 +5737,7 @@
   "character:trigger": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:troubadour": {
@@ -5929,8 +5929,8 @@
   "character:vampire": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "generic/ambiguous character tag; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:vanny": {
     "tried": "2026-06-14",
@@ -6007,8 +6007,8 @@
   "character:victor": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no official or strongly authoritative Korean localized character name found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:vivi": {
     "tried": "2026-06-14",
@@ -6049,8 +6049,8 @@
   "character:vyse": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:waai fu": {
     "tried": "2026-06-14",
@@ -6067,8 +6067,8 @@
   "character:warlock": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:wataru mitani": {
     "tried": "2026-06-14",
@@ -6121,7 +6121,7 @@
   "character:witch": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:wong ling pha": {
@@ -6193,8 +6193,8 @@
   "character:yae": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:yamatonokami yasusada": {
     "tried": "2026-06-14",
@@ -6277,8 +6277,8 @@
   "character:youhei": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:youko": {
     "tried": "2026-06-14",
@@ -6293,10 +6293,10 @@
     "reason": "duplicate translation \"유구레\" already used by character:yuugure in the same category"
   },
   "character:yui arata": {
-    "tried": "2026-06-08",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
-    "reason": "confidence none; no authoritative Korean localized character name found"
+    "attempts": 2,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:yui kasuga": {
     "tried": "2026-06-16",
@@ -6307,8 +6307,8 @@
   "character:yuika tachibana": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "no strong authoritative Korean localized character name found for this tag"
+    "attempts": 4,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:yuka takeuchi": {
     "tried": "2026-06-08",
@@ -6325,7 +6325,7 @@
   "character:yuki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
+    "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
   "character:yuki sanada": {
@@ -6487,8 +6487,8 @@
   "character:yuuri": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 2,
-    "reason": "No official or strongly authoritative Korean localized character name found; not guessed or transliterated."
+    "attempts": 3,
+    "reason": "no official or strongly authoritative Korean localized name found"
   },
   "character:z18": {
     "tried": "2026-06-14",
@@ -6583,8 +6583,8 @@
   "character:zeke": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:zell dincht": {
     "tried": "2026-06-14",
@@ -6631,8 +6631,8 @@
   "character:zoe": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 3,
-    "reason": "ambiguous character name; no strong authoritative Korean localized match found"
+    "attempts": 4,
+    "reason": "empty translation with confidence none"
   },
   "character:zoey": {
     "tried": "2026-06-14",
