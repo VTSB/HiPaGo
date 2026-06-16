@@ -47,6 +47,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"아델\" already used by character:adell in the same category"
   },
+  "character:aduchi momo": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아즈치 모모\" already used by character:azuchi momo in the same category"
+  },
   "character:ai": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
@@ -64,6 +70,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"아이린\" already used by character:irene in the same category"
+  },
+  "character:aiko": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:ain": {
     "tried": "2026-06-14",
@@ -95,6 +107,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:albert": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:albion": {
     "tried": "2026-06-08",
     "verdict": "_NEEDS_REVIEW",
@@ -112,6 +130,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"크리스탈\" already used by character:krystal in the same category"
+  },
+  "character:alisa": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
   },
   "character:alissa": {
     "tried": "2026-06-14",
@@ -209,11 +233,29 @@
     "attempts": 1,
     "reason": "duplicate translation \"애니\" already used by character:ani in the same category"
   },
+  "character:anya": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아냐\" already used by character:nah in the same category"
+  },
   "character:apis": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:arakune": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"아라크네\" already used by character:arachne in the same category"
+  },
+  "character:aratsuka ogami": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:arawn": {
     "tried": "2026-06-14",
@@ -275,6 +317,11 @@
     "attempts": 4,
     "reason": "no official or strongly authoritative Korean localized name found"
   },
+  "character:asako": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
+  },
   "character:ascoeur": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -286,6 +333,11 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"아스카\" already used by character:asuka in the same category"
+  },
+  "character:assistant": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
   },
   "character:aster": {
     "tried": "2026-06-08",
@@ -310,6 +362,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:aura shurifon": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
   },
   "character:auron": {
     "tried": "2026-06-14",
@@ -419,11 +477,23 @@
     "attempts": 1,
     "reason": "duplicate translation \"벤케이 무사시보\" already used by character:benkei musashibou in the same category"
   },
+  "character:benkei musashibou": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"무사시보 벤케이\" already used by character:musashibou benkei in the same category"
+  },
   "character:betti": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"베티\" already used by character:bettie in the same category"
+  },
+  "character:bevel": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none"
   },
   "character:bibeak": {
     "tried": "2026-06-14",
@@ -485,6 +555,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"보스\" already used by character:boss in the same category"
   },
+  "character:bready": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"브래디\" already used by character:brady in the same category"
+  },
   "character:brid": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -539,6 +615,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"카인\" already used by character:kain in the same category"
   },
+  "character:caleen keemosn": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
+  },
   "character:candice catnipp": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -562,6 +644,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"칼라\" already used by character:karla in the same category"
+  },
+  "character:carol": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 6,
+    "reason": "confidence is none and translation is empty"
   },
   "character:catcher": {
     "tried": "2026-06-14",
@@ -881,6 +969,24 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:darius najjar": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none"
+  },
+  "character:david": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
+  },
+  "character:dazzi": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation appears corrupted and cannot be verified as valid Korean"
+  },
   "character:delga": {
     "tried": "2026-06-08",
     "verdict": "_NEEDS_REVIEW",
@@ -934,6 +1040,18 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:diola": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
+  },
+  "character:doctor thomas light": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"닥터 라이트\" already used by character:doctor light in the same category"
   },
   "character:doll": {
     "tried": "2026-06-14",
@@ -1026,16 +1144,22 @@
     "reason": "duplicate translation \"엘리스\" already used by character:ellis in the same category"
   },
   "character:elisiss": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "duplicate translation \"엘리시스\" already used by character:elesis in the same category"
+    "attempts": 2,
+    "reason": "empty translation"
   },
   "character:elizabeth": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 6,
     "reason": "no official or strongly authoritative Korean localized character name found"
+  },
+  "character:elle mel marta": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"엘 멜 마타\" already used by character:elle mel mata in the same category"
   },
   "character:elle viano": {
     "tried": "2026-06-14",
@@ -1193,6 +1317,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:farrah": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:faye": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -1230,9 +1360,9 @@
     "reason": "confidence is none and no official Korean character name was identified"
   },
   "character:fina": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"피나\" already used by character:feena in the same category"
   },
   "character:finn": {
@@ -1349,6 +1479,18 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:fumi": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "character:fuutou shizune": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and translation empty"
+  },
   "character:fuxi": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -1372,6 +1514,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:gabriel": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:gabrielle": {
     "tried": "2026-06-14",
@@ -1427,6 +1575,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"젤\" already used by character:zel in the same category"
   },
+  "character:gene": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"진 스타윈드\" already used by character:gene starwind in the same category"
+  },
   "character:geodude": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -1450,6 +1604,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 5,
     "reason": "confidence none"
+  },
+  "character:gill": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:gipsy": {
     "tried": "2026-06-14",
@@ -1535,6 +1695,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"총잡이\" already used by character:gunhild in the same category"
   },
+  "character:gunner": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
+  },
   "character:haelga": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -1553,11 +1719,23 @@
     "attempts": 1,
     "reason": "duplicate translation \"하쿠오로\" already used by character:hakuoro in the same category"
   },
+  "character:hakuryuu": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:hanna": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"한나\" already used by character:hannah in the same category"
+  },
+  "character:hanna froese": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
   },
   "character:hao asakura": {
     "tried": "2026-06-14",
@@ -1703,6 +1881,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:hildas mom": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"요한나\" already used by character:johanna in the same category"
+  },
   "character:hina": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
@@ -1726,6 +1910,22 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"호무라\" already used by character:pyra in the same category"
+  },
+  "character:honey": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
+  "character:honou no heine": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
+  },
+  "character:hoplite": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
   },
   "character:horn": {
     "tried": "2026-06-14",
@@ -1793,6 +1993,11 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:hyosuke magumo": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
+  },
   "character:i-201": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -1800,9 +2005,9 @@
     "reason": "not confident translation"
   },
   "character:i-203": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "not confident translation"
   },
   "character:i-400": {
@@ -1901,6 +2106,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:irene": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:irenes": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -1986,10 +2197,10 @@
     "reason": "not confident translation"
   },
   "character:jack": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "duplicate translation \"잭\" already used by character:zac in the same category"
+    "attempts": 2,
+    "reason": "empty translation"
   },
   "character:jacqli": {
     "tried": "2026-06-16",
@@ -2237,11 +2448,23 @@
     "attempts": 6,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
+  "character:kana iwata": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"가나\" already used by character:kana in the same category"
+  },
   "character:kaname tanuma": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:kanata": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
   },
   "character:kane himuro": {
     "tried": "2026-06-14",
@@ -2321,6 +2544,12 @@
     "attempts": 4,
     "reason": "confidence none"
   },
+  "character:kataochi chuko": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none with empty translation"
+  },
   "character:katarina": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -2339,6 +2568,12 @@
     "attempts": 1,
     "reason": "confidence none; no reliable Korean localized name found"
   },
+  "character:katue pearson": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none with empty translation"
+  },
   "character:kaya": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -2350,6 +2585,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"케일\" already used by character:kale in the same category"
+  },
+  "character:kaze": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none with empty translation"
   },
   "character:keigo asano": {
     "tried": "2026-06-14",
@@ -2380,6 +2621,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:kevin": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:kikuzuki": {
     "tried": "2026-06-14",
@@ -2591,6 +2838,18 @@
     "attempts": 1,
     "reason": "duplicate translation \"쿠비라\" already used by character:kuvira in the same category"
   },
+  "character:kuntakku": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
+  },
+  "character:kurusu": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
+  },
   "character:kyoko toshinou": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -2664,9 +2923,9 @@
     "reason": "duplicate translation \"란\" already used by character:ran in the same category"
   },
   "character:lala": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"라라\" already used by character:ursula in the same category"
   },
   "character:lamretta": {
@@ -2915,6 +3174,12 @@
     "attempts": 6,
     "reason": "no official or strongly authoritative Korean localized character name found"
   },
+  "character:lloyd sirius": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and missing translation"
+  },
   "character:lobelia carlini": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
@@ -2963,6 +3228,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"루이스\" already used by character:lewis in the same category"
   },
+  "character:lucca ashtear": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:lucciano": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -2974,6 +3245,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 5,
     "reason": "confidence none"
+  },
+  "character:lucilius": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"루시퍼\" already used by character:lucifer in the same category"
   },
   "character:lucy": {
     "tried": "2026-06-16",
@@ -3029,10 +3306,16 @@
     "attempts": 1,
     "reason": "duplicate translation \"리피아\" already used by character:leafeon in the same category"
   },
-  "character:lynn": {
-    "tried": "2026-06-14",
+  "character:lyney": {
+    "tried": "2026-06-16",
     "verdict": "REJECT",
     "attempts": 1,
+    "reason": "duplicate translation \"리니\" already used by character:linie in the same category"
+  },
+  "character:lynn": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 2,
     "reason": "duplicate translation \"린\" already used by character:rin in the same category"
   },
   "character:lynne": {
@@ -3198,9 +3481,9 @@
     "reason": "duplicate translation \"말린\" already used by character:marlene in the same category"
   },
   "character:malon": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"말론\" already used by character:marlone in the same category"
   },
   "character:mana": {
@@ -3208,6 +3491,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 3,
     "reason": "confidence none"
+  },
+  "character:mana livingston": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:manami oukusa": {
     "tried": "2026-06-14",
@@ -3233,6 +3522,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"마가렛\" already used by character:marguerite in the same category"
   },
+  "character:marguerite fatima": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
+  },
   "character:mari": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
@@ -3252,9 +3547,9 @@
     "reason": "duplicate translation \"마리벨\" already used by character:maribel in the same category"
   },
   "character:marielle": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"마리엘\" already used by character:mariel in the same category"
   },
   "character:marlon": {
@@ -3323,6 +3618,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:mcdonalds daughter": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none"
+  },
   "character:meelo": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -3376,6 +3677,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"메이메이\" already used by character:mei mei in the same category"
+  },
+  "character:melleau": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"메루\" already used by character:meru in the same category"
   },
   "character:melone": {
     "tried": "2026-06-14",
@@ -3443,6 +3750,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"미키\" already used by character:miki in the same category"
   },
+  "character:michelle chang": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"미셸 창\" already used by character:michelle cheung in the same category"
+  },
   "character:michishio": {
     "tried": "2026-06-08",
     "verdict": "_NEEDS_REVIEW",
@@ -3478,6 +3791,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"미코가미 나기사\" already used by character:nagisa mikogami in the same category"
+  },
+  "character:milleore": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is empty"
   },
   "character:millie": {
     "tried": "2026-06-14",
@@ -3539,6 +3858,12 @@
     "attempts": 3,
     "reason": "confidence none"
   },
+  "character:mint fantome": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:misdreavus": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -3556,6 +3881,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"안개\" already used by character:haze in the same category"
+  },
+  "character:misty may": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:misuzu gundou": {
     "tried": "2026-06-14",
@@ -3600,9 +3931,9 @@
     "reason": "no authoritative Korean localized character name found"
   },
   "character:mizuho": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "empty translation"
   },
   "character:mjrn": {
@@ -3641,6 +3972,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:momoka kawaragi": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation text is corrupted mojibake rather than valid Korean"
+  },
   "character:momoko": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
@@ -3652,6 +3989,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:monaca towa": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation text is corrupted mojibake rather than valid Korean"
   },
   "character:monica": {
     "tried": "2026-06-14",
@@ -3676,6 +4019,24 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"모나\" already used by character:mona in the same category"
+  },
+  "character:monomasa": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation text is corrupted mojibake rather than valid Korean"
+  },
+  "character:monster kid": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation text is corrupted mojibake rather than valid Korean"
+  },
+  "character:moonlight flower": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "translation text is corrupted mojibake rather than valid Korean"
   },
   "character:mordred": {
     "tried": "2026-06-14",
@@ -3748,6 +4109,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:murakami": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
   },
   "character:murasaki kuhouin": {
     "tried": "2026-06-14",
@@ -3875,6 +4242,12 @@
     "attempts": 1,
     "reason": "confidence none; no authoritative Korean localized name found"
   },
+  "character:nezha": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"나타\" already used by character:nata in the same category"
+  },
   "character:nico": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -3904,6 +4277,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:ninja": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:noa": {
     "tried": "2026-06-14",
@@ -4139,6 +4518,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"페리\" already used by character:ferry in the same category"
   },
+  "character:perm": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:pete": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -4199,6 +4584,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"멍청한\" already used by character:grookey in the same category"
   },
+  "character:porno": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:ppk": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -4218,9 +4609,9 @@
     "reason": "duplicate translation \"프라나\" already used by character:plana in the same category"
   },
   "character:precia zan zenosakis": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "empty translation"
   },
   "character:pressel": {
@@ -4289,6 +4680,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"조용한\" already used by character:silent in the same category"
   },
+  "character:qum": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:r-0": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -4312,6 +4709,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"라구나\" already used by character:laguna in the same category"
   },
+  "character:rai": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none"
+  },
   "character:raigh": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -4323,6 +4726,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"라이카\" already used by character:laika in the same category"
+  },
+  "character:rajyaki": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none"
   },
   "character:raki": {
     "tried": "2026-06-14",
@@ -4415,9 +4824,9 @@
     "reason": "confidence none; no authoritative Korean localized character name found"
   },
   "character:ren": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "empty translation"
   },
   "character:ren ikenami": {
@@ -4444,6 +4853,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:renee graves": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none and empty translation"
+  },
   "character:reona": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -4463,9 +4878,9 @@
     "reason": "not confident translation"
   },
   "character:rico": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"리코\" already used by character:riko in the same category"
   },
   "character:rico brzenska": {
@@ -4517,9 +4932,9 @@
     "reason": "not confident translation"
   },
   "character:riku tachibana": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 5,
     "reason": "empty translation"
   },
   "character:rina takashimizu": {
@@ -4565,9 +4980,9 @@
     "reason": "confidence is none; no authoritative Korean localized name found"
   },
   "character:rio mason busujima": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 5,
     "reason": "empty translation"
   },
   "character:rio mei long": {
@@ -4607,9 +5022,9 @@
     "reason": "duplicate translation \"로마\" already used by character:roma in the same category"
   },
   "character:ronin": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 4,
+    "attempts": 5,
     "reason": "empty translation"
   },
   "character:rosia": {
@@ -4738,6 +5153,12 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:sahli lao": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:saki": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
@@ -4797,6 +5218,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 4,
     "reason": "confidence none"
+  },
+  "character:sayaka kamimori": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence none; no Korean translation provided"
   },
   "character:sayuka kouenji": {
     "tried": "2026-06-16",
@@ -4912,6 +5339,11 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:sekka": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
+  },
   "character:seko": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -4935,6 +5367,11 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 6,
     "reason": "no authoritative Korean localized character name found"
+  },
+  "character:sen yarizui": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
   },
   "character:sena": {
     "tried": "2026-06-16",
@@ -4983,6 +5420,11 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"세트\" already used by character:sett in the same category"
+  },
+  "character:shakki": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
   },
   "character:shamu meruruusa": {
     "tried": "2026-06-16",
@@ -5061,6 +5503,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:shino": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:shiraishi": {
     "tried": "2026-06-14",
@@ -5146,6 +5594,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"헐크\" already used by character:hulk in the same category"
   },
+  "character:shunpei kuze": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is missing"
+  },
   "character:shurelia": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -5163,6 +5617,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "confidence is none; no reliable official Korean localized character name was found"
+  },
+  "character:sieglinde baumgard": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1,
+    "reason": "confidence is none and translation is missing"
   },
   "character:sierra": {
     "tried": "2026-06-16",
@@ -5187,6 +5647,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"실크\" already used by character:silk in the same category"
+  },
+  "character:silver": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"실버\" already used by character:silva in the same category"
   },
   "character:sima": {
     "tried": "2026-06-14",
@@ -5231,9 +5697,9 @@
     "reason": "duplicate translation \"시타\" already used by character:sheeta in the same category"
   },
   "character:sivil": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
+    "attempts": 2,
     "reason": "duplicate translation \"시빌\" already used by character:sybilla in the same category"
   },
   "character:sizuru nakatsu": {
@@ -5325,6 +5791,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"유령\" already used by character:haunter in the same category"
+  },
+  "character:sphie rim atwaria crier": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:spike": {
     "tried": "2026-06-08",
@@ -5512,6 +5984,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"타바사\" already used by character:tabitha in the same category"
   },
+  "character:tadatomo": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:taisei onari": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -5529,6 +6007,12 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "confidence none; no authoritative Korean localized name found"
+  },
+  "character:tamaki": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:tamasaburou": {
     "tried": "2026-06-14",
@@ -5613,6 +6097,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"테레사\" already used by character:theresa in the same category"
+  },
+  "character:thetis": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"MH-4 테티스\" already used by character:mh-4 thetis in the same category"
   },
   "character:thor": {
     "tried": "2026-06-14",
@@ -5745,6 +6235,12 @@
     "verdict": "REJECT",
     "attempts": 1,
     "reason": "duplicate translation \"음유시인\" already used by character:bard in the same category"
+  },
+  "character:trumpet": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
   },
   "character:tsubaki aihara": {
     "tried": "2026-06-14",
@@ -5932,6 +6428,12 @@
     "attempts": 6,
     "reason": "no authoritative Korean localized character name found"
   },
+  "character:van": {
+    "tried": "2026-06-16",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "duplicate translation \"반\" already used by character:ban in the same category"
+  },
   "character:vanny": {
     "tried": "2026-06-14",
     "verdict": "REJECT",
@@ -5951,10 +6453,10 @@
     "reason": "duplicate translation \"비\" already used by character:rain in the same category"
   },
   "character:veena": {
-    "tried": "2026-06-14",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 1,
-    "reason": "duplicate translation \"비나\" already used by character:binah in the same category"
+    "attempts": 2,
+    "reason": "empty translation"
   },
   "character:veibae": {
     "tried": "2026-06-14",
@@ -6340,6 +6842,11 @@
     "attempts": 1,
     "reason": "not confident translation"
   },
+  "character:yukiko shinsaki": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
+  },
   "character:yukina shirahane": {
     "tried": "2026-06-14",
     "verdict": "_NEEDS_REVIEW",
@@ -6423,6 +6930,11 @@
     "verdict": "_NEEDS_REVIEW",
     "attempts": 1,
     "reason": "not confident translation"
+  },
+  "character:yusuke kinoshita": {
+    "tried": "2026-06-16",
+    "verdict": "_NEEDS_REVIEW",
+    "attempts": 1
   },
   "character:yusuke urameshi": {
     "tried": "2026-06-14",
@@ -7039,8 +7551,8 @@
   "series:bakunyuu maid kari": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 21,
-    "reason": "confidence none; no official or strongly authoritative Korean localized series title found"
+    "attempts": 41,
+    "reason": "confidence none and empty translation"
   },
   "series:bakuretsu muteki bangai-o": {
     "tried": "2026-06-09",
@@ -9271,8 +9783,8 @@
   "series:kyuushu sentai danjija": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 20,
-    "reason": "confidence none; no official or strongly authoritative Korean localized series title found"
+    "attempts": 40,
+    "reason": "confidence none and empty translation"
   },
   "series:l no kisetsu": {
     "tried": "2026-06-07",
@@ -9867,9 +10379,9 @@
     "reason": "English-only translation lacks target-language characters"
   },
   "series:minna de kitaeru zennou training": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none; unresolved Korean title"
   },
   "series:mint na bokura": {
@@ -9903,9 +10415,9 @@
     "reason": "empty translation"
   },
   "series:misoni no mikoto": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none; unresolved Korean title"
   },
   "series:misshitsu no sacrifice": {
@@ -9921,9 +10433,9 @@
     "reason": "empty translation"
   },
   "series:missingblue": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none; unresolved Korean title"
   },
   "series:misty moon metropolis": {
@@ -10106,9 +10618,9 @@
     "reason": "corrupted mojibake translation"
   },
   "series:my home mirano": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:my life as a teenage robot": {
@@ -10567,9 +11079,9 @@
     "reason": "corrupted or invalid Korean translation text"
   },
   "series:ongezellig": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "empty translation and confidence none"
   },
   "series:oni": {
@@ -10597,9 +11109,9 @@
     "reason": "confidence none with empty translation"
   },
   "series:oniku daisuki zeushi-kun": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "empty translation and confidence none"
   },
   "series:only you": {
@@ -10717,9 +11229,9 @@
     "reason": "confidence none and empty translation"
   },
   "series:owen": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none with empty translation"
   },
   "series:oyakodon oppai tokumori bonyuu tsuyudaku de": {
@@ -10747,9 +11259,9 @@
     "reason": "empty translation"
   },
   "series:pacify": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none with empty translation"
   },
   "series:pandemonium majutsushi no mura": {
@@ -10759,15 +11271,15 @@
     "reason": "confidence none and empty translation"
   },
   "series:pandora no yume": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none with empty translation"
   },
   "series:panic-chan": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 4,
+    "attempts": 24,
     "reason": "confidence none with empty translation"
   },
   "series:papuwa": {
@@ -11908,9 +12420,9 @@
     "reason": "empty translation"
   },
   "series:super beat sports": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:super dog rilienthal": {
@@ -11926,9 +12438,9 @@
     "reason": "empty translation"
   },
   "series:supreme candy": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:susie-chan to marvy": {
@@ -11938,15 +12450,15 @@
     "reason": "confidence none and empty translation"
   },
   "series:swot": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:t-34": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:taboo charming mother": {
@@ -12129,9 +12641,9 @@
     "reason": "corrupted or invalid Korean translation"
   },
   "series:tensai ryouri shounen ajinosuke": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:tenshi na konamaiki": {
@@ -12218,9 +12730,9 @@
     "reason": "missing translation and confidence is none"
   },
   "series:the mini suke police": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:the momotaroh": {
@@ -12230,15 +12742,15 @@
     "reason": "confidence none; empty translation"
   },
   "series:the muse and don": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:the queen of duellist": {
-    "tried": "2026-06-13",
+    "tried": "2026-06-16",
     "verdict": "REJECT",
-    "attempts": 5,
+    "attempts": 25,
     "reason": "empty translation"
   },
   "series:the saiban": {
@@ -12351,8 +12863,8 @@
   "series:tonari no miko-san wa minna warau": {
     "tried": "2026-06-16",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 20,
-    "reason": "confidence none; no official or strongly authoritative Korean localized series title found"
+    "attempts": 40,
+    "reason": "confidence none and empty translation"
   },
   "series:tonari no onee-san": {
     "tried": "2026-06-13",
