@@ -69,6 +69,7 @@ const translations = {
     en: 'This gallery is already downloaded. Download it again?',
     ko: '이미 다운로드된 갤러리입니다. 다시 받을까요?',
   },
+  'detail.filesMissing': { en: 'Files missing · Re-download', ko: '로컬 파일 없음 · 다시 받기' },
   'detail.copyId': { en: 'Copy ID', ko: 'ID 복사' },
   'detail.copied': { en: 'ID copied!', ko: 'ID 복사됨!' },
 
