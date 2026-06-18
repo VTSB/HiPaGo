@@ -649,6 +649,12 @@
     "attempts": 1,
     "reason": "duplicate translation \"아르케 클라인\" already used by character:arche klein in the same category"
   },
+  "character:archerko": {
+    "tried": "2026-06-18",
+    "verdict": "REJECT",
+    "attempts": 1,
+    "reason": "empty translation"
+  },
   "character:archie": {
     "tried": "2026-06-17",
     "verdict": "_NEEDS_REVIEW",
@@ -1253,7 +1259,7 @@
   "character:botanist": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 137,
+    "attempts": 138,
     "reason": "empty translation"
   },
   "character:boyfriend": {
@@ -1402,7 +1408,7 @@
   "character:carol": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 255,
+    "attempts": 256,
     "reason": "confidence is none and translation is empty"
   },
   "character:cassandra": {
@@ -2983,7 +2989,7 @@
   "character:fortress": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 185,
+    "attempts": 186,
     "reason": "empty translation"
   },
   "character:foxhound": {
@@ -5923,7 +5929,7 @@
   "character:leila barthes": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 53,
+    "attempts": 54,
     "reason": "confidence none"
   },
   "character:leira": {
@@ -7591,7 +7597,7 @@
   "character:mizuho": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "empty translation"
   },
   "character:mjrn": {
@@ -8723,7 +8729,7 @@
   "character:precia zan zenosakis": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "empty translation"
   },
   "character:pressel": {
@@ -9122,7 +9128,7 @@
   "character:ren": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "empty translation"
   },
   "character:ren ikenami": {
@@ -9304,7 +9310,7 @@
   "character:rin mitsuki": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 194,
+    "attempts": 195,
     "reason": "empty translation with confidence none; no authoritative match found quickly"
   },
   "character:rina takashimizu": {
@@ -10377,7 +10383,7 @@
   "character:shiori unozawa": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 152,
+    "attempts": 153,
     "reason": "empty translation with confidence none"
   },
   "character:shiraishi": {
@@ -10413,7 +10419,7 @@
   "character:shiroma": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 152,
+    "attempts": 153,
     "reason": "empty translation with confidence none"
   },
   "character:shiron": {
@@ -13633,7 +13639,7 @@
   "series:bakunyuu maid kari": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 290,
+    "attempts": 291,
     "reason": "confidence none and empty translation"
   },
   "series:bakuretsu muteki bangai-o": {
@@ -15865,7 +15871,7 @@
   "series:kyuushu sentai danjija": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 289,
+    "attempts": 290,
     "reason": "confidence none and empty translation"
   },
   "series:l no kisetsu": {
@@ -16463,7 +16469,7 @@
   "series:minna de kitaeru zennou training": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none; unresolved Korean title"
   },
   "series:mint na bokura": {
@@ -16499,7 +16505,7 @@
   "series:misoni no mikoto": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none; unresolved Korean title"
   },
   "series:misshitsu no sacrifice": {
@@ -16517,7 +16523,7 @@
   "series:missingblue": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none; unresolved Korean title"
   },
   "series:misty moon metropolis": {
@@ -16702,7 +16708,7 @@
   "series:my home mirano": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:my life as a teenage robot": {
@@ -17163,7 +17169,7 @@
   "series:ongezellig": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "empty translation and confidence none"
   },
   "series:oni": {
@@ -17193,7 +17199,7 @@
   "series:oniku daisuki zeushi-kun": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "empty translation and confidence none"
   },
   "series:only you": {
@@ -17313,7 +17319,7 @@
   "series:owen": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none with empty translation"
   },
   "series:oyakodon oppai tokumori bonyuu tsuyudaku de": {
@@ -17343,7 +17349,7 @@
   "series:pacify": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none with empty translation"
   },
   "series:pandemonium majutsushi no mura": {
@@ -17355,13 +17361,13 @@
   "series:pandora no yume": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none with empty translation"
   },
   "series:panic-chan": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 273,
+    "attempts": 274,
     "reason": "confidence none with empty translation"
   },
   "series:papuwa": {
@@ -18504,7 +18510,7 @@
   "series:super beat sports": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:super dog rilienthal": {
@@ -18522,7 +18528,7 @@
   "series:supreme candy": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:susie-chan to marvy": {
@@ -18534,13 +18540,13 @@
   "series:swot": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:t-34": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:taboo charming mother": {
@@ -18725,7 +18731,7 @@
   "series:tensai ryouri shounen ajinosuke": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:tenshi na konamaiki": {
@@ -18814,7 +18820,7 @@
   "series:the mini suke police": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:the momotaroh": {
@@ -18826,13 +18832,13 @@
   "series:the muse and don": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:the queen of duellist": {
     "tried": "2026-06-18",
     "verdict": "REJECT",
-    "attempts": 274,
+    "attempts": 275,
     "reason": "empty translation"
   },
   "series:the saiban": {
@@ -18945,7 +18951,7 @@
   "series:tonari no miko-san wa minna warau": {
     "tried": "2026-06-18",
     "verdict": "_NEEDS_REVIEW",
-    "attempts": 289,
+    "attempts": 290,
     "reason": "confidence none and empty translation"
   },
   "series:tonari no onee-san": {
