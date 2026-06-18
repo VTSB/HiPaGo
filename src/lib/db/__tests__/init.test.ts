@@ -13,6 +13,12 @@ vi.mock('@/lib/store/db-status', () => ({
   },
 }));
 
+// Mock the DB adapter — checkDbReady probes the tag table row count.
+const mockQuery = vi.fn();
+vi.mock('../adapter', () => ({
+  ensureDb: vi.fn(async () => ({ query: mockQuery })),
+}));
+
 import { getSyncStatus } from '../sync-status';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { checkDbReady } from '../init';
@@ -29,6 +35,8 @@ beforeEach(() => {
     setDbReady: mockSetDbReady,
     setTagsStale: mockSetTagsStale,
   });
+  // Default: tag table is populated, so a 'completed' status stays ready=true.
+  mockQuery.mockResolvedValue([{ c: 50000 }]);
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -54,5 +62,57 @@ describe('checkDbReady — tag staleness window (14 days)', () => {
     await checkDbReady();
 
     expect(mockSetTagsStale).toHaveBeenCalledWith(true);
+  });
+});
+
+describe('checkDbReady — tag table row validation', () => {
+  it('status completed but tag table EMPTY → not ready (forces re-sync)', async () => {
+    mockGetSyncStatus.mockResolvedValue(
+      JSON.stringify({ status: 'completed', timestamp: Date.now() }),
+    );
+    mockQuery.mockResolvedValue([{ c: 0 }]);
+
+    const ready = await checkDbReady();
+
+    expect(ready).toBe(false);
+    expect(mockSetDbReady).toHaveBeenCalledWith(false);
+    // An empty table is not "stale" — it just needs a (re)sync.
+    expect(mockSetTagsStale).not.toHaveBeenCalledWith(true);
+  });
+
+  it('status completed and tag table populated → ready', async () => {
+    mockGetSyncStatus.mockResolvedValue(
+      JSON.stringify({ status: 'completed', timestamp: Date.now() }),
+    );
+    mockQuery.mockResolvedValue([{ c: 42000 }]);
+
+    const ready = await checkDbReady();
+
+    expect(ready).toBe(true);
+    expect(mockSetDbReady).toHaveBeenCalledWith(true);
+  });
+
+  it('status not completed → not ready, and the table is not probed', async () => {
+    mockGetSyncStatus.mockResolvedValue(
+      JSON.stringify({ status: 'loading', timestamp: Date.now() }),
+    );
+
+    const ready = await checkDbReady();
+
+    expect(ready).toBe(false);
+    expect(mockSetDbReady).toHaveBeenCalledWith(false);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it('count probe failure falls back to the completed flag (does not block boot)', async () => {
+    mockGetSyncStatus.mockResolvedValue(
+      JSON.stringify({ status: 'completed', timestamp: Date.now() }),
+    );
+    mockQuery.mockRejectedValue(new Error('db locked'));
+
+    const ready = await checkDbReady();
+
+    expect(ready).toBe(true);
+    expect(mockSetDbReady).toHaveBeenCalledWith(true);
   });
 });

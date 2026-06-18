@@ -1,4 +1,5 @@
 import { getSyncStatus, setSyncStatus } from './sync-status';
+import { ensureDb } from './adapter';
 import { useDbStatusStore } from '@/lib/store/db-status';
 
 /** Sync status keys */
@@ -37,7 +38,24 @@ export function parseSyncData(raw: string | null): SyncStatusData | null {
 export async function checkDbReady(): Promise<boolean> {
   const raw = await getSyncStatus(SYNC_KEY_TAGS);
   const data = parseSyncData(raw);
-  const ready = data?.status === 'completed';
+  let ready = data?.status === 'completed';
+
+  // Defense in depth: a prior sync may have marked 'completed' with an empty tag
+  // table (e.g. blocked fetches that parsed to 0 tags before the empty-guard in
+  // runRuntimeTagSync existed). Trust the flag only if the tag table actually has
+  // rows — otherwise a stuck device would never re-sync, since DbInitializer only
+  // syncs when !ready. The probe is best-effort: if it fails, keep the flag value
+  // so a transient query error never blocks boot.
+  if (ready) {
+    try {
+      const db = await ensureDb();
+      const rows = await db.query<{ c: number }>('SELECT COUNT(*) as c FROM tag');
+      if (!rows[0] || rows[0].c === 0) ready = false;
+    } catch {
+      // Probe failed — fall back to the sync-status flag value.
+    }
+  }
+
   useDbStatusStore.getState().setDbReady(ready);
 
   // Check if tags are stale (older than 14 days)

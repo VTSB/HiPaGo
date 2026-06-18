@@ -218,6 +218,10 @@ describe('checkDbReady', () => {
 
   it('returns true and sets dbReady=true when sync_status is "completed"', async () => {
     await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({ status: 'completed', timestamp: 1000, count: 100 }));
+    // checkDbReady now also verifies the tag table is non-empty.
+    await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG], 'ready-tag', 1,
+    ]);
     const ready = await checkDbReady();
     expect(ready).toBe(true);
     expect(useDbStatusStore.getState().dbReady).toBe(true);
@@ -493,7 +497,7 @@ describe('Full lifecycle', () => {
     expect(ready1).toBe(false);
     expect(useDbStatusStore.getState().dbReady).toBe(false);
 
-    setMockTags({});
+    setMockTags({ tag: [['lifecycle-tag', 1]] });
     await runTagSync();
 
     const ready2 = await checkDbReady();
@@ -503,6 +507,10 @@ describe('Full lifecycle', () => {
 
   it('completed DB -> checkDbReady=true -> no sync needed', async () => {
     await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({ status: 'completed', timestamp: 1000, count: 100 }));
+    // checkDbReady now also verifies the tag table is non-empty.
+    await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG], 'completed-tag', 1,
+    ]);
 
     const ready = await checkDbReady();
     expect(ready).toBe(true);
@@ -515,7 +523,7 @@ describe('Full lifecycle', () => {
     const ready1 = await checkDbReady();
     expect(ready1).toBe(false);
 
-    setMockTags({});
+    setMockTags({ tag: [['resync-tag', 1]] });
     await runTagSync();
 
     const ready2 = await checkDbReady();
@@ -523,7 +531,7 @@ describe('Full lifecycle', () => {
   });
 
   it('sync_status persists across checkDbReady calls', async () => {
-    setMockTags({});
+    setMockTags({ tag: [['persist-tag', 1]] });
     await runTagSync();
 
     resetStore();

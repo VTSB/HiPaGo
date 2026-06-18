@@ -543,7 +543,11 @@ describe('runTagSync — runtime path', () => {
   // 11. loadLocale called after runtime sync (not applyKoreanLocalization)
   // -------------------------------------------------------------------------
   it('calls useTagI18nStore.loadLocale after sync completes', async () => {
-    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
+    // Must insert at least one tag — an all-empty sync is now treated as a
+    // failure (see empty-guard test below), so it would not "complete".
+    mockFetchPage.mockResolvedValue(
+      makeTagPageHtml([{ name: 'locale-tag', count: 1, href: '/tag/locale-tag-all.html' }]),
+    );
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
 
@@ -568,12 +572,42 @@ describe('runTagSync — runtime path', () => {
   it('clears a stale syncError when a new sync starts', async () => {
     // Seed a prior failure.
     useDbStatusStore.getState().setSyncError('previous failure');
-    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
+    // A successful sync must insert at least one tag (an all-empty sync is now a
+    // failure — see the empty-guard test below).
+    mockFetchPage.mockResolvedValue(
+      makeTagPageHtml([{ name: 'fresh-tag', count: 1, href: '/tag/fresh-tag-all.html' }]),
+    );
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
 
     // Successful sync clears the error and marks the DB ready.
     expect(useDbStatusStore.getState().syncError).toBeNull();
     expect(useDbStatusStore.getState().dbReady).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Empty-guard — a sync that parses 0 tags from every page must NOT complete
+  // -------------------------------------------------------------------------
+  it('does NOT mark completed when every page parses to 0 tags (blocked/challenge response)', async () => {
+    // Simulates a device whose fetches return a challenge/blocked page: HTTP 200
+    // but no parseable tags. Without the guard this would markTagSyncCompleted(0),
+    // poisoning dbReady with an empty tag table.
+    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    const state = useDbStatusStore.getState();
+    expect(state.dbReady).toBe(false);
+    expect(state.syncError).toBeTruthy();
+    expect(state.isSyncing).toBe(false);
+
+    // sync_status must NOT be 'completed' (so the next launch retries).
+    const raw = await getSyncStatus(SYNC_KEY_TAGS);
+    const data = raw ? JSON.parse(raw) : null;
+    expect(data?.status).not.toBe('completed');
+
+    // The tag table stays empty.
+    const tags = await queryAll<{ name: string }>('SELECT name FROM tag', []);
+    expect(tags.length).toBe(0);
   });
 });

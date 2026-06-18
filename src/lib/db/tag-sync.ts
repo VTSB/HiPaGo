@@ -222,6 +222,18 @@ async function runRuntimeTagSync(): Promise<void> {
       }
     }
 
+    // Never mark an empty sync as completed. A blocked/challenge response is an
+    // HTTP 200 page that parses to 0 tags (no throw), so without this guard every
+    // page "succeeds" with 0 tags and the sync is marked completed with an empty
+    // tag table — which poisons dbReady (see checkDbReady) and stops any re-sync.
+    // Throw instead so runTagSync records the error and the status stays
+    // not-completed, so it retries on the next launch.
+    if (totalTagCount === 0) {
+      throw new Error(
+        'Tag sync produced 0 tags — every page returned no parseable tags (likely a blocked/challenge response). Not marking completed.',
+      );
+    }
+
     await markTagSyncCompleted(totalTagCount);
 
     // Reload locale translations into the store (respects current user locale)
