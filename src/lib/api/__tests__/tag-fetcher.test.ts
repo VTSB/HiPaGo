@@ -16,6 +16,15 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
+const mockBypassFetch = vi.fn();
+
+vi.mock('@/lib/plugins/bypass', () => ({
+  Bypass: {
+    fetch: (...args: unknown[]) => mockBypassFetch(...args),
+    downloadToFile: vi.fn(),
+  },
+}));
+
 import { createTagFetcher, parseRetryAfter } from '../tag-fetcher';
 import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
 
@@ -28,6 +37,7 @@ beforeEach(() => {
   vi.mocked(isAndroid).mockReturnValue(false);
   mockFetch.mockReset();
   mockInvoke.mockReset();
+  mockBypassFetch.mockReset();
 });
 
 afterEach(() => {
@@ -69,25 +79,30 @@ describe('createTagFetcher — factory', () => {
     });
   });
 
-  it('returns CapacitorHttpFetcher when Capacitor detected', () => {
+  it('returns the CapacitorBypassFetcher when Capacitor (iOS) detected', () => {
     vi.mocked(isCapacitor).mockReturnValue(true);
     const fetcher = createTagFetcher();
     expect(typeof fetcher.fetchPage).toBe('function');
     expect(typeof fetcher.dispose).toBe('function');
   });
 
-  it('fetches the real hitomi URL directly on Android (WebView interceptor bypasses)', async () => {
+  it('on Android fetches tag pages through the Bypass plugin, not a plain interceptor fetch', async () => {
     vi.mocked(isAndroid).mockReturnValue(true);
     vi.mocked(isCapacitor).mockReturnValue(true); // Android is also Capacitor
-    mockFetch.mockResolvedValue({ ok: true, text: () => Promise.resolve('<html>a</html>') });
+    // body is a number[] byte array (BypassFetchResult.body); decoded via TextDecoder.
+    const bytes = Array.from(new TextEncoder().encode('<html>a</html>'));
+    mockBypassFetch.mockResolvedValue({ status: 200, headers: {}, body: bytes });
 
     const fetcher = createTagFetcher();
     const result = await fetcher.fetchPage('allartists-a.html');
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://hitomi.la/allartists-a.html',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    // The JS fetch transport must be the Bypass plugin (the WebView interceptor
+    // does not bypass JS fetch() calls), with the real hitomi URL + headers.
+    expect(mockBypassFetch).toHaveBeenCalledWith({
+      url: 'https://hitomi.la/allartists-a.html',
+      headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
     expect(result).toBe('<html>a</html>');
   });
 });

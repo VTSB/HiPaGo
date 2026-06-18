@@ -1,4 +1,4 @@
-import { isTauri, isCapacitor, isAndroid } from '@/lib/utils/platform';
+import { isTauri, isCapacitor } from '@/lib/utils/platform';
 
 export interface TagFetcher {
   /** Fetch a hitomi.la tag page and return raw HTML */
@@ -136,9 +136,12 @@ class CapacitorBypassFetcher implements TagFetcher {
 
 export function createTagFetcher(): TagFetcher {
   if (isTauri()) return new TauriBypassFetcher();
-  // Android: plain fetch to the real hitomi URL — the WebView interceptor
-  // bypasses + injects headers. iOS keeps the plugin until its interceptor lands.
-  if (isAndroid()) return new HttpFetcher((path) => `https://hitomi.la/${path}`);
+  // Capacitor (Android + iOS): fetch tag pages through the Bypass plugin
+  // (Rust bypass-core), the same JS-fetch transport the api client uses for ltn.
+  // The Android WebView interceptor only bypasses <img>/resource loads, NOT JS
+  // fetch() calls, so a plain fetch to hitomi.la here goes out un-bypassed and
+  // fails on device — which silently blocked the tag-DB sync (and Korean
+  // autocomplete, which has no remote fallback). See platform.ts isAndroid docs.
   if (isCapacitor()) return new CapacitorBypassFetcher();
   return new HttpFetcher((path) => '/api/tags/fetch?url=' + encodeURIComponent(path));
 }
