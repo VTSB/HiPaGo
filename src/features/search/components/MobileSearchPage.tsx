@@ -13,6 +13,7 @@ import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { SyncErrorBanner } from '@/shared/components/SyncErrorBanner';
 import { useT } from '@/lib/i18n/useT';
 
 /**
@@ -168,6 +169,10 @@ export function MobileSearchPage() {
     // On a results route (/search?q=) this is a stacked view and the (main)
     // layout drops its top padding, so add the status-bar safe-area here.
     <div className={urlQuery ? 'pt-[calc(0.5rem+env(safe-area-inset-top))]' : undefined}>
+      {/* Tag-sync failures are otherwise invisible on mobile (the header
+          indicator is desktop-only) — surface the failure + reason here, where
+          tag autocomplete/popular tags live. */}
+      <SyncErrorBanner />
       <div className="mb-6 flex w-full items-center gap-1.5">
         {/* On a results route (/search?q=) this is a stacked view: show a ←
             back chevron to the left of the box (the tab bar is hidden). Pops

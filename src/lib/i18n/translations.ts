@@ -46,6 +46,10 @@ const translations = {
   // Tag DB sync status
   'sync.syncing': { en: 'Syncing tag DB', ko: '태그 DB 동기화 중' },
   'sync.failed': { en: 'Tag DB sync failed', ko: '태그 DB 동기화 실패' },
+  'sync.failed.desc': {
+    en: 'Tag autocomplete and popular tags need the tag DB. The sync failed — tap retry, or copy the error below.',
+    ko: '태그 자동완성과 추천 태그는 태그 DB가 필요해요. 동기화가 실패했어요 — 재시도하거나 아래 오류를 복사해 주세요.',
+  },
   'sync.retry': { en: 'Retry', ko: '재시도' },
 
   // Gallery detail
