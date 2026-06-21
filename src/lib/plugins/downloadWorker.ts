@@ -5,7 +5,7 @@
  * On Android the worker is the SOLE downloader. TS resolves a gallery's
  * work-order, hands it off to the native side via {@link writeWorkOrder} (so TS
  * never needs raw access to the app's filesDir), then schedules the worker via
- * {@link enqueue}. One unique, Wi-Fi-constrained worker drains all pending
+ * {@link enqueue}. One unique, Wi-Fi-constrained worker chain drains pending
  * work-orders, surviving app background/kill with a foreground notification.
  *
  * {@link cancel} drops one gallery's pending work-order and stops the worker when
@@ -26,10 +26,10 @@ export interface DownloadWorkerPlugin {
   writeWorkOrder(options: { galleryId: string; json: string }): Promise<void>;
 
   /**
-   * Schedule the unique, UNMETERED-constrained download worker (ExistingWorkPolicy
-   * KEEP). The work-order file is assumed already written. A worker already
-   * running picks up newly written work-orders, so enqueueing several galleries
-   * then calling enqueue once is sufficient.
+   * Schedule the unique, UNMETERED-constrained download worker chain
+   * (ExistingWorkPolicy.APPEND_OR_REPLACE). The work-order file is assumed
+   * already written. Appending a follow-up pass closes the race where a new
+   * work-order lands while the current worker run is already finishing.
    */
   enqueue(options: { galleryId: string }): Promise<void>;
 
@@ -51,7 +51,9 @@ export interface DownloadWorkerPlugin {
    * this method (its foreground download is already in-process), so the TS poller
    * is isAndroid-gated and never calls it on iOS.
    */
-  getProgress(options: { galleryId: string }): Promise<{ current: number; total: number } | { current: null }>;
+  getProgress(options: {
+    galleryId: string;
+  }): Promise<{ current: number; total: number } | { current: null }>;
 }
 
 export const DownloadWorker = registerPlugin<DownloadWorkerPlugin>('DownloadWorker');

@@ -13,7 +13,13 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useScrollReveal } from '@/shared/hooks/useScrollReveal';
 import { useReaderZoom } from '@/features/reader/hooks/useReaderZoom';
 
-export function ReaderView({ galleryId, initialPage }: { galleryId: number; initialPage?: number }) {
+export function ReaderView({
+  galleryId,
+  initialPage,
+}: {
+  galleryId: number;
+  initialPage?: number;
+}) {
   const reader = useReader(galleryId, initialPage);
   const offline = useOfflineImages(galleryId);
   // Enable native WebView pinch-zoom only while the reader is open (Android);
@@ -41,7 +47,8 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
     if (!targetEl) return;
     programmaticScrollRef.current = true;
     clearTimeout(scrollTimerRef.current);
-    const offset = targetEl.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop;
+    const offset =
+      targetEl.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop;
     node.scrollTo({ top: offset, behavior: 'smooth' });
     scrollTimerRef.current = setTimeout(() => {
       programmaticScrollRef.current = false;
@@ -80,15 +87,21 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
     if (mode === 'scroll') scrollToPageElement(prevIdx);
   }, [currentPage, mode, setCurrentPage, scrollToPageElement, dualPage]);
 
-  const handleVisiblePageChange = useCallback((page: number) => {
-    if (programmaticScrollRef.current) return;
-    setCurrentPage(page);
-  }, [setCurrentPage]);
+  const handleVisiblePageChange = useCallback(
+    (page: number) => {
+      if (programmaticScrollRef.current) return;
+      setCurrentPage(page);
+    },
+    [setCurrentPage],
+  );
 
-  const handlePageChange = useCallback((page: number) => {
-    setCurrentPage(page);
-    if (mode === 'scroll') scrollToPageElement(page);
-  }, [setCurrentPage, mode, scrollToPageElement]);
+  const handlePageChange = useCallback(
+    (page: number) => {
+      setCurrentPage(page);
+      if (mode === 'scroll') scrollToPageElement(page);
+    },
+    [setCurrentPage, mode, scrollToPageElement],
+  );
 
   // Arrow key navigation for both page and scroll modes
   useEffect(() => {
@@ -106,20 +119,21 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
   }, [handleNextPage, handlePrevPage]);
 
   // A downloaded gallery must read fully offline — its page count comes from the
-  // local manifest (offline.urls), NOT the network detail query. Synthesize an
+  // local manifest (offline.sources), NOT the network detail query. Synthesize an
   // image list of the right length so the readers + controls work without the
   // gallery-info fetch (which can never resolve offline → the old infinite spin).
-  const offlineCount = offline.urls?.length ?? 0;
+  const offlineCount = offline.sources?.length ?? 0;
   const images: GalleryImage[] = useMemo(
     () =>
       offlineCount > 0 && reader.images.length !== offlineCount
         ? Array.from({ length: offlineCount }, (_, i) => ({
             name: '',
             hash: `offline-${i}`,
-            // Real aspect ratio read from the downloaded image bytes (offline.dims);
-            // 0/0 only if a page's dims couldn't be decoded → natural-size fallback.
-            width: offline.dims?.[i]?.width ?? 0,
-            height: offline.dims?.[i]?.height ?? 0,
+            // The fast offline path avoids pre-decoding every stored page before
+            // first paint; use a stable manga-page fallback if dimensions are
+            // unavailable.
+            width: offline.dims?.[i]?.width ?? 800,
+            height: offline.dims?.[i]?.height ?? 1200,
             types: new Set<ImageType>(),
           }))
         : reader.images,
@@ -138,18 +152,27 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
   // Wait on the network reader query ONLY when the gallery is not downloaded;
   // a downloaded gallery renders from local files regardless of network state.
   if (offline.loading || (offlineCount === 0 && reader.isLoading))
-    return <div className="flex min-h-screen items-center justify-center bg-black"><Spinner size="md" className="border-zinc-600 border-t-white" /></div>;
-  if (offlineCount === 0 && reader.error) return <div className="flex min-h-screen items-center justify-center bg-black text-red-400">{reader.error}</div>;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black">
+        <Spinner size="md" className="border-zinc-600 border-t-white" />
+      </div>
+    );
+  if (offlineCount === 0 && reader.error)
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black text-red-400">
+        {reader.error}
+      </div>
+    );
 
   // NOTE: when a downloaded gallery's stored files are missing/corrupt,
-  // useOfflineImages returns urls:null (offlineCount === 0) so we DELIBERATELY
+  // useOfflineImages returns sources:null (offlineCount === 0) so we DELIBERATELY
   // fall through to the normal cache→network reader path above (useReader runs
   // regardless of download status) rather than showing a dead-end "files
   // missing" screen. The detail page surfaces the missing-files state at the
   // download button instead. So there is no `offline.missing` branch here.
 
-  // Pass offline blob URLs when available; readers fall back to network when undefined.
-  const offlineUrls = offline.urls ?? undefined;
+  // Pass offline sources when available; readers fall back to network when undefined.
+  const offlineSources = offline.sources ?? undefined;
 
   return (
     <div ref={rootRef} className="relative min-h-screen bg-black">
@@ -165,12 +188,47 @@ export function ReaderView({ galleryId, initialPage }: { galleryId: number; init
         }}
         aria-label="Back"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5"><path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" /></svg>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          className="h-5 w-5"
+        >
+          <path
+            fillRule="evenodd"
+            d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z"
+            clipRule="evenodd"
+          />
+        </svg>
       </button>
-      {reader.mode === 'page'
-        ? <PageReader images={images} currentPage={reader.currentPage} onPageChange={reader.setCurrentPage} offlineUrls={offlineUrls} />
-        : <ScrollReader images={images} initialPage={reader.currentPage} onScrollPositionChange={reader.setScrollPosition} onVisiblePageChange={handleVisiblePageChange} scrollCallbackRef={scrollCallbackRef} scrollNodeRef={scrollNodeRef} offlineUrls={offlineUrls} />}
-      <ReaderControls onBack={reader.goBack} currentPage={reader.currentPage} totalPages={reader.totalPages} mode={reader.mode} onModeChange={reader.setMode} onNextPage={handleNextPage} onPrevPage={handlePrevPage} onPageChange={handlePageChange} />
+      {reader.mode === 'page' ? (
+        <PageReader
+          images={images}
+          currentPage={reader.currentPage}
+          onPageChange={reader.setCurrentPage}
+          offlineSources={offlineSources}
+        />
+      ) : (
+        <ScrollReader
+          images={images}
+          initialPage={reader.currentPage}
+          onScrollPositionChange={reader.setScrollPosition}
+          onVisiblePageChange={handleVisiblePageChange}
+          scrollCallbackRef={scrollCallbackRef}
+          scrollNodeRef={scrollNodeRef}
+          offlineSources={offlineSources}
+        />
+      )}
+      <ReaderControls
+        onBack={reader.goBack}
+        currentPage={reader.currentPage}
+        totalPages={reader.totalPages}
+        mode={reader.mode}
+        onModeChange={reader.setMode}
+        onNextPage={handleNextPage}
+        onPrevPage={handlePrevPage}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }

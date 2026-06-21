@@ -151,6 +151,7 @@ export function GalleryDetail({ id }: { id: number }) {
     cancel: handleCancelDownload,
     error: dlError,
     isDownloaded,
+    queuedPosition,
   } = useDownloadGallery(
     id,
     displayBlock?.title || `Gallery ${id}`,
@@ -262,7 +263,7 @@ export function GalleryDetail({ id }: { id: number }) {
               toggleFav();
             }}
             disabled={favPending}
-              className={`absolute left-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-colors disabled:opacity-50 sm:h-auto sm:w-auto sm:p-1.5 ${isFav ? 'text-yellow-400' : 'text-white/70 sm:hover:text-white'}`}
+            className={`absolute left-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-colors disabled:opacity-50 sm:h-auto sm:w-auto sm:p-1.5 ${isFav ? 'text-yellow-400' : 'text-white/70 sm:hover:text-white'}`}
             aria-label={isFav ? t('detail.removeFavorite') : t('detail.addFavorite')}
           >
             <svg
@@ -315,7 +316,10 @@ export function GalleryDetail({ id }: { id: number }) {
           {tagEntries.length > 0 && (
             <div className="space-y-2">
               {tagEntries.map(([type, tags]) => (
-                <div key={type} className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
+                <div
+                  key={type}
+                  className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2"
+                >
                   <span className="shrink-0 text-sm font-semibold uppercase text-zinc-500 sm:w-20 sm:text-[13px] dark:text-zinc-400">
                     {type}
                   </span>
@@ -349,6 +353,16 @@ export function GalleryDetail({ id }: { id: number }) {
                 >
                   <Spinner size="sm" />
                   {dlProgress.current}/{dlProgress.total}
+                </button>
+              ) : queuedPosition !== null ? (
+                <button
+                  onClick={handleCancelDownload}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+                >
+                  {t('library.queue.queued')}
+                  <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+                    #{queuedPosition}
+                  </span>
                 </button>
               ) : isDownloaded && filesMissing ? (
                 <button
@@ -408,9 +422,7 @@ export function GalleryDetail({ id }: { id: number }) {
                 </button>
               ))}
           </div>
-          {dlError && (
-            <p className="text-sm text-red-600 dark:text-red-400">{dlError}</p>
-          )}
+          {dlError && <p className="text-sm text-red-600 dark:text-red-400">{dlError}</p>}
         </div>
       </div>
 
