@@ -50,9 +50,12 @@ import uniffi.bypass.BypassKt;
  *    is skipped, so an app-kill-interrupted gallery resumes from disk.
  *  - The {@code 0000.json} manifest (a JSON array of per-page exts) is rewritten
  *    incrementally after each page so the TS reader/reconcile sees progress.
+ *  - The handoff dir is re-scanned until no new processable work-orders remain,
+ *    so downloads queued while this worker is already running are not missed.
  *  - On a page hard-failure the gallery is left partial and its work-order is
- *    KEPT (TS auto-retry/reconcile decides what to do); the worker breaks to the
- *    next work-order file. The work-order is deleted ONLY on full success.
+ *    KEPT (TS auto-retry/reconcile decides what to do); the worker skips that
+ *    file for the rest of this run and keeps draining newer work-orders. The
+ *    work-order is deleted ONLY on full success.
  *  - One SUMMARY foreground notification is updated across all galleries (not one
  *    per gallery), satisfying the foreground-service requirement.
  *  - Honors {@link #isStopped()} (WorkManager cancellation) between pages.
@@ -97,52 +100,82 @@ public class GalleryDownloadWorker extends Worker {
         }
 
         File handoffDir = new File(getApplicationContext().getFilesDir(), HANDOFF_DIR);
-        File[] orderFiles = handoffDir.listFiles((dir, name) -> name.endsWith(".json"));
 
-        // Best-effort prune of stale progress files: any dl-progress/<id>.json whose
-        // gallery no longer has a work-order in dl-queue is orphaned (a prior run
-        // crashed before cleanup). The in-app getProgress returns null for these,
-        // but pruning keeps the dir small. Failure here must not affect downloads.
-        pruneStaleProgress(orderFiles);
-
-        if (orderFiles == null || orderFiles.length == 0) {
-            return Result.success();
-        }
-
-        // Process in stable name order (TS names files <galleryId>.json; sorting by
-        // name gives a deterministic order that the app can reason about).
-        Arrays.sort(orderFiles, Comparator.comparing(File::getName));
-
-        // Without a SAF tree there is nowhere to write — retry later (the user may
-        // re-grant the folder, after which the same work-orders are still queued).
+        // Without a SAF tree there is nowhere to write. Retry later only when
+        // there is actual work pending; otherwise finish quietly.
         if (!saf.hasTree()) {
-            return Result.retry();
+            File[] pending = listOrderFiles(handoffDir);
+            pruneStaleProgress(pending);
+            return pending.length == 0 ? Result.success() : Result.retry();
         }
 
-        for (File orderFile : orderFiles) {
-            if (isStopped()) {
-                // WorkManager cancelled us — stop cleanly, leaving remaining
-                // work-orders for the next run.
+        java.util.Set<String> failedThisRun = new java.util.HashSet<>();
+
+        while (!isStopped()) {
+            File[] orderFiles = listOrderFiles(handoffDir);
+
+            // Best-effort prune of stale progress files: any dl-progress/<id>.json whose
+            // gallery no longer has a work-order in dl-queue is orphaned (a prior run
+            // crashed before cleanup). The in-app getProgress returns null for these,
+            // but pruning keeps the dir small. Failure here must not affect downloads.
+            pruneStaleProgress(orderFiles);
+
+            if (orderFiles.length == 0) {
                 return Result.success();
             }
 
-            JSONObject order = readOrder(orderFile);
-            if (order == null) {
-                // Unparseable work-order — drop it so it does not wedge the queue.
-                orderFile.delete();
-                continue;
+            boolean processedAny = false;
+
+            for (File orderFile : orderFiles) {
+                if (isStopped()) {
+                    // WorkManager cancelled us. Stop cleanly, leaving remaining
+                    // work-orders for the next run.
+                    return Result.success();
+                }
+
+                String orderName = orderFile.getName();
+                if (failedThisRun.contains(orderName)) {
+                    continue;
+                }
+
+                JSONObject order = readOrder(orderFile);
+                if (order == null) {
+                    // Unparseable work-order: drop it so it does not wedge the queue.
+                    orderFile.delete();
+                    processedAny = true;
+                    continue;
+                }
+
+                processedAny = true;
+                boolean completed = processGallery(order);
+                if (completed) {
+                    // Full success: remove the work-order so it is not reprocessed.
+                    orderFile.delete();
+                    failedThisRun.remove(orderName);
+                } else {
+                    // Keep the file for a later scheduled/reconciled retry, but do
+                    // not immediately spin on the same failing gallery in this run.
+                    failedThisRun.add(orderName);
+                }
             }
 
-            boolean completed = processGallery(order);
-            if (completed) {
-                // Full success → remove the work-order so it is not reprocessed.
-                orderFile.delete();
+            // Only previously-failed files remain. Finish this run; a future
+            // enqueue/reconcile will schedule another pass.
+            if (!processedAny) {
+                return Result.success();
             }
-            // On failure we KEEP the file: TS reconcile/auto-retry decides. We just
-            // advance to the next gallery.
         }
 
         return Result.success();
+    }
+
+    private File[] listOrderFiles(File handoffDir) {
+        File[] files = handoffDir.listFiles((dir, name) -> name.endsWith(".json"));
+        if (files == null) return new File[0];
+        // Process in stable name order (TS names files <galleryId>.json; sorting
+        // by name gives a deterministic order that the app can reason about).
+        Arrays.sort(files, Comparator.comparing(File::getName));
+        return files;
     }
 
     // -----------------------------------------------------------------------
@@ -397,9 +430,11 @@ public class GalleryDownloadWorker extends Worker {
     // -----------------------------------------------------------------------
 
     private void updateNotification(String title, int current, int total) {
+        int percent = total > 0 ? Math.min(100, Math.round((current * 100f) / total)) : 0;
+        String titleSuffix = title.isEmpty() ? "" : " - " + title;
         String text = total > 0
-                ? "Downloading " + current + "/" + total + (title.isEmpty() ? "" : " — " + title)
-                : "Downloading…";
+                ? "Downloading " + current + "/" + total + " (" + percent + "%)" + titleSuffix
+                : "Downloading...";
         ForegroundInfo info = buildForegroundInfo(text, current, total);
         try {
             setForegroundAsync(info);
@@ -415,7 +450,8 @@ public class GalleryDownloadWorker extends Worker {
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setOngoing(true)
-                .setOnlyAlertOnce(true);
+                .setOnlyAlertOnce(true)
+                .setSubText(current > 0 && total > 0 ? current + "/" + total : null);
         if (total > 0) {
             builder.setProgress(total, current, false);
         }

@@ -63,12 +63,7 @@ export class TauriDownloadStore implements DownloadStore {
     });
   }
 
-  async putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     await this.mkdir(this.galleryPath(galleryId));
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('plugin:fs|write_file', bytes, {
@@ -99,11 +94,7 @@ export class TauriDownloadStore implements DownloadStore {
     return (stat?.size as number) ?? 0;
   }
 
-  async getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null> {
+  async getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null> {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const data = await invoke<unknown>('plugin:fs|read_file', {
@@ -118,11 +109,7 @@ export class TauriDownloadStore implements DownloadStore {
     }
   }
 
-  async imageExists(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean> {
+  async imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
     try {
       // plugin:fs|stat throws if the path does not exist; a present file with
       // size 0 is a torn write and is reported as missing.
@@ -130,6 +117,18 @@ export class TauriDownloadStore implements DownloadStore {
       return (st?.size ?? 0) > 0;
     } catch {
       return false;
+    }
+  }
+
+  async imageUrl(galleryId: number, index: number, ext: string): Promise<string | null> {
+    try {
+      if (!(await this.imageExists(galleryId, index, ext))) return null;
+      const { convertFileSrc } = await import('@tauri-apps/api/core');
+      const { appDataDir, join } = await import('@tauri-apps/api/path');
+      const abs = await join(await appDataDir(), this.imagePath(galleryId, index, ext));
+      return convertFileSrc(abs);
+    } catch {
+      return null;
     }
   }
 
