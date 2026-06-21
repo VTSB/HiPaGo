@@ -1,6 +1,8 @@
 package com.hipago.app;
 
+import android.Manifest;
 import android.content.Context;
+import android.os.Build;
 
 import androidx.work.Constraints;
 import androidx.work.ExistingWorkPolicy;
@@ -9,10 +11,13 @@ import androidx.work.OneTimeWorkRequest;
 import androidx.work.WorkManager;
 
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONObject;
 
@@ -27,22 +32,31 @@ import java.io.FileOutputStream;
  * On Android the worker is the SOLE downloader. TS resolves a work-order, hands
  * it off via {@link #writeWorkOrder} (so TS never needs raw access to the app's
  * {@code filesDir}), then calls {@link #enqueue} to schedule the worker. One
- * unique worker ({@link GalleryDownloadWorker#UNIQUE_WORK_NAME}, policy KEEP)
- * drains ALL pending work-order files, so enqueueing several galleries then
- * calling enqueue once is enough — the running worker picks up the new files.
+ * unique worker chain ({@link GalleryDownloadWorker#UNIQUE_WORK_NAME}, policy
+ * APPEND_OR_REPLACE) drains pending work-order files. Appending a follow-up run
+ * closes the race where a work-order is written while a previous run is already
+ * finishing.
  *
  * Network constraint: {@link NetworkType#UNMETERED} (Wi-Fi/ethernet only), so a
  * metered/no network holds the work until Wi-Fi returns (WorkManager re-runs it).
+ * Android 13+ notification permission is requested before enqueueing so the
+ * worker's foreground progress notification appears in the system shade.
  *
  * {@link #cancel} removes one gallery's work-order file; if no work-orders remain
  * it also cancels the unique work so the worker stops.
  *
  * DEVICE-PENDING: Java is not compiled in the sandbox; this file is verified by
  * code review here and must be smoke-tested on a physical/emulator Android
- * device (WorkManager scheduling, UNMETERED constraint, KEEP policy, cancel).
+ * device (WorkManager scheduling, UNMETERED constraint, append policy, cancel).
  */
-@CapacitorPlugin(name = "DownloadWorker")
+@CapacitorPlugin(
+        name = "DownloadWorker",
+        permissions = {
+                @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications")
+        }
+)
 public class DownloadWorkerPlugin extends Plugin {
+    private static final String NOTIFICATIONS = "notifications";
 
     private File handoffDir() {
         File dir = new File(getContext().getFilesDir(), GalleryDownloadWorker.HANDOFF_DIR);
@@ -82,12 +96,34 @@ public class DownloadWorkerPlugin extends Plugin {
 
     /**
      * Enqueue the unique, Wi-Fi-constrained download worker. The work-order file is
-     * assumed already written (via {@link #writeWorkOrder}). KEEP means a worker
-     * that is already running/enqueued is left alone — it will pick up the new
-     * work-order file on its current run or the next.
+     * assumed already written (via {@link #writeWorkOrder}). APPEND_OR_REPLACE keeps
+     * the current run and appends a follow-up pass, so a work-order written while a
+     * worker is already running is still guaranteed to be seen.
      */
     @PluginMethod
     public void enqueue(PluginCall call) {
+        if (shouldRequestNotificationPermission()) {
+            requestPermissionForAlias(NOTIFICATIONS, call, "notificationPermissionCallback");
+            return;
+        }
+
+        enqueueWorker(call);
+    }
+
+    @PermissionCallback
+    private void notificationPermissionCallback(PluginCall call) {
+        // A denial only hides the foreground notification from the shade; the
+        // actual WorkManager download should still proceed.
+        enqueueWorker(call);
+    }
+
+    private boolean shouldRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false;
+        PermissionState state = getPermissionState(NOTIFICATIONS);
+        return state == PermissionState.PROMPT || state == PermissionState.PROMPT_WITH_RATIONALE;
+    }
+
+    private void enqueueWorker(PluginCall call) {
         try {
             Constraints constraints = new Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.UNMETERED)
@@ -97,7 +133,7 @@ public class DownloadWorkerPlugin extends Plugin {
                     .build();
             WorkManager.getInstance(getContext()).enqueueUniqueWork(
                     GalleryDownloadWorker.UNIQUE_WORK_NAME,
-                    ExistingWorkPolicy.KEEP,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
                     request);
             call.resolve();
         } catch (Exception e) {

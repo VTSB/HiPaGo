@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useIsMobile } from '@/shared/hooks/useIsMobile';
 import { useT } from '@/lib/i18n/useT';
 import { FavoritesView } from '@/features/favorites/components/FavoritesView';
@@ -9,10 +9,20 @@ import { DownloadsView } from '@/features/library/components/DownloadsView';
 
 type Segment = 'favorites' | 'history' | 'downloads';
 
+function parseSegment(value: string | null): Segment | null {
+  return value === 'favorites' || value === 'history' || value === 'downloads' ? value : null;
+}
+
+function librarySegmentHref(segment: Segment): string {
+  return segment === 'favorites' ? '/library' : `/library?tab=${segment}`;
+}
+
 export function LibraryHub() {
   const t = useT();
   const isMobile = useIsMobile();
-  const [segment, setSegment] = useState<Segment>('favorites');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const segment = parseSegment(searchParams.get('tab')) ?? 'favorites';
 
   // Desktop: /library stays exactly the downloads page it is today.
   if (!isMobile) {
@@ -40,7 +50,7 @@ export function LibraryHub() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setSegment(id)}
+                onClick={() => router.replace(librarySegmentHref(id), { scroll: false })}
                 className={`min-h-10 flex-1 rounded-full text-sm font-medium transition-colors ${
                   active
                     ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-950 dark:text-zinc-100'

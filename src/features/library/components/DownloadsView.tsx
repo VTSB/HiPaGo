@@ -9,10 +9,19 @@ import { TagChip } from '@/shared/components/TagChip';
 import { DownloadQueueView } from '@/features/library/components/DownloadQueueView';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
-import { listLibraryDownloads, searchDownloads, deleteDownload, deserializeTags } from '@/lib/db/download';
+import {
+  listLibraryDownloads,
+  searchDownloads,
+  deleteDownload,
+  deserializeTags,
+} from '@/lib/db/download';
 import { enqueueDownload } from '@/lib/db/download-queue';
 import { clearAutoRetry, AUTO_RETRY_MAX } from '@/lib/db/download-retry';
-import { processQueue, useDownloadProgressStore } from '@/lib/store/download-progress';
+import {
+  DOWNLOAD_LIBRARY_CHANGED_EVENT,
+  processQueue,
+  useDownloadProgressStore,
+} from '@/lib/store/download-progress';
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
@@ -24,6 +33,9 @@ import type { DownloadProgress } from '@/lib/utils/download-zip';
 // as the same cover-forward cards.
 const GRID_CLASS =
   '-mx-2 grid grid-cols-2 gap-x-2 gap-y-2.5 sm:mx-0 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5';
+const LAST_LIST_URL_KEY = 'hipago:last-list-url';
+const INITIAL_RENDER_COUNT = 80;
+const RENDER_BATCH_SIZE = 80;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -110,7 +122,10 @@ function useAutoRetryLabel(item: DBDownload): string | null {
   const msLeft = new Date(nextRetryAt).getTime() - now;
   let timeStr: string;
   if (msLeft <= 0) {
-    return t('library.retry.now') + ` (${t('library.retry.attempt').replace('{k}', String(retryCount)).replace('{max}', String(AUTO_RETRY_MAX))})`;
+    return (
+      t('library.retry.now') +
+      ` (${t('library.retry.attempt').replace('{k}', String(retryCount)).replace('{max}', String(AUTO_RETRY_MAX))})`
+    );
   }
   const totalSec = Math.ceil(msLeft / 1000);
   if (totalSec >= 60) {
@@ -132,6 +147,7 @@ function useAutoRetryLabel(item: DBDownload): string | null {
 
 interface LibraryCardProps {
   item: DBDownload;
+  localCoverUrl?: string | null;
   onDelete: (galleryId: number) => void;
   onExport: (galleryId: number, title: string) => void;
   onRetry: (item: DBDownload) => void;
@@ -179,7 +195,13 @@ function OverflowMenu({ label, items }: { label: string; items: MenuAction[] }) 
         aria-expanded={open}
         className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white shadow-sm backdrop-blur-sm active:bg-black/70 sm:hover:bg-black/70"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          className="h-4 w-4"
+          aria-hidden="true"
+        >
           <path d="M8 4a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2zm0 5a1 1 0 110-2 1 1 0 010 2z" />
         </svg>
       </button>
@@ -193,7 +215,10 @@ function OverflowMenu({ label, items }: { label: string; items: MenuAction[] }) 
               key={it.key}
               type="button"
               role="menuitem"
-              onClick={() => { setOpen(false); it.onClick(); }}
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
               className={`block w-full px-4 py-2.5 text-left text-sm font-medium ${
                 it.destructive
                   ? 'text-red-600 hover:bg-red-50 active:bg-red-50 dark:text-red-400 dark:hover:bg-red-950 dark:active:bg-red-950'
@@ -209,37 +234,34 @@ function OverflowMenu({ label, items }: { label: string; items: MenuAction[] }) 
   );
 }
 
-/** A WebView file URL for the gallery's downloaded first page, used as an offline
- *  cover. null on web / when nothing is downloaded → caller uses the network thumb. */
-function useDownloadedCoverUrl(galleryId: number): string | null {
-  const { data } = useQuery({
-    queryKey: ['download-cover', galleryId],
-    queryFn: async () => {
-      const store = await createDownloadStore();
-      return (await store.coverUrl?.(galleryId)) ?? null;
-    },
-    staleTime: Infinity,
-  });
-  return data ?? null;
-}
-
-function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgress, retryOverride }: LibraryCardProps) {
+function LibraryCard({
+  item,
+  localCoverUrl,
+  onDelete,
+  onExport,
+  onRetry,
+  isRetrying,
+  retryProgress,
+  retryOverride,
+}: LibraryCardProps) {
   const t = useT();
   const isFailed = item.status === 'failed';
   const showDownloading = item.status === 'downloading' || isRetrying;
 
   // The live store entry (retryOverride) is fresher than the DB row on a
   // just-failed item, so prefer it for the auto-retry annotation.
-  const effectiveItem: DBDownload =
-    retryOverride?.retryAt
-      ? { ...item, nextRetryAt: retryOverride.retryAt, retryCount: retryOverride.attempt ?? item.retryCount }
-      : item;
+  const effectiveItem: DBDownload = retryOverride?.retryAt
+    ? {
+        ...item,
+        nextRetryAt: retryOverride.retryAt,
+        retryCount: retryOverride.attempt ?? item.retryCount,
+      }
+    : item;
   const autoRetryLabel = useAutoRetryLabel(effectiveItem);
 
   // Prefer the locally downloaded first page (offline, no network) and fall back
   // to the network thumbnail when there is no local file (or on web).
-  const localCover = useDownloadedCoverUrl(item.galleryId);
-  const coverSrc = localCover ?? (item.thumbnail ? resolveThumbnailUrl(item.thumbnail) : null);
+  const coverSrc = localCoverUrl ?? (item.thumbnail ? resolveThumbnailUrl(item.thumbnail) : null);
 
   // Build display tags from the stored tag map, mirroring GalleryCard ordering
   // (uncensored first, then artist/group, then the rest).
@@ -263,7 +285,21 @@ function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgr
     return all;
   }, [tagEntries]);
 
-  const progressLabel = retryProgress ? `${retryProgress.current}/${retryProgress.total}` : null;
+  const progressLabel = retryProgress
+    ? `${retryProgress.current}/${retryProgress.total} · ${
+        retryProgress.total > 0
+          ? Math.round((retryProgress.current / retryProgress.total) * 100)
+          : 0
+      }%`
+    : null;
+  const rememberCurrentListUrl = useCallback(() => {
+    try {
+      const url = window.location.pathname + window.location.search;
+      sessionStorage.setItem(LAST_LIST_URL_KEY, url);
+    } catch {
+      // History/session storage can be unavailable in private/embedded contexts.
+    }
+  }, []);
 
   // Secondary actions live in the ⋯ menu, never as an inline button row.
   const menuItems = useMemo<MenuAction[]>(() => {
@@ -272,15 +308,29 @@ function LibraryCard({ item, onDelete, onExport, onRetry, isRetrying, retryProgr
       items.push({ key: 'retry', label: t('library.retry'), onClick: () => onRetry(item) });
     }
     if (item.status === 'complete') {
-      items.push({ key: 'export', label: t('library.exportZip'), onClick: () => onExport(item.galleryId, item.title) });
+      items.push({
+        key: 'export',
+        label: t('library.exportZip'),
+        onClick: () => onExport(item.galleryId, item.title),
+      });
     }
-    items.push({ key: 'delete', label: t('library.delete'), onClick: () => onDelete(item.galleryId), destructive: true });
+    items.push({
+      key: 'delete',
+      label: t('library.delete'),
+      onClick: () => onDelete(item.galleryId),
+      destructive: true,
+    });
     return items;
   }, [isFailed, item, t, onRetry, onExport, onDelete]);
 
   return (
     <div className="group relative">
-      <Link href={galleryHref(item.galleryId)} className="block touch-manipulation" draggable={false}>
+      <Link
+        href={galleryHref(item.galleryId)}
+        className="block touch-manipulation"
+        draggable={false}
+        onClick={rememberCurrentListUrl}
+      >
         <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:bg-zinc-800 sm:hover:shadow-lg">
           {coverSrc ? (
             <AbortableImage
@@ -390,16 +440,25 @@ function StorageIndicator() {
     let cancelled = false;
     createDownloadStore()
       .then((store) => store.usage())
-      .then((bytes) => { if (!cancelled) setUsageBytes(bytes); })
-      .catch(() => { /* storage unavailable */ });
-    return () => { cancelled = true; };
+      .then((bytes) => {
+        if (!cancelled) setUsageBytes(bytes);
+      })
+      .catch(() => {
+        /* storage unavailable */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (usageBytes === null) return null;
 
   return (
     <p className="text-sm text-zinc-500 dark:text-zinc-400">
-      {t('library.storageUsed')}: <span className="font-medium text-zinc-700 dark:text-zinc-300">{formatBytes(usageBytes)}</span>
+      {t('library.storageUsed')}:{' '}
+      <span className="font-medium text-zinc-700 dark:text-zinc-300">
+        {formatBytes(usageBytes)}
+      </span>
     </p>
   );
 }
@@ -416,6 +475,8 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const [rawQuery, setRawQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_COUNT);
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
   const storeEntries = useDownloadProgressStore((s) => s.entries);
@@ -426,7 +487,21 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     debounceRef.current = setTimeout(() => setDebouncedQuery(v), DEBOUNCE_MS);
   }, []);
 
-  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const onLibraryChanged = () => {
+      void queryClient.invalidateQueries({ queryKey: ['library-list'] });
+      void queryClient.invalidateQueries({ queryKey: ['library-search'] });
+    };
+    window.addEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
+    return () => window.removeEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
+  }, [queryClient]);
 
   const hasQuery = debouncedQuery.trim().length > 0;
 
@@ -454,24 +529,70 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const activeLoading = hasQuery ? isFilterLoading : isLoading;
 
   const totalCount = activeItems?.length ?? 0;
+  const visibleItems = useMemo(
+    () => (activeItems ?? []).slice(0, renderLimit),
+    [activeItems, renderLimit],
+  );
+  const visibleGalleryIds = useMemo(
+    () => visibleItems.map((item) => item.galleryId),
+    [visibleItems],
+  );
+  const hasMoreRenderedItems = renderLimit < totalCount;
+
+  const { data: coverUrls = {} } = useQuery({
+    queryKey: ['download-covers', visibleGalleryIds],
+    queryFn: async () => {
+      const store = await createDownloadStore();
+      if (!store.coverUrl) return {};
+      const pairs = await Promise.all(
+        visibleGalleryIds.map(async (id) => [id, await store.coverUrl?.(id)] as const),
+      );
+      return Object.fromEntries(pairs.filter(([, url]) => !!url)) as Record<number, string>;
+    },
+    enabled: visibleGalleryIds.length > 0,
+    staleTime: Infinity,
+  });
+
+  useEffect(() => {
+    setRenderLimit(INITIAL_RENDER_COUNT);
+  }, [debouncedQuery]);
+
+  useEffect(() => {
+    if (!hasMoreRenderedItems) return;
+    if (typeof IntersectionObserver === 'undefined') return;
+    const node = loadMoreRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setRenderLimit((n) => Math.min(n + RENDER_BATCH_SIZE, totalCount));
+      },
+      { rootMargin: '900px 0px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMoreRenderedItems, totalCount]);
 
   // Delete handler: remove DB row + DownloadStore files, then invalidate queries
-  const handleDelete = useCallback(async (galleryId: number) => {
-    if (!window.confirm(t('library.confirmDelete'))) return;
-    try {
-      await deleteDownload(galleryId);
+  const handleDelete = useCallback(
+    async (galleryId: number) => {
+      if (!window.confirm(t('library.confirmDelete'))) return;
       try {
-        const store = await createDownloadStore();
-        await store.deleteGallery(galleryId);
+        await deleteDownload(galleryId);
+        try {
+          const store = await createDownloadStore();
+          await store.deleteGallery(galleryId);
+        } catch {
+          // Storage adapter may not be present or files already gone — DB row is still removed
+        }
       } catch {
-        // Storage adapter may not be present or files already gone — DB row is still removed
+        // DB delete failed — nothing to do
       }
-    } catch {
-      // DB delete failed — nothing to do
-    }
-    queryClient.invalidateQueries({ queryKey: ['library-list'] });
-    queryClient.invalidateQueries({ queryKey: ['library-search'] });
-  }, [t, queryClient]);
+      queryClient.invalidateQueries({ queryKey: ['library-list'] });
+      queryClient.invalidateQueries({ queryKey: ['library-search'] });
+    },
+    [t, queryClient],
+  );
 
   // Export a downloaded gallery's stored images back out as a ZIP.
   const handleExport = useCallback(async (galleryId: number, title: string) => {
@@ -484,34 +605,37 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   // re-fetches the gallery's file list (not stored on the row), resumes from the
   // partial pages, and pushes live progress into the store. This unifies retry
   // with the single download authority — no separate single-flight here.
-  const handleRetry = useCallback(async (item: DBDownload) => {
-    // The processor already single-flights per gallery; a live entry means it's
-    // in flight, so ignore a duplicate tap.
-    if (storeEntries[item.galleryId]?.progress) return;
-    try {
-      // Manual retry resets the auto-restart attempt counter — a fresh set of
-      // automatic attempts thereafter. enqueueDownload (default path) also
-      // resets it, but clear explicitly so the reset holds even if the enqueue
-      // is later changed, and clear the store's "retry pending" entry now.
-      await clearAutoRetry(item.galleryId);
-      await enqueueDownload(
-        {
-          galleryId: item.galleryId,
-          title: item.title,
-          thumbnail: item.thumbnail,
-          tags: deserializeTags(item.tags),
-        },
-        { userInitiated: true },
-      );
-      useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
-      void processQueue();
-    } catch (e) {
-      console.error('Retry failed to enqueue:', e);
-    } finally {
-      queryClient.invalidateQueries({ queryKey: ['library-list'] });
-      queryClient.invalidateQueries({ queryKey: ['library-search'] });
-    }
-  }, [storeEntries, queryClient]);
+  const handleRetry = useCallback(
+    async (item: DBDownload) => {
+      // The processor already single-flights per gallery; a live entry means it's
+      // in flight, so ignore a duplicate tap.
+      if (storeEntries[item.galleryId]?.progress) return;
+      try {
+        // Manual retry resets the auto-restart attempt counter — a fresh set of
+        // automatic attempts thereafter. enqueueDownload (default path) also
+        // resets it, but clear explicitly so the reset holds even if the enqueue
+        // is later changed, and clear the store's "retry pending" entry now.
+        await clearAutoRetry(item.galleryId);
+        await enqueueDownload(
+          {
+            galleryId: item.galleryId,
+            title: item.title,
+            thumbnail: item.thumbnail,
+            tags: deserializeTags(item.tags),
+          },
+          { userInitiated: true },
+        );
+        useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
+        void processQueue();
+      } catch (e) {
+        console.error('Retry failed to enqueue:', e);
+      } finally {
+        queryClient.invalidateQueries({ queryKey: ['library-list'] });
+        queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      }
+    },
+    [storeEntries, queryClient],
+  );
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);
 
@@ -547,11 +671,25 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {activeLoading ? (
-        <div className="flex justify-center py-12"><Spinner size="md" /></div>
+        <div className="flex justify-center py-12">
+          <Spinner size="md" />
+        </div>
       ) : totalCount === 0 ? (
         <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-14 w-14 text-zinc-300 dark:text-zinc-700" aria-hidden="true">
-            <path d="M4 4h4v16H4zM10 4h4v16h-4zM18 4l2 16-2 .25" strokeLinecap="round" strokeLinejoin="round" />
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="h-14 w-14 text-zinc-300 dark:text-zinc-700"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 4h4v16H4zM10 4h4v16h-4zM18 4l2 16-2 .25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           <p className="max-w-xs text-sm text-zinc-500 dark:text-zinc-400">
             {hasQuery ? t('search.noResults') : t('library.empty')}
@@ -567,13 +705,14 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : (
         <div className={GRID_CLASS}>
-          {(activeItems ?? []).map((item) => {
+          {visibleItems.map((item) => {
             const entry = storeEntries[item.galleryId];
             const isRetrying = !!entry?.progress;
             return (
               <LibraryCard
                 key={item.galleryId}
                 item={item}
+                localCoverUrl={coverUrls[item.galleryId] ?? null}
                 onDelete={handleDelete}
                 onExport={handleExport}
                 onRetry={handleRetry}
@@ -585,6 +724,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
               />
             );
           })}
+          {hasMoreRenderedItems && <div ref={loadMoreRef} className="col-span-full h-8" />}
         </div>
       )}
     </>

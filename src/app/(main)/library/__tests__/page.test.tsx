@@ -28,10 +28,25 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
 // Mocks
 // ---------------------------------------------------------------------------
 
+const mockNavigation = vi.hoisted(() => ({
+  replace: vi.fn(),
+}));
+const mockDevice = vi.hoisted(() => ({
+  isMobile: false,
+}));
 const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
 const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
 const mockCreateDownloadStore = vi.fn();
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mockNavigation.replace }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
+
+vi.mock('@/shared/hooks/useIsMobile', () => ({
+  useIsMobile: () => mockDevice.isMobile,
+}));
 
 vi.mock('@/lib/db/download', () => ({
   listDownloads: () => mockListDownloads(),
@@ -77,6 +92,7 @@ vi.mock('@/lib/store/download-progress', () => {
     resumeAll: vi.fn(async () => {}),
   };
   return {
+    DOWNLOAD_LIBRARY_CHANGED_EVENT: 'hipago:download-library-changed',
     processQueue: vi.fn(async () => {}),
     useDownloadProgressStore: (sel: (s: typeof state) => unknown) => sel(state),
   };
@@ -88,8 +104,27 @@ vi.mock('@/lib/storage/download-store', () => ({
 
 // Mock next/link as a plain anchor
 vi.mock('next/link', () => ({
-  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode; [k: string]: unknown }) => (
-    <a href={href} {...rest}>{children}</a>
+  default: ({
+    href,
+    children,
+    onClick,
+    ...rest
+  }: {
+    href: string;
+    children: React.ReactNode;
+    onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
+    [k: string]: unknown;
+  }) => (
+    <a
+      href={href}
+      {...rest}
+      onClick={(event) => {
+        event.preventDefault();
+        onClick?.(event);
+      }}
+    >
+      {children}
+    </a>
   ),
 }));
 
@@ -137,11 +172,7 @@ async function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   const result = render(
-    React.createElement(
-      QueryClientProvider,
-      { client: qc },
-      React.createElement(LibraryPage),
-    ),
+    React.createElement(QueryClientProvider, { client: qc }, React.createElement(LibraryPage)),
   );
   return { ...result, qc };
 }
@@ -153,6 +184,9 @@ async function renderPage() {
 describe('LibraryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDevice.isMobile = false;
+    window.history.replaceState({}, '', '/library');
+    sessionStorage.clear();
     mockCreateDownloadStore.mockResolvedValue({
       usage: vi.fn().mockResolvedValue(0),
       deleteGallery: vi.fn().mockResolvedValue(undefined),
@@ -168,7 +202,9 @@ describe('LibraryPage', () => {
   it('shows a spinner while loading', async () => {
     mockListDownloads.mockReturnValue(new Promise(() => {}));
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
 
     expect(screen.getByTestId('spinner')).toBeTruthy();
   });
@@ -176,7 +212,9 @@ describe('LibraryPage', () => {
   it('renders an empty-state message when there are no downloads', async () => {
     mockListDownloads.mockResolvedValue([]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     expect(screen.getByText('library.empty')).toBeTruthy();
@@ -189,7 +227,9 @@ describe('LibraryPage', () => {
     ];
     mockListDownloads.mockResolvedValue(items);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     expect(screen.getByText('Gallery One')).toBeTruthy();
@@ -199,7 +239,9 @@ describe('LibraryPage', () => {
   it('renders total item count in the heading', async () => {
     mockListDownloads.mockResolvedValue([makeItem(), makeItem({ galleryId: 1002 })]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     expect(screen.getByText('(2)')).toBeTruthy();
@@ -210,20 +252,76 @@ describe('LibraryPage', () => {
     // itself opens the gallery (no inline "Open" button).
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001 })]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const cardLink = screen.getByRole('link');
     expect(cardLink.getAttribute('href')).toBe('/gallery?id=1001');
   });
 
+  it('opens the downloads segment on mobile when the URL tab is downloads', async () => {
+    mockDevice.isMobile = true;
+    window.history.replaceState({}, '', '/library?tab=downloads');
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    expect(
+      screen.getByRole('tab', { name: 'saved.seg.downloads' }).getAttribute('aria-selected'),
+    ).toBe('true');
+    expect(screen.getByText('Saved Download')).toBeTruthy();
+  });
+
+  it('writes the downloads tab into the URL when selected on mobile', async () => {
+    mockDevice.isMobile = true;
+    mockListDownloads.mockResolvedValue([]);
+
+    await act(async () => {
+      await renderPage();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('tab', { name: 'saved.seg.downloads' }));
+    });
+
+    expect(mockNavigation.replace).toHaveBeenCalledWith('/library?tab=downloads', {
+      scroll: false,
+    });
+  });
+
+  it('remembers the downloads tab URL before opening a downloaded gallery', async () => {
+    mockDevice.isMobile = true;
+    window.history.replaceState({}, '', '/library?tab=downloads');
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('link'));
+    });
+
+    expect(sessionStorage.getItem('hipago:last-list-url')).toBe('/library?tab=downloads');
+  });
+
   it('does NOT show per-card size/page-count metadata on the card face', async () => {
     // The redesigned card matches the gallery-block card: title + tags only.
     // Page count and size were removed from the card (storage-used stays in the
     // page header). Verify the page-count number is not rendered on the card.
-    mockListDownloads.mockResolvedValue([makeItem({ pageCount: 42, totalBytes: 1024, title: 'Sized Gallery' })]);
+    mockListDownloads.mockResolvedValue([
+      makeItem({ pageCount: 42, totalBytes: 1024, title: 'Sized Gallery' }),
+    ]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     expect(screen.getByText('Sized Gallery')).toBeTruthy();
@@ -244,14 +342,20 @@ describe('LibraryPage', () => {
 
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const moreBtn = screen.getByRole('button', { name: 'library.more' });
-    await act(async () => { fireEvent.click(moreBtn); });
+    await act(async () => {
+      fireEvent.click(moreBtn);
+    });
 
     const deleteBtn = screen.getByRole('menuitem', { name: 'library.delete' });
-    await act(async () => { fireEvent.click(deleteBtn); });
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
 
     expect(mockDeleteDownload).toHaveBeenCalledWith(2001);
     expect(mockDeleteGallery).toHaveBeenCalledWith(2001);
@@ -261,14 +365,20 @@ describe('LibraryPage', () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 3001 })]);
     vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const moreBtn = screen.getByRole('button', { name: 'library.more' });
-    await act(async () => { fireEvent.click(moreBtn); });
+    await act(async () => {
+      fireEvent.click(moreBtn);
+    });
 
     const deleteBtn = screen.getByRole('menuitem', { name: 'library.delete' });
-    await act(async () => { fireEvent.click(deleteBtn); });
+    await act(async () => {
+      fireEvent.click(deleteBtn);
+    });
 
     expect(mockDeleteDownload).not.toHaveBeenCalled();
   });
@@ -293,12 +403,18 @@ describe('LibraryPage', () => {
     mockSearchDownloads.mockResolvedValue([]);
 
     vi.useFakeTimers();
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     // Drain the initial listDownloads fetch
-    await act(async () => { await vi.runAllTimersAsync(); });
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
     const input = screen.getByRole('textbox');
-    act(() => { fireEvent.change(input, { target: { value: 'dragon' } }); });
+    act(() => {
+      fireEvent.change(input, { target: { value: 'dragon' } });
+    });
 
     // Debounce has not fired — search must not have been called yet
     expect(mockSearchDownloads).not.toHaveBeenCalled();
@@ -310,48 +426,59 @@ describe('LibraryPage', () => {
     mockListDownloads.mockResolvedValue([makeItem()]);
     mockSearchDownloads.mockResolvedValue([makeItem({ galleryId: 9001, title: 'Filtered' })]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const input = screen.getByRole('textbox');
-    act(() => { fireEvent.change(input, { target: { value: 'dragon' } }); });
+    act(() => {
+      fireEvent.change(input, { target: { value: 'dragon' } });
+    });
 
-    await waitFor(
-      () => expect(mockSearchDownloads).toHaveBeenCalledWith({ query: 'dragon' }),
-      { timeout: 3000 },
-    );
+    await waitFor(() => expect(mockSearchDownloads).toHaveBeenCalledWith({ query: 'dragon' }), {
+      timeout: 3000,
+    });
   });
 
   it('shows filtered results after debounce', async () => {
     mockListDownloads.mockResolvedValue([makeItem({ title: 'Original' })]);
-    mockSearchDownloads.mockResolvedValue([makeItem({ galleryId: 9001, title: 'Filtered Result' })]);
+    mockSearchDownloads.mockResolvedValue([
+      makeItem({ galleryId: 9001, title: 'Filtered Result' }),
+    ]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const input = screen.getByRole('textbox');
-    act(() => { fireEvent.change(input, { target: { value: 'filtered' } }); });
+    act(() => {
+      fireEvent.change(input, { target: { value: 'filtered' } });
+    });
 
-    await waitFor(
-      () => expect(screen.getByText('Filtered Result')).toBeTruthy(),
-      { timeout: 3000 },
-    );
+    await waitFor(() => expect(screen.getByText('Filtered Result')).toBeTruthy(), {
+      timeout: 3000,
+    });
   });
 
   it('shows no-results message when search returns empty', async () => {
     mockListDownloads.mockResolvedValue([makeItem()]);
     mockSearchDownloads.mockResolvedValue([]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const input = screen.getByRole('textbox');
-    act(() => { fireEvent.change(input, { target: { value: 'zzznomatch' } }); });
+    act(() => {
+      fireEvent.change(input, { target: { value: 'zzznomatch' } });
+    });
 
-    await waitFor(
-      () => expect(screen.getByText('search.noResults')).toBeTruthy(),
-      { timeout: 3000 },
-    );
+    await waitFor(() => expect(screen.getByText('search.noResults')).toBeTruthy(), {
+      timeout: 3000,
+    });
   });
 
   it('reverts to full list when query is cleared', async () => {
@@ -359,24 +486,24 @@ describe('LibraryPage', () => {
     mockListDownloads.mockResolvedValue(full);
     mockSearchDownloads.mockResolvedValue([makeItem({ galleryId: 9001, title: 'Filtered' })]);
 
-    await act(async () => { await renderPage(); });
+    await act(async () => {
+      await renderPage();
+    });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
 
     const input = screen.getByRole('textbox');
 
     // Type → wait for filtered results
-    act(() => { fireEvent.change(input, { target: { value: 'x' } }); });
-    await waitFor(
-      () => expect(screen.getByText('Filtered')).toBeTruthy(),
-      { timeout: 3000 },
-    );
+    act(() => {
+      fireEvent.change(input, { target: { value: 'x' } });
+    });
+    await waitFor(() => expect(screen.getByText('Filtered')).toBeTruthy(), { timeout: 3000 });
 
     // Clear via the visible clear control → wait for full list to reappear
     const clearButton = screen.getByRole('button', { name: 'Clear' });
-    act(() => { fireEvent.click(clearButton); });
-    await waitFor(
-      () => expect(screen.getByText('Full List Item')).toBeTruthy(),
-      { timeout: 3000 },
-    );
+    act(() => {
+      fireEvent.click(clearButton);
+    });
+    await waitFor(() => expect(screen.getByText('Full List Item')).toBeTruthy(), { timeout: 3000 });
   });
 });

@@ -7,6 +7,8 @@ import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
+import { OfflineImage } from './OfflineImage';
+import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImages';
 
 // High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
 // tags still get decoded by the browser, so a large mounted window pins
@@ -28,12 +30,15 @@ export function PageReader({
   currentPage,
   onPageChange,
   offlineUrls,
+  offlineSources,
 }: {
   images: GalleryImage[];
   currentPage: number;
   onPageChange: (p: number) => void;
   /** When provided, use these blob URLs instead of fetching from the network. */
   offlineUrls?: string[];
+  /** Fast offline sources from useOfflineImages. */
+  offlineSources?: OfflineImageSource[];
 }) {
   const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
   const imageFormat = useSettingsStore((s) => s.imageFormat);
@@ -44,7 +49,11 @@ export function PageReader({
   // The virtualized track (spacer) whose `transform` we animate for a page turn.
   const trackRef = useRef<HTMLDivElement | null>(null);
   // In-flight transform slide, so a rapid second turn can land the first instantly.
-  const slideAnimRef = useRef<{ to: number; onEnd: () => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const slideAnimRef = useRef<{
+    to: number;
+    onEnd: () => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
   const [width, setWidth] = useState(0);
   // Mirror `width` so the once-attached scroll listener reads the current value
   // (and the SAME value the slides are sized with) without re-subscribing.
@@ -53,8 +62,12 @@ export function PageReader({
   // current values without re-subscribing on every page change.
   const currentPageRef = useRef(currentPage);
   const onPageChangeRef = useRef(onPageChange);
-  useEffect(() => { currentPageRef.current = currentPage; });
-  useEffect(() => { onPageChangeRef.current = onPageChange; });
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  });
+  useEffect(() => {
+    onPageChangeRef.current = onPageChange;
+  });
 
   // True while WE drive the scroll (button / key / tap / prop change) so the
   // scroll listener doesn't echo a redundant onPageChange back.
@@ -70,15 +83,22 @@ export function PageReader({
 
   useEffect(() => {
     // Skip the gg.js network fetch when all images are served from local storage.
-    if (offlineUrls) return;
+    if (offlineSources || offlineUrls) return;
     getGgConfig().then(setGgConfig);
-  }, [offlineUrls]);
+  }, [offlineSources, offlineUrls]);
+
+  const normalizedOfflineSources = useMemo<OfflineImageSource[] | undefined>(() => {
+    if (offlineSources) return offlineSources;
+    return offlineUrls?.map((url, index) => ({ index, ext: '', url }));
+  }, [offlineSources, offlineUrls]);
 
   const urls = useMemo(() => {
-    if (offlineUrls) return offlineUrls;
+    if (normalizedOfflineSources) {
+      return normalizedOfflineSources.map((source) => source.url ?? `offline:${source.index}`);
+    }
     if (!ggConfig) return [];
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
-  }, [offlineUrls, images, ggConfig, imageFormat]);
+  }, [normalizedOfflineSources, images, ggConfig, imageFormat]);
 
   const hasUrls = urls.length > 0;
   const slideCount = Math.ceil(images.length / step);
@@ -132,7 +152,7 @@ export function PageReader({
     if (!urls.length) return;
     // Skip JS-Image preloading for offline (blob) URLs — they are already in
     // memory so there is nothing to warm and no network request to abort.
-    if (offlineUrls) return;
+    if (normalizedOfflineSources) return;
     const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
     const start = Math.max(0, currentPage - PRELOAD_BEHIND);
     const skip = new Set(dualPage ? [currentPage, currentPage + 1] : [currentPage]);
@@ -177,7 +197,7 @@ export function PageReader({
       cancelled = true;
       controller.abort();
     };
-  }, [urls, currentPage, dualPage, offlineUrls]);
+  }, [urls, currentPage, dualPage, normalizedOfflineSources]);
 
   // Sync the snapped page back to the parent (native scroll → currentPage).
   useEffect(() => {
@@ -241,54 +261,62 @@ export function PageReader({
   // `scrollLeft` to the target — net-zero visual change, one virtualizer update.
   // A jump beyond the mounted overscan window (target not rendered → would slide
   // to blank) falls back to the browser's native smooth scroll.
-  const animateScrollTo = useCallback((el: HTMLDivElement, to: number) => {
-    const track = trackRef.current;
-    const w = widthRef.current || 1;
-    finishSlide(el, track ?? el);
-    const from = el.scrollLeft;
-    const delta = to - from;
-    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const animateScrollTo = useCallback(
+    (el: HTMLDivElement, to: number) => {
+      const track = trackRef.current;
+      const w = widthRef.current || 1;
+      finishSlide(el, track ?? el);
+      const from = el.scrollLeft;
+      const delta = to - from;
+      const reduce =
+        typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-    const commit = () => {
-      if (track) {
-        track.style.transition = 'none';
-        track.style.transform = '';
+      const commit = () => {
+        if (track) {
+          track.style.transition = 'none';
+          track.style.transform = '';
+        }
+        el.scrollLeft = to;
+        el.style.scrollSnapType = 'x mandatory';
+        programmaticRef.current = false;
+      };
+
+      if (Math.abs(delta) < 1) {
+        commit();
+        return;
       }
-      el.scrollLeft = to;
-      el.style.scrollSnapType = 'x mandatory';
-      programmaticRef.current = false;
-    };
+      // Target outside the mounted window (overscan 2) — can't slide to an unmounted
+      // slide. Use the native smooth scroll; onScrollEnd restores snap.
+      if (!track || reduce || Math.abs(delta) > 2 * w + 1) {
+        el.style.scrollSnapType = 'none';
+        el.scrollTo({ left: to, behavior: reduce ? 'auto' : 'smooth' });
+        return;
+      }
 
-    if (Math.abs(delta) < 1) { commit(); return; }
-    // Target outside the mounted window (overscan 2) — can't slide to an unmounted
-    // slide. Use the native smooth scroll; onScrollEnd restores snap.
-    if (!track || reduce || Math.abs(delta) > 2 * w + 1) {
       el.style.scrollSnapType = 'none';
-      el.scrollTo({ left: to, behavior: reduce ? 'auto' : 'smooth' });
-      return;
-    }
+      // Start showing `from` (translateX 0), animate to showing `to` (translateX -delta).
+      track.style.transition = 'none';
+      track.style.transform = 'translateX(0px)';
+      void track.offsetWidth; // reflow so the transition starts from 0
+      track.style.transition = `transform ${PAGE_TURN_MS}ms ${PAGE_TURN_EASING}`;
+      track.style.transform = `translateX(${-delta}px)`;
 
-    el.style.scrollSnapType = 'none';
-    // Start showing `from` (translateX 0), animate to showing `to` (translateX -delta).
-    track.style.transition = 'none';
-    track.style.transform = 'translateX(0px)';
-    void track.offsetWidth; // reflow so the transition starts from 0
-    track.style.transition = `transform ${PAGE_TURN_MS}ms ${PAGE_TURN_EASING}`;
-    track.style.transform = `translateX(${-delta}px)`;
-
-    const onEnd = () => {
-      const anim = slideAnimRef.current;
-      if (!anim) return;
-      track.removeEventListener('transitionend', anim.onEnd);
-      clearTimeout(anim.timer);
-      slideAnimRef.current = null;
-      commit();
-    };
-    // Safety net in case `transitionend` is missed (interrupted compositor commit).
-    const timer = setTimeout(onEnd, PAGE_TURN_MS + 80);
-    slideAnimRef.current = { to, onEnd, timer };
-    track.addEventListener('transitionend', onEnd);
-  }, [finishSlide]);
+      const onEnd = () => {
+        const anim = slideAnimRef.current;
+        if (!anim) return;
+        track.removeEventListener('transitionend', anim.onEnd);
+        clearTimeout(anim.timer);
+        slideAnimRef.current = null;
+        commit();
+      };
+      // Safety net in case `transitionend` is missed (interrupted compositor commit).
+      const timer = setTimeout(onEnd, PAGE_TURN_MS + 80);
+      slideAnimRef.current = { to, onEnd, timer };
+      track.addEventListener('transitionend', onEnd);
+    },
+    [finishSlide],
+  );
 
   // Drive the scroll when the logical page changes from outside (buttons, arrow
   // keys, tap zones, jump modal).
@@ -332,16 +360,25 @@ export function PageReader({
     }, 600);
   }, [currentPage, width, step, animateScrollTo, virtualizer]);
 
-  useEffect(() => () => {
-    clearTimeout(programmaticTimerRef.current);
-    const anim = slideAnimRef.current;
-    if (anim) { clearTimeout(anim.timer); slideAnimRef.current = null; }
-  }, []);
+  useEffect(
+    () => () => {
+      clearTimeout(programmaticTimerRef.current);
+      const anim = slideAnimRef.current;
+      if (anim) {
+        clearTimeout(anim.timer);
+        slideAnimRef.current = null;
+      }
+    },
+    [],
+  );
 
-  const navigate = useCallback((target: number) => {
-    if (target < 0 || target >= images.length || target === currentPageRef.current) return;
-    onPageChangeRef.current(target);
-  }, [images.length]);
+  const navigate = useCallback(
+    (target: number) => {
+      if (target < 0 || target >= images.length || target === currentPageRef.current) return;
+      onPageChangeRef.current(target);
+    },
+    [images.length],
+  );
 
   // Desktop mouse drag-to-pan: native scroll-snap responds to touch/trackpad but
   // not a click-drag, so add a minimal handler (no physics) that snaps on release.
@@ -383,11 +420,12 @@ export function PageReader({
     else navigate(currentPage - step);
   };
 
-  if (!hasUrls) return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white/80" />
-    </div>
-  );
+  if (!hasUrls)
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white/80" />
+      </div>
+    );
 
   // The slide the reader is currently parked on. Its image gets fetchPriority
   // "high" so it wins CDN connection slots over the low-priority preloads of
@@ -400,33 +438,41 @@ export function PageReader({
     const secondIdx = dualPage ? pageIdx + 1 : -1;
     const hasSecond = dualPage && secondIdx < images.length;
     const priority = slideIndex === currentSlide ? 'high' : undefined;
-    return (
-      <div className={dualPage ? 'flex items-center justify-center gap-1' : ''}>
-        <AbortableImage
-          src={urls[pageIdx]}
-          alt={`Page ${pageIdx + 1}`}
+    const renderReaderImage = (idx: number, className: string) =>
+      normalizedOfflineSources ? (
+        <OfflineImage
+          source={normalizedOfflineSources[idx]}
+          alt={`Page ${idx + 1}`}
           draggable={false}
           loading="eager"
           spinner
           fetchPriority={priority}
-          // On <sm we drop max-h so the image fills the viewport width
-          // (portrait phones + portrait manga → no big black bands). The slide
-          // scrolls vertically if the image is taller than the viewport.
-          className={`pointer-events-none select-none object-contain ${
-            dualPage ? 'max-h-screen max-w-[50vw]' : 'max-w-full sm:max-h-screen'
-          }`}
+          className={className}
         />
-        {hasSecond && (
-          <AbortableImage
-            src={urls[secondIdx]}
-            alt={`Page ${secondIdx + 1}`}
-            draggable={false}
-            loading="eager"
-            spinner
-            fetchPriority={priority}
-            className="pointer-events-none max-h-screen max-w-[50vw] select-none object-contain"
-          />
+      ) : (
+        <AbortableImage
+          src={urls[idx]}
+          alt={`Page ${idx + 1}`}
+          draggable={false}
+          loading="eager"
+          spinner
+          fetchPriority={priority}
+          className={className}
+        />
+      );
+    return (
+      <div className={dualPage ? 'flex items-center justify-center gap-1' : ''}>
+        {renderReaderImage(
+          pageIdx,
+          `pointer-events-none select-none object-contain ${
+            dualPage ? 'max-h-screen max-w-[50vw]' : 'max-w-full sm:max-h-screen'
+          }`,
         )}
+        {hasSecond &&
+          renderReaderImage(
+            secondIdx,
+            'pointer-events-none max-h-screen max-w-[50vw] select-none object-contain',
+          )}
       </div>
     );
   };
@@ -444,7 +490,10 @@ export function PageReader({
     >
       {/* Virtualized track — only a small window of viewport-wide, snap-aligned
           slides is mounted; the spacer width keeps scrollLeft mapped to pages. */}
-      <div ref={trackRef} style={{ width: virtualizer.getTotalSize(), height: '100%', position: 'relative' }}>
+      <div
+        ref={trackRef}
+        style={{ width: virtualizer.getTotalSize(), height: '100%', position: 'relative' }}
+      >
         {virtualizer.getVirtualItems().map((vi) => (
           <div
             key={vi.key}

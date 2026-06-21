@@ -35,7 +35,12 @@ function QueueThumb({ item }: { item: QueueItem }) {
   return (
     <div className="relative h-12 w-9 shrink-0 overflow-hidden rounded-md bg-zinc-200 dark:bg-zinc-700">
       {src ? (
-        <AbortableImage src={src} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
+        <AbortableImage
+          src={src}
+          alt={item.title}
+          className="h-full w-full object-cover"
+          loading="lazy"
+        />
       ) : (
         <div className="flex h-full items-center justify-center text-[10px] text-zinc-400">
           #{item.id}
@@ -83,15 +88,25 @@ const ResumeIcon = (
   </svg>
 );
 const CancelIcon = (
-  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4" aria-hidden="true">
+  <svg
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    className="h-4 w-4"
+    aria-hidden="true"
+  >
     <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
   </svg>
 );
 const DragIcon = (
   <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
-    <circle cx="6" cy="4" r="1.1" /><circle cx="10" cy="4" r="1.1" />
-    <circle cx="6" cy="8" r="1.1" /><circle cx="10" cy="8" r="1.1" />
-    <circle cx="6" cy="12" r="1.1" /><circle cx="10" cy="12" r="1.1" />
+    <circle cx="6" cy="4" r="1.1" />
+    <circle cx="10" cy="4" r="1.1" />
+    <circle cx="6" cy="8" r="1.1" />
+    <circle cx="10" cy="8" r="1.1" />
+    <circle cx="6" cy="12" r="1.1" />
+    <circle cx="10" cy="12" r="1.1" />
   </svg>
 );
 
@@ -209,7 +224,7 @@ function PendingRow({ item }: { item: QueueItem }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main view — active item (fixed top) + drag-sortable pending list.
+// Main view — active items (fixed top) + drag-sortable pending list.
 // ---------------------------------------------------------------------------
 
 export function DownloadQueueView() {
@@ -226,7 +241,7 @@ export function DownloadQueueView() {
     void refreshQueue();
   }, [refreshQueue]);
 
-  const active = queue.find((q) => q.status === 'downloading') ?? null;
+  const activeItems = useMemo(() => queue.filter((q) => q.status === 'downloading'), [queue]);
   const pending = useMemo(() => queue.filter((q) => q.status !== 'downloading'), [queue]);
   const pendingIds = useMemo(() => pending.map((p) => p.id), [pending]);
 
@@ -279,7 +294,9 @@ export function DownloadQueueView() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {active && <ActiveRow item={active} />}
+        {activeItems.map((item) => (
+          <ActiveRow key={item.id} item={item} />
+        ))}
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={pendingIds} strategy={verticalListSortingStrategy}>

@@ -36,12 +36,7 @@ export interface DownloadStore {
    * @param bytes      Raw image data.
    * @param ext        File extension without leading dot, e.g. "webp".
    */
-  putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void>;
+  putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void>;
 
   /**
    * Copy an existing file (e.g. a persistent image-cache file) into the gallery
@@ -61,11 +56,15 @@ export interface DownloadStore {
    * Read one image from the gallery folder.
    * Returns null when the file does not exist.
    */
-  getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null>;
+  getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null>;
+
+  /**
+   * A WebView-loadable URL for one stored page. Implemented by adapters that can
+   * expose native file URLs without copying bytes through JS. Returns null when
+   * the page is missing. Adapters backed by SAF/content URIs may omit this and
+   * callers should fall back to lazy getImage reads for visible pages only.
+   */
+  imageUrl?(galleryId: number, index: number, ext: string): Promise<string | null>;
 
   /**
    * Cheap existence check for a single stored page — true only when the file
@@ -76,11 +75,7 @@ export interface DownloadStore {
    * Unlike getImage, this should NOT read the file bytes into the JS heap —
    * adapters use a stat/handle probe so resume stays cheap on large galleries.
    */
-  imageExists?(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean>;
+  imageExists?(galleryId: number, index: number, ext: string): Promise<boolean>;
 
   /**
    * A WebView-loadable URL (convertFileSrc) for the gallery's first downloaded
@@ -140,7 +135,19 @@ export function galleryFolderName(galleryId: number): string {
  * Pick and instantiate the appropriate DownloadStore adapter for the current
  * runtime platform.  Mirrors the pattern used in src/lib/db/init.ts.
  */
+let downloadStorePromise: Promise<DownloadStore> | null = null;
+
 export async function createDownloadStore(): Promise<DownloadStore> {
+  if (downloadStorePromise) return downloadStorePromise;
+
+  downloadStorePromise = createDownloadStoreUncached().catch((error) => {
+    downloadStorePromise = null;
+    throw error;
+  });
+  return downloadStorePromise;
+}
+
+async function createDownloadStoreUncached(): Promise<DownloadStore> {
   if (isTauri()) {
     const { TauriDownloadStore } = await import('./adapters/tauri');
     return TauriDownloadStore.create();
@@ -161,4 +168,8 @@ export async function createDownloadStore(): Promise<DownloadStore> {
   // Browser / Next.js web — OPFS preferred, IndexedDB-blob fallback.
   const { WebDownloadStore } = await import('./adapters/web');
   return WebDownloadStore.create();
+}
+
+export function __resetDownloadStoreForTests(): void {
+  downloadStorePromise = null;
 }
