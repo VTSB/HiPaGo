@@ -11,7 +11,7 @@ use crate::BypassError;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 // Split TLS ClientHello at the record header boundary (byte 5).
 // Fragment 1 = 5-byte TLS record header (content type, version, length) — too small for DPI to inspect.
@@ -20,6 +20,7 @@ use tokio::sync::Notify;
 // Strategy matches GoodbyeDPI / zapret proven approach.
 const FIRST_SPLIT: usize = 5;
 const FRAGMENT_DELAY_MS: u64 = 200;
+const MAX_FRAGMENTED_HANDSHAKES: usize = 4;
 
 /// Handle to the running SOCKS5 proxy.
 pub struct ProxyHandle {
@@ -45,6 +46,7 @@ pub async fn start_proxy() -> Result<ProxyHandle, BypassError> {
     let port = listener.local_addr()?.port();
     let shutdown = Arc::new(Notify::new());
     let resolver = DohResolver::new();
+    let fragment_slots = Arc::new(Semaphore::new(MAX_FRAGMENTED_HANDSHAKES));
 
     let shutdown_clone = shutdown.clone();
 
@@ -55,7 +57,8 @@ pub async fn start_proxy() -> Result<ProxyHandle, BypassError> {
                     match accept_result {
                         Ok((stream, _)) => {
                             let resolver = resolver.clone();
-                            tokio::spawn(handle_client(stream, resolver));
+                            let fragment_slots = fragment_slots.clone();
+                            tokio::spawn(handle_client(stream, resolver, fragment_slots));
                         }
                         Err(e) => {
                             eprintln!("[bypass-proxy] accept error: {e}");
@@ -73,8 +76,12 @@ pub async fn start_proxy() -> Result<ProxyHandle, BypassError> {
 }
 
 /// Handle a single SOCKS5 client connection.
-async fn handle_client(mut client: TcpStream, resolver: DohResolver) {
-    if let Err(e) = handle_client_inner(&mut client, &resolver).await {
+async fn handle_client(
+    mut client: TcpStream,
+    resolver: DohResolver,
+    fragment_slots: Arc<Semaphore>,
+) {
+    if let Err(e) = handle_client_inner(&mut client, &resolver, fragment_slots).await {
         eprintln!("[bypass-proxy] connection error: {e}");
     }
 }
@@ -82,6 +89,7 @@ async fn handle_client(mut client: TcpStream, resolver: DohResolver) {
 async fn handle_client_inner(
     client: &mut TcpStream,
     resolver: &DohResolver,
+    fragment_slots: Arc<Semaphore>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // --- SOCKS5 Handshake ---
 
@@ -175,6 +183,17 @@ async fn handle_client_inner(
         hostname.clone()
     };
 
+    // Gate fragmented TLS handshakes before opening the upstream socket. Waiting
+    // here holds only the local SOCKS connection, not a target TCP socket plus
+    // relay buffers.
+    let fragment_permit = if port == 443 {
+        Some(fragment_slots.clone().acquire_owned().await.map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "fragment limiter closed")
+        })?)
+    } else {
+        None
+    };
+
     // --- Connect to target ---
     let mut target = match TcpStream::connect(format!("{resolved_ip}:{port}")).await {
         Ok(stream) => stream,
@@ -197,7 +216,7 @@ async fn handle_client_inner(
         .await?;
 
     // --- Bidirectional relay with first-write fragmentation ---
-    relay_with_fragmentation(client, &mut target).await?;
+    relay_with_fragmentation(client, &mut target, fragment_permit).await?;
 
     Ok(())
 }
@@ -207,6 +226,7 @@ async fn handle_client_inner(
 async fn relay_with_fragmentation(
     client: &mut TcpStream,
     target: &mut TcpStream,
+    fragment_permit: Option<OwnedSemaphorePermit>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (mut client_read, mut client_write) = tokio::io::split(client);
     let (mut target_read, mut target_write) = tokio::io::split(target);
@@ -215,6 +235,7 @@ async fn relay_with_fragmentation(
     let client_to_target = async move {
         let mut buf = vec![0u8; 65536];
         let mut first_write = true;
+        let mut fragment_permit = fragment_permit;
 
         loop {
             let n = match client_read.read(&mut buf).await {
@@ -228,8 +249,9 @@ async fn relay_with_fragmentation(
                 }
             };
 
-            if first_write && n > FIRST_SPLIT {
+            if first_write && fragment_permit.is_some() && is_tls_client_hello(&buf[..n]) {
                 first_write = false;
+                let _permit = fragment_permit.take();
                 // Fragment 1: TLS record header only (5 bytes) — DPI can't extract SNI from this.
                 target_write.write_all(&buf[..FIRST_SPLIT]).await?;
                 target_write.flush().await?;
@@ -240,6 +262,7 @@ async fn relay_with_fragmentation(
                 target_write.flush().await?;
             } else {
                 first_write = false;
+                drop(fragment_permit.take());
                 target_write.write_all(&buf[..n]).await?;
             }
         }
@@ -274,4 +297,35 @@ async fn relay_with_fragmentation(
     }
 
     Ok(())
+}
+
+fn is_tls_client_hello(buf: &[u8]) -> bool {
+    buf.len() > FIRST_SPLIT
+        // TLS handshake record
+        && buf[0] == 0x16
+        // TLS record version family (TLS 1.0-1.3 ClientHello records use 0x03xx)
+        && buf[1] == 0x03
+        // Handshake message type: ClientHello
+        && buf[5] == 0x01
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_tls_client_hello;
+
+    #[test]
+    fn detects_tls_client_hello_records() {
+        let buf = [0x16, 0x03, 0x03, 0x02, 0x00, 0x01, 0x00];
+        assert!(is_tls_client_hello(&buf));
+    }
+
+    #[test]
+    fn rejects_http_first_writes() {
+        assert!(!is_tls_client_hello(b"GET / HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn rejects_short_tls_record_headers() {
+        assert!(!is_tls_client_hello(&[0x16, 0x03, 0x03, 0x02, 0x00]));
+    }
 }
