@@ -22,6 +22,7 @@ impl Client {
 
         let client = rquest::Client::builder()
             .impersonate(Impersonate::Chrome131)
+            .enable_ech_grease(true)
             .proxy(proxy)
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))

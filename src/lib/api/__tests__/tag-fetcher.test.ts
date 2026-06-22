@@ -75,7 +75,13 @@ describe('createTagFetcher — factory', () => {
 
     expect(mockInvoke).toHaveBeenCalledWith('bypass_fetch', {
       url: 'https://hitomi.la/allartists-a.html',
-      headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },
+      headers: expect.objectContaining({
+        'User-Agent': expect.stringContaining('Chrome/131.0.0.0'),
+        Accept: expect.stringContaining('text/html'),
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: 'https://hitomi.la/',
+        Origin: 'https://hitomi.la',
+      }),
     });
   });
 
@@ -100,10 +106,47 @@ describe('createTagFetcher — factory', () => {
     // does not bypass JS fetch() calls), with the real hitomi URL + headers.
     expect(mockBypassFetch).toHaveBeenCalledWith({
       url: 'https://hitomi.la/allartists-a.html',
-      headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },
+      headers: expect.objectContaining({
+        'User-Agent': expect.stringContaining('Chrome/131.0.0.0'),
+        Accept: expect.stringContaining('text/html'),
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: 'https://hitomi.la/',
+        Origin: 'https://hitomi.la',
+      }),
     });
     expect(mockFetch).not.toHaveBeenCalled();
     expect(result).toBe('<html>a</html>');
+  });
+
+  it('on Android throws immediately for a non-retryable upstream status', async () => {
+    vi.mocked(isAndroid).mockReturnValue(true);
+    vi.mocked(isCapacitor).mockReturnValue(true);
+    const bytes = Array.from(new TextEncoder().encode('<html>blocked</html>'));
+    mockBypassFetch.mockResolvedValue({ status: 403, headers: {}, body: bytes });
+
+    const fetcher = createTagFetcher();
+
+    await expect(fetcher.fetchPage('allartists-a.html')).rejects.toThrow(/status 403/);
+    expect(mockBypassFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('on Android retries a transient upstream status then succeeds', async () => {
+    vi.useFakeTimers();
+    vi.mocked(isAndroid).mockReturnValue(true);
+    vi.mocked(isCapacitor).mockReturnValue(true);
+    const bytes = Array.from(new TextEncoder().encode('<html>ok</html>'));
+    mockBypassFetch
+      .mockResolvedValueOnce({ status: 503, headers: {}, body: [] })
+      .mockResolvedValueOnce({ status: 200, headers: {}, body: bytes });
+
+    const fetcher = createTagFetcher();
+    const request = fetcher.fetchPage('allartists-a.html');
+    await vi.runAllTimersAsync();
+
+    await expect(request).resolves.toBe('<html>ok</html>');
+    expect(mockBypassFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 
@@ -114,7 +157,9 @@ describe('createTagFetcher — factory', () => {
 describe('WebProxyFetcher — behavior', () => {
   it('fetchPage calls correct proxy URL and returns text', async () => {
     mockFetch.mockResolvedValue({
+      status: 200,
       ok: true,
+      headers: { get: () => null },
       text: () => Promise.resolve('<html>test</html>'),
     });
 

@@ -7,10 +7,140 @@ export interface TagFetcher {
   dispose(): Promise<void>;
 }
 
+const MAX_RETRIES = 3;
+const REQUEST_TIMEOUT_MS = 30_000;
+
+const TAG_PAGE_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Sec-Fetch-Site': 'cross-site',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Dest': 'empty',
+  Referer: 'https://hitomi.la/',
+  Origin: 'https://hitomi.la',
+};
+
+type HeaderBag = Headers | Record<string, string> | { get(name: string): string | null };
+
+interface FetchPageResponse {
+  status: number;
+  headers?: HeaderBag;
+  text(): Promise<string>;
+}
+
+class NonRetryableTagFetchError extends Error {}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getHeader(headers: HeaderBag | undefined, name: string): string | null {
+  if (!headers) return null;
+
+  const get = (headers as { get?: (headerName: string) => string | null | undefined }).get;
+  if (typeof get === 'function') {
+    return get.call(headers, name) ?? null;
+  }
+
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return null;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function isSuccessfulStatus(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
+function decodeBase64Utf8(body: string): string {
+  const bytes = Uint8Array.from(atob(body), (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function errorName(err: unknown): string | undefined {
+  const name = (err as { name?: unknown })?.name;
+  return typeof name === 'string' ? name : undefined;
+}
+
+function toError(err: unknown): Error {
+  if (err instanceof Error) return err;
+  const error = new Error(String(err));
+  const name = errorName(err);
+  if (name) error.name = name;
+  return error;
+}
+
+async function fetchPageWithRetries(
+  label: string,
+  path: string,
+  fetchOnce: () => Promise<FetchPageResponse>,
+): Promise<string> {
+  let lastError: Error | undefined;
+  // Set from a 429 response's Retry-After header; consumed by the next
+  // iteration's backoff wait, then cleared.
+  let retryAfterMs: number | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = retryAfterMs ?? 1000 * 2 ** (attempt - 1);
+      retryAfterMs = null;
+      await sleep(delay);
+    }
+
+    try {
+      const resp = await fetchOnce();
+
+      if (resp.status === 429) {
+        retryAfterMs = parseRetryAfter(getHeader(resp.headers, 'retry-after'));
+        lastError = new Error(
+          `${label}: rate limited (429) for "${path}" (attempt ${attempt + 1})`,
+        );
+        continue;
+      }
+
+      if (isRetryableStatus(resp.status)) {
+        lastError = new Error(
+          `${label}: status ${resp.status} for "${path}" (attempt ${attempt + 1})`,
+        );
+        continue;
+      }
+
+      if (!isSuccessfulStatus(resp.status)) {
+        throw new NonRetryableTagFetchError(
+          `${label}: request failed with status ${resp.status} for path "${path}"`,
+        );
+      }
+
+      return await resp.text();
+    } catch (err) {
+      if (err instanceof NonRetryableTagFetchError) throw err;
+
+      const error = toError(err);
+      if (errorName(err) === 'AbortError') {
+        lastError = new Error(`${label}: timeout for "${path}" (attempt ${attempt + 1})`);
+      } else {
+        lastError = error;
+      }
+
+      if (attempt < MAX_RETRIES) continue;
+      throw lastError;
+    }
+  }
+
+  throw lastError ?? new Error(`${label}: failed after retries for "${path}"`);
+}
+
 // ---------------------------------------------------------------------------
 // HttpFetcher — plain fetch with retry/backoff. The URL builder is injected so
-// the same retry logic serves the web proxy (/api/tags/fetch) and Android's
-// direct https fetch (bypassed transparently by the WebView interceptor).
+// browser builds can go through the web proxy (/api/tags/fetch). Native builds
+// below reuse the same status/retry helper around bypass-core.
 // ---------------------------------------------------------------------------
 
 /**
@@ -29,61 +159,26 @@ export function parseRetryAfter(value: string | null | undefined): number | null
 }
 
 class HttpFetcher implements TagFetcher {
-  private maxRetries = 3;
-
   /** @param buildUrl maps a hitomi path to the URL this platform should fetch. */
   constructor(private readonly buildUrl: (path: string) => string) {}
 
   async fetchPage(path: string): Promise<string> {
-    let lastError: Error | undefined;
-    // Set from a 429 response's Retry-After header; consumed by the next
-    // iteration's backoff wait, then cleared.
-    let retryAfterMs: number | null = null;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      if (attempt > 0) {
-        const delay = retryAfterMs ?? 1000 * 2 ** (attempt - 1);
-        retryAfterMs = null;
-        await new Promise((r) => setTimeout(r, delay));
-      }
+    return fetchPageWithRetries('HttpFetcher', path, async () => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30_000);
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
         const resp = await fetch(this.buildUrl(path), {
           signal: controller.signal,
         });
-        if (resp.status === 429) {
-          // Rate limited — retry, honoring Retry-After verbatim when present.
-          retryAfterMs = parseRetryAfter(resp.headers.get('retry-after'));
-          lastError = new Error(
-            `HttpFetcher: rate limited (429) for "${path}" (attempt ${attempt + 1})`
-          );
-          continue;
-        }
-        if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
-          lastError = new Error(
-            `HttpFetcher: status ${resp.status} for "${path}" (attempt ${attempt + 1})`
-          );
-          continue;
-        }
-        if (!resp.ok) {
-          throw new Error(
-            `HttpFetcher: request failed with status ${resp.status} for path "${path}"`
-          );
-        }
-        return await resp.text();
-      } catch (err) {
-        if ((err as Error).name === 'AbortError') {
-          lastError = new Error(`HttpFetcher: timeout for "${path}" (attempt ${attempt + 1})`);
-          continue;
-        }
-        lastError = err as Error;
-        if (attempt < this.maxRetries) continue;
-        throw err;
+        return {
+          status: resp.status,
+          headers: resp.headers,
+          text: () => resp.text(),
+        };
       } finally {
         clearTimeout(timer);
       }
-    }
-    throw lastError ?? new Error(`HttpFetcher: failed after retries for "${path}"`);
+    });
   }
 
   async dispose(): Promise<void> {
@@ -98,12 +193,18 @@ class HttpFetcher implements TagFetcher {
 class TauriBypassFetcher implements TagFetcher {
   async fetchPage(path: string): Promise<string> {
     const { invoke } = await import('@tauri-apps/api/core');
-    const resp = (await invoke('bypass_fetch', {
-      url: `https://hitomi.la/${path}`,
-      headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },
-    })) as { status: number; headers: Record<string, string>; body: string };
-    // Decode base64 body to string
-    return atob(resp.body);
+    return fetchPageWithRetries('TauriBypassFetcher', path, async () => {
+      const resp = (await invoke('bypass_fetch', {
+        url: `https://hitomi.la/${path}`,
+        headers: { ...TAG_PAGE_HEADERS },
+      })) as { status: number; headers: Record<string, string>; body: string };
+
+      return {
+        status: resp.status,
+        headers: resp.headers,
+        text: async () => decodeBase64Utf8(resp.body),
+      };
+    });
   }
 
   async dispose(): Promise<void> {
@@ -118,11 +219,18 @@ class TauriBypassFetcher implements TagFetcher {
 class CapacitorBypassFetcher implements TagFetcher {
   async fetchPage(path: string): Promise<string> {
     const { Bypass } = await import('@/lib/plugins/bypass');
-    const resp = await Bypass.fetch({
-      url: `https://hitomi.la/${path}`,
-      headers: { Referer: 'https://hitomi.la/', Origin: 'https://hitomi.la' },
+    return fetchPageWithRetries('CapacitorBypassFetcher', path, async () => {
+      const resp = await Bypass.fetch({
+        url: `https://hitomi.la/${path}`,
+        headers: { ...TAG_PAGE_HEADERS },
+      });
+
+      return {
+        status: resp.status,
+        headers: resp.headers,
+        text: async () => new TextDecoder().decode(new Uint8Array(resp.body)),
+      };
     });
-    return new TextDecoder().decode(new Uint8Array(resp.body));
   }
 
   async dispose(): Promise<void> {
