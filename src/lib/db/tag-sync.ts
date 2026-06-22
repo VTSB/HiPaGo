@@ -34,6 +34,15 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function reloadCurrentLocale(): Promise<void> {
+  const currentLocale = useSettingsStore.getState().locale;
+  await useTagI18nStore.getState().loadLocale(currentLocale);
+}
+
 /**
  * Build a lookup map of existing tags for a given type byte.
  */
@@ -237,8 +246,7 @@ async function runRuntimeTagSync(): Promise<void> {
     await markTagSyncCompleted(totalTagCount);
 
     // Reload locale translations into the store (respects current user locale)
-    const currentLocale = useSettingsStore.getState().locale;
-    await useTagI18nStore.getState().loadLocale(currentLocale);
+    await reloadCurrentLocale();
   } finally {
     await fetcher.dispose();
   }
@@ -261,7 +269,7 @@ export async function runTagSync(): Promise<void> {
     await runRuntimeTagSync();
   } catch (error) {
     console.error('[tag-sync] Sync failed:', error);
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     useDbStatusStore.getState().setSyncError(message);
     useDbStatusStore.getState().setIsSyncing(false);
   }
