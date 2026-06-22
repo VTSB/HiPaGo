@@ -9,6 +9,8 @@ export interface TagFetcher {
 
 const MAX_RETRIES = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
+const TAG_PAGE_BASE_URL = 'https://hitomi.la';
+const TAG_PAGE_ORIGIN = 'https://hitomi.la';
 
 const TAG_PAGE_HEADERS: Record<string, string> = {
   'User-Agent':
@@ -18,8 +20,8 @@ const TAG_PAGE_HEADERS: Record<string, string> = {
   'Sec-Fetch-Site': 'cross-site',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Dest': 'empty',
-  Referer: 'https://hitomi.la/',
-  Origin: 'https://hitomi.la',
+  Referer: `${TAG_PAGE_ORIGIN}/`,
+  Origin: TAG_PAGE_ORIGIN,
 };
 
 type HeaderBag = Headers | Record<string, string> | { get(name: string): string | null };
@@ -195,7 +197,7 @@ class TauriBypassFetcher implements TagFetcher {
     const { invoke } = await import('@tauri-apps/api/core');
     return fetchPageWithRetries('TauriBypassFetcher', path, async () => {
       const resp = (await invoke('bypass_fetch', {
-        url: `https://hitomi.la/${path}`,
+        url: `${TAG_PAGE_BASE_URL}/${path}`,
         headers: { ...TAG_PAGE_HEADERS },
       })) as { status: number; headers: Record<string, string>; body: string };
 
@@ -221,7 +223,7 @@ class CapacitorBypassFetcher implements TagFetcher {
     const { Bypass } = await import('@/lib/plugins/bypass');
     return fetchPageWithRetries('CapacitorBypassFetcher', path, async () => {
       const resp = await Bypass.fetch({
-        url: `https://hitomi.la/${path}`,
+        url: `${TAG_PAGE_BASE_URL}/${path}`,
         headers: { ...TAG_PAGE_HEADERS },
       });
 

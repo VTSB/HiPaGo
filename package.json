@@ -29,7 +29,7 @@
     "cap:add:ios": "cap add ios",
     "cap:open:android": "cap open android",
     "cap:open:ios": "cap open ios",
-    "cap:run:android": "cap run android",
+    "cap:run:android": "node scripts/build-android.mjs && node scripts/build-static.mjs && cap sync android && cap run android",
     "cap:run:ios": "cap run ios",
     "translate-tags": "tsx scripts/translate-tags.ts",
     "translate-tags:analyze": "tsx scripts/translate-tags.ts analyze"

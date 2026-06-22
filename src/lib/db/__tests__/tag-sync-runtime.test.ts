@@ -20,9 +20,7 @@ vi.mock('@/lib/api/tag-fetcher', () => ({
   }),
 }));
 
-// Global fetch stub — runtime path should NOT call it, but runBundledJsonSync
-// fallback might if runtime unexpectedly throws. Stub it to reject so any
-// accidental fallback is visible.
+// Global fetch stub — runtime path should not call it.
 const mockGlobalFetch = vi.fn();
 vi.stubGlobal('fetch', mockGlobalFetch);
 

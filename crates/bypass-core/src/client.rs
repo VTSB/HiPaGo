@@ -6,6 +6,7 @@
 use crate::{BypassError, BypassResponse};
 use rquest::Impersonate;
 use std::collections::HashMap;
+use std::error::Error as StdError;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -17,7 +18,9 @@ pub struct Client {
 impl Client {
     /// Create a new client that routes through the local SOCKS5 proxy.
     pub fn new(proxy_port: u16) -> Result<Self, BypassError> {
-        let proxy = rquest::Proxy::all(format!("socks5://127.0.0.1:{proxy_port}"))
+        // Use socks5h so rquest passes hostnames to the local proxy. Plain
+        // socks5 resolves locally first, bypassing our DoH resolver.
+        let proxy = rquest::Proxy::all(format!("socks5h://127.0.0.1:{proxy_port}"))
             .map_err(|e| BypassError::HttpError(format!("Failed to create proxy: {e}")))?;
 
         let client = rquest::Client::builder()
@@ -50,7 +53,7 @@ impl Client {
         let response = request
             .send()
             .await
-            .map_err(|e| BypassError::HttpError(format!("Request failed: {e}")))?;
+            .map_err(|e| BypassError::HttpError(format_error_chain("Request failed", &e)))?;
 
         let status = response.status().as_u16();
 
@@ -64,7 +67,7 @@ impl Client {
         let body = response
             .bytes()
             .await
-            .map_err(|e| BypassError::HttpError(format!("Failed to read body: {e}")))?
+            .map_err(|e| BypassError::HttpError(format_error_chain("Failed to read body", &e)))?
             .to_vec();
 
         Ok(BypassResponse {
@@ -91,7 +94,7 @@ impl Client {
         let response = request
             .send()
             .await
-            .map_err(|e| BypassError::HttpError(format!("Request failed: {e}")))?;
+            .map_err(|e| BypassError::HttpError(format_error_chain("Request failed", &e)))?;
 
         let status = response.status().as_u16();
         let mut resp_headers = HashMap::new();
@@ -153,7 +156,7 @@ impl Client {
         let mut response = request
             .send()
             .await
-            .map_err(|e| BypassError::HttpError(format!("Request failed: {e}")))?;
+            .map_err(|e| BypassError::HttpError(format_error_chain("Request failed", &e)))?;
 
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
@@ -187,6 +190,16 @@ impl Client {
         tokio::fs::rename(&tmp_path, dest_path).await?;
         Ok(total)
     }
+}
+
+fn format_error_chain(context: &str, err: &dyn StdError) -> String {
+    let mut message = format!("{context}: {err}");
+    let mut source = err.source();
+    while let Some(err) = source {
+        message.push_str(&format!("; caused by: {err}"));
+        source = err.source();
+    }
+    message
 }
 
 /// Response with streaming body via channel.

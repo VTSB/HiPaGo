@@ -18,7 +18,7 @@ const MAX_DOH_QUERIES: usize = 2;
 
 #[derive(Debug, Clone)]
 struct CacheEntry {
-    ip: String,
+    ips: Vec<String>,
     expires_at: Instant,
 }
 
@@ -50,15 +50,15 @@ struct DohAnswer {
 pub struct DohResolver {
     cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
     ech_cache: Arc<Mutex<HashMap<String, EchCacheEntry>>>,
-    in_flight: Arc<Mutex<HashMap<String, broadcast::Sender<Result<String, String>>>>>,
+    in_flight: Arc<Mutex<HashMap<String, broadcast::Sender<Result<Vec<String>, String>>>>>,
     ech_in_flight: Arc<Mutex<HashMap<String, broadcast::Sender<Result<Option<Vec<u8>>, String>>>>>,
     http_client: Arc<rquest::Client>,
     query_slots: Arc<Semaphore>,
 }
 
 enum ResolveRole {
-    Leader(broadcast::Sender<Result<String, String>>),
-    Follower(broadcast::Receiver<Result<String, String>>),
+    Leader(broadcast::Sender<Result<Vec<String>, String>>),
+    Follower(broadcast::Receiver<Result<Vec<String>, String>>),
 }
 
 enum EchResolveRole {
@@ -88,6 +88,16 @@ impl DohResolver {
     /// Resolve a hostname to an IP address via DoH.
     /// Uses caching with TTL and in-flight deduplication.
     pub async fn resolve(&self, hostname: &str) -> Result<String, BypassError> {
+        self.resolve_all(hostname).await.and_then(|ips| {
+            ips.into_iter()
+                .next()
+                .ok_or_else(|| BypassError::DohError("No A record in DoH response".into()))
+        })
+    }
+
+    /// Resolve a hostname to all A records returned by DoH.
+    /// Uses caching with TTL and in-flight deduplication.
+    pub async fn resolve_all(&self, hostname: &str) -> Result<Vec<String>, BypassError> {
         let hostname = normalize_hostname(hostname);
 
         // Check cache
@@ -95,7 +105,7 @@ impl DohResolver {
             let cache = self.cache.lock().await;
             if let Some(entry) = cache.get(&hostname) {
                 if Instant::now() < entry.expires_at {
-                    return Ok(entry.ip.clone());
+                    return Ok(entry.ips.clone());
                 }
             }
         }
@@ -105,7 +115,7 @@ impl DohResolver {
             if let Some(tx) = in_flight.get(&hostname) {
                 ResolveRole::Follower(tx.subscribe())
             } else {
-                let (tx, _) = broadcast::channel::<Result<String, String>>(1);
+                let (tx, _) = broadcast::channel::<Result<Vec<String>, String>>(1);
                 in_flight.insert(hostname.clone(), tx.clone());
                 ResolveRole::Leader(tx)
             }
@@ -126,12 +136,12 @@ impl DohResolver {
         let result = self.fetch_from_doh(&hostname).await;
 
         // Cache on success
-        if let Ok((ref ip, ref ttl)) = result {
+        if let Ok((ref ips, ref ttl)) = result {
             let mut cache = self.cache.lock().await;
             cache.insert(
                 hostname.clone(),
                 CacheEntry {
-                    ip: ip.clone(),
+                    ips: ips.clone(),
                     expires_at: Instant::now() + *ttl,
                 },
             );
@@ -146,12 +156,12 @@ impl DohResolver {
 
         // Broadcast result to all waiters
         let broadcast_result = match &result {
-            Ok((ip, _)) => Ok(ip.clone()),
+            Ok((ips, _)) => Ok(ips.clone()),
             Err(e) => Err(e.to_string()),
         };
         let _ = tx.send(broadcast_result);
 
-        result.map(|(ip, _)| ip)
+        result.map(|(ips, _)| ips)
     }
 
     /// Look up an ECHConfigList from HTTPS/SVCB records via DoH.
@@ -220,7 +230,7 @@ impl DohResolver {
         result.map(|(config_list, _)| config_list)
     }
 
-    async fn fetch_from_doh(&self, hostname: &str) -> Result<(String, Duration), BypassError> {
+    async fn fetch_from_doh(&self, hostname: &str) -> Result<(Vec<String>, Duration), BypassError> {
         let providers = [
             "https://1.1.1.1/dns-query", // Cloudflare primary
             "https://1.0.0.1/dns-query", // Cloudflare secondary
@@ -262,7 +272,7 @@ impl DohResolver {
         &self,
         base_url: &str,
         hostname: &str,
-    ) -> Result<(String, Duration), BypassError> {
+    ) -> Result<(Vec<String>, Duration), BypassError> {
         let url = format!("{}?name={}&type=A", base_url, hostname);
         let _permit = self
             .query_slots
@@ -305,14 +315,21 @@ impl DohResolver {
             .answer
             .ok_or_else(|| BypassError::DohError("No answers in DoH response".into()))?;
 
-        // Find first A record (type 1)
-        let a_record = answers
-            .iter()
-            .find(|a| a.record_type == 1)
-            .ok_or_else(|| BypassError::DohError("No A record in DoH response".into()))?;
+        let mut ips = Vec::new();
+        let mut ttl_secs = MAX_TTL.as_secs();
+        for answer in answers.iter().filter(|answer| answer.record_type == 1) {
+            if !ips.contains(&answer.data) {
+                ips.push(answer.data.clone());
+            }
+            ttl_secs = ttl_secs.min(answer.ttl);
+        }
 
-        let ttl_secs = a_record.ttl.max(MIN_TTL.as_secs()).min(MAX_TTL.as_secs());
-        Ok((a_record.data.clone(), Duration::from_secs(ttl_secs)))
+        if ips.is_empty() {
+            return Err(BypassError::DohError("No A record in DoH response".into()));
+        }
+
+        let ttl_secs = ttl_secs.max(MIN_TTL.as_secs()).min(MAX_TTL.as_secs());
+        Ok((ips, Duration::from_secs(ttl_secs)))
     }
 
     async fn query_ech_provider(
