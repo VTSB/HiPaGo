@@ -17,7 +17,9 @@ pub struct Client {
 impl Client {
     /// Create a new client that routes through the local SOCKS5 proxy.
     pub fn new(proxy_port: u16) -> Result<Self, BypassError> {
-        let proxy = rquest::Proxy::all(format!("socks5://127.0.0.1:{proxy_port}"))
+        // Use socks5h so rquest passes hostnames to the local proxy. Plain
+        // socks5 resolves locally first, bypassing our DoH resolver.
+        let proxy = rquest::Proxy::all(format!("socks5h://127.0.0.1:{proxy_port}"))
             .map_err(|e| BypassError::HttpError(format!("Failed to create proxy: {e}")))?;
 
         let client = rquest::Client::builder()

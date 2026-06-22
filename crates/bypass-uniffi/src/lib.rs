@@ -5,9 +5,9 @@
 
 use bypass_core::{BypassClient, BypassError as CoreBypassError};
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tokio::runtime::Runtime;
-use tokio::sync::OnceCell;
+use tokio::sync::RwLock;
 
 // Pin the binding namespace to `bypass` (matches BypassPlugin.java's
 // `import uniffi.bypass.*`). Without this, UniFFI proc-macro mode derives
@@ -17,12 +17,42 @@ uniffi::setup_scaffolding!("bypass");
 
 fn runtime() -> &'static Runtime {
     static RT: OnceLock<Runtime> = OnceLock::new();
-    RT.get_or_init(|| {
-        Runtime::new().expect("Failed to create tokio runtime")
-    })
+    RT.get_or_init(|| Runtime::new().expect("Failed to create tokio runtime"))
 }
 
-static CLIENT: OnceCell<BypassClient> = OnceCell::const_new();
+/// Resettable bypass client. Android can keep the process alive after a SOCKS
+/// proxy/connect failure, so the next call must be able to create a fresh proxy
+/// instead of reusing the failed global client forever.
+static CLIENT: OnceLock<RwLock<Option<Arc<BypassClient>>>> = OnceLock::new();
+
+fn client_lock() -> &'static RwLock<Option<Arc<BypassClient>>> {
+    CLIENT.get_or_init(|| RwLock::new(None))
+}
+
+async fn get_client() -> Result<Arc<BypassClient>, BypassError> {
+    {
+        let guard = client_lock().read().await;
+        if let Some(client) = guard.as_ref() {
+            return Ok(Arc::clone(client));
+        }
+    }
+
+    let mut guard = client_lock().write().await;
+    if let Some(client) = guard.as_ref() {
+        return Ok(Arc::clone(client));
+    }
+
+    let client = Arc::new(BypassClient::new().await.map_err(BypassError::from)?);
+    *guard = Some(Arc::clone(&client));
+    Ok(client)
+}
+
+async fn reset_client() {
+    let mut guard = client_lock().write().await;
+    if let Some(client) = guard.take() {
+        client.shutdown().await;
+    }
+}
 
 // NOTE: the variant field is named `reason`, not `message`. UniFFI's Kotlin
 // generator emits a `val <field>` on the generated Exception subclass; a
@@ -65,20 +95,25 @@ pub fn bypass_fetch(
 ) -> Result<BypassResponse, BypassError> {
     let rt = runtime();
     rt.block_on(async {
-        let client = CLIENT
-            .get_or_try_init(|| async {
-                BypassClient::new().await.map_err(BypassError::from)
-            })
-            .await?;
-
-        let resp = client.fetch(&url, headers).await?;
-
-        Ok(BypassResponse {
-            // bypass-core's HTTP status is u16; widen to i32 for FFI.
-            status: i32::from(resp.status),
-            headers: resp.headers,
-            body: resp.body,
-        })
+        for attempt in 0..2u8 {
+            let client = get_client().await?;
+            match client.fetch(&url, headers.clone()).await {
+                Ok(resp) => {
+                    return Ok(BypassResponse {
+                        // bypass-core's HTTP status is u16; widen to i32 for FFI.
+                        status: i32::from(resp.status),
+                        headers: resp.headers,
+                        body: resp.body,
+                    });
+                }
+                Err(e) if attempt == 0 => {
+                    eprintln!("[bypass-uniffi] fetch failed, resetting client: {e}");
+                    reset_client().await;
+                }
+                Err(e) => return Err(BypassError::from(e)),
+            }
+        }
+        unreachable!()
     })
 }
 
@@ -94,13 +129,20 @@ pub fn bypass_download_to_file(
 ) -> Result<i64, BypassError> {
     let rt = runtime();
     rt.block_on(async {
-        let client = CLIENT
-            .get_or_try_init(|| async {
-                BypassClient::new().await.map_err(BypassError::from)
-            })
-            .await?;
-
-        let written = client.download_to_file(&url, headers, &dest_path).await?;
-        Ok(written as i64)
+        for attempt in 0..2u8 {
+            let client = get_client().await?;
+            match client
+                .download_to_file(&url, headers.clone(), &dest_path)
+                .await
+            {
+                Ok(written) => return Ok(written as i64),
+                Err(e) if attempt == 0 => {
+                    eprintln!("[bypass-uniffi] download failed, resetting client: {e}");
+                    reset_client().await;
+                }
+                Err(e) => return Err(BypassError::from(e)),
+            }
+        }
+        unreachable!()
     })
 }
