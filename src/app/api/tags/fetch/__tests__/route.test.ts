@@ -36,6 +36,14 @@ describe('/api/tags/fetch — 429 / Retry-After', () => {
 
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('<html>ok</html>');
+    expect(mockBypassFetch).toHaveBeenCalledWith(
+      'https://hitomi.la/allartists-a.html',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Referer: 'https://hitomi.la/',
+        }),
+      }),
+    );
   });
 
   it('rejects an invalid url parameter with 400', async () => {

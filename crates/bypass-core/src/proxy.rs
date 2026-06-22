@@ -172,15 +172,15 @@ async fn handle_client_inner(
     }
 
     // --- Resolve DNS via DoH ---
-    let resolved_ip = if atyp == 0x03 {
+    let resolved_ips = if atyp == 0x03 {
         // Domain name — resolve via DoH
         resolver
-            .resolve(&hostname)
+            .resolve_all(&hostname)
             .await
             .map_err(|e| format!("DoH resolution failed for {hostname}: {e}"))?
     } else {
         // Already an IP
-        hostname.clone()
+        vec![hostname.clone()]
     };
 
     // Gate fragmented TLS handshakes before opening the upstream socket. Waiting
@@ -195,14 +195,32 @@ async fn handle_client_inner(
     };
 
     // --- Connect to target ---
-    let mut target = match TcpStream::connect(format!("{resolved_ip}:{port}")).await {
-        Ok(stream) => stream,
-        Err(e) => {
+    let mut last_connect_error = None;
+    let mut target = None;
+    for resolved_ip in &resolved_ips {
+        match TcpStream::connect(format!("{resolved_ip}:{port}")).await {
+            Ok(stream) => {
+                target = Some(stream);
+                break;
+            }
+            Err(e) => {
+                last_connect_error = Some(format!("{resolved_ip}:{port}: {e}"));
+            }
+        }
+    }
+    let mut target = match target {
+        Some(stream) => stream,
+        None => {
             // Send connection refused reply
             client
                 .write_all(&[0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
                 .await?;
-            return Err(format!("Failed to connect to {resolved_ip}:{port}: {e}").into());
+            return Err(format!(
+                "Failed to connect to {hostname}:{port} via DoH IPs [{}]: {}",
+                resolved_ips.join(", "),
+                last_connect_error.unwrap_or_else(|| "no addresses attempted".into())
+            )
+            .into());
         }
     };
 

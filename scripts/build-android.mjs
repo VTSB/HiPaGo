@@ -8,7 +8,23 @@ import { execSync } from 'node:child_process';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+function ensureCargoNdk() {
+  try {
+    execSync('cargo ndk --version', { cwd: root, stdio: 'pipe' });
+  } catch {
+    console.error(
+      [
+        'Android bypass build requires cargo-ndk.',
+        'Install it with: cargo install cargo-ndk',
+        'Also make sure Android NDK is installed and ANDROID_NDK_HOME or Android SDK local.properties is configured.',
+      ].join('\n'),
+    );
+    process.exit(1);
+  }
+}
+
 console.log('Building bypass-uniffi for Android...');
+ensureCargoNdk();
 
 execSync(
   'cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 build --release -p bypass-uniffi',
