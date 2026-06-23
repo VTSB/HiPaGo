@@ -76,10 +76,10 @@ describe('isUnmeteredNetwork (web/desktop)', () => {
 });
 
 describe('isUnmeteredNetwork (capacitor native, plugin absent)', () => {
-  it('falls back to online best-effort when @capacitor/network is not installed', async () => {
+  it('falls back to online best-effort when the Network plugin is not installed', async () => {
     mockedIsCapacitor.mockReturnValue(true);
     setNavigator(true, undefined);
-    // The dynamic import of @capacitor/network rejects (not installed); the
+    // The registerPlugin proxy rejects when the native plugin is absent; the
     // guard returns null and we best-effort allow while online.
     expect(await isUnmeteredNetwork()).toBe(true);
   });

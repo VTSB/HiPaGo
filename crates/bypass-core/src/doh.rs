@@ -166,10 +166,8 @@ impl DohResolver {
 
     /// Look up an ECHConfigList from HTTPS/SVCB records via DoH.
     ///
-    /// This prepares the data needed for real ECH. `rquest` 1.5.5 only exposes
-    /// ECH GREASE publicly, so the returned config cannot be applied to the TLS
-    /// handshake until the TLS client exposes `SSL_set1_ech_config_list` or an
-    /// equivalent hook.
+    /// The ECH transport applies this config list directly through rustls.
+    /// Callers that stay on `rquest` only get ECH GREASE.
     pub async fn resolve_ech_config(&self, hostname: &str) -> Result<Option<Vec<u8>>, BypassError> {
         let hostname = normalize_hostname(hostname);
 
@@ -397,10 +395,89 @@ fn normalize_hostname(hostname: &str) -> String {
 }
 
 fn parse_ech_config_from_https_rr(data: &str) -> Option<Vec<u8>> {
+    if let Some(config_list) = parse_wire_https_rr_ech_config(data) {
+        return Some(config_list);
+    }
+
     split_svcb_fields(data)
         .into_iter()
         .skip(2)
         .find_map(|field| field.strip_prefix("ech=").and_then(decode_ech_config_value))
+}
+
+fn parse_wire_https_rr_ech_config(data: &str) -> Option<Vec<u8>> {
+    let wire = parse_dns_wire_hex(data)?;
+    parse_https_rdata_ech_config(&wire)
+}
+
+fn parse_dns_wire_hex(data: &str) -> Option<Vec<u8>> {
+    let mut fields = data.split_whitespace();
+    if fields.next()? != "\\#" {
+        return None;
+    }
+
+    let expected_len = fields.next()?.parse::<usize>().ok()?;
+    let mut wire = Vec::with_capacity(expected_len);
+    for field in fields {
+        if field.len() % 2 != 0 || !field.chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return None;
+        }
+
+        let mut i = 0;
+        while i < field.len() {
+            wire.push(u8::from_str_radix(&field[i..i + 2], 16).ok()?);
+            i += 2;
+        }
+    }
+
+    (wire.len() == expected_len).then_some(wire)
+}
+
+fn parse_https_rdata_ech_config(wire: &[u8]) -> Option<Vec<u8>> {
+    // HTTPS RR RDATA: SvcPriority(2), TargetName(wire DNS name), SvcParams.
+    if wire.len() < 3 {
+        return None;
+    }
+
+    let mut offset = 2;
+    loop {
+        let len = *wire.get(offset)? as usize;
+        offset += 1;
+
+        // DNS name compression pointers are not expected in HTTPS RDATA from
+        // DoH JSON; refuse them instead of guessing where SvcParams begin.
+        if len & 0xc0 != 0 {
+            return None;
+        }
+
+        if len == 0 {
+            break;
+        }
+
+        offset = offset.checked_add(len)?;
+        if offset > wire.len() {
+            return None;
+        }
+    }
+
+    while offset + 4 <= wire.len() {
+        let key = u16::from_be_bytes([wire[offset], wire[offset + 1]]);
+        let value_len = u16::from_be_bytes([wire[offset + 2], wire[offset + 3]]) as usize;
+        offset += 4;
+
+        let end = offset.checked_add(value_len)?;
+        if end > wire.len() {
+            return None;
+        }
+
+        if key == 5 {
+            return Some(wire[offset..end].to_vec());
+        }
+
+        offset = end;
+    }
+
+    None
 }
 
 fn split_svcb_fields(data: &str) -> Vec<String> {
@@ -472,8 +549,8 @@ impl Default for DohResolver {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_ech_config_value, normalize_hostname, parse_ech_config_from_https_rr,
-        split_svcb_fields,
+        decode_ech_config_value, normalize_hostname, parse_dns_wire_hex,
+        parse_ech_config_from_https_rr, split_svcb_fields,
     };
 
     #[test]
@@ -497,9 +574,23 @@ mod tests {
     }
 
     #[test]
+    fn parses_ech_config_from_wire_format_https_record() {
+        let rr = "\\# 106 00 01 00 00 01 00 06 02 68 33 02 68 32 00 04 00 04 b9 a5 a9 e7 00 05 00 3d 00 3b fe 0d 00 37 11 00 20 00 20 2b 02 ca a9 c8 8a 42 9b b3 2d 2c a3 6c b9 d4 a3 f0 35 16 6f 85 42 cf 5d 0c 9c 4c 42 71 89 fc 15 00 04 00 01 00 01 00 08 69 65 74 66 2e 6f 72 67 00 00 00 06 00 10 26 05 64 00 00 20 11 74 ce 4f 7c 31 82 d5 e2 3f";
+        let config = parse_ech_config_from_https_rr(rr).expect("ECH config should parse");
+
+        assert_eq!(config.len(), 61);
+        assert_eq!(&config[..4], &[0x00, 0x3b, 0xfe, 0x0d]);
+    }
+
+    #[test]
     fn returns_none_when_https_record_has_no_ech_param() {
         let rr = "1 . alpn=h2,h3 ipv4hint=192.0.2.1";
         assert_eq!(parse_ech_config_from_https_rr(rr), None);
+    }
+
+    #[test]
+    fn rejects_wire_format_with_mismatched_declared_length() {
+        assert_eq!(parse_dns_wire_hex("\\# 4 00 01 02"), None);
     }
 
     #[test]

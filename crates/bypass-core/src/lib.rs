@@ -3,10 +3,12 @@
 //! Combines three bypass techniques:
 //! 1. **DoH** (DNS over HTTPS) — resolves via Cloudflare 1.1.1.1 to bypass DNS poisoning
 //! 2. **TLS ClientHello fragmentation** — splits first TLS packet to defeat SNI-based DPI
-//! 3. **Chrome TLS fingerprint** — impersonates Chrome's TLS fingerprint via BoringSSL
+//! 3. **ECH when available** — applies HTTPS/SVCB ECHConfigList through rustls
+//! 4. **Chrome TLS fingerprint fallback** — uses rquest for hosts without ECHConfigList
 
 pub mod client;
 pub mod doh;
+mod ech_http;
 pub mod proxy;
 
 pub use client::StreamingResponse;
@@ -37,7 +39,7 @@ pub struct BypassResponse {
     pub body: Vec<u8>,
 }
 
-/// High-level bypass client combining DoH + SOCKS5 proxy + Chrome fingerprint.
+/// High-level bypass client combining DoH + SOCKS5 proxy + ECH-capable HTTPS.
 ///
 /// Usage:
 /// ```no_run
