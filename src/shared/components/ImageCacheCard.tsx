@@ -14,6 +14,7 @@ import { useT } from '@/lib/i18n/useT';
 import { getImageCache, bytesToMb, mbToBytes, formatBytes } from '@/lib/cache/image-cache';
 import type { ImageCacheStore } from '@/lib/cache/image-cache-store';
 import { resetImageDisplayCaches } from '@/shared/components/AbortableImage';
+import { TextInput } from '@/shared/components/atoms/TextInput';
 
 export function ImageCacheCard() {
   const t = useT();
@@ -96,16 +97,18 @@ export function ImageCacheCard() {
         </p>
 
         <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-300">
-          <span className="font-mono font-semibold">{formatBytes(usage)}</span> {t('settings.imageCache.used')}
+          <span className="font-mono font-semibold">{formatBytes(usage)}</span>{' '}
+          {t('settings.imageCache.used')}
           <span className="text-zinc-400"> / {capLabel}</span>
         </p>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <label className="flex-1">
             <span className="mb-1 block text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">
-              {t('settings.imageCache.max')} <span className="text-zinc-400">({t('settings.imageCache.off')})</span>
+              {t('settings.imageCache.max')}{' '}
+              <span className="text-zinc-400">({t('settings.imageCache.off')})</span>
             </span>
-            <input
+            <TextInput
               type="number"
               inputMode="numeric"
               min={0}
@@ -113,7 +116,6 @@ export function ImageCacheCard() {
               value={unlimited ? '' : mbInput}
               disabled={unlimited}
               onChange={(e) => onMbChange(e.target.value)}
-              className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 disabled:opacity-50 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
             />
           </label>
 

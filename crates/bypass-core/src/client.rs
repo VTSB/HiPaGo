@@ -1,8 +1,10 @@
-//! HTTP client with Chrome TLS fingerprint impersonation via rquest.
+//! HTTP client with ECH-capable HTTPS and Chrome TLS fallback via rquest.
 //!
-//! Connects through the local SOCKS5 proxy for DoH + fragmentation,
-//! while rquest handles BoringSSL TLS with Chrome-matching parameters.
+//! ECH-capable hosts use a direct rustls ECH transport. Other hosts, or ECH
+//! attempts that fail before a response is exposed, fall back to the local
+//! SOCKS5 proxy path for DoH + fragmentation.
 
+use crate::ech_http::EchHttpClient;
 use crate::{BypassError, BypassResponse};
 use rquest::Impersonate;
 use std::collections::HashMap;
@@ -13,6 +15,7 @@ use tokio::sync::mpsc;
 /// HTTP client configured with Chrome TLS fingerprint and SOCKS5 proxy.
 pub struct Client {
     inner: rquest::Client,
+    ech: EchHttpClient,
 }
 
 impl Client {
@@ -32,7 +35,10 @@ impl Client {
             .build()
             .map_err(|e| BypassError::HttpError(format!("Failed to build client: {e}")))?;
 
-        Ok(Self { inner: client })
+        Ok(Self {
+            inner: client,
+            ech: EchHttpClient::new(),
+        })
     }
 
     /// Fetch a URL with bypass (DoH + fragmentation + Chrome fingerprint).
@@ -41,6 +47,10 @@ impl Client {
         url: &str,
         headers: Option<HashMap<String, String>>,
     ) -> Result<BypassResponse, BypassError> {
+        if let Some(response) = self.ech.fetch(url, headers.as_ref()).await? {
+            return Ok(response);
+        }
+
         let mut request = self.inner.get(url);
 
         // Add custom headers
@@ -84,6 +94,10 @@ impl Client {
         url: &str,
         headers: Option<HashMap<String, String>>,
     ) -> Result<StreamingResponse, BypassError> {
+        if let Some(response) = self.ech.fetch_streaming(url, headers.as_ref()).await? {
+            return Ok(response);
+        }
+
         let mut request = self.inner.get(url);
         if let Some(hdrs) = headers {
             for (key, value) in hdrs {
@@ -145,6 +159,14 @@ impl Client {
         dest_path: &str,
     ) -> Result<u64, BypassError> {
         use tokio::io::AsyncWriteExt;
+
+        if let Some(written) = self
+            .ech
+            .download_to_file(url, headers.as_ref(), dest_path)
+            .await?
+        {
+            return Ok(written);
+        }
 
         let mut request = self.inner.get(url);
         if let Some(hdrs) = headers {
