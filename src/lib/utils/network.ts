@@ -5,15 +5,16 @@
  * the next queued item). A manual tap is userInitiated and bypasses it.
  *
  * Detection strategy:
- *  - Capacitor native: use @capacitor/network's Network.getStatus() and treat
- *    connectionType === 'wifi' as unmetered. The plugin is an optional dep, so
- *    the import is dynamic and guarded — if it is absent we fall through.
+ *  - Capacitor native: use the Network native plugin's getStatus() through
+ *    @capacitor/core's registerPlugin proxy and treat connectionType === 'wifi'
+ *    as unmetered. The plugin is optional; if it is absent we fall through.
  *  - Web / desktop: navigator.onLine + the NetworkInformation API
  *    (navigator.connection). A 'cellular' type or saveData hint is metered.
  *  - When nothing is conclusive: best-effort. Treat as unmetered while online
  *    (so a desktop on ethernet / a browser without NetworkInformation is not
  *    permanently gated), metered while offline.
  */
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { isCapacitor } from './platform';
 
 interface NetworkInformationLike {
@@ -22,19 +23,19 @@ interface NetworkInformationLike {
   saveData?: boolean;
 }
 
+interface CapacitorNetworkPlugin {
+  getStatus(): Promise<{ connected: boolean; connectionType: string }>;
+}
+
+// `registerPlugin` returns a proxy without requiring a separate Network JS
+// package to be bundled. If the native Network plugin is absent, calls reject
+// and nativeIsWifi() falls back to browser best-effort.
+const CapacitorNetwork = registerPlugin<CapacitorNetworkPlugin>('Network');
+
 async function nativeIsWifi(): Promise<boolean | null> {
   try {
-    // @capacitor/network is an OPTIONAL dependency (not installed in the web/
-    // desktop builds). A static `import('@capacitor/network')` would fail TS
-    // module resolution, so the specifier is held in a variable — the bundler
-    // resolves it at runtime on native where the plugin is present, and the
-    // catch below handles its absence everywhere else.
-    const specifier = '@capacitor/network';
-    const mod = (await import(/* @vite-ignore */ specifier).catch(() => null)) as {
-      Network?: { getStatus: () => Promise<{ connected: boolean; connectionType: string }> };
-    } | null;
-    if (!mod?.Network) return null;
-    const status = await mod.Network.getStatus();
+    if (!Capacitor.isPluginAvailable('Network')) return null;
+    const status = await CapacitorNetwork.getStatus();
     if (!status.connected) return false;
     return status.connectionType === 'wifi';
   } catch {

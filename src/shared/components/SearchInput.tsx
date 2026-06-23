@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TextInput } from '@/shared/components/atoms/TextInput';
 
 export interface SearchInputProps {
   value: string;
@@ -46,27 +47,35 @@ export function SearchInput({
           <path d="m20 20-3.2-3.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       )}
-      <input
+      <TextInput
         ref={inputRef}
         type="text"
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={onFocus}
         onBlur={onBlur}
-        className={`h-12 w-full border-0 bg-[var(--control)] text-base text-[var(--control-fg)] outline-none ring-0 transition-colors focus:bg-[var(--control-hover)] sm:h-10 sm:text-sm placeholder:text-[var(--control-placeholder)] ${
-          pill ? 'rounded-2xl' : 'rounded-2xl sm:rounded-xl'
-        } ${leadingIcon ? 'pl-12 sm:pl-10' : 'px-4 sm:px-3'} ${value && !disabled ? 'pr-10 sm:pr-8' : 'pr-4 sm:pr-3'}`}
         placeholder={placeholder}
         disabled={disabled}
+        leading={leadingIcon}
+        trailing={Boolean(value && !disabled)}
+        radius={pill ? 'pill' : 'default'}
       />
       {value && !disabled && (
         <button
-          onMouseDown={e => { e.preventDefault(); onClear?.(); }}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onClear?.();
+          }}
           className="absolute right-2 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 hover:text-zinc-200"
           aria-label="Clear"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-[19px] w-[19px]">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            className="h-[19px] w-[19px]"
+          >
             <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
           </svg>
         </button>

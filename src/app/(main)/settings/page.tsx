@@ -17,6 +17,7 @@ import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
 import { ImageCacheCard } from '@/shared/components/ImageCacheCard';
 import { DownloadLocationCard } from '@/shared/components/DownloadLocationCard';
 import { TagDbStatusCard } from '@/shared/components/TagDbStatusCard';
+import { TextInput } from '@/shared/components/atoms/TextInput';
 import {
   getActiveDefaultFilterToken,
   replaceActiveDefaultFilterToken,
@@ -84,14 +85,13 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
 
   return (
     <div className="relative">
-      <input
+      <TextInput
         ref={inputRef}
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
         placeholder={t('settings.blurTags.placeholder')}
-        className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
       />
       {showDropdown && suggestions.length > 0 && (
         <div
@@ -183,7 +183,7 @@ function DefaultFilterInput({
 
   return (
     <div className="relative">
-      <input
+      <TextInput
         ref={inputRef}
         type="text"
         value={value}
@@ -191,7 +191,6 @@ function DefaultFilterInput({
         onBlur={() => onChange(value.trim())}
         onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
         placeholder={t('settings.defaultFilter.placeholder')}
-        className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
       />
       {showDropdown && suggestions.length > 0 && (
         <div

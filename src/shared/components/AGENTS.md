@@ -18,6 +18,7 @@ The `components/` directory contains reusable React UI components that are share
 - **`InfiniteScrollTrigger.tsx`** - Infinite scroll sentinel
 - **`LanguageFilter.tsx`** - Language dropdown selector
 - **`SortSelector.tsx`** - Sort order dropdown selector
+- **`atoms/TextInput.tsx`** - Shared filled input atom used by search and settings fields
 - **`Spinner.tsx`** - Loading indicator
 - **`TagChip.tsx`** - Tag display component with link
 
@@ -56,6 +57,12 @@ The `components/` directory contains reusable React UI components that are share
 - Use for: Gallery lists with pagination (favorites, search results, history)
 
 ### Filtering & Selection
+
+**`atoms/TextInput.tsx`** (shared input atom)
+- Props: native input props plus `leading`, `trailing`, `radius`, `fullWidth`, `align`, `textSize`
+- Styling: Uses the `--control` semantic tokens from `globals.css`; no outline border
+- Behavior: Pure input surface only; wrappers add icons, clear buttons, and dropdown logic
+- Use for: Search inputs, settings text fields, and compact form controls that should match the main search bar
 
 **`LanguageFilter.tsx`** (1.1 KB)
 - Props: None (reads/writes `useSettingsStore`)
@@ -163,7 +170,7 @@ const Component = () => {
 ### Common Tasks
 
 **Add a new reusable component:**
-1. Create file: `src/shared/components/[ComponentName].tsx`
+1. Create primitive controls in `src/shared/components/atoms/[ComponentName].tsx`; create composed components in `src/shared/components/[ComponentName].tsx`
 2. Add `'use client'` at top
 3. Define props interface with JSDoc
 4. Implement with hooks and Tailwind styling
