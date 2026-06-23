@@ -250,9 +250,10 @@ describe('markTagSyncCompleted', () => {
     expect(typeof data.timestamp).toBe('number');
   });
 
-  it('sets dbReady=true, isSyncing=false, syncProgress=100', async () => {
+  it('sets dbReady=true, clears sync flags, and syncProgress=100', async () => {
     useDbStatusStore.getState().setIsSyncing(true);
     useDbStatusStore.getState().setSyncProgress(50);
+    useDbStatusStore.getState().setTagsStale(true);
 
     await markTagSyncCompleted(100);
 
@@ -260,6 +261,7 @@ describe('markTagSyncCompleted', () => {
     expect(state.dbReady).toBe(true);
     expect(state.isSyncing).toBe(false);
     expect(state.syncProgress).toBe(100);
+    expect(state.tagsStale).toBe(false);
   });
 });
 

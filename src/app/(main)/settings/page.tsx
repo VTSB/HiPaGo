@@ -16,6 +16,7 @@ import { Select } from '@/shared/components/Select';
 import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
 import { ImageCacheCard } from '@/shared/components/ImageCacheCard';
 import { DownloadLocationCard } from '@/shared/components/DownloadLocationCard';
+import { TagDbStatusCard } from '@/shared/components/TagDbStatusCard';
 import {
   getActiveDefaultFilterToken,
   replaceActiveDefaultFilterToken,
@@ -295,6 +296,9 @@ export default function SettingsPage() {
             ]}
           />
         </div>
+
+        {/* Tag DB Status */}
+        <TagDbStatusCard />
 
         {/* Default Result Filter */}
         <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4">
