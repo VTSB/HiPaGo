@@ -28,7 +28,11 @@ async fn test_hitomi_access() {
 
     let resp2 = client.fetch("https://tagindex.hitomi.la/", Some(h2)).await;
     match &resp2 {
-        Ok(r) => println!("[tagindex.hitomi.la] status={}, body_len={}", r.status, r.body.len()),
+        Ok(r) => println!(
+            "[tagindex.hitomi.la] status={}, body_len={}",
+            r.status,
+            r.body.len()
+        ),
         Err(e) => println!("[tagindex.hitomi.la] ERROR: {e}"),
     }
     assert!(resp2.is_ok(), "tagindex.hitomi.la: {:?}", resp2.err());
@@ -45,7 +49,12 @@ async fn test_hitomi_access() {
     match &resp3 {
         Ok(r) => {
             let body_str = String::from_utf8_lossy(&r.body);
-            println!("[CDN gg.js] status={}, body_len={}, preview={}...", r.status, r.body.len(), &body_str[..body_str.len().min(200)]);
+            println!(
+                "[CDN gg.js] status={}, body_len={}, preview={}...",
+                r.status,
+                r.body.len(),
+                &body_str[..body_str.len().min(200)]
+            );
         }
         Err(e) => println!("[CDN gg.js] ERROR: {e}"),
     }
@@ -55,4 +64,27 @@ async fn test_hitomi_access() {
 
     client.shutdown().await;
     println!("All 3 domains passed!");
+}
+
+#[tokio::test]
+async fn test_cloudflare_ech_access() {
+    let client = BypassClient::new().await.expect("Failed to create client");
+
+    let mut headers = HashMap::new();
+    headers.insert("User-Agent".into(), "Mozilla/5.0".into());
+
+    let resp = client
+        .fetch("https://cloudflare-ech.com/", Some(headers))
+        .await;
+    match &resp {
+        Ok(r) => println!(
+            "[cloudflare-ech.com] status={}, body_len={}",
+            r.status,
+            r.body.len()
+        ),
+        Err(e) => println!("[cloudflare-ech.com] ERROR: {e}"),
+    }
+    assert!(resp.is_ok(), "cloudflare-ech.com: {:?}", resp.err());
+
+    client.shutdown().await;
 }
