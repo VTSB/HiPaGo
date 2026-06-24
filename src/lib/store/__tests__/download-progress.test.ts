@@ -68,6 +68,7 @@ vi.mock('@/lib/db/download-queue', () => ({
       tags: '{}',
       pageCount: item.pageCount,
       status: 'queued',
+      queuePosition: item.pos ?? item.id,
     };
   }),
   removeFromQueue: vi.fn(async (id: number) => {
@@ -473,13 +474,14 @@ describe('Android worker handoff (Task C, AC-005)', () => {
 
   it('the work-order JSON carries pages with index/url/ext/relPath/headers', async () => {
     androidFlag = true;
-    queue.push({ id: 200, pageCount: 0 });
+    queue.push({ id: 200, pageCount: 0, pos: 7 });
     await processQueue();
 
     const write = workOrderWrites.find((w) => w.galleryId === '200');
     expect(write).toBeTruthy();
     const order = JSON.parse(write!.json);
     expect(order.galleryId).toBe(200);
+    expect(order.queuePosition).toBe(7);
     expect(order.pages).toHaveLength(1);
     const page = order.pages[0];
     expect(page).toHaveProperty('index', 0);
@@ -1652,6 +1654,35 @@ describe('reconcileQueue (AC-007)', () => {
       | { status: string }
       | undefined;
     expect(completed?.status).toBe('complete');
+  });
+
+  it('Android: recovers a failed row when native retry later completed on disk', async () => {
+    androidFlag = true;
+    adapterRows.push({
+      galleryId: 59,
+      title: 'Recovered',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 2,
+      status: 'failed',
+      lastError: 'Background download failed',
+    });
+    manifestPages.set(59, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const completed = upsertedRows.find(
+      (r) =>
+        (r as { galleryId: number }).galleryId === 59 &&
+        (r as { status: string }).status === 'complete',
+    );
+    expect(completed).toBeTruthy();
   });
 
   it('iOS: marks a gallery complete when its manifest covers the target page count', async () => {

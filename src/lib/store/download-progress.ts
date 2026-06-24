@@ -344,8 +344,9 @@ function clearProgressPollTimer(): void {
  * Finalize a native-background download row to 'complete' when the on-disk
  * manifest exactly matches every page. SHARED by the Android live-progress poller
  * (in-app, while the app stays open) and reconcileQueue (on next app open) so the
- * two use ONE completion rule and cannot drift. A 'downloading' row whose
- * manifest lists exactly its recorded `pageCount` pages is marked 'complete'.
+ * two use ONE completion rule and cannot drift. A native-owned 'downloading' or
+ * app-marked 'failed' row whose manifest lists exactly its recorded `pageCount`
+ * pages is marked 'complete'.
  * Returns true iff the row is 'complete' after the call. May throw on DB/store
  * IO — callers decide whether that is fatal (reconcile) or retried next tick
  * (poller).
@@ -354,7 +355,12 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
   const current = await getDownload(galleryId);
   if (!current) return false;
   if (current.status === 'complete') return true;
-  if (current.status !== 'downloading' || (current.pageCount ?? 0) <= 0) return false;
+  if (
+    (current.status !== 'downloading' && current.status !== 'failed') ||
+    (current.pageCount ?? 0) <= 0
+  ) {
+    return false;
+  }
   if (await hasCompleteDownloadedGallery(galleryId, current.pageCount)) {
     const pages = await getDownloadedGalleryPages(galleryId);
     await upsertDownload({
@@ -541,9 +547,11 @@ async function handOffToAndroidWorker(
   id: number,
   title: string,
   files: GalleryFile[],
+  queuePosition?: number | null,
 ): Promise<void> {
   const config = await getGgConfig();
   const order = buildWorkOrder(id, title, files, config);
+  order.queuePosition = queuePosition ?? null;
   const galleryId = String(id);
   await DownloadWorker.writeWorkOrder({ galleryId, json: JSON.stringify(order) });
   await DownloadWorker.enqueue({ galleryId });
@@ -642,7 +650,7 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
         try {
           const downloadStore = await createDownloadStore();
           await downloadStore.ensureReady?.();
-          await handOffToAndroidWorker(id, next.title, files);
+          await handOffToAndroidWorker(id, next.title, files, next.queuePosition);
           // Leave a tracked 'downloading' row (NOT in the queue) so the worker's
           // progress survives app kill and reconcileQueue can finalize it on next
           // open. pageCount carries the TARGET total here (the worker is

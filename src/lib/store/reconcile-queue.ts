@@ -52,7 +52,7 @@ async function reconcileNativeBackgroundDownloads(): Promise<void> {
     rows = await db.query<DBDownload>(
       `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
          FROM download
-        WHERE status = 'downloading' AND pageCount > 0`,
+        WHERE status IN ('downloading', 'failed') AND pageCount > 0`,
     );
   } catch {
     return;

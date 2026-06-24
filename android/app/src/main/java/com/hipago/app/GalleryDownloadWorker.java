@@ -187,10 +187,24 @@ public class GalleryDownloadWorker extends Worker {
     private File[] listOrderFiles(File handoffDir) {
         File[] files = handoffDir.listFiles((dir, name) -> name.endsWith(".json"));
         if (files == null) return new File[0];
-        // Process in stable name order (TS names files <galleryId>.json; sorting
-        // by name gives a deterministic order that the app can reason about).
-        Arrays.sort(files, Comparator.comparing(File::getName));
+        // Process by TS queuePosition first so native handoff preserves manual
+        // front/reorder semantics; fall back to filename for older work-orders.
+        Arrays.sort(files, Comparator
+                .comparingLong(this::orderQueuePosition)
+                .thenComparing(File::getName));
         return files;
+    }
+
+    private long orderQueuePosition(File orderFile) {
+        try {
+            JSONObject obj = readOrder(orderFile);
+            if (obj == null || !obj.has("queuePosition") || obj.isNull("queuePosition")) {
+                return Long.MAX_VALUE;
+            }
+            return obj.optLong("queuePosition", Long.MAX_VALUE);
+        } catch (Throwable t) {
+            return Long.MAX_VALUE;
+        }
     }
 
     // -----------------------------------------------------------------------
