@@ -293,6 +293,14 @@ public class SafLibrary {
         return written;
     }
 
+    /** Return the file size for a relative file, or -1 when missing/unknown. */
+    public long size(String relPath) {
+        if (rootDir() == null) return -1L;
+        DocumentFile file = resolveFile(relPath);
+        if (file == null || !file.isFile()) return -1L;
+        return file.length();
+    }
+
     /** Delete a single relative file. No-op when missing. Returns false on a hard failure. */
     public boolean delete(String relPath) {
         if (rootDir() == null) return false;

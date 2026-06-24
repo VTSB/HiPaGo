@@ -5,12 +5,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
-import {
-  upsertDownload,
-  getDownload,
-  listLibraryDownloads,
-  serializeTags,
-} from '../download';
+import { upsertDownload, getDownload, listLibraryDownloads, serializeTags } from '../download';
 import {
   enqueueDownload,
   listQueue,
@@ -100,7 +95,9 @@ describe('enqueueDownload', () => {
   });
 
   it('sets status to queued and clears stale lastError', async () => {
-    await upsertDownload(makeRow({ galleryId: 5, status: 'failed', lastError: 'boom', pageCount: 4 }));
+    await upsertDownload(
+      makeRow({ galleryId: 5, status: 'failed', lastError: 'boom', pageCount: 4 }),
+    );
     await enqueueDownload(meta(5));
     const row = await getDownload(5);
     expect(row!.status).toBe('queued');
@@ -165,7 +162,9 @@ describe('pauseQueued / resumeQueued', () => {
 
 describe('removeFromQueue', () => {
   it('clears queuePosition but keeps the row when it has pages', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'queued', queuePosition: 1, pageCount: 5 }));
+    await upsertDownload(
+      makeRow({ galleryId: 1, status: 'queued', queuePosition: 1, pageCount: 5 }),
+    );
     await removeFromQueue(1);
     const row = await getDownload(1);
     expect(row).not.toBeNull();
@@ -176,6 +175,24 @@ describe('removeFromQueue', () => {
     await enqueueDownload(meta(1)); // pageCount 0
     await removeFromQueue(1);
     expect(await getDownload(1)).toBeNull();
+  });
+
+  it('keeps a failed row with no pages so first-page failures can be retried', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        queuePosition: 1,
+        pageCount: 0,
+        lastError: 'network failed before first page',
+      }),
+    );
+    await removeFromQueue(1);
+    const row = await getDownload(1);
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe('failed');
+    expect(row!.queuePosition == null).toBe(true);
+    expect(row!.lastError).toBe('network failed before first page');
   });
 
   it('is a no-op for a non-existent row', async () => {
@@ -221,8 +238,12 @@ describe('listLibraryDownloads', () => {
   });
 
   it('orders by downloadedAt descending', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'complete', downloadedAt: '2024-01-01T00:00:00Z' }));
-    await upsertDownload(makeRow({ galleryId: 2, status: 'complete', downloadedAt: '2024-03-01T00:00:00Z' }));
+    await upsertDownload(
+      makeRow({ galleryId: 1, status: 'complete', downloadedAt: '2024-01-01T00:00:00Z' }),
+    );
+    await upsertDownload(
+      makeRow({ galleryId: 2, status: 'complete', downloadedAt: '2024-03-01T00:00:00Z' }),
+    );
     const rows = await listLibraryDownloads();
     expect(rows[0].galleryId).toBe(2);
   });

@@ -865,6 +865,27 @@ describe('iOS background backstop (Task D)', () => {
     deferred.resolve();
     await run;
   });
+
+  it('pause of an active iOS download drops the backstop work-order', async () => {
+    iosFlag = true;
+    queue.push({ id: 406, pageCount: 2 });
+    dl.mockImplementation(
+      async (...a: unknown[]) =>
+        new Promise<void>((_res, rej) => {
+          const opts = a[8] as { isPauseSignal: () => boolean };
+          setTimeout(() => {
+            rej(opts.isPauseSignal() ? new DownloadPausedError() : new Error('not paused'));
+          }, 5);
+        }),
+    );
+
+    const run = processQueue();
+    await new Promise((r) => setTimeout(r, 1));
+    await useDownloadProgressStore.getState().pause(406);
+
+    expect(workerCancels).toContain('406');
+    await run;
+  });
 });
 
 describe('cancel (AC-005)', () => {
@@ -985,6 +1006,15 @@ describe('auto-retry scheduler timer (AC-004)', () => {
 
       const autoRequeue = enqueued.find((e) => (e.meta as { galleryId: number }).galleryId === 88);
       expect(autoRequeue).toBeFalsy();
+      const checksAfterFirstDue = unmetered.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(unmetered.mock.calls.length).toBe(checksAfterFirstDue);
+
+      await vi.advanceTimersByTimeAsync(59_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(unmetered.mock.calls.length).toBeGreaterThan(checksAfterFirstDue);
     } finally {
       vi.useRealTimers();
     }
@@ -1209,7 +1239,7 @@ describe('reconcileQueue (AC-007)', () => {
     expect(completed).toBeFalsy();
   });
 
-  it('does NOT kick the processor on a metered network', async () => {
+  it('non-Android: does NOT kick the processor on a metered network', async () => {
     adapterRows.push({
       galleryId: 13,
       title: 'Z',
@@ -1227,6 +1257,31 @@ describe('reconcileQueue (AC-007)', () => {
 
     // Zombie was requeued, but download was not driven (processor not kicked).
     expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalled();
+    expect(dl).not.toHaveBeenCalled();
+  });
+
+  it('Android: kicks the processor on a metered network so CONNECTED WorkManager can run', async () => {
+    androidFlag = true;
+    adapterRows.push({
+      galleryId: 14,
+      title: 'Cellular',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 3,
+      status: 'downloading',
+    });
+    unmetered.mockResolvedValue(false);
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 14 }),
+    );
+    expect(workOrderWrites.map((w) => w.galleryId)).toContain('14');
+    expect(workerEnqueues).toContain('14');
     expect(dl).not.toHaveBeenCalled();
   });
 });

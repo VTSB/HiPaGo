@@ -159,13 +159,15 @@ export async function resumeQueued(galleryId: number): Promise<void> {
  * - If the row has stored pages (pageCount > 0) it is NOT deleted — the
  *   downloaded pages and its eventual library row are kept; only the queue
  *   position is cleared (the active-run lifecycle will set the final status).
- * - If the row has no pages, the row is deleted entirely (nothing to keep).
+ * - If the row is failed it is kept even at pageCount 0 so first-page failures
+ *   remain visible in the library and can be retried.
+ * - If the row has no pages and is not failed, the row is deleted entirely.
  */
 export async function removeFromQueue(galleryId: number): Promise<void> {
   const db = await ensureDb();
   const row = await getDownload(galleryId);
   if (!row) return;
-  if (row.pageCount > 0) {
+  if (row.pageCount > 0 || row.status === 'failed') {
     await db.execute('UPDATE download SET queuePosition = NULL WHERE galleryId = ?', [galleryId]);
   } else {
     await db.execute('DELETE FROM download WHERE galleryId = ?', [galleryId]);

@@ -147,6 +147,7 @@ let globalPaused = false;
 // every schedule/fire/queue mutation (mirrors the running/controllers
 // module-singleton pattern so the scheduler is independent of React).
 let autoRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const METERED_AUTO_RETRY_RECHECK_MS = 60_000;
 
 // Internal helper that the store closure binds to so processQueue can push
 // store updates. Assigned once when the store is created.
@@ -182,22 +183,38 @@ export function armAutoRetryTimer(): void {
     if (!earliest) return;
     // Clamp to >= 0; an overdue item fires on the next tick.
     const delay = Math.max(0, new Date(earliest).getTime() - Date.now());
-    // A second arm may have run while we awaited; clear before setting.
-    if (autoRetryTimer !== null) {
-      clearTimeout(autoRetryTimer);
-      autoRetryTimer = null;
-    }
-    autoRetryTimer = setTimeout(() => {
-      autoRetryTimer = null;
-      void fireDueAutoRetries();
-    }, delay);
+    scheduleAutoRetryTimer(delay);
   })();
+}
+
+function scheduleAutoRetryTimer(delay: number): void {
+  if (autoRetryTimer !== null) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+  autoRetryTimer = setTimeout(() => {
+    autoRetryTimer = null;
+    void fireDueAutoRetries();
+  }, delay);
+}
+
+async function rearmAutoRetryTimerAfterMeteredHold(): Promise<void> {
+  let earliest: string | null;
+  try {
+    earliest = await earliestNextRetryAt();
+  } catch {
+    return;
+  }
+  if (!earliest) return;
+  const dueDelay = Math.max(0, new Date(earliest).getTime() - Date.now());
+  scheduleAutoRetryTimer(Math.max(dueDelay, METERED_AUTO_RETRY_RECHECK_MS));
 }
 
 /**
  * Re-enqueue every currently-due auto-retry row (Wi-Fi-gated) and kick the
  * processor, then re-arm the timer for whatever remains. On a metered network
- * nothing is requeued and the timer is re-armed to try again later.
+ * nothing is requeued and an overdue item is checked again after a short hold
+ * instead of spinning a 0ms timer.
  */
 export async function fireDueAutoRetries(): Promise<void> {
   let unmetered: boolean;
@@ -207,40 +224,42 @@ export async function fireDueAutoRetries(): Promise<void> {
     unmetered = false;
   }
 
-  if (unmetered) {
-    let due: Awaited<ReturnType<typeof listDueAutoRetries>> = [];
-    try {
-      due = await listDueAutoRetries(new Date().toISOString());
-    } catch {
-      due = [];
-    }
-    for (const row of due) {
-      try {
-        // Auto requeue: KEEP the escalating-backoff counter (keepRetryState) so
-        // the next failure escalates rather than resetting to attempt 1.
-        await enqueueDownload(
-          {
-            galleryId: row.galleryId,
-            title: row.title,
-            thumbnail: row.thumbnail,
-            tags: deserializeTags(row.tags),
-          },
-          { keepRetryState: true },
-        );
-        // The row left 'failed' for 'queued' — drop any stale retry-pending entry.
-        storeApi?.setEntry(row.galleryId, null);
-      } catch (e) {
-        console.warn('[auto-retry] requeue failed:', row.galleryId, e);
-      }
-    }
-    if (due.length > 0) {
-      storeApi?.refreshQueue();
-      void processQueue();
-    }
+  if (!unmetered) {
+    await rearmAutoRetryTimerAfterMeteredHold();
+    return;
   }
 
-  // Always re-arm: metered → wait for the next window; unmetered → any rows that
-  // were not due yet still need a timer.
+  let due: Awaited<ReturnType<typeof listDueAutoRetries>> = [];
+  try {
+    due = await listDueAutoRetries(new Date().toISOString());
+  } catch {
+    due = [];
+  }
+  for (const row of due) {
+    try {
+      // Auto requeue: KEEP the escalating-backoff counter (keepRetryState) so
+      // the next failure escalates rather than resetting to attempt 1.
+      await enqueueDownload(
+        {
+          galleryId: row.galleryId,
+          title: row.title,
+          thumbnail: row.thumbnail,
+          tags: deserializeTags(row.tags),
+        },
+        { keepRetryState: true },
+      );
+      // The row left 'failed' for 'queued' — drop any stale retry-pending entry.
+      storeApi?.setEntry(row.galleryId, null);
+    } catch (e) {
+      console.warn('[auto-retry] requeue failed:', row.galleryId, e);
+    }
+  }
+  if (due.length > 0) {
+    storeApi?.refreshQueue();
+    void processQueue();
+  }
+
+  // Any rows that were not due yet still need a timer.
   armAutoRetryTimer();
 }
 
@@ -888,6 +907,11 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         // the pausing signal and writes status 'paused' (not 'failed').
         pausing.add(id);
         controller.abort();
+        // iOS background backstop must not resume a user-paused gallery while
+        // the foreground row is intentionally held.
+        if (isIos()) {
+          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+        }
       } else {
         // Not-yet-started queued item → just hold it.
         await pauseQueued(id);

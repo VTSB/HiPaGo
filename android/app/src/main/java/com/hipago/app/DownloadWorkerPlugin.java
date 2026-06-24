@@ -25,6 +25,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Capacitor plugin that bridges the TS download queue to the native
@@ -88,9 +89,19 @@ public class DownloadWorkerPlugin extends Plugin {
         if (json == null) { call.reject("json is required"); return; }
         try {
             File f = orderFile(galleryId);
-            try (FileOutputStream fos = new FileOutputStream(f)) {
-                fos.write(json.getBytes("UTF-8"));
+            File tmp = new File(handoffDir(), galleryId + ".json.tmp");
+            try (FileOutputStream fos = new FileOutputStream(tmp)) {
+                fos.write(json.getBytes(StandardCharsets.UTF_8));
                 fos.flush();
+                fos.getFD().sync();
+            }
+            if (f.exists() && !f.delete()) {
+                throw new Exception("replace failed: " + f.getName());
+            }
+            if (!tmp.renameTo(f)) {
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+                throw new Exception("atomic publish failed: " + f.getName());
             }
             call.resolve();
         } catch (Exception e) {
