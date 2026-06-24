@@ -339,9 +339,10 @@ public class SafLibrary {
 
     /** Recursively delete a relative directory and drop any cached handles under it. */
     public void deleteDir(String relPath) {
+        assertSafe(relPath);
         if (rootDir() == null) return;
         DocumentFile dir = resolveDir(relPath, false);
-        if (dir != null && dir.exists()) {
+        if (dir != null && dir.exists() && dir.isDirectory()) {
             dir.delete(); // DocumentFile.delete removes the subtree.
         }
         dirCache.keySet().removeIf(k -> k.equals(relPath) || k.startsWith(relPath + "/"));
