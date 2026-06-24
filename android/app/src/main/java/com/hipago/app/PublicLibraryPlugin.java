@@ -2,7 +2,6 @@ package com.hipago.app;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.content.UriPermission;
 import android.net.Uri;
 
 import androidx.activity.result.ActivityResult;
@@ -17,7 +16,6 @@ import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.util.Base64;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -90,22 +88,6 @@ public class PublicLibraryPlugin extends Plugin {
     // Tree (persisted folder) management
     // -----------------------------------------------------------------------
 
-    /** Whether the persisted tree URI still has a live, writable permission. */
-    private boolean isTreeValid(Uri tree) {
-        if (tree == null) return false;
-        boolean persisted = false;
-        List<UriPermission> perms = getContext().getContentResolver().getPersistedUriPermissions();
-        for (UriPermission p : perms) {
-            if (p.getUri().equals(tree) && p.isWritePermission()) {
-                persisted = true;
-                break;
-            }
-        }
-        if (!persisted) return false;
-        DocumentFile root = DocumentFile.fromTreeUri(getContext(), tree);
-        return root != null && root.canWrite();
-    }
-
     @PluginMethod
     public void openDocumentTree(PluginCall call) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
@@ -147,11 +129,11 @@ public class PublicLibraryPlugin extends Plugin {
     @PluginMethod
     public void getTree(PluginCall call) {
         Uri tree = saf().getTreeUri();
-        boolean valid = isTreeValid(tree);
+        boolean valid = saf().hasTree();
         JSObject ret = new JSObject();
         ret.put("treeUri", tree != null ? tree.toString() : null);
         if (valid) {
-            DocumentFile root = DocumentFile.fromTreeUri(getContext(), tree);
+            DocumentFile root = saf().rootDir();
             ret.put("displayName", root != null && root.getName() != null ? root.getName() : "");
         } else {
             ret.put("displayName", null);
