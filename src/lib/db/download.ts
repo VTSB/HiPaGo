@@ -109,12 +109,12 @@ export async function updateDownloadProgress(
  * Update the folderName of an existing download row.
  * A no-op if the galleryId does not exist.
  */
-export async function setDownloadFolderName(
-  galleryId: number,
-  folderName: string,
-): Promise<void> {
+export async function setDownloadFolderName(galleryId: number, folderName: string): Promise<void> {
   const db = await ensureDb();
-  await db.execute('UPDATE download SET folderName = ? WHERE galleryId = ?', [folderName, galleryId]);
+  await db.execute('UPDATE download SET folderName = ? WHERE galleryId = ?', [
+    folderName,
+    galleryId,
+  ]);
   await persistDb();
 }
 
@@ -128,10 +128,11 @@ export async function markDownloadMigrated(
   migratedAt: string,
 ): Promise<void> {
   const db = await ensureDb();
-  await db.execute(
-    'UPDATE download SET folderName = ?, migratedAt = ? WHERE galleryId = ?',
-    [folderName, migratedAt, galleryId],
-  );
+  await db.execute('UPDATE download SET folderName = ?, migratedAt = ? WHERE galleryId = ?', [
+    folderName,
+    migratedAt,
+    galleryId,
+  ]);
   await persistDb();
 }
 
