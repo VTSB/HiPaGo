@@ -199,6 +199,15 @@ public class SafLibrary {
         return p.lastIndexOf('/');
     }
 
+    static String fileNameForPath(String relPath) {
+        int idx = lastSlash(relPath);
+        return idx < 0 ? relPath : relPath.substring(idx + 1);
+    }
+
+    static String tempNameForPublish(String finalName, long nonce) {
+        return "." + finalName + ".tmp-" + Long.toHexString(nonce);
+    }
+
     /** Resolve a relative FILE path to its DocumentFile, or null if missing. */
     private DocumentFile resolveFile(String relPath) {
         assertSafe(relPath);
@@ -291,32 +300,81 @@ public class SafLibrary {
     /**
      * Copy a LOCAL source file (absolute or {@code file://} path, e.g. a temp in
      * the cache dir) into the tree at relative {@code toRelPath}. The source stays
-     * a normal File; only the destination is a content URI. Returns bytes written.
+     * a normal File; only the destination is a content URI. Writes go to a sibling
+     * temp document first, then publish by rename so a killed provider write does
+     * not leave partial bytes under the final filename. Returns bytes written.
      */
     public long copyFromFile(String from, String toRelPath) throws Exception {
         if (rootDir() == null) throw new Exception("NO_TREE");
         if (from == null) throw new Exception("from is required");
         String srcPath = from.startsWith("file://") ? Uri.parse(from).getPath() : from;
+        if (srcPath == null || srcPath.isEmpty()) throw new Exception("source file not found: " + from);
         File src = new File(srcPath);
         if (!src.exists() || !src.isFile()) {
             throw new Exception("source file not found: " + from);
         }
-        Uri uri = ensureFileUri(toRelPath);
-        if (uri == null) throw new Exception("copy create failed: " + toRelPath);
+        assertSafe(toRelPath);
+        int idx = lastSlash(toRelPath);
+        String dirPart = idx < 0 ? "" : toRelPath.substring(0, idx);
+        String finalName = fileNameForPath(toRelPath);
+        DocumentFile dir = resolveDir(dirPart, true);
+        if (dir == null) throw new Exception("copy create failed: " + toRelPath);
+
+        String tempName = tempNameForPublish(finalName, System.nanoTime());
+        DocumentFile existingTemp = dir.findFile(tempName);
+        if (existingTemp != null && !existingTemp.delete()) {
+            throw new Exception("copy temp cleanup failed: " + tempName);
+        }
+
+        DocumentFile temp = dir.createFile(mimeFor(finalName), tempName);
+        if (temp == null) throw new Exception("copy temp create failed: " + toRelPath);
+
         ContentResolver cr = context.getContentResolver();
         long written = 0;
-        try (FileInputStream fis = new FileInputStream(src);
-             OutputStream os = cr.openOutputStream(uri, "wt")) {
-            if (os == null) throw new Exception("openOutputStream returned null");
-            byte[] buf = new byte[65536];
-            int n;
-            while ((n = fis.read(buf)) != -1) {
-                os.write(buf, 0, n);
-                written += n;
+        try {
+            try (FileInputStream fis = new FileInputStream(src);
+                 OutputStream os = cr.openOutputStream(temp.getUri(), "wt")) {
+                if (os == null) throw new Exception("openOutputStream returned null");
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = fis.read(buf)) != -1) {
+                    os.write(buf, 0, n);
+                    written += n;
+                }
+                os.flush();
             }
-            os.flush();
+
+            long sourceSize = src.length();
+            if (sourceSize <= 0 || written != sourceSize || temp.length() != sourceSize) {
+                throw new Exception("incomplete temp SAF write");
+            }
+
+            DocumentFile existingFinal = dir.findFile(finalName);
+            if (existingFinal != null) {
+                if (!existingFinal.isFile()) throw new Exception("destination is not a file: " + toRelPath);
+                if (!existingFinal.delete()) throw new Exception("destination delete failed: " + toRelPath);
+            }
+            if (!temp.renameTo(finalName)) {
+                throw new Exception("copy publish failed: " + toRelPath);
+            }
+            DocumentFile published = dir.findFile(finalName);
+            if (published == null || !published.isFile() || published.length() != sourceSize) {
+                throw new Exception("copy publish verification failed: " + toRelPath);
+            }
+            return written;
+        } catch (Throwable t) {
+            try {
+                DocumentFile staleTemp = dir.findFile(tempName);
+                if (staleTemp != null && staleTemp.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    staleTemp.delete();
+                }
+            } catch (Throwable ignored) {
+                // Best-effort cleanup; a stale temp file is ignored by readers.
+            }
+            if (t instanceof Exception) throw (Exception) t;
+            throw new Exception(t);
         }
-        return written;
     }
 
     /** Return the file size for a relative file, or -1 when missing/unknown. */
