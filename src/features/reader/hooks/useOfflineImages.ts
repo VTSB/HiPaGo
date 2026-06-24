@@ -97,7 +97,7 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
 
       if (cancelled || runId !== runIdRef.current) return;
 
-      if (pages.length === 0) {
+      if (pages.length === 0 || ((row.pageCount ?? 0) > 0 && pages.length < row.pageCount)) {
         setResult({ sources: null, urls: null, dims: null, missing: true, loading: false });
         return;
       }

@@ -37,13 +37,13 @@ const mockRevokeObjectURL = vi.fn((url: string) => {
 
 import { useOfflineImages } from '../hooks/useOfflineImages';
 
-function makeRow(status: DBDownload['status'], galleryId = 42): DBDownload {
+function makeRow(status: DBDownload['status'], galleryId = 42, pageCount = 3): DBDownload {
   return {
     galleryId,
     title: 'Test Gallery',
     thumbnail: '',
     tags: '{}',
-    pageCount: 3,
+    pageCount,
     totalBytes: 1000,
     downloadedAt: new Date().toISOString(),
     status,
@@ -146,7 +146,7 @@ describe('useOfflineImages - completed gallery', () => {
         `file://${galleryId}/${index}.${ext}`,
     );
     mockCreateDownloadStore.mockResolvedValue({ imageUrl });
-    mockGetDownload.mockResolvedValue(makeRow('complete', 7));
+    mockGetDownload.mockResolvedValue(makeRow('complete', 7, 2));
     mockGetDownloadedGalleryPages.mockResolvedValue([
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'jpg' },
@@ -173,7 +173,7 @@ describe('useOfflineImages - completed gallery', () => {
 
   it('falls back to lazy loaders when store creation fails', async () => {
     mockCreateDownloadStore.mockRejectedValue(new Error('storage unavailable'));
-    mockGetDownload.mockResolvedValue(makeRow('complete'));
+    mockGetDownload.mockResolvedValue(makeRow('complete', 42, 1));
     mockGetDownloadedGalleryPages.mockResolvedValue([{ index: 0, ext: 'webp' }]);
 
     const { result } = renderHook(() => useOfflineImages(42));
@@ -200,13 +200,29 @@ describe('useOfflineImages - missing stored files', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it('returns missing:true when the manifest is shorter than the completed row pageCount', async () => {
+    mockGetDownload.mockResolvedValue(makeRow('complete'));
+    mockGetDownloadedGalleryPages.mockResolvedValue([
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+
+    const { result } = renderHook(() => useOfflineImages(42));
+    await flushHook();
+
+    expect(result.current.sources).toBeNull();
+    expect(result.current.urls).toBeNull();
+    expect(result.current.missing).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
   it('lets a lazy native URL loader report null for a missing page', async () => {
     mockCreateDownloadStore.mockResolvedValue({
       imageUrl: vi.fn(async (_galleryId: number, index: number) =>
         index === 0 ? 'file://0.webp' : null,
       ),
     });
-    mockGetDownload.mockResolvedValue(makeRow('complete'));
+    mockGetDownload.mockResolvedValue(makeRow('complete', 42, 2));
     mockGetDownloadedGalleryPages.mockResolvedValue([
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'webp' },
@@ -228,7 +244,7 @@ describe('useOfflineImages - missing stored files', () => {
   });
 
   it('lets a lazy page loader report null for a missing page', async () => {
-    mockGetDownload.mockResolvedValue(makeRow('complete', 55));
+    mockGetDownload.mockResolvedValue(makeRow('complete', 55, 2));
     mockGetDownloadedGalleryPages.mockResolvedValue([
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'webp' },

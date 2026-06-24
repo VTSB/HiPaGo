@@ -270,6 +270,7 @@ import {
 } from '../download-progress';
 import { DownloadWorker } from '@/lib/plugins/downloadWorker';
 import * as queueOps from '@/lib/db/download-queue';
+import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
 
 beforeEach(async () => {
   queue.length = 0;
@@ -293,6 +294,7 @@ beforeEach(async () => {
   androidFlag = false;
   iosFlag = false;
   dl.mockReset();
+  vi.mocked(resolveGalleryDetail).mockClear();
   unmetered.mockReset();
   unmetered.mockResolvedValue(true);
   useDownloadProgressStore.setState({
@@ -440,6 +442,24 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(managerRows.map((q) => q.id).sort()).toEqual([1, 2, 3]);
     expect(managerRows.every((q) => q.status === 'downloading')).toBe(true);
     expect(managerRows.every((q) => q.progress?.total === 1)).toBe(true);
+  });
+
+  it('marks Android handoff failures as failed rows before removing them from the queue', async () => {
+    androidFlag = true;
+    workerWriteThrows.value = true;
+    queue.push({ id: 250, pageCount: 0 });
+
+    await processQueue();
+
+    expect(dl).not.toHaveBeenCalled();
+    expect(workerEnqueues).not.toContain('250');
+    expect(errorRows).toContainEqual({
+      galleryId: 250,
+      status: 'failed',
+      lastError: 'writeWorkOrder failed',
+    });
+    expect(removed).toContain(250);
+    expect(useDownloadProgressStore.getState().entries[250]?.error).toBe('writeWorkOrder failed');
   });
 
   it('non-Android still runs the in-process downloader (no worker call)', async () => {
@@ -1019,9 +1039,80 @@ describe('auto-retry scheduler timer (AC-004)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('Android: re-enqueues due rows on a metered network because native worker is CONNECTED-gated', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const { armAutoRetryTimer } = await import('../download-progress');
+      unmetered.mockResolvedValue(false);
+      earliest = new Date(Date.now() + 30_000).toISOString();
+      dueRows = [{ galleryId: 89, title: 'G89', thumbnail: '/tn', tags: '{}' }];
+
+      armAutoRetryTimer();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const autoRequeue = enqueued.find((e) => (e.meta as { galleryId: number }).galleryId === 89);
+      expect(autoRequeue).toBeTruthy();
+      expect((autoRequeue!.opts as { keepRetryState?: boolean }).keepRetryState).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('queue actions (AC-001 / Task B)', () => {
+  it('start ignores a shorter offline-detail file list when an existing complete row expects more pages', async () => {
+    downloadRows.set(71, { status: 'complete', pageCount: 3 });
+    vi.mocked(resolveGalleryDetail).mockResolvedValueOnce({
+      files: [
+        {
+          name: 'resolved-1.webp',
+          hash: 'h1',
+          width: 1,
+          height: 1,
+          haswebp: 1,
+          hasavif: 0,
+          hasavifsmalltn: 0,
+        },
+        {
+          name: 'resolved-2.webp',
+          hash: 'h2',
+          width: 1,
+          height: 1,
+          haswebp: 1,
+          hasavif: 0,
+          hasavifsmalltn: 0,
+        },
+      ],
+    } as Awaited<ReturnType<typeof resolveGalleryDetail>>);
+    dl.mockResolvedValue(undefined);
+
+    await useDownloadProgressStore.getState().start({
+      id: 71,
+      title: 'Partial fallback',
+      thumbnail: '/tn',
+      files: [
+        {
+          name: 'partial.webp',
+          hash: 'h',
+          width: 1,
+          height: 1,
+          haswebp: 1,
+          hasavif: 0,
+          hasavifsmalltn: 0,
+        },
+      ],
+      tags: {},
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(vi.mocked(resolveGalleryDetail)).toHaveBeenCalledWith(71);
+    expect(dl.mock.calls[0][3]).toHaveLength(2);
+  });
+
   it('pause(active) marks the row paused (not failed) and retains its pages', async () => {
     queue.push({ id: 7, pageCount: 3 });
     let paused = false;
@@ -1183,10 +1274,11 @@ describe('reconcileQueue (AC-007)', () => {
     expect(completed?.status).toBe('complete');
   });
 
-  it('iOS: marks a gallery complete when its manifest covers all pages', async () => {
+  it('iOS: does NOT infer completion from manifest length because pageCount is progressive', async () => {
     iosFlag = true;
-    // A 'downloading' row targeting 2 pages; the BGProcessingTask finished it
-    // while the app was closed (DB-decoupled, like Android).
+    // iOS foreground rows store pageCount as current progress, not target total.
+    // A background task may have written more pages than that without finishing
+    // the full gallery, so launch reconcile must resume instead of completing.
     adapterRows.push({
       galleryId: 57,
       title: 'I',
@@ -1205,10 +1297,15 @@ describe('reconcileQueue (AC-007)', () => {
     await reconcileQueue();
     await new Promise((r) => setTimeout(r, 5));
 
-    const completed = upsertedRows.find((r) => (r as { galleryId: number }).galleryId === 57) as
-      | { status: string }
-      | undefined;
-    expect(completed?.status).toBe('complete');
+    const completed = upsertedRows.find(
+      (r) =>
+        (r as { galleryId: number }).galleryId === 57 &&
+        (r as { status: string }).status === 'complete',
+    );
+    expect(completed).toBeFalsy();
+    expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 57 }),
+    );
   });
 
   it('Android: does NOT mark complete when the manifest is short of the target', async () => {
@@ -1283,5 +1380,23 @@ describe('reconcileQueue (AC-007)', () => {
     expect(workOrderWrites.map((w) => w.galleryId)).toContain('14');
     expect(workerEnqueues).toContain('14');
     expect(dl).not.toHaveBeenCalled();
+  });
+
+  it('Android: re-enqueues due auto-retries on a metered network for CONNECTED WorkManager', async () => {
+    androidFlag = true;
+    unmetered.mockResolvedValue(false);
+    dueRows = [{ galleryId: 15, title: 'Retry', thumbnail: '/tn', tags: '{}' }];
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 15 }),
+      { keepRetryState: true },
+    );
+    expect(workOrderWrites.map((w) => w.galleryId)).toContain('15');
+    expect(workerEnqueues).toContain('15');
   });
 });
