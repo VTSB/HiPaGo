@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { getDownload } from '@/lib/db/download';
 import { createDownloadStore } from '@/lib/storage/download-store';
-import { getDownloadedGalleryPages, getDownloadedImage } from '@/lib/utils/download-zip';
+import {
+  getDownloadedGalleryPages,
+  getDownloadedImage,
+  hasCompleteDownloadedGallery,
+} from '@/lib/utils/download-zip';
 
 export interface OfflineImageDim {
   width: number;
@@ -97,7 +101,14 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
 
       if (cancelled || runId !== runIdRef.current) return;
 
-      if (pages.length === 0 || ((row.pageCount ?? 0) > 0 && pages.length < row.pageCount)) {
+      let completeOnDisk = false;
+      try {
+        completeOnDisk = await hasCompleteDownloadedGallery(galleryId, row.pageCount ?? 0);
+      } catch {
+        completeOnDisk = false;
+      }
+
+      if (!completeOnDisk) {
         setResult({ sources: null, urls: null, dims: null, missing: true, loading: false });
         return;
       }

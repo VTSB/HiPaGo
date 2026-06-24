@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { getDownload } from '@/lib/db/download';
-import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
+import { hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
 import { useDownloadProgressStore } from '@/lib/store/download-progress';
 
 export interface DownloadedFilesPresence {
@@ -53,11 +53,9 @@ export function useDownloadedFilesPresent(id: number): DownloadedFilesPresence {
           setState({ filesMissing: false, checking: false });
           return;
         }
-        const pages = await getDownloadedGalleryPages(id);
+        const completeOnDisk = await hasCompleteDownloadedGallery(id, row.pageCount);
         if (cancelled) return;
-        const missing =
-          pages.length === 0 || (row.pageCount > 0 && pages.length < row.pageCount);
-        setState({ filesMissing: missing, checking: false });
+        setState({ filesMissing: !completeOnDisk, checking: false });
       } catch {
         // Transient/unknown storage error — assume present, don't nag.
         if (!cancelled) setState({ filesMissing: false, checking: false });

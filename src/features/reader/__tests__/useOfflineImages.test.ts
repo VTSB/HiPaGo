@@ -6,6 +6,7 @@ import type { DBDownload } from '@/lib/db/schema';
 const mockGetDownload = vi.fn();
 const mockGetDownloadedGalleryPages = vi.fn();
 const mockGetDownloadedImage = vi.fn();
+const mockHasCompleteDownloadedGallery = vi.fn();
 const mockCreateDownloadStore = vi.fn();
 
 vi.mock('@/lib/db/download', () => ({
@@ -20,6 +21,8 @@ vi.mock('@/lib/utils/download-zip', () => ({
   getDownloadedGalleryPages: (galleryId: number) => mockGetDownloadedGalleryPages(galleryId),
   getDownloadedImage: (galleryId: number, index: number) =>
     mockGetDownloadedImage(galleryId, index),
+  hasCompleteDownloadedGallery: (galleryId: number, expectedPageCount: number) =>
+    mockHasCompleteDownloadedGallery(galleryId, expectedPageCount),
 }));
 
 const createdUrls: string[] = [];
@@ -64,6 +67,7 @@ beforeEach(() => {
   revokedUrls.length = 0;
   urlCounter = 0;
   mockCreateDownloadStore.mockResolvedValue({});
+  mockHasCompleteDownloadedGallery.mockResolvedValue(true);
   vi.stubGlobal('URL', {
     createObjectURL: mockCreateObjectURL,
     revokeObjectURL: mockRevokeObjectURL,
@@ -190,6 +194,7 @@ describe('useOfflineImages - missing stored files', () => {
   it('returns missing:true when status is complete but manifest is empty', async () => {
     mockGetDownload.mockResolvedValue(makeRow('complete'));
     mockGetDownloadedGalleryPages.mockResolvedValue([]);
+    mockHasCompleteDownloadedGallery.mockResolvedValue(false);
 
     const { result } = renderHook(() => useOfflineImages(42));
     await flushHook();
@@ -206,10 +211,29 @@ describe('useOfflineImages - missing stored files', () => {
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'webp' },
     ]);
+    mockHasCompleteDownloadedGallery.mockResolvedValue(false);
 
     const { result } = renderHook(() => useOfflineImages(42));
     await flushHook();
 
+    expect(result.current.sources).toBeNull();
+    expect(result.current.urls).toBeNull();
+    expect(result.current.missing).toBe(true);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('returns missing:true when manifest covers pageCount but an image file is missing', async () => {
+    mockGetDownload.mockResolvedValue(makeRow('complete', 42, 2));
+    mockGetDownloadedGalleryPages.mockResolvedValue([
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    mockHasCompleteDownloadedGallery.mockResolvedValue(false);
+
+    const { result } = renderHook(() => useOfflineImages(42));
+    await flushHook();
+
+    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 2);
     expect(result.current.sources).toBeNull();
     expect(result.current.urls).toBeNull();
     expect(result.current.missing).toBe(true);

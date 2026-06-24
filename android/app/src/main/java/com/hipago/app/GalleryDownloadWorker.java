@@ -112,7 +112,6 @@ public class GalleryDownloadWorker extends Worker {
         }
 
         java.util.Set<String> failedThisRun = new java.util.HashSet<>();
-        boolean hadRetryableFailure = false;
 
         while (!isStopped()) {
             File[] orderFiles = listOrderFiles(handoffDir);
@@ -165,14 +164,16 @@ public class GalleryDownloadWorker extends Worker {
                     // Keep the file for a later scheduled/reconciled retry, but do
                     // not immediately spin on the same failing gallery in this run.
                     failedThisRun.add(orderName);
-                    hadRetryableFailure = true;
                 }
             }
 
             // Only previously-failed files remain. Finish this run; a future
             // enqueue/reconcile will schedule another pass.
             if (!processedAny) {
-                return hadRetryableFailure ? Result.retry() : Result.success();
+                // Leave failed work-orders in place, but do not let WorkManager
+                // spin on stale URLs or deterministic page failures. App-level
+                // reconcile/auto-retry will re-enqueue a fresh pass.
+                return Result.success();
             }
         }
 
@@ -269,6 +270,10 @@ public class GalleryDownloadWorker extends Worker {
             File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
             try {
                 BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
+                if (isStopped() || !orderFile.exists()) {
+                    deleteProgress(galleryId);
+                    return false;
+                }
                 long sourceSize = temp.length();
                 long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
                 long storedSize = saf.size(relPath);
@@ -293,6 +298,10 @@ public class GalleryDownloadWorker extends Worker {
             // Write/update the 0000.json manifest incrementally (JSON array of
             // exts) so the reader/reconcile sees the gallery growing. The manifest
             // path is the gallery folder + 0000.json, derived from the page relPath.
+            if (isStopped() || !orderFile.exists()) {
+                deleteProgress(galleryId);
+                return false;
+            }
             if (!writeManifest(relPath, exts, i + 1)) {
                 deleteProgress(galleryId);
                 return false;
@@ -302,6 +311,10 @@ public class GalleryDownloadWorker extends Worker {
         // All pages present → write the final, full manifest once more (defensive)
         // and report success.
         String anyRelPath = pages.optJSONObject(0).optString("relPath", null);
+        if (isStopped() || !orderFile.exists()) {
+            deleteProgress(galleryId);
+            return false;
+        }
         if (anyRelPath != null && !writeManifest(anyRelPath, exts, total)) {
             deleteProgress(galleryId);
             return false;
