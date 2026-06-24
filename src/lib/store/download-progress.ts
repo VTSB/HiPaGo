@@ -1031,13 +1031,18 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         // Android: the gallery may have been handed off to the native worker
         // (no controller, not in the TS queue). Drop its work-order so the
         // worker skips it (and stops if the handoff queue empties).
-        void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
-        void setDownloadError(id, 'failed', 'Cancelled')
-          .catch(() => {})
-          .finally(() => notifyDownloadLibraryChanged(true));
-        void removeFromQueue(id)
-          .catch(() => {})
-          .finally(() => void refreshQueue());
+        void (async () => {
+          await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          const storedPages = await getDownloadedGalleryPages(id).catch(() => []);
+          if (storedPages.length === 0) {
+            await deleteDownload(id).catch(() => {});
+          } else {
+            await setDownloadError(id, 'failed', 'Cancelled').catch(() => {});
+            await removeFromQueue(id).catch(() => {});
+          }
+          notifyDownloadLibraryChanged(true);
+          void refreshQueue();
+        })();
         fileCache.delete(id);
         markNotDownloaded(id);
         setEntry(id, null);

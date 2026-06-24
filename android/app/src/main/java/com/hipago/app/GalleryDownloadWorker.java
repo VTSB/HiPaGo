@@ -280,7 +280,7 @@ public class GalleryDownloadWorker extends Worker {
             String relPath = page.optString("relPath", null);
             String url = page.optString("url", null);
             String ext = page.optString("ext", "webp");
-            if (relPath == null || url == null) {
+            if (!isValidRelPath(relPath) || !isValidDownloadUrl(url) || !isValidExtension(ext)) {
                 deleteProgress(galleryId);
                 return GalleryResult.UNRECOVERABLE;
             }
@@ -340,7 +340,7 @@ public class GalleryDownloadWorker extends Worker {
                 return GalleryResult.CANCELED;
             }
             if (!writeManifest(relPath, exts, i + 1)) {
-                deleteProgress(galleryId);
+                writeProgressFailure(galleryId, "Background download failed");
                 return GalleryResult.RETRYABLE_FAILURE;
             }
         }
@@ -353,7 +353,7 @@ public class GalleryDownloadWorker extends Worker {
             return GalleryResult.CANCELED;
         }
         if (anyRelPath != null && !writeManifest(anyRelPath, exts, total)) {
-            deleteProgress(galleryId);
+            writeProgressFailure(galleryId, "Background download failed");
             return GalleryResult.RETRYABLE_FAILURE;
         }
         // Gallery complete → remove its live-progress file (the poller then reads
@@ -507,6 +507,33 @@ public class GalleryDownloadWorker extends Worker {
             out.put(key, h.optString(key, ""));
         }
         return out.isEmpty() ? null : out;
+    }
+
+    static boolean isValidRelPath(String relPath) {
+        if (relPath == null || relPath.isEmpty()) return false;
+        if (relPath.startsWith("/") || relPath.startsWith("\\")) return false;
+        if (relPath.indexOf('\0') >= 0 || relPath.indexOf('\\') >= 0) return false;
+        String[] parts = relPath.split("/", -1);
+        for (String part : parts) {
+            if (part.isEmpty() || part.equals(".") || part.equals("..")) return false;
+        }
+        return true;
+    }
+
+    static boolean isValidDownloadUrl(String url) {
+        if (url == null || url.isEmpty()) return false;
+        return url.startsWith("https://") || url.startsWith("http://");
+    }
+
+    static boolean isValidExtension(String ext) {
+        if (ext == null || ext.isEmpty() || ext.length() > 16) return false;
+        for (int i = 0; i < ext.length(); i++) {
+            char c = ext.charAt(i);
+            boolean alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+            boolean digit = c >= '0' && c <= '9';
+            if (!alpha && !digit) return false;
+        }
+        return true;
     }
 
     private static JSONObject readOrder(File file) {

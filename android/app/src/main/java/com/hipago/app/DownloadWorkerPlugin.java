@@ -86,6 +86,15 @@ public class DownloadWorkerPlugin extends Plugin {
         return new File(progressDir(), galleryId + ".json");
     }
 
+    static boolean isValidGalleryId(String galleryId) {
+        if (galleryId == null || galleryId.isEmpty()) return false;
+        for (int i = 0; i < galleryId.length(); i++) {
+            char c = galleryId.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
     private void deleteProgress(String galleryId) {
         File f = progressFile(galleryId);
         if (f.exists()) {
@@ -148,11 +157,11 @@ public class DownloadWorkerPlugin extends Plugin {
     public void writeWorkOrder(PluginCall call) {
         String galleryId = call.getString("galleryId");
         String json = call.getString("json");
-        if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
+        if (!isValidGalleryId(galleryId)) { call.reject("galleryId must be numeric"); return; }
         if (json == null) { call.reject("json is required"); return; }
         try {
             String payloadGalleryId = workOrderGalleryId(json);
-            if (!galleryId.equals(payloadGalleryId)) {
+            if (!isValidGalleryId(payloadGalleryId) || !galleryId.equals(payloadGalleryId)) {
                 call.reject("work-order galleryId does not match filename");
                 return;
             }
@@ -266,7 +275,7 @@ public class DownloadWorkerPlugin extends Plugin {
     @PluginMethod
     public void getProgress(PluginCall call) {
         String galleryId = call.getString("galleryId");
-        if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
+        if (!isValidGalleryId(galleryId)) { call.reject("galleryId must be numeric"); return; }
         call.resolve(readProgressFile(progressFile(galleryId)));
     }
 
@@ -278,7 +287,7 @@ public class DownloadWorkerPlugin extends Plugin {
     @PluginMethod
     public void cancel(PluginCall call) {
         String galleryId = call.getString("galleryId");
-        if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
+        if (!isValidGalleryId(galleryId)) { call.reject("galleryId must be numeric"); return; }
         try {
             File f = orderFile(galleryId);
             if (f.exists()) {
