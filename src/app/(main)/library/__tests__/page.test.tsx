@@ -428,23 +428,25 @@ describe('LibraryPage', () => {
     mockSearchDownloads.mockResolvedValue([]);
 
     vi.useFakeTimers();
-    await act(async () => {
-      await renderPage();
-    });
-    // Drain the initial listDownloads fetch
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
+    try {
+      await act(async () => {
+        await renderPage();
+      });
+      // Drain the initial listDownloads fetch
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
 
-    const input = screen.getByRole('textbox');
-    act(() => {
-      fireEvent.change(input, { target: { value: 'dragon' } });
-    });
+      const input = screen.getByRole('textbox');
+      act(() => {
+        fireEvent.change(input, { target: { value: 'dragon' } });
+      });
 
-    // Debounce has not fired — search must not have been called yet
-    expect(mockSearchDownloads).not.toHaveBeenCalled();
-
-    vi.useRealTimers();
+      // Debounce has not fired — search must not have been called yet
+      expect(mockSearchDownloads).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('calls searchDownloads with typed query after debounce elapses', async () => {
