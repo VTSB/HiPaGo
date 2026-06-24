@@ -3,6 +3,40 @@ apply plugin: 'com.android.application'
 // generated/java/uniffi/bypass/ by scripts/build-android.mjs.
 apply plugin: 'kotlin-android'
 
+def releaseSigningPropNames = [
+    'HIPAGO_KEYSTORE_PATH',
+    'HIPAGO_KEYSTORE_PASSWORD',
+    'HIPAGO_KEY_ALIAS',
+    'HIPAGO_KEY_ALIAS_PASSWORD',
+]
+
+def readReleaseSigningProp = { name ->
+    def value = findProperty(name)
+    value == null ? '' : value.toString().trim()
+}
+
+def releaseSigningProps = releaseSigningPropNames.collectEntries { name ->
+    [(name): readReleaseSigningProp(name)]
+}
+def releaseSigningRequested = releaseSigningProps.values().any { it }
+def signedReleaseRequired = readReleaseSigningProp('HIPAGO_REQUIRE_SIGNED_RELEASE').equalsIgnoreCase('true') ||
+    (System.getenv('HIPAGO_REQUIRE_SIGNED_RELEASE') ?: '').equalsIgnoreCase('true')
+def missingReleaseSigningProps = releaseSigningPropNames.findAll { !releaseSigningProps[it] }
+
+if ((signedReleaseRequired || releaseSigningRequested) && !missingReleaseSigningProps.empty) {
+    throw new GradleException(
+        'Android release signing is required but these Gradle properties are missing: ' +
+            missingReleaseSigningProps.join(', ')
+    )
+}
+
+if (releaseSigningRequested && !file(releaseSigningProps.HIPAGO_KEYSTORE_PATH).isFile()) {
+    throw new GradleException(
+        'Android release signing keystore was not found: ' +
+            releaseSigningProps.HIPAGO_KEYSTORE_PATH
+    )
+}
+
 android {
     namespace "com.hipago.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -26,12 +60,11 @@ android {
         // the block is created but no storeFile is set, so any build that
         // references it would fail loudly — this is intentional.
         release {
-            def storeFilePath = findProperty('HIPAGO_KEYSTORE_PATH') as String
-            if (storeFilePath) {
-                storeFile file(storeFilePath)
-                storePassword findProperty('HIPAGO_KEYSTORE_PASSWORD') as String
-                keyAlias findProperty('HIPAGO_KEY_ALIAS') as String
-                keyPassword findProperty('HIPAGO_KEY_ALIAS_PASSWORD') as String
+            if (releaseSigningRequested) {
+                storeFile file(releaseSigningProps.HIPAGO_KEYSTORE_PATH)
+                storePassword releaseSigningProps.HIPAGO_KEYSTORE_PASSWORD
+                keyAlias releaseSigningProps.HIPAGO_KEY_ALIAS
+                keyPassword releaseSigningProps.HIPAGO_KEY_ALIAS_PASSWORD
             }
         }
     }
@@ -44,7 +77,7 @@ android {
             // (unsigned release APK), so `./gradlew assembleRelease` does
             // not require a developer to provision the secret. CI sets the
             // props before `gradlew assembleRelease` runs.
-            if (findProperty('HIPAGO_KEYSTORE_PATH')) {
+            if (releaseSigningRequested) {
                 signingConfig signingConfigs.release
             }
         }
