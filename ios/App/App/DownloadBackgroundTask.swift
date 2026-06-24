@@ -318,6 +318,18 @@ final class DownloadBackgroundTask {
                     headers: page.headers.isEmpty ? nil : page.headers,
                     destPath: temp.path
                 )
+                if shouldStop() {
+                    try? fileManager.removeItem(at: temp)
+                    return .stopped
+                }
+                if !fileManager.fileExists(atPath: orderFile.path) {
+                    try? fileManager.removeItem(at: temp)
+                    return .completed
+                }
+                guard isNonEmptyFile(temp) else {
+                    try? fileManager.removeItem(at: temp)
+                    return .partial
+                }
                 // Move temp → final. Remove any stale dest first (defensive: a
                 // zero-byte/partial leftover from a prior crashed run).
                 if fileManager.fileExists(atPath: dest.path) {
