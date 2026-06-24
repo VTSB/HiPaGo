@@ -17,7 +17,7 @@ vi.mock('@/lib/utils/download-zip', () => ({
 // Controllable store: the hook only reads it via primitive selectors.
 let storeState: { downloaded: Record<number, boolean>; entries: Record<number, unknown> };
 vi.mock('@/lib/store/download-progress', () => ({
-  useDownloadProgressStore: <T,>(selector: (s: typeof storeState) => T): T => selector(storeState),
+  useDownloadProgressStore: <T>(selector: (s: typeof storeState) => T): T => selector(storeState),
 }));
 
 import { useDownloadedFilesPresent } from '../useDownloadedFilesPresent';
@@ -41,12 +41,24 @@ beforeEach(() => {
 });
 
 describe('useDownloadedFilesPresent', () => {
-  it('not downloaded → filesMissing false, never reads disk', async () => {
+  it('no complete DB row → filesMissing false and never reads disk', async () => {
     storeState.downloaded = { 42: false };
+    mockGetDownload.mockResolvedValue(null);
     const { result } = renderHook(() => useDownloadedFilesPresent(42));
     await waitFor(() => expect(result.current.checking).toBe(false));
     expect(result.current.filesMissing).toBe(false);
-    expect(mockGetDownload).not.toHaveBeenCalled();
+    expect(mockGetDownload).toHaveBeenCalledWith(42);
+    expect(mockHasCompleteDownloadedGallery).not.toHaveBeenCalled();
+  });
+
+  it('downloaded flag false but complete DB row has missing files → missing', async () => {
+    storeState.downloaded = { 42: false };
+    mockGetDownload.mockResolvedValue(makeRow('complete', 3));
+    mockHasCompleteDownloadedGallery.mockResolvedValue(false);
+    const { result } = renderHook(() => useDownloadedFilesPresent(42));
+    await waitFor(() => expect(result.current.checking).toBe(false));
+    expect(result.current.filesMissing).toBe(true);
+    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 3);
   });
 
   it('complete + manifest covers all pages → not missing', async () => {

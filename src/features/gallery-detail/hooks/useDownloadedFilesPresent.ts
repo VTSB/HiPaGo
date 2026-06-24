@@ -15,9 +15,9 @@ export interface DownloadedFilesPresence {
 }
 
 /**
- * Verify that a gallery the store reports as downloaded ('complete') actually
- * has its image files on disk. A transient storage read error is treated as
- * "present" (filesMissing=false) so we never wrongly nag a re-download.
+ * Verify that a gallery with a completed DB row actually has its image files on
+ * disk. A transient storage read error is treated as "present"
+ * (filesMissing=false) so we never wrongly nag a re-download.
  *
  * Re-checks when the gallery changes, when its downloaded flag flips, and when
  * an active (re)download for it starts/finishes — so the button leaves the
@@ -40,9 +40,8 @@ export function useDownloadedFilesPresent(id: number): DownloadedFilesPresence {
       // Reset inside the async fn (not synchronously in the effect body) to
       // satisfy react-hooks/set-state-in-effect.
       setState({ filesMissing: false, checking: true });
-      // Only a completed download can have "missing" files; everything else is
-      // handled by the normal not-downloaded / downloading button states.
-      if (!isDownloaded || downloadActive) {
+      // Active work is handled by the normal downloading button state.
+      if (downloadActive) {
         if (!cancelled) setState({ filesMissing: false, checking: false });
         return;
       }
