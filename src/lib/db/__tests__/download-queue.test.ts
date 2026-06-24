@@ -188,16 +188,32 @@ describe('pauseQueued / resumeQueued', () => {
 // ---------------------------------------------------------------------------
 
 describe('removeFromQueue', () => {
-  it('clears queuePosition but keeps the row when it has pages', async () => {
+  it('turns a partial queued cancel into a visible failed library row', async () => {
     await upsertDownload(
       makeRow({ galleryId: 1, status: 'queued', queuePosition: 1, pageCount: 5 }),
     );
     await removeFromQueue(1);
     const row = await getDownload(1);
     expect(row).not.toBeNull();
+    expect(row!.status).toBe('failed');
     expect(row!.queuePosition == null).toBe(true);
     expect((await listQueue()).map((r) => r.galleryId)).not.toContain(1);
+    expect((await listLibraryDownloads()).map((r) => r.galleryId)).toContain(1);
     expect(await dequeueNextQueued()).toBeNull();
+  });
+
+  it('turns a partial paused cancel into a visible failed library row', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 2, status: 'paused', queuePosition: 1, pageCount: 3 }),
+    );
+    await removeFromQueue(2);
+
+    const row = await getDownload(2);
+    expect(row).not.toBeNull();
+    expect(row!.status).toBe('failed');
+    expect(row!.queuePosition == null).toBe(true);
+    expect((await listQueue()).map((r) => r.galleryId)).not.toContain(2);
+    expect((await listLibraryDownloads()).map((r) => r.galleryId)).toContain(2);
   });
 
   it('deletes the row when it has no pages', async () => {

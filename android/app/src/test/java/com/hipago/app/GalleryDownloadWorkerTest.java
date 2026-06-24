@@ -1,6 +1,7 @@
 package com.hipago.app;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +45,37 @@ public class GalleryDownloadWorkerTest {
         File order = writeOrder("string-position.json", "{\"galleryId\":123,\"queuePosition\":\"3\"}");
 
         assertEquals(3L, GalleryDownloadWorker.orderQueuePosition(order));
+    }
+
+    @Test
+    public void validatesWorkOrderPageRelPathsBeforeSafAccess() {
+        assertTrue(GalleryDownloadWorker.isValidRelPath("HiPaGo/123 Title/0001.webp"));
+        assertTrue(GalleryDownloadWorker.isValidRelPath("downloads/123/0001.avif"));
+
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(null));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(""));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath("/HiPaGo/123/0001.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo/123/"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo/../0001.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo//0001.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo\\123\\0001.webp"));
+    }
+
+    @Test
+    public void validatesDownloadUrlAndExtensionBeforeNativeDownload() {
+        assertTrue(GalleryDownloadWorker.isValidDownloadUrl("https://aa.hitomi.la/webp/x.webp"));
+        assertTrue(GalleryDownloadWorker.isValidDownloadUrl("http://example.test/x.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl(null));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl(""));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("file:///tmp/x.webp"));
+
+        assertTrue(GalleryDownloadWorker.isValidExtension("webp"));
+        assertTrue(GalleryDownloadWorker.isValidExtension("avif"));
+        assertTrue(GalleryDownloadWorker.isValidExtension("jpg"));
+        assertTrue(!GalleryDownloadWorker.isValidExtension(null));
+        assertTrue(!GalleryDownloadWorker.isValidExtension(""));
+        assertTrue(!GalleryDownloadWorker.isValidExtension("../webp"));
+        assertTrue(!GalleryDownloadWorker.isValidExtension("webp.tmp"));
     }
 
     private File writeOrder(String name, String json) throws Exception {
