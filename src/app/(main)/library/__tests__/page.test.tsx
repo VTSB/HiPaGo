@@ -37,6 +37,28 @@ const mockDevice = vi.hoisted(() => ({
 const mockSettings = vi.hoisted(() => ({
   libraryInitialTab: 'favorites' as 'favorites' | 'history' | 'downloads',
 }));
+const mockQueueOps = vi.hoisted(() => ({
+  enqueueDownload: vi.fn(async () => 1),
+}));
+const mockRetryOps = vi.hoisted(() => ({
+  clearAutoRetry: vi.fn(async () => {}),
+}));
+const mockDownloadProgressState = vi.hoisted(() => ({
+  entries: {},
+  downloaded: {},
+  queue: [],
+  globalPaused: false,
+  start: vi.fn(async () => {}),
+  cancel: vi.fn(),
+  refreshDownloaded: vi.fn(async () => {}),
+  refreshQueue: vi.fn(async () => {}),
+  reorder: vi.fn(async () => {}),
+  pause: vi.fn(async () => {}),
+  resume: vi.fn(async () => {}),
+  pauseAll: vi.fn(async () => {}),
+  resumeAll: vi.fn(async () => {}),
+  clearRetryPending: vi.fn(),
+}));
 const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
 const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
@@ -76,11 +98,11 @@ vi.mock('@/lib/db/download', () => ({
 // The queue layer + processor are pulled in by the rewired retry path; stub them
 // so the page test stays a pure UI render test (no DB adapter / network).
 vi.mock('@/lib/db/download-queue', () => ({
-  enqueueDownload: vi.fn(async () => 1),
+  enqueueDownload: mockQueueOps.enqueueDownload,
 }));
 
 vi.mock('@/lib/db/download-retry', () => ({
-  clearAutoRetry: vi.fn(async () => {}),
+  clearAutoRetry: mockRetryOps.clearAutoRetry,
   AUTO_RETRY_MAX: 3,
 }));
 
@@ -88,25 +110,9 @@ vi.mock('@/lib/store/download-progress', () => {
   // Full-enough store shape: DownloadQueueView (mounted atop DownloadsView since
   // Task B) reads queue/globalPaused + action selectors, and renders nothing when
   // queue is empty — so an empty queue keeps this a pure library-list render test.
-  const state = {
-    entries: {},
-    downloaded: {},
-    queue: [],
-    globalPaused: false,
-    start: vi.fn(async () => {}),
-    cancel: vi.fn(),
-    refreshDownloaded: vi.fn(async () => {}),
-    refreshQueue: vi.fn(async () => {}),
-    reorder: vi.fn(async () => {}),
-    pause: vi.fn(async () => {}),
-    resume: vi.fn(async () => {}),
-    pauseAll: vi.fn(async () => {}),
-    resumeAll: vi.fn(async () => {}),
-    clearRetryPending: vi.fn(),
-  };
   const useDownloadProgressStore = Object.assign(
-    (sel: (s: typeof state) => unknown) => sel(state),
-    { getState: () => state },
+    (sel: (s: typeof mockDownloadProgressState) => unknown) => sel(mockDownloadProgressState),
+    { getState: () => mockDownloadProgressState },
   );
   return {
     DOWNLOAD_LIBRARY_CHANGED_EVENT: 'hipago:download-library-changed',
@@ -214,6 +220,10 @@ describe('LibraryPage', () => {
     vi.clearAllMocks();
     mockDevice.isMobile = false;
     mockSettings.libraryInitialTab = 'favorites';
+    mockDownloadProgressState.entries = {};
+    mockDownloadProgressState.downloaded = {};
+    mockDownloadProgressState.queue = [];
+    mockDownloadProgressState.globalPaused = false;
     window.history.replaceState({}, '', '/library');
     sessionStorage.clear();
     mockCreateDownloadStore.mockResolvedValue({
@@ -468,8 +478,21 @@ describe('LibraryPage', () => {
     });
 
     expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'library.retry' })).toBeTruthy();
+    const retry = screen.getByRole('menuitem', { name: 'library.retry' });
+    expect(retry).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(retry);
+    });
+
+    await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4003 }));
+    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(4003);
+    expect(mockQueueOps.enqueueDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 4003, title: 'Missing Files' }),
+      { userInitiated: true },
+    );
+    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4003);
   });
 
   it('manual retry only starts the selected failed gallery', async () => {
@@ -490,6 +513,12 @@ describe('LibraryPage', () => {
     });
 
     await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4100 }));
+    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(4100);
+    expect(mockQueueOps.enqueueDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 4100, title: 'Failed Retry' }),
+      { userInitiated: true },
+    );
+    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4100);
   });
 
   it('hides export while complete-row integrity is still being checked', async () => {
