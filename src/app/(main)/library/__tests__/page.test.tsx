@@ -41,6 +41,7 @@ const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
 const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
 const mockCreateDownloadStore = vi.fn();
+const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockNavigation.replace }),
@@ -103,6 +104,11 @@ vi.mock('@/lib/store/download-progress', () => {
 
 vi.mock('@/lib/storage/download-store', () => ({
   createDownloadStore: () => mockCreateDownloadStore(),
+}));
+
+vi.mock('@/lib/utils/download-zip', () => ({
+  exportGalleryZip: (galleryId: number, title: string) =>
+    mockExportGalleryZip(galleryId, title),
 }));
 
 // Mock next/link as a plain anchor
@@ -200,6 +206,7 @@ describe('LibraryPage', () => {
       usage: vi.fn().mockResolvedValue(0),
       deleteGallery: vi.fn().mockResolvedValue(undefined),
     });
+    mockExportGalleryZip.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -406,6 +413,53 @@ describe('LibraryPage', () => {
     });
 
     expect(mockDeleteDownload).not.toHaveBeenCalled();
+  });
+
+  it('shows an export error when stored files are missing', async () => {
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4001, title: 'Broken Export' })]);
+    mockExportGalleryZip.mockRejectedValue(new Error('Missing downloaded page 2'));
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+    });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('library.exportFailed');
+    expect(mockExportGalleryZip).toHaveBeenCalledWith(4001, 'Broken Export');
+  });
+
+  it('does not start a duplicate export while one is already pending', async () => {
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4002, title: 'Slow Export' })]);
+    mockExportGalleryZip.mockReturnValue(new Promise(() => {}));
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+    });
+
+    expect(mockExportGalleryZip).toHaveBeenCalledTimes(1);
+    expect(mockExportGalleryZip).toHaveBeenCalledWith(4002, 'Slow Export');
   });
 
   // ── AC-006: search filters the list ──────────────────────────────────────

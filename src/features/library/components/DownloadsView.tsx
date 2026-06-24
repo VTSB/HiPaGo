@@ -477,6 +477,8 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_COUNT);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportingIdsRef = useRef<Set<number>>(new Set());
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
   const storeEntries = useDownloadProgressStore((s) => s.entries);
@@ -595,10 +597,25 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   );
 
   // Export a downloaded gallery's stored images back out as a ZIP.
-  const handleExport = useCallback(async (galleryId: number, title: string) => {
-    const { exportGalleryZip } = await import('@/lib/utils/download-zip');
-    await exportGalleryZip(galleryId, title);
-  }, []);
+  const handleExport = useCallback(
+    async (galleryId: number, title: string) => {
+      if (exportingIdsRef.current.has(galleryId)) return;
+      exportingIdsRef.current.add(galleryId);
+      setExportError(null);
+      try {
+        const { exportGalleryZip } = await import('@/lib/utils/download-zip');
+        await exportGalleryZip(galleryId, title);
+      } catch (e) {
+        console.error('Export failed:', e);
+        setExportError(t('library.exportFailed'));
+        void queryClient.invalidateQueries({ queryKey: ['library-list'] });
+        void queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      } finally {
+        exportingIdsRef.current.delete(galleryId);
+      }
+    },
+    [t, queryClient],
+  );
 
   // Retry a failed download by RESUMING it THROUGH THE QUEUE: enqueue the row
   // (userInitiated → front of queue) and kick the processor. The processor
@@ -658,6 +675,15 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
       {/* Download manager — active + queued/paused items, ABOVE the completed
           list. Hidden (renders null) when nothing is active or queued. */}
       <DownloadQueueView />
+
+      {exportError && (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+        >
+          {exportError}
+        </div>
+      )}
 
       {/* Search bar — hidden when library is empty and no query active. */}
       {showSearchBar && (
