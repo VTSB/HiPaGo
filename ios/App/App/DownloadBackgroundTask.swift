@@ -145,7 +145,7 @@ final class DownloadBackgroundTask {
                     self.cancelPendingTask()
                 }
             } else {
-                self.scheduleProcessingTask()
+                self.scheduleProcessingTask(after: 5 * 60)
             }
             task.setTaskCompleted(success: success)
         }
@@ -154,14 +154,17 @@ final class DownloadBackgroundTask {
     /// Submit a `BGProcessingTaskRequest` for the download identifier. Shared by
     /// `run` (reschedule) and `DownloadWorkerPlugin.enqueue` (initial submit).
     /// `requiresNetworkConnectivity` is set because every page is a network
-    /// download; `earliestBeginDate` is left nil so iOS may grant time as soon as
-    /// it sees fit. Best-effort: a submit failure (e.g. identifier not permitted,
+    /// download. Best-effort: a submit failure (e.g. identifier not permitted,
     /// simulator) is swallowed — the foreground path still downloads.
-    func scheduleProcessingTask() {
+    func scheduleProcessingTask(after delay: TimeInterval? = nil) {
         let request = BGProcessingTaskRequest(identifier: Self.taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
-        request.earliestBeginDate = nil
+        if let delay, delay > 0 {
+            request.earliestBeginDate = Date(timeIntervalSinceNow: delay)
+        } else {
+            request.earliestBeginDate = nil
+        }
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {

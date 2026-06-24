@@ -367,6 +367,7 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
       ...current,
       pageCount: pages.length,
       status: 'complete',
+      queuePosition: null,
       lastError: null,
     });
     return true;
@@ -656,8 +657,8 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           // open. pageCount carries the TARGET total here (the worker is
           // DB-decoupled and writes only the SAF manifest); reconcile marks the
           // row 'complete' once the on-disk manifest covers all pages. The row's
-          // queuePosition is cleared so it leaves listQueue() like the in-process
-          // active item does.
+          // status, not queuePosition, keeps it out of listQueue(); preserving
+          // queuePosition lets pause/resume restore the original order.
           await upsertDownload({
             galleryId: id,
             title: next.title,
@@ -668,7 +669,7 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
             downloadedAt: next.downloadedAt ?? new Date().toISOString(),
             status: 'downloading',
             folderName: galleryFolderName(id, next.title),
-            queuePosition: null,
+            queuePosition: next.queuePosition ?? null,
             lastError: null,
             retryCount: next.retryCount ?? null,
             nextRetryAt: null,
@@ -798,6 +799,9 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           // Drop it from the queue (it surfaces in the library as failed) and
           // advance to the next item.
           await removeFromQueue(id);
+          if (isIos()) {
+            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          }
           const message =
             e instanceof ApiError
               ? `Download failed (HTTP ${e.status})`

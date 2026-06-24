@@ -132,7 +132,7 @@ vi.mock('@/lib/db/download-queue', () => ({
 // (status:'failed', pageCount:0) so existing tests are unaffected.
 const downloadRows = new Map<
   number,
-  { retryCount?: number; status?: string; pageCount?: number }
+  { retryCount?: number; status?: string; pageCount?: number; queuePosition?: number | null }
 >();
 const upsertedRows: unknown[] = [];
 const errorRows: { galleryId: number; status: string; lastError: string | null }[] = [];
@@ -177,6 +177,7 @@ vi.mock('@/lib/db/download', () => ({
       status: r.status,
       pageCount: (r as { pageCount?: number }).pageCount ?? prev.pageCount,
       retryCount: (r as { retryCount?: number | null }).retryCount ?? prev.retryCount,
+      queuePosition: (r as { queuePosition?: number | null }).queuePosition ?? prev.queuePosition,
     });
   }),
   setDownloadError: vi.fn(async (galleryId: number, status: string, lastError: string | null) => {
@@ -465,10 +466,11 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     // A 'downloading' (background) row was upserted (not removed) so reconcile
     // can finalize it; the store surfaces a background entry.
     const upserted = upsertedRows.find((r) => (r as { galleryId: number }).galleryId === 100) as
-      | { status: string; pageCount: number }
+      | { status: string; pageCount: number; queuePosition: number | null }
       | undefined;
     expect(upserted?.status).toBe('downloading');
     expect(upserted?.pageCount).toBe(1); // resolveGalleryDetail returns 1 file
+    expect(upserted?.queuePosition).toBe(100);
     expect(useDownloadProgressStore.getState().entries[100]?.progress?.total).toBe(1);
   });
 
@@ -1147,6 +1149,18 @@ describe('iOS background backstop (Task D)', () => {
     expect(workerCancels).toContain('406');
     await run;
   });
+
+  it('failed foreground iOS download drops the stale backstop work-order before auto-retry', async () => {
+    iosFlag = true;
+    queue.push({ id: 408, pageCount: 0 });
+    dl.mockRejectedValueOnce(new Error('stale urls'));
+
+    await processQueue();
+
+    expect(workerCancels).toContain('408');
+    expect(removed).toContain(408);
+    expect(scheduled.map((r) => r.id)).toContain(408);
+  });
 });
 
 describe('cancel (AC-005)', () => {
@@ -1494,7 +1508,7 @@ describe('queue actions (AC-001 / Task B)', () => {
 
   it('pause(Android handed-off active) cancels native work and persists paused', async () => {
     androidFlag = true;
-    downloadRows.set(88, { status: 'downloading', pageCount: 3 });
+    downloadRows.set(88, { status: 'downloading', pageCount: 3, queuePosition: 2 });
     useDownloadProgressStore.setState({
       entries: { 88: { progress: { current: 1, total: 3 }, error: null } },
     });
@@ -1503,6 +1517,7 @@ describe('queue actions (AC-001 / Task B)', () => {
 
     expect(workerCancels).toContain('88');
     expect(errorRows).toContainEqual({ galleryId: 88, status: 'paused', lastError: null });
+    expect(downloadRows.get(88)?.queuePosition).toBe(2);
     expect(useDownloadProgressStore.getState().entries[88]).toBeUndefined();
   });
 
@@ -1638,7 +1653,9 @@ describe('reconcileQueue (AC-007)', () => {
       tags: '{}',
       pageCount: 3,
       status: 'downloading',
+      queuePosition: 5,
     });
+    downloadRows.set(55, { status: 'downloading', pageCount: 3, queuePosition: 5 });
     manifestPages.set(55, [
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'webp' },
@@ -1651,9 +1668,10 @@ describe('reconcileQueue (AC-007)', () => {
     await new Promise((r) => setTimeout(r, 5));
 
     const completed = upsertedRows.find((r) => (r as { galleryId: number }).galleryId === 55) as
-      | { status: string }
+      | { status: string; queuePosition: number | null }
       | undefined;
     expect(completed?.status).toBe('complete');
+    expect(completed?.queuePosition).toBeNull();
   });
 
   it('Android: recovers a failed row when native retry later completed on disk', async () => {
