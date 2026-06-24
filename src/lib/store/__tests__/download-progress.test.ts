@@ -66,8 +66,20 @@ vi.mock('@/lib/db/download-queue', () => ({
   enqueueDownload: vi.fn(async (meta: unknown, opts: unknown) => {
     enqueued.push({ meta, opts });
     const m = meta as { galleryId: number };
-    if (!queue.find((q) => q.id === m.galleryId)) queue.push({ id: m.galleryId, pageCount: 0 });
-    return queue.length;
+    const options = (opts ?? {}) as { userInitiated?: boolean; queuePosition?: number };
+    const existing = queue.find((q) => q.id === m.galleryId);
+    const pos =
+      options.queuePosition ??
+      (options.userInitiated
+        ? Math.min(1, ...queue.map((q) => q.pos ?? q.id)) - 1
+        : Math.max(0, ...queue.map((q) => q.pos ?? q.id)) + 1);
+    if (existing) {
+      existing.pos = pos;
+      existing.paused = false;
+    } else {
+      queue.push({ id: m.galleryId, pageCount: 0, pos });
+    }
+    return pos;
   }),
   // Queue surface consumed by the store actions (AC-001). listQueue() returns
   // queued + paused rows in position order, mirroring the production SQL.
@@ -387,6 +399,24 @@ describe('processQueue (AC-005)', () => {
     expect(removed).toContain(2);
     expect(useDownloadProgressStore.getState().entries[1]?.error).toBe('boom');
   });
+
+  it('detail resolution failure schedules the same automatic retry path as download failures', async () => {
+    queue.push({ id: 44, pageCount: 2 });
+    downloadRows.set(44, { retryCount: 1, status: 'failed', pageCount: 2 });
+    vi.mocked(resolveGalleryDetail).mockRejectedValueOnce(new Error('detail unavailable'));
+
+    await processQueue();
+
+    expect(errorRows).toContainEqual({
+      galleryId: 44,
+      status: 'failed',
+      lastError: 'Failed to resolve gallery',
+    });
+    expect(removed).toContain(44);
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]).toMatchObject({ id: 44, attempt: 2 });
+    expect(useDownloadProgressStore.getState().entries[44]?.retryAt).toBe(scheduled[0].dueAt);
+  });
 });
 
 describe('Android worker handoff (Task C, AC-005)', () => {
@@ -455,6 +485,7 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     androidFlag = true;
     workerWriteThrows.value = true;
     queue.push({ id: 250, pageCount: 0 });
+    downloadRows.set(250, { retryCount: 0, status: 'failed', pageCount: 0 });
 
     await processQueue();
 
@@ -467,6 +498,9 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     });
     expect(removed).toContain(250);
     expect(useDownloadProgressStore.getState().entries[250]?.error).toBe('writeWorkOrder failed');
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]).toMatchObject({ id: 250, attempt: 1 });
+    expect(useDownloadProgressStore.getState().entries[250]?.retryAt).toBe(scheduled[0].dueAt);
   });
 
   it('non-Android still runs the in-process downloader (no worker call)', async () => {
@@ -1131,6 +1165,38 @@ describe('auto-retry scheduler timer (AC-004)', () => {
 });
 
 describe('queue actions (AC-001 / Task B)', () => {
+  it('manual start processes only the tapped gallery and leaves stale queued work parked', async () => {
+    queue.push({ id: 80, pageCount: 0, pos: 5 });
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+    });
+
+    await useDownloadProgressStore.getState().start({
+      id: 81,
+      title: 'Manual',
+      thumbnail: '/tn',
+      files: [
+        {
+          name: 'manual.webp',
+          hash: 'h',
+          width: 1,
+          height: 1,
+          haswebp: 1,
+          hasavif: 0,
+          hasavifsmalltn: 0,
+        },
+      ],
+      tags: {},
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(order).toEqual([81]);
+    expect(removed).toContain(81);
+    expect(removed).not.toContain(80);
+    expect(queue.find((q) => q.id === 80)).toBeTruthy();
+  });
+
   it('start ignores a shorter offline-detail file list when an existing complete row expects more pages', async () => {
     downloadRows.set(71, { status: 'complete', pageCount: 3 });
     vi.mocked(resolveGalleryDetail).mockResolvedValueOnce({

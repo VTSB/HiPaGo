@@ -163,6 +163,29 @@ let storeApi: {
   hasEntry: (id: number) => boolean;
 } | null = null;
 
+async function scheduleFailureRetry(
+  id: number,
+  message: string,
+  entry: Pick<DownloadEntry, 'progress'> = { progress: null },
+): Promise<void> {
+  const failedRow = await getDownload(id).catch(() => null);
+  const usedAttempts = failedRow?.retryCount ?? 0;
+  if (failedRow && usedAttempts < AUTO_RETRY_MAX) {
+    const attempt = usedAttempts + 1;
+    const delay = AUTO_RETRY_BACKOFF_MS[usedAttempts];
+    const retryAt = new Date(Date.now() + delay).toISOString();
+    try {
+      await scheduleAutoRetry(id, attempt, retryAt);
+      storeApi?.setEntry(id, { ...entry, error: message, retryAt, attempt });
+      storeApi?.armAutoRetryTimer();
+      return;
+    } catch {
+      // Fall through to a plain failed entry if retry persistence fails.
+    }
+  }
+  storeApi?.setEntry(id, { ...entry, error: message });
+}
+
 /**
  * Re-arm the single auto-retry timer to the earliest pending `nextRetryAt`.
  *
@@ -545,14 +568,16 @@ async function scheduleIosBackgroundBackstop(
  * active download at a time. After each item completes/fails/pauses, re-checks
  * for the next 'queued' item and continues until the queue is empty.
  */
-export async function processQueue(): Promise<void> {
+export async function processQueue(options: { onlyGalleryId?: number } = {}): Promise<void> {
   if (running) return;
+  const onlyGalleryId = options.onlyGalleryId;
   running = true;
   try {
     // Honour a global pause before dequeuing the first item, too.
     let next = globalPaused ? null : await dequeueNextQueued();
     for (; next; next = globalPaused ? null : await dequeueNextQueued()) {
       const id = next.galleryId;
+      if (onlyGalleryId !== undefined && id !== onlyGalleryId) break;
 
       // Resolve the gallery's file list + tags. Prefer the cached list from a
       // manual start; otherwise re-fetch the detail (resume / auto-advance).
@@ -570,9 +595,12 @@ export async function processQueue(): Promise<void> {
         } catch (e) {
           // Could not resolve the gallery's files — leave it 'failed', advance.
           console.error('Queue: failed to resolve gallery detail', id, e);
-          await setDownloadError(id, 'failed', 'Failed to resolve gallery').catch(() => {});
+          const message = 'Failed to resolve gallery';
+          await setDownloadError(id, 'failed', message).catch(() => {});
           await removeFromQueue(id);
-          storeApi?.setEntry(id, { progress: null, error: 'Failed to resolve gallery' });
+          await scheduleFailureRetry(id, message);
+          storeApi?.markNotDownloaded(id);
+          notifyDownloadLibraryChanged(true);
           continue;
         }
       }
@@ -631,7 +659,8 @@ export async function processQueue(): Promise<void> {
           await setDownloadError(id, 'failed', message).catch(() => {});
           await removeFromQueue(id);
           storeApi?.markNotDownloaded(id);
-          storeApi?.setEntry(id, { progress: null, error: message });
+          await scheduleFailureRetry(id, message);
+          notifyDownloadLibraryChanged(true);
         } finally {
           fileCache.delete(id);
           storeApi?.refreshQueue();
@@ -717,25 +746,8 @@ export async function processQueue(): Promise<void> {
           // Staged auto-restart (Task E): if the row still has automatic
           // attempts left, schedule the next one on escalating backoff and
           // surface a "retry pending" entry. Otherwise leave it plain 'failed'
-          // (manual retry only). removeFromQueue kept the row 'failed' (it has
-          // pages) or deleted it (no pages); read it back to learn the count.
-          const failedRow = await getDownload(id).catch(() => null);
-          const usedAttempts = failedRow?.retryCount ?? 0;
-          if (failedRow && usedAttempts < AUTO_RETRY_MAX) {
-            const attempt = usedAttempts + 1;
-            const delay = AUTO_RETRY_BACKOFF_MS[usedAttempts];
-            const retryAt = new Date(Date.now() + delay).toISOString();
-            try {
-              await scheduleAutoRetry(id, attempt, retryAt);
-              storeApi?.setEntry(id, { progress: null, error: message, retryAt, attempt });
-              storeApi?.armAutoRetryTimer();
-            } catch {
-              storeApi?.setEntry(id, { progress: null, error: message });
-            }
-          } else {
-            // Cap exhausted (or row gone): leave it failed, no further auto-retry.
-            storeApi?.setEntry(id, { progress: null, error: message });
-          }
+          // (manual retry only).
+          await scheduleFailureRetry(id, message);
           storeApi?.markNotDownloaded(id);
           notifyDownloadLibraryChanged(true);
         }
@@ -748,14 +760,17 @@ export async function processQueue(): Promise<void> {
         // manager UI reflects the new head/order at every step.
         storeApi?.refreshQueue();
       }
+      if (onlyGalleryId !== undefined && id === onlyGalleryId) break;
     }
   } finally {
     running = false;
   }
   // A re-check guard: if an item was enqueued during the final loop teardown,
   // kick the processor again (running is now false, so this is safe).
-  const pending = await dequeueNextQueued().catch(() => null);
-  if (pending) void processQueue();
+  if (onlyGalleryId === undefined) {
+    const pending = await dequeueNextQueued().catch(() => null);
+    if (pending) void processQueue();
+  }
 }
 
 export const useDownloadProgressStore = create<DownloadProgressState>()((set, get) => {
@@ -902,7 +917,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       }
 
       void refreshQueue();
-      void processQueue();
+      void processQueue({ onlyGalleryId: id });
     },
     cancel: (id) => {
       const controller = controllers.get(id);
