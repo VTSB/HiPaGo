@@ -456,10 +456,11 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
  *
  * Resolves the gg config, builds the work-order (per-page url/ext/relPath/
  * headers), writes it to the native handoff dir, and enqueues the unique
- * Wi-Fi-constrained worker chain. The worker writes images + the 0000.json manifest into
- * the SAF tree the reader already uses; the row's completion is reconciled on
- * next app open/foreground (reconcileQueue). This is fast (no download is awaited
- * here), so the processor does NOT hold `running` waiting on the worker.
+ * connected-network worker chain. The worker writes images + the 0000.json
+ * manifest into the SAF tree the reader already uses; the row's completion is
+ * reconciled on next app open/foreground (reconcileQueue). This is fast (no
+ * download is awaited here), so the processor does NOT hold `running` waiting
+ * on the worker.
  *
  * Throws on a genuine handoff failure so the caller leaves the item failed.
  */

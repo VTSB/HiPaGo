@@ -5,8 +5,9 @@
  * On Android the worker is the SOLE downloader. TS resolves a gallery's
  * work-order, hands it off to the native side via {@link writeWorkOrder} (so TS
  * never needs raw access to the app's filesDir), then schedules the worker via
- * {@link enqueue}. One unique, Wi-Fi-constrained worker chain drains pending
- * work-orders, surviving app background/kill with a foreground notification.
+ * {@link enqueue}. One unique, connected-network worker chain drains pending
+ * work-orders over Wi-Fi, ethernet, or cellular, surviving app background/kill
+ * with a foreground notification.
  *
  * {@link cancel} drops one gallery's pending work-order and stops the worker when
  * the queue empties.
@@ -26,7 +27,7 @@ export interface DownloadWorkerPlugin {
   writeWorkOrder(options: { galleryId: string; json: string }): Promise<void>;
 
   /**
-   * Schedule the unique, UNMETERED-constrained download worker chain
+   * Schedule the unique, CONNECTED-constrained download worker chain
    * (ExistingWorkPolicy.APPEND_OR_REPLACE). The work-order file is assumed
    * already written. Appending a follow-up pass closes the race where a new
    * work-order lands while the current worker run is already finishing.

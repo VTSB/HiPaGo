@@ -34,6 +34,9 @@ const mockNavigation = vi.hoisted(() => ({
 const mockDevice = vi.hoisted(() => ({
   isMobile: false,
 }));
+const mockSettings = vi.hoisted(() => ({
+  libraryInitialTab: 'favorites' as 'favorites' | 'history' | 'downloads',
+}));
 const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
 const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
@@ -139,7 +142,12 @@ vi.mock('@/lib/i18n/useT', () => ({
 }));
 
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { locale: string }) => unknown) => sel({ locale: 'en' }),
+  useSettingsStore: (
+    sel: (s: {
+      locale: string;
+      libraryInitialTab: 'favorites' | 'history' | 'downloads';
+    }) => unknown,
+  ) => sel({ locale: 'en', libraryInitialTab: mockSettings.libraryInitialTab }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -185,6 +193,7 @@ describe('LibraryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDevice.isMobile = false;
+    mockSettings.libraryInitialTab = 'favorites';
     window.history.replaceState({}, '', '/library');
     sessionStorage.clear();
     mockCreateDownloadStore.mockResolvedValue({
@@ -264,6 +273,22 @@ describe('LibraryPage', () => {
   it('opens the downloads segment on mobile when the URL tab is downloads', async () => {
     mockDevice.isMobile = true;
     window.history.replaceState({}, '', '/library?tab=downloads');
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    expect(
+      screen.getByRole('tab', { name: 'saved.seg.downloads' }).getAttribute('aria-selected'),
+    ).toBe('true');
+    expect(screen.getByText('Saved Download')).toBeTruthy();
+  });
+
+  it('uses the configured initial tab on mobile when the URL has no tab', async () => {
+    mockDevice.isMobile = true;
+    mockSettings.libraryInitialTab = 'downloads';
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
 
     await act(async () => {

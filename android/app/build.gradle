@@ -10,8 +10,8 @@ android {
         applicationId "com.hipago.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "0.0.7"
+        versionCode 8
+        versionName "0.0.8"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -82,8 +82,8 @@ dependencies {
     // absolute-path File I/O that needed MANAGE_EXTERNAL_STORAGE.
     implementation "androidx.documentfile:documentfile:1.0.1"
     // WorkManager — runs the background gallery download worker
-    // (GalleryDownloadWorker) so downloads survive app kill, on a Wi-Fi-only
-    // (UNMETERED) constraint with a foreground-service progress notification.
+    // (GalleryDownloadWorker) so downloads survive app kill, on a connected
+    // network constraint with a foreground-service progress notification.
     // 2.9.x is the stable line compatible with compileSdk 34.
     implementation "androidx.work:work-runtime:2.9.1"
     implementation project(':capacitor-android')
