@@ -588,6 +588,21 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(useDownloadProgressStore.getState().entries[252]).toBeUndefined();
   });
 
+  it('keeps Android storage cancellation visible when the queued row has partial pages', async () => {
+    androidFlag = true;
+    ensureDownloadStoreReady.mockRejectedValueOnce(new DownloadCancelledError('cancelled'));
+    queue.push({ id: 253, pageCount: 3 });
+    downloadRows.set(253, { retryCount: 0, status: 'queued', pageCount: 3 });
+
+    await processQueue();
+
+    expect(workOrderWrites).toEqual([]);
+    expect(workerEnqueues).not.toContain('253');
+    expect(removed).toContain(253);
+    expect(errorRows).toContainEqual({ galleryId: 253, status: 'failed', lastError: null });
+    expect(scheduled).toEqual([]);
+  });
+
   it('non-Android still runs the in-process downloader (no worker call)', async () => {
     androidFlag = false;
     queue.push({ id: 300, pageCount: 0 });
@@ -896,7 +911,7 @@ describe('Android live-progress poller (AC-003)', () => {
 // from the on-disk manifest and flips the row to 'complete' in-app.
 describe('finalizeDownloadIfComplete (shared completion rule)', () => {
   it('marks a downloading row complete when the manifest covers all pages', async () => {
-    downloadRows.set(900, { status: 'downloading', pageCount: 3 });
+    downloadRows.set(900, { status: 'downloading', pageCount: 3, retryCount: 2 });
     manifestPages.set(900, [
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'webp' },
@@ -904,8 +919,16 @@ describe('finalizeDownloadIfComplete (shared completion rule)', () => {
     ]);
     const done = await finalizeDownloadIfComplete(900);
     expect(done).toBe(true);
-    const upsert = upsertedRows.at(-1) as { galleryId: number; status: string; pageCount: number };
+    const upsert = upsertedRows.at(-1) as {
+      galleryId: number;
+      status: string;
+      pageCount: number;
+      retryCount: number;
+      nextRetryAt: string | null;
+    };
     expect(upsert).toMatchObject({ galleryId: 900, status: 'complete', pageCount: 3 });
+    expect(upsert.retryCount).toBe(0);
+    expect(upsert.nextRetryAt).toBeNull();
   });
 
   it('does NOT finalize when the manifest is short of pageCount', async () => {
@@ -1423,6 +1446,28 @@ describe('auto-retry scheduler timer (AC-004)', () => {
       expect((autoRequeue!.opts as { keepRetryState?: boolean }).keepRetryState).toBe(true);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('holds due rows while globally paused instead of re-enqueueing them', async () => {
+    vi.useFakeTimers();
+    try {
+      const { armAutoRetryTimer } = await import('../download-progress');
+      unmetered.mockResolvedValue(true);
+      earliest = new Date(Date.now() + 30_000).toISOString();
+      dueRows = [{ galleryId: 91, title: 'G91', thumbnail: '/tn', tags: '{}' }];
+
+      await useDownloadProgressStore.getState().pauseAll();
+      armAutoRetryTimer();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(31_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const autoRequeue = enqueued.find((e) => (e.meta as { galleryId: number }).galleryId === 91);
+      expect(autoRequeue).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+      await useDownloadProgressStore.getState().resumeAll();
     }
   });
 });

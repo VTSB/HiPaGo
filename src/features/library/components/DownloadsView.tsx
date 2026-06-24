@@ -99,7 +99,7 @@ function useAutoRetryLabel(item: DBDownload): string | null {
   const t = useT();
   const nextRetryAt = item.nextRetryAt;
   const retryCount = item.retryCount ?? 0;
-  const pending = item.status === 'failed' && !!nextRetryAt && retryCount < AUTO_RETRY_MAX;
+  const pending = item.status === 'failed' && !!nextRetryAt && retryCount <= AUTO_RETRY_MAX;
 
   // Tick `now` every second so the countdown updates. Date.now() / setNow are
   // called only inside timer callbacks (never synchronously in render or the
@@ -488,6 +488,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
   const storeEntries = useDownloadProgressStore((s) => s.entries);
+  const refreshQueue = useDownloadProgressStore((s) => s.refreshQueue);
 
   const handleQueryChange = useCallback((v: string) => {
     setRawQuery(v);
@@ -506,6 +507,8 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     const onLibraryChanged = () => {
       void queryClient.invalidateQueries({ queryKey: ['library-list'] });
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
+      void queryClient.invalidateQueries({ queryKey: ['download-covers'] });
     };
     window.addEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
     return () => window.removeEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
@@ -678,15 +681,17 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           { userInitiated: true },
         );
         useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
+        void refreshQueue();
         void processQueue({ onlyGalleryId: item.galleryId });
       } catch (e) {
         console.error('Retry failed to enqueue:', e);
       } finally {
         queryClient.invalidateQueries({ queryKey: ['library-list'] });
         queryClient.invalidateQueries({ queryKey: ['library-search'] });
+        queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       }
     },
-    [storeEntries, queryClient],
+    [storeEntries, queryClient, refreshQueue],
   );
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);

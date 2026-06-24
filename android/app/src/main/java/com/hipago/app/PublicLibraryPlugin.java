@@ -15,7 +15,6 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import java.util.Base64;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -186,7 +185,7 @@ public class PublicLibraryPlugin extends Plugin {
         io.execute(() -> {
             try {
                 if (!saf().hasTree()) { call.reject("NO_TREE"); return; }
-                byte[] data = Base64.getDecoder().decode(dataBase64);
+                byte[] data = android.util.Base64.decode(dataBase64, android.util.Base64.NO_WRAP);
                 saf().writeBytes(path, data);
                 call.resolve();
             } catch (SecurityException e) {
@@ -206,7 +205,7 @@ public class PublicLibraryPlugin extends Plugin {
                 byte[] data = saf().readBytes(path);
                 if (data == null) { call.reject("file not found: " + path); return; }
                 JSObject ret = new JSObject();
-                ret.put("dataBase64", Base64.getEncoder().encodeToString(data));
+                ret.put("dataBase64", android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP));
                 call.resolve(ret);
             } catch (SecurityException e) {
                 call.reject(e.getMessage());
