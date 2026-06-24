@@ -503,6 +503,8 @@ describe('downloadGalleryToLibrary', () => {
       downloadedAt: '2026-01-01T00:00:00.000Z',
       status: 'queued',
       queuePosition: 7,
+      retryCount: 2,
+      nextRetryAt: '2026-01-01T00:01:00.000Z',
     });
 
     await downloadGalleryToLibrary(22, 'Queued', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
@@ -512,6 +514,38 @@ describe('downloadGalleryToLibrary', () => {
       galleryId: 22,
       status: 'downloading',
       queuePosition: 7,
+      retryCount: 2,
+      nextRetryAt: null,
+    });
+  });
+
+  it('preserves retryCount when a retry attempt fails before the first page', async () => {
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 24,
+      title: 'Retrying',
+      thumbnail: 'thumb.jpg',
+      tags: '{}',
+      pageCount: 0,
+      totalBytes: 0,
+      downloadedAt: '2026-01-01T00:00:00.000Z',
+      status: 'queued',
+      queuePosition: 9,
+      retryCount: 2,
+      nextRetryAt: null,
+    });
+    vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network down'));
+
+    await expect(
+      downloadGalleryToLibrary(24, 'Retrying', 'thumb.jpg', [makeFile()], makeGgConfig(), {}),
+    ).rejects.toThrow('Network down');
+
+    const failedUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
+    expect(failedUpsert).toMatchObject({
+      galleryId: 24,
+      status: 'failed',
+      queuePosition: 9,
+      retryCount: 2,
+      nextRetryAt: null,
     });
   });
 

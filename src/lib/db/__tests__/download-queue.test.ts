@@ -105,6 +105,23 @@ describe('enqueueDownload', () => {
     // preserves partial pages so the processor resumes
     expect(row!.pageCount).toBe(4);
   });
+
+  it('can restore an explicit queue position when reconciling an interrupted active row', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 6, status: 'downloading', queuePosition: 4, retryCount: 2 }),
+    );
+
+    const position = await enqueueDownload(meta(6), {
+      keepRetryState: true,
+      queuePosition: 4,
+    });
+
+    const row = await getDownload(6);
+    expect(position).toBe(4);
+    expect(row!.status).toBe('queued');
+    expect(row!.queuePosition).toBe(4);
+    expect(row!.retryCount).toBe(2);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -127,6 +144,16 @@ describe('listQueue + dequeueNextQueued', () => {
     await pauseQueued(1); // pos 1 now paused → skipped
     const next = await dequeueNextQueued();
     expect(next!.galleryId).toBe(2);
+  });
+
+  it('orders NULL queuePosition after positioned queued rows', async () => {
+    await upsertDownload(makeRow({ galleryId: 1, status: 'queued', queuePosition: null }));
+    await upsertDownload(makeRow({ galleryId: 2, status: 'queued', queuePosition: 3 }));
+    await upsertDownload(makeRow({ galleryId: 3, status: 'paused', queuePosition: 2 }));
+
+    const q = await listQueue();
+    expect(q.map((r) => r.galleryId)).toEqual([3, 2, 1]);
+    expect((await dequeueNextQueued())!.galleryId).toBe(2);
   });
 
   it('dequeueNextQueued returns null when nothing is queued', async () => {
