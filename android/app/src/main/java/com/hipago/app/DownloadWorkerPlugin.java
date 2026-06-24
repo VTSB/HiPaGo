@@ -177,7 +177,10 @@ public class DownloadWorkerPlugin extends Plugin {
 
     private void enqueueWorker(PluginCall call) {
         try {
-            ExistingWorkPolicy policy = workPolicyForCurrentConstraint();
+            boolean migratingNetworkConstraint = shouldMigrateNetworkConstraint();
+            ExistingWorkPolicy policy = migratingNetworkConstraint
+                    ? ExistingWorkPolicy.REPLACE
+                    : ExistingWorkPolicy.APPEND_OR_REPLACE;
             Constraints constraints = new Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build();
@@ -189,27 +192,30 @@ public class DownloadWorkerPlugin extends Plugin {
                     GalleryDownloadWorker.UNIQUE_WORK_NAME,
                     policy,
                     request);
+            if (migratingNetworkConstraint) {
+                markNetworkConstraintMigrated();
+            }
             call.resolve();
         } catch (Exception e) {
             call.reject("enqueue error: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
     }
 
-    private ExistingWorkPolicy workPolicyForCurrentConstraint() {
+    private boolean shouldMigrateNetworkConstraint() {
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         int version = prefs.getInt(KEY_NETWORK_CONSTRAINT_VERSION, 0);
-        if (version >= NETWORK_CONSTRAINT_CONNECTED_VERSION) {
-            return ExistingWorkPolicy.APPEND_OR_REPLACE;
-        }
+        return version < NETWORK_CONSTRAINT_CONNECTED_VERSION;
+    }
 
+    private void markNetworkConstraintMigrated() {
         // One-time migration from the old UNMETERED work constraint. Existing
         // WorkManager requests keep their original constraints across app
         // updates, so replace the unique chain once; persistent work-order files
         // let the new CONNECTED worker resume anything that was interrupted.
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         prefs.edit()
                 .putInt(KEY_NETWORK_CONSTRAINT_VERSION, NETWORK_CONSTRAINT_CONNECTED_VERSION)
                 .apply();
-        return ExistingWorkPolicy.REPLACE;
     }
 
     /**

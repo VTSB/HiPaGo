@@ -118,6 +118,11 @@ public class GalleryDownloadWorker extends Worker {
         if (!saf.hasTree()) {
             File[] pending = listOrderFiles(handoffDir);
             pruneStaleProgress(pending);
+            for (File orderFile : pending) {
+                String name = orderFile.getName();
+                String galleryId = name.substring(0, name.length() - ".json".length());
+                writeProgressFailure(galleryId, "Select a download folder");
+            }
             return Result.success();
         }
 
