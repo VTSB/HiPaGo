@@ -172,7 +172,12 @@ export async function removeFromQueue(galleryId: number): Promise<void> {
   const db = await ensureDb();
   const row = await getDownload(galleryId);
   if (!row) return;
-  if (row.pageCount > 0 || row.status === 'failed') {
+  if (row.pageCount > 0 && (row.status === 'queued' || row.status === 'paused')) {
+    await db.execute(
+      'UPDATE download SET status = ?, lastError = ?, queuePosition = NULL WHERE galleryId = ?',
+      ['failed', null, galleryId],
+    );
+  } else if (row.pageCount > 0 || row.status === 'failed') {
     await db.execute('UPDATE download SET queuePosition = NULL WHERE galleryId = ?', [galleryId]);
   } else {
     await db.execute('DELETE FROM download WHERE galleryId = ?', [galleryId]);

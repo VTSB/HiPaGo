@@ -627,7 +627,7 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(workerCancels).toContain('100');
   });
 
-  it('cancel on Android marks a handed-off row failed so it does not stay downloading', async () => {
+  it('cancel on Android deletes a handed-off row when no pages were stored', async () => {
     androidFlag = true;
     downloadRows.set(101, { status: 'downloading', pageCount: 5 });
     useDownloadProgressStore.setState({
@@ -635,15 +635,37 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     });
 
     useDownloadProgressStore.getState().cancel(101);
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 5));
 
-    expect(errorRows).toContainEqual({
+    expect(workerCancels).toContain('101');
+    expect(deletedRows).toContain(101);
+    expect(errorRows).not.toContainEqual({
       galleryId: 101,
       status: 'failed',
       lastError: 'Cancelled',
     });
     expect(useDownloadProgressStore.getState().entries[101]).toBeUndefined();
+  });
+
+  it('cancel on Android keeps a failed handed-off row when partial pages exist', async () => {
+    androidFlag = true;
+    manifestPages.set(102, [{ index: 0, ext: 'webp' }]);
+    downloadRows.set(102, { status: 'downloading', pageCount: 5 });
+    useDownloadProgressStore.setState({
+      entries: { 102: { progress: { current: 2, total: 5 }, error: null } },
+    });
+
+    useDownloadProgressStore.getState().cancel(102);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(workerCancels).toContain('102');
+    expect(errorRows).toContainEqual({
+      galleryId: 102,
+      status: 'failed',
+      lastError: 'Cancelled',
+    });
+    expect(deletedRows).not.toContain(102);
+    expect(useDownloadProgressStore.getState().entries[102]).toBeUndefined();
   });
 });
 

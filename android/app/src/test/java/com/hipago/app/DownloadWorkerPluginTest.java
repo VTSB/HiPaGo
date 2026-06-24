@@ -39,6 +39,16 @@ public class DownloadWorkerPluginTest {
     }
 
     @Test
+    public void acceptsOnlyNumericGalleryIdsForNativeFileBoundaries() {
+        assertTrue(DownloadWorkerPlugin.isValidGalleryId("12345"));
+        assertTrue(!DownloadWorkerPlugin.isValidGalleryId(null));
+        assertTrue(!DownloadWorkerPlugin.isValidGalleryId(""));
+        assertTrue(!DownloadWorkerPlugin.isValidGalleryId("../123"));
+        assertTrue(!DownloadWorkerPlugin.isValidGalleryId("123/456"));
+        assertTrue(!DownloadWorkerPlugin.isValidGalleryId("abc123"));
+    }
+
+    @Test
     public void readsProgressFileValuesForForegroundPoller() throws Exception {
         File file = writeProgress("progress.json", "{\"current\":4,\"total\":10}");
 
