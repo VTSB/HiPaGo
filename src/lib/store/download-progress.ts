@@ -258,6 +258,10 @@ export async function fireDueAutoRetries(): Promise<void> {
   // Android auto-retries are handed to WorkManager, whose constraint is
   // NetworkType.CONNECTED, so cellular is allowed there. Other platforms keep
   // the Wi-Fi/ethernet gate for in-process downloads.
+  if (globalPaused) {
+    await rearmAutoRetryTimerAfterMeteredHold();
+    return;
+  }
   if (!unmetered && !isAndroid()) {
     await rearmAutoRetryTimerAfterMeteredHold();
     return;
@@ -369,6 +373,8 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
       pageCount: pages.length,
       status: 'complete',
       queuePosition: null,
+      retryCount: 0,
+      nextRetryAt: null,
       lastError: null,
     });
     return true;
@@ -402,6 +408,7 @@ async function finalizeAndroidDownloadIfComplete(id: number): Promise<void> {
 
 async function failAndroidDownloadIfWorkerStopped(id: number, message: string): Promise<void> {
   await setDownloadError(id, 'failed', message).catch(() => {});
+  await removeFromQueue(id).catch(() => {});
   await scheduleFailureRetry(id, message);
   storeApi?.markNotDownloaded(id);
   storeApi?.refreshQueue();
@@ -690,6 +697,9 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           if (e instanceof DownloadCancelledError) {
             await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
             await removeFromQueue(id);
+            if ((next.pageCount ?? 0) > 0) {
+              await setDownloadError(id, 'failed', null).catch(() => {});
+            }
             storeApi?.setEntry(id, null);
             storeApi?.markNotDownloaded(id);
             notifyDownloadLibraryChanged(true);
@@ -1137,6 +1147,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       for (const r of rows) {
         if (r.status === 'paused') await resumeQueued(r.galleryId);
       }
+      armAutoRetryTimer();
       void processQueue();
       await refreshQueue();
     },

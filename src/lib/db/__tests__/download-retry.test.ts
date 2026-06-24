@@ -62,7 +62,9 @@ describe('scheduleAutoRetry', () => {
   });
 
   it('is a no-op when the row is not failed (e.g. already requeued)', async () => {
-    await upsertDownload(makeRow({ galleryId: 2, status: 'queued', queuePosition: 1, lastError: null }));
+    await upsertDownload(
+      makeRow({ galleryId: 2, status: 'queued', queuePosition: 1, lastError: null }),
+    );
     await scheduleAutoRetry(2, 1, '2024-06-01T10:05:00Z');
     const row = await getDownload(2);
     expect(row!.nextRetryAt == null).toBe(true);
@@ -71,32 +73,93 @@ describe('scheduleAutoRetry', () => {
 });
 
 describe('listDueAutoRetries', () => {
-  it('returns only failed rows past nextRetryAt with retryCount < MAX', async () => {
+  it('returns failed rows past nextRetryAt with retryCount <= MAX', async () => {
     const now = '2024-06-01T12:00:00Z';
     // Due: failed, past due, attempts left.
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: 1, nextRetryAt: '2024-06-01T11:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
     // Not due: nextRetryAt in the future.
-    await upsertDownload(makeRow({ galleryId: 2, status: 'failed', retryCount: 1, nextRetryAt: '2024-06-01T13:00:00Z' }));
-    // Cap exhausted: retryCount === MAX.
-    await upsertDownload(makeRow({ galleryId: 3, status: 'failed', retryCount: AUTO_RETRY_MAX, nextRetryAt: '2024-06-01T11:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 2,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T13:00:00Z',
+      }),
+    );
+    // Last scheduled attempt is still eligible.
+    await upsertDownload(
+      makeRow({
+        galleryId: 3,
+        status: 'failed',
+        retryCount: AUTO_RETRY_MAX,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    // Beyond the cap: ignored defensively.
+    await upsertDownload(
+      makeRow({
+        galleryId: 6,
+        status: 'failed',
+        retryCount: AUTO_RETRY_MAX + 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
     // No schedule: nextRetryAt NULL.
-    await upsertDownload(makeRow({ galleryId: 4, status: 'failed', retryCount: 0, nextRetryAt: null }));
+    await upsertDownload(
+      makeRow({ galleryId: 4, status: 'failed', retryCount: 0, nextRetryAt: null }),
+    );
     // Wrong status: queued.
-    await upsertDownload(makeRow({ galleryId: 5, status: 'queued', queuePosition: 1, retryCount: 1, nextRetryAt: '2024-06-01T11:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 5,
+        status: 'queued',
+        queuePosition: 1,
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
 
     const due = await listDueAutoRetries(now);
-    expect(due.map((r) => r.galleryId)).toEqual([1]);
+    expect(due.map((r) => r.galleryId)).toEqual([1, 3]);
   });
 
   it('orders oldest-due first', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: 1, nextRetryAt: '2024-06-01T11:30:00Z' }));
-    await upsertDownload(makeRow({ galleryId: 2, status: 'failed', retryCount: 1, nextRetryAt: '2024-06-01T11:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:30:00Z',
+      }),
+    );
+    await upsertDownload(
+      makeRow({
+        galleryId: 2,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
     const due = await listDueAutoRetries('2024-06-01T12:00:00Z');
     expect(due.map((r) => r.galleryId)).toEqual([2, 1]);
   });
 
   it('treats a NULL retryCount as 0 (still eligible)', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: null, nextRetryAt: '2024-06-01T11:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: null,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
     const due = await listDueAutoRetries('2024-06-01T12:00:00Z');
     expect(due.map((r) => r.galleryId)).toEqual([1]);
   });
@@ -104,7 +167,14 @@ describe('listDueAutoRetries', () => {
 
 describe('clearAutoRetry', () => {
   it('resets retryCount to 0 and clears nextRetryAt', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: 2, nextRetryAt: '2024-06-01T11:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: 2,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
     await clearAutoRetry(1);
     const row = await getDownload(1);
     expect(row!.retryCount).toBe(0);
@@ -114,10 +184,31 @@ describe('clearAutoRetry', () => {
 
 describe('earliestNextRetryAt', () => {
   it('returns the MIN nextRetryAt over eligible failed rows', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: 1, nextRetryAt: '2024-06-01T13:00:00Z' }));
-    await upsertDownload(makeRow({ galleryId: 2, status: 'failed', retryCount: 1, nextRetryAt: '2024-06-01T11:00:00Z' }));
-    // Cap-exhausted row must be ignored even though it has the earliest time.
-    await upsertDownload(makeRow({ galleryId: 3, status: 'failed', retryCount: AUTO_RETRY_MAX, nextRetryAt: '2024-06-01T09:00:00Z' }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T13:00:00Z',
+      }),
+    );
+    await upsertDownload(
+      makeRow({
+        galleryId: 2,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    // Beyond-cap row must be ignored even though it has the earliest time.
+    await upsertDownload(
+      makeRow({
+        galleryId: 3,
+        status: 'failed',
+        retryCount: AUTO_RETRY_MAX + 1,
+        nextRetryAt: '2024-06-01T09:00:00Z',
+      }),
+    );
     const earliest = await earliestNextRetryAt();
     expect(earliest).toBe('2024-06-01T11:00:00Z');
   });
@@ -130,7 +221,15 @@ describe('earliestNextRetryAt', () => {
 
 describe('enqueueDownload + retry counters (AC-002 / AC-005 reset)', () => {
   it('manual (default) enqueue RESETS retryCount and clears nextRetryAt', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: 2, nextRetryAt: '2024-06-01T11:00:00Z', pageCount: 4 }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: 2,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+        pageCount: 4,
+      }),
+    );
     await enqueueDownload({ galleryId: 1, title: 'G1', thumbnail: '/tn', tags: {} });
     const row = await getDownload(1);
     expect(row!.status).toBe('queued');
@@ -140,8 +239,19 @@ describe('enqueueDownload + retry counters (AC-002 / AC-005 reset)', () => {
   });
 
   it('auto requeue (keepRetryState) PRESERVES retryCount, clears nextRetryAt', async () => {
-    await upsertDownload(makeRow({ galleryId: 1, status: 'failed', retryCount: 2, nextRetryAt: '2024-06-01T11:00:00Z', pageCount: 4 }));
-    await enqueueDownload({ galleryId: 1, title: 'G1', thumbnail: '/tn', tags: {} }, { keepRetryState: true });
+    await upsertDownload(
+      makeRow({
+        galleryId: 1,
+        status: 'failed',
+        retryCount: 2,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+        pageCount: 4,
+      }),
+    );
+    await enqueueDownload(
+      { galleryId: 1, title: 'G1', thumbnail: '/tn', tags: {} },
+      { keepRetryState: true },
+    );
     const row = await getDownload(1);
     expect(row!.status).toBe('queued');
     expect(row!.retryCount).toBe(2);
