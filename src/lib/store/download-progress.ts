@@ -341,10 +341,10 @@ function clearProgressPollTimer(): void {
 
 /**
  * Finalize a native-background download row to 'complete' when the on-disk
- * manifest already covers every page. SHARED by the Android live-progress poller
+ * manifest exactly matches every page. SHARED by the Android live-progress poller
  * (in-app, while the app stays open) and reconcileQueue (on next app open) so the
  * two use ONE completion rule and cannot drift. A 'downloading' row whose
- * manifest lists at least its recorded `pageCount` pages is marked 'complete'.
+ * manifest lists exactly its recorded `pageCount` pages is marked 'complete'.
  * Returns true iff the row is 'complete' after the call. May throw on DB/store
  * IO — callers decide whether that is fatal (reconcile) or retried next tick
  * (poller).
@@ -391,6 +391,15 @@ async function finalizeAndroidDownloadIfComplete(id: number): Promise<void> {
   stopAndroidProgressPoll(id);
 }
 
+async function failAndroidDownloadIfWorkerStopped(id: number, message: string): Promise<void> {
+  await setDownloadError(id, 'failed', message).catch(() => {});
+  await scheduleFailureRetry(id, message);
+  storeApi?.markNotDownloaded(id);
+  storeApi?.refreshQueue();
+  notifyDownloadLibraryChanged(true);
+  stopAndroidProgressPoll(id);
+}
+
 /** One poll tick: read the worker's progress file and push it into the store. */
 async function pollAndroidProgressOnce(id: number): Promise<void> {
   // The gallery is done/cancelled when its store entry is gone — stop polling.
@@ -418,11 +427,17 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
     }
     return;
   }
-  // current === null → no progress file: the worker has not started yet OR it
-  // already completed (it deletes the file when done). Disambiguate via the
-  // on-disk manifest — finalize only when it truly covers all pages; otherwise
-  // keep the last known value and keep polling.
+  // current === null → no progress file: the worker has not started yet, failed,
+  // or completed (it deletes the file when done). Disambiguate via the on-disk
+  // manifest first. If the manifest is still incomplete after we had observed
+  // native progress, treat it as a stopped/failed worker instead of leaving the
+  // row stuck as "downloading" until next app launch.
   await finalizeAndroidDownloadIfComplete(id);
+  if (!progressPollGalleryIds.has(id)) return;
+  const lastProgress = useDownloadProgressStore.getState().entries[id]?.progress;
+  if (lastProgress && lastProgress.current > 0) {
+    await failAndroidDownloadIfWorkerStopped(id, 'Background download stopped before completion');
+  }
 }
 
 /**
@@ -858,7 +873,13 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
     refreshDownloaded: async (id) => {
       try {
         const row = await getDownload(id);
-        const isComplete = row?.status === 'complete';
+        let isComplete = false;
+        if (row?.status === 'complete') {
+          isComplete =
+            (row.pageCount ?? 0) > 0
+              ? await hasCompleteDownloadedGallery(id, row.pageCount).catch(() => false)
+              : true;
+        }
         set((s) => ({ downloaded: { ...s.downloaded, [id]: isComplete } }));
         if (isComplete) {
           setEntry(id, null);

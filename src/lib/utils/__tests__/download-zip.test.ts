@@ -1285,6 +1285,20 @@ describe('hasCompleteDownloadedGallery', () => {
 
     await expect(hasCompleteDownloadedGallery(33, 2)).resolves.toBe(false);
   });
+
+  it('returns false when the manifest has stale extra pages beyond the expected pageCount', async () => {
+    await memStore.putImage(
+      34,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp', 'webp'])),
+      'json',
+    );
+    await memStore.putImage(34, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 1, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 2, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(34, 2)).resolves.toBe(false);
+  });
 });
 
 // ── exportGalleryZip (AC-007) ─────────────────────────────────────────────────

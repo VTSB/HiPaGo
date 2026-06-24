@@ -31,7 +31,7 @@ vi.mock('@/lib/utils/download-zip', async () => {
     getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
     hasCompleteDownloadedGallery: vi.fn(async (id: number, expectedPageCount: number) => {
       const pages = manifestPages.get(id) ?? [];
-      return pages.length > 0 && (expectedPageCount <= 0 || pages.length >= expectedPageCount);
+      return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
     }),
   };
 });
@@ -580,24 +580,59 @@ describe('Android live-progress poller (AC-003)', () => {
     }
   });
 
-  it('keeps the last known progress when getProgress returns {current:null}', async () => {
+  it('keeps the placeholder progress when getProgress returns {current:null} before worker start', async () => {
     vi.useFakeTimers();
     try {
       androidFlag = true;
       useDownloadProgressStore.setState({
-        entries: { 501: { progress: { current: 4, total: 8 }, error: null } },
+        entries: { 501: { progress: { current: 0, total: 8 }, error: null } },
       });
-      workerProgress.value = { current: 4, total: 8 };
+      workerProgress.value = { current: 0, total: 8 };
       startAndroidProgressPoll(501);
       await vi.advanceTimersByTimeAsync(0);
 
-      // File temporarily absent → null this tick; the prior value must stick.
+      // Worker has not published a file yet → null this tick; placeholder sticks.
       workerProgress.value = { current: null };
       await vi.advanceTimersByTimeAsync(1000);
       expect(useDownloadProgressStore.getState().entries[501]?.progress).toEqual({
-        current: 4,
+        current: 0,
         total: 8,
       });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks Android handoff failed when progress disappears after work began and manifest is incomplete', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      downloadRows.set(503, { status: 'downloading', pageCount: 8, retryCount: 0 });
+      useDownloadProgressStore.setState({
+        entries: { 503: { progress: { current: 4, total: 8 }, error: null } },
+      });
+      workerProgress.value = { current: 4, total: 8 };
+      startAndroidProgressPoll(503);
+      await vi.advanceTimersByTimeAsync(0);
+
+      workerProgress.value = { current: null };
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(errorRows).toContainEqual({
+        galleryId: 503,
+        status: 'failed',
+        lastError: 'Background download stopped before completion',
+      });
+      expect(scheduled).toHaveLength(1);
+      expect(scheduled[0]).toMatchObject({ id: 503, attempt: 1 });
+      expect(useDownloadProgressStore.getState().entries[503]?.error).toBe(
+        'Background download stopped before completion',
+      );
+      expect(useDownloadProgressStore.getState().entries[503]?.retryAt).toBe(scheduled[0].dueAt);
+      const callsAfterFailure = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBe(callsAfterFailure);
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -717,6 +752,27 @@ describe('Android live-progress poller (AC-003)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('refreshDownloaded verifies files before trusting a complete DB row', async () => {
+    downloadRows.set(802, { status: 'complete', pageCount: 2 });
+    manifestPages.set(802, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+
+    await useDownloadProgressStore.getState().refreshDownloaded(802);
+
+    expect(useDownloadProgressStore.getState().downloaded[802]).toBe(true);
+  });
+
+  it('refreshDownloaded does not mark complete when the DB row is complete but files are missing', async () => {
+    downloadRows.set(803, { status: 'complete', pageCount: 2 });
+
+    await useDownloadProgressStore.getState().refreshDownloaded(803);
+
+    expect(useDownloadProgressStore.getState().downloaded[803]).toBe(false);
+    expect(useDownloadProgressStore.getState().entries[803]).toBeUndefined();
+  });
 });
 
 // ── Android in-app completion bridge (finalize without relaunch) ──────────────
@@ -745,6 +801,19 @@ describe('finalizeDownloadIfComplete (shared completion rule)', () => {
       { index: 1, ext: 'webp' },
     ]);
     const done = await finalizeDownloadIfComplete(901);
+    expect(done).toBe(false);
+    expect(upsertedRows).toHaveLength(0);
+  });
+
+  it('does NOT finalize when the manifest has stale extra pages beyond pageCount', async () => {
+    downloadRows.set(905, { status: 'downloading', pageCount: 3 });
+    manifestPages.set(905, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+      { index: 2, ext: 'webp' },
+      { index: 3, ext: 'webp' },
+    ]);
+    const done = await finalizeDownloadIfComplete(905);
     expect(done).toBe(false);
     expect(upsertedRows).toHaveLength(0);
   });
