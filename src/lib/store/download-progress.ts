@@ -416,6 +416,31 @@ async function failAndroidDownloadIfWorkerStopped(id: number, message: string): 
   stopAndroidProgressPoll(id);
 }
 
+async function pauseAndroidHandedOffDownload(id: number): Promise<boolean> {
+  const row = await getDownload(id).catch(() => null);
+  if (row && row.queuePosition == null) {
+    try {
+      await enqueueDownload(
+        {
+          galleryId: row.galleryId,
+          title: row.title,
+          thumbnail: row.thumbnail,
+          tags: deserializeTags(row.tags),
+        },
+        { keepRetryState: true },
+      );
+    } catch {
+      return false;
+    }
+  }
+  try {
+    await setDownloadError(id, 'paused', null);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** One poll tick: read the worker's progress file and push it into the store. */
 async function pollAndroidProgressOnce(id: number): Promise<void> {
   // The gallery is done/cancelled when its store entry is gone — stop polling.
@@ -1075,11 +1100,12 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         }
       } else if (isAndroid() && get().entries[id]?.progress != null) {
-        void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
-        stopAndroidProgressPoll(id);
-        await setDownloadError(id, 'paused', null).catch(() => {});
-        setEntry(id, null);
-        notifyDownloadLibraryChanged(true);
+        if (await pauseAndroidHandedOffDownload(id)) {
+          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          stopAndroidProgressPoll(id);
+          setEntry(id, null);
+          notifyDownloadLibraryChanged(true);
+        }
       } else {
         // Not-yet-started queued item → just hold it.
         await pauseQueued(id);
@@ -1130,10 +1156,11 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           .filter(([, entry]) => entry.progress != null)
           .map(([id]) => Number(id));
         for (const id of activeIds) {
-          await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
-          stopAndroidProgressPoll(id);
-          await setDownloadError(id, 'paused', null).catch(() => {});
-          setEntry(id, null);
+          if (await pauseAndroidHandedOffDownload(id)) {
+            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+            stopAndroidProgressPoll(id);
+            setEntry(id, null);
+          }
         }
         if (activeIds.length > 0) notifyDownloadLibraryChanged(true);
       }

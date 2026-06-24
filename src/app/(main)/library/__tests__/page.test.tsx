@@ -416,6 +416,58 @@ describe('LibraryPage', () => {
 
     expect(mockDeleteDownload).toHaveBeenCalledWith(2001);
     expect(mockDeleteGallery).toHaveBeenCalledWith(2001);
+    expect(mockDownloadProgressState.cancel).not.toHaveBeenCalled();
+  });
+
+  it('cancels native/in-flight work before deleting a downloading row', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 2002, title: 'Active Native Download', status: 'downloading' }),
+    ]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await screen.findByText('Active Native Download');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
+    });
+
+    expect(mockDownloadProgressState.cancel).toHaveBeenCalledWith(2002);
+    expect(mockDeleteDownload).toHaveBeenCalledWith(2002);
+  });
+
+  it('clears a pending auto-retry before deleting a failed row', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        galleryId: 2003,
+        title: 'Retry Pending',
+        status: 'failed',
+        nextRetryAt: new Date(Date.now() + 30_000).toISOString(),
+        retryCount: 1,
+      }),
+    ]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
+    });
+
+    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(2003);
+    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(2003);
+    expect(mockDeleteDownload).toHaveBeenCalledWith(2003);
   });
 
   it('does NOT delete when the confirm dialog is cancelled', async () => {
