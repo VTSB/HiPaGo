@@ -2,6 +2,7 @@ package com.hipago.app;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Build;
 
 import androidx.work.Constraints;
@@ -37,8 +38,8 @@ import java.io.FileOutputStream;
  * closes the race where a work-order is written while a previous run is already
  * finishing.
  *
- * Network constraint: {@link NetworkType#UNMETERED} (Wi-Fi/ethernet only), so a
- * metered/no network holds the work until Wi-Fi returns (WorkManager re-runs it).
+ * Network constraint: {@link NetworkType#CONNECTED}, so downloads may run on
+ * Wi-Fi, ethernet, or cellular but still wait while the device is offline.
  * Android 13+ notification permission is requested before enqueueing so the
  * worker's foreground progress notification appears in the system shade.
  *
@@ -47,7 +48,7 @@ import java.io.FileOutputStream;
  *
  * DEVICE-PENDING: Java is not compiled in the sandbox; this file is verified by
  * code review here and must be smoke-tested on a physical/emulator Android
- * device (WorkManager scheduling, UNMETERED constraint, append policy, cancel).
+ * device (WorkManager scheduling, CONNECTED constraint, append policy, cancel).
  */
 @CapacitorPlugin(
         name = "DownloadWorker",
@@ -57,6 +58,9 @@ import java.io.FileOutputStream;
 )
 public class DownloadWorkerPlugin extends Plugin {
     private static final String NOTIFICATIONS = "notifications";
+    private static final String PREFS = "hipago_download_worker";
+    private static final String KEY_NETWORK_CONSTRAINT_VERSION = "network_constraint_version";
+    private static final int NETWORK_CONSTRAINT_CONNECTED_VERSION = 2;
 
     private File handoffDir() {
         File dir = new File(getContext().getFilesDir(), GalleryDownloadWorker.HANDOFF_DIR);
@@ -95,7 +99,7 @@ public class DownloadWorkerPlugin extends Plugin {
     }
 
     /**
-     * Enqueue the unique, Wi-Fi-constrained download worker. The work-order file is
+     * Enqueue the unique, connected-network download worker. The work-order file is
      * assumed already written (via {@link #writeWorkOrder}). APPEND_OR_REPLACE keeps
      * the current run and appends a follow-up pass, so a work-order written while a
      * worker is already running is still guaranteed to be seen.
@@ -125,20 +129,38 @@ public class DownloadWorkerPlugin extends Plugin {
 
     private void enqueueWorker(PluginCall call) {
         try {
+            ExistingWorkPolicy policy = workPolicyForCurrentConstraint();
             Constraints constraints = new Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.UNMETERED)
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build();
             OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(GalleryDownloadWorker.class)
                     .setConstraints(constraints)
                     .build();
             WorkManager.getInstance(getContext()).enqueueUniqueWork(
                     GalleryDownloadWorker.UNIQUE_WORK_NAME,
-                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    policy,
                     request);
             call.resolve();
         } catch (Exception e) {
             call.reject("enqueue error: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
+    }
+
+    private ExistingWorkPolicy workPolicyForCurrentConstraint() {
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int version = prefs.getInt(KEY_NETWORK_CONSTRAINT_VERSION, 0);
+        if (version >= NETWORK_CONSTRAINT_CONNECTED_VERSION) {
+            return ExistingWorkPolicy.APPEND_OR_REPLACE;
+        }
+
+        // One-time migration from the old UNMETERED work constraint. Existing
+        // WorkManager requests keep their original constraints across app
+        // updates, so replace the unique chain once; persistent work-order files
+        // let the new CONNECTED worker resume anything that was interrupted.
+        prefs.edit()
+                .putInt(KEY_NETWORK_CONSTRAINT_VERSION, NETWORK_CONSTRAINT_CONNECTED_VERSION)
+                .apply();
+        return ExistingWorkPolicy.REPLACE;
     }
 
     /**

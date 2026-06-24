@@ -185,6 +185,11 @@ const translations = {
   'settings.langFilter.english': { en: 'English', ko: '영어' },
   'settings.langFilter.chinese': { en: 'Chinese', ko: '중국어' },
   'settings.langFilter.korean': { en: 'Korean', ko: '한국어' },
+  'settings.libraryInitialTab': { en: 'Library Start Tab', ko: '라이브러리 시작 탭' },
+  'settings.libraryInitialTab.desc': {
+    en: 'Choose which tab opens first when entering Library',
+    ko: '라이브러리에 들어갈 때 처음 열 탭을 선택합니다',
+  },
   'settings.tagDb': { en: 'Tag DB', ko: '태그 DB' },
   'settings.tagDb.desc': {
     en: 'Local tag autocomplete, Korean search, and popular tags use this database',
