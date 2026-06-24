@@ -146,13 +146,13 @@ describe('listQueue + dequeueNextQueued', () => {
     expect(next!.galleryId).toBe(2);
   });
 
-  it('orders NULL queuePosition after positioned queued rows', async () => {
+  it('excludes queued rows whose queuePosition was cleared', async () => {
     await upsertDownload(makeRow({ galleryId: 1, status: 'queued', queuePosition: null }));
     await upsertDownload(makeRow({ galleryId: 2, status: 'queued', queuePosition: 3 }));
     await upsertDownload(makeRow({ galleryId: 3, status: 'paused', queuePosition: 2 }));
 
     const q = await listQueue();
-    expect(q.map((r) => r.galleryId)).toEqual([3, 2, 1]);
+    expect(q.map((r) => r.galleryId)).toEqual([3, 2]);
     expect((await dequeueNextQueued())!.galleryId).toBe(2);
   });
 
@@ -196,6 +196,8 @@ describe('removeFromQueue', () => {
     const row = await getDownload(1);
     expect(row).not.toBeNull();
     expect(row!.queuePosition == null).toBe(true);
+    expect((await listQueue()).map((r) => r.galleryId)).not.toContain(1);
+    expect(await dequeueNextQueued()).toBeNull();
   });
 
   it('deletes the row when it has no pages', async () => {

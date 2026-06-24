@@ -157,6 +157,7 @@ final class DownloadBackgroundTask {
     /// download. Best-effort: a submit failure (e.g. identifier not permitted,
     /// simulator) is swallowed — the foreground path still downloads.
     func scheduleProcessingTask(after delay: TimeInterval? = nil) {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
         let request = BGProcessingTaskRequest(identifier: Self.taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
@@ -300,6 +301,7 @@ final class DownloadBackgroundTask {
             // Resume: a page already on disk is skipped (idempotent overlap with
             // the foreground downloader, which suspends while backgrounded).
             if isNonEmptyFile(dest) {
+                writeManifest(galleryDir: galleryDir, exts: Array(exts.prefix(i + 1)))
                 continue
             }
             if fileManager.fileExists(atPath: dest.path) {

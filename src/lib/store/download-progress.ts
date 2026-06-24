@@ -137,6 +137,7 @@ const fileCache = new Map<number, { files: GalleryFile[]; tags: Record<string, s
 // Synchronous single-flight guard for the processor loop. Never inferred from an
 // async DB read — that would be a read-then-write race (PLAN decision 6).
 let running = false;
+const pendingManualKicks = new Set<number>();
 
 // Module-level global-pause flag. Read synchronously at the top of the processor
 // loop so a pauseAll() stops auto-advance immediately (the store's reactive
@@ -598,8 +599,11 @@ async function scheduleIosBackgroundBackstop(
  * for the next 'queued' item and continues until the queue is empty.
  */
 export async function processQueue(options: { onlyGalleryId?: number } = {}): Promise<void> {
-  if (running) return;
   const onlyGalleryId = options.onlyGalleryId;
+  if (running) {
+    if (onlyGalleryId !== undefined) pendingManualKicks.add(onlyGalleryId);
+    return;
+  }
   running = true;
   try {
     // Honour a global pause before dequeuing the first item, too.
@@ -778,6 +782,9 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
         if (e instanceof DownloadPausedError) {
           // Paused: row left 'paused' (resumable) by download-zip; keep it in the
           // queue (position retained), clear the live progress entry.
+          if (isIos()) {
+            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          }
           storeApi?.setEntry(id, null);
         } else if (
           e instanceof DownloadCancelledError ||
@@ -787,6 +794,7 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           // message). Drop it from the queue and clear the entry.
           await removeFromQueue(id);
           if (isIos()) {
+            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
             const storedPages = await getDownloadedGalleryPages(id).catch(() => []);
             if (storedPages.length === 0) {
               await deleteDownload(id).catch(() => {});
@@ -831,6 +839,12 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
     }
   } finally {
     running = false;
+  }
+  const nextManualId = pendingManualKicks.values().next().value as number | undefined;
+  if (nextManualId !== undefined) {
+    pendingManualKicks.delete(nextManualId);
+    void processQueue({ onlyGalleryId: nextManualId });
+    return;
   }
   // A re-check guard: if an item was enqueued during the final loop teardown,
   // kick the processor again (running is now false, so this is safe).
