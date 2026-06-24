@@ -48,6 +48,8 @@ public class GalleryDownloadWorkerRuntimeTest {
 
         File progressDir = new File(context.getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR);
         assertTrue(progressDir.mkdirs());
+        File activeProgress = new File(progressDir, "123.json");
+        Files.write(activeProgress.toPath(), "{\"current\":1,\"total\":2}".getBytes(StandardCharsets.UTF_8));
         File staleProgress = new File(progressDir, "999.json");
         Files.write(staleProgress.toPath(), "{\"current\":1,\"total\":2}".getBytes(StandardCharsets.UTF_8));
 
