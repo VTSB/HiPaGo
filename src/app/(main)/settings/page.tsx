@@ -16,6 +16,8 @@ import { Select } from '@/shared/components/Select';
 import { UpdateCheckCard } from '@/shared/components/UpdateCheckCard';
 import { ImageCacheCard } from '@/shared/components/ImageCacheCard';
 import { DownloadLocationCard } from '@/shared/components/DownloadLocationCard';
+import { TagDbStatusCard } from '@/shared/components/TagDbStatusCard';
+import { TextInput } from '@/shared/components/atoms/TextInput';
 import {
   getActiveDefaultFilterToken,
   replaceActiveDefaultFilterToken,
@@ -83,14 +85,13 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
 
   return (
     <div className="relative">
-      <input
+      <TextInput
         ref={inputRef}
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
         placeholder={t('settings.blurTags.placeholder')}
-        className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
       />
       {showDropdown && suggestions.length > 0 && (
         <div
@@ -182,7 +183,7 @@ function DefaultFilterInput({
 
   return (
     <div className="relative">
-      <input
+      <TextInput
         ref={inputRef}
         type="text"
         value={value}
@@ -190,7 +191,6 @@ function DefaultFilterInput({
         onBlur={() => onChange(value.trim())}
         onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
         placeholder={t('settings.defaultFilter.placeholder')}
-        className="h-12 w-full rounded-xl border border-zinc-300 bg-white px-4 text-base text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 sm:h-10 sm:rounded-md sm:px-3 sm:text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
       />
       {showDropdown && suggestions.length > 0 && (
         <div
@@ -228,12 +228,14 @@ export default function SettingsPage() {
   const blurTags = useSettingsStore((s) => s.blurTags);
   const defaultFilterQuery = useSettingsStore((s) => s.defaultFilterQuery);
   const secureScreen = useSettingsStore((s) => s.secureScreen);
+  const libraryInitialTab = useSettingsStore((s) => s.libraryInitialTab);
   const setLocale = useSettingsStore((s) => s.setLocale);
   const setLanguage = useSettingsStore((s) => s.setLanguage);
   const setReaderMode = useSettingsStore((s) => s.setReaderMode);
   const setImageFormat = useSettingsStore((s) => s.setImageFormat);
   const setDefaultFilterQuery = useSettingsStore((s) => s.setDefaultFilterQuery);
   const setSecureScreen = useSettingsStore((s) => s.setSecureScreen);
+  const setLibraryInitialTab = useSettingsStore((s) => s.setLibraryInitialTab);
   const addBlurTag = useSettingsStore((s) => s.addBlurTag);
   const removeBlurTag = useSettingsStore((s) => s.removeBlurTag);
   const t = useT();
@@ -295,6 +297,41 @@ export default function SettingsPage() {
             ]}
           />
         </div>
+
+        {/* Library Initial Tab */}
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+              {t('settings.libraryInitialTab')}
+            </p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+              {t('settings.libraryInitialTab.desc')}
+            </p>
+          </div>
+          <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
+            <button
+              onClick={() => setLibraryInitialTab('favorites')}
+              className={segmentClass(libraryInitialTab === 'favorites')}
+            >
+              {t('saved.seg.favorites')}
+            </button>
+            <button
+              onClick={() => setLibraryInitialTab('history')}
+              className={segmentClass(libraryInitialTab === 'history')}
+            >
+              {t('saved.seg.history')}
+            </button>
+            <button
+              onClick={() => setLibraryInitialTab('downloads')}
+              className={segmentClass(libraryInitialTab === 'downloads')}
+            >
+              {t('saved.seg.downloads')}
+            </button>
+          </div>
+        </div>
+
+        {/* Tag DB Status */}
+        <TagDbStatusCard />
 
         {/* Default Result Filter */}
         <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4">

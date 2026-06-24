@@ -1,6 +1,6 @@
 {
   "name": "hipago",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@10.30.3",
@@ -13,6 +13,7 @@
     "lint": "eslint",
     "test": "node scripts/test.mjs",
     "test:watch": "vitest",
+    "test:android:unit": "cd android && ./gradlew testDebugUnitTest --build-cache",
     "format": "prettier --write 'src/**/*.{ts,tsx}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx}'",
     "build:static": "node scripts/build-static.mjs",
@@ -21,6 +22,7 @@
     "build:bypass:android": "node scripts/build-android.mjs",
     "build:bypass:ios": "node scripts/build-ios.mjs",
     "build:android": "node scripts/build-android.mjs && node scripts/build-static.mjs && cap sync android && cd android && ./gradlew assembleDebug",
+    "build:android:release": "node scripts/build-android.mjs && node scripts/build-static.mjs && cap sync android && cd android && HIPAGO_REQUIRE_SIGNED_RELEASE=true ./gradlew assembleRelease",
     "build:ios": "node scripts/build-ios.mjs && node scripts/build-static.mjs && cap sync ios",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

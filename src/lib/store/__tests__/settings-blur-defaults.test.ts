@@ -101,7 +101,7 @@ describe('v4 migration — downloadBasePath → downloadTreeUri (SAF)', () => {
     expect(out.defaultFilterQuery).toBe('');
   });
 
-  it('v6: is a no-op (fields already present, same reference)', () => {
+  it('v6 -> v7 adds the library initial tab default without touching prior fields', () => {
     const state = {
       blurTags: ['male:yaoi'],
       imageCacheMaxBytes: 0,
@@ -113,9 +113,31 @@ describe('v4 migration — downloadBasePath → downloadTreeUri (SAF)', () => {
     const out = migrateSettings(state, 6) as {
       downloadTreeUri: string | null;
       secureScreen: boolean;
+      libraryInitialTab: string;
     };
     expect(out.downloadTreeUri).toBe('content://tree/x');
     expect(out.secureScreen).toBe(true);
+    expect(out.libraryInitialTab).toBe('favorites');
+  });
+
+  it('v7: is a no-op (fields already present, same reference)', () => {
+    const state = {
+      blurTags: ['male:yaoi'],
+      imageCacheMaxBytes: 0,
+      downloadTreeUri: 'content://tree/x',
+      downloadTreeName: 'X',
+      defaultFilterQuery: '',
+      secureScreen: true,
+      libraryInitialTab: 'downloads',
+    };
+    const out = migrateSettings(state, 7) as {
+      downloadTreeUri: string | null;
+      secureScreen: boolean;
+      libraryInitialTab: string;
+    };
+    expect(out.downloadTreeUri).toBe('content://tree/x');
+    expect(out.secureScreen).toBe(true);
+    expect(out.libraryInitialTab).toBe('downloads');
     expect(out).toBe(state);
   });
 });

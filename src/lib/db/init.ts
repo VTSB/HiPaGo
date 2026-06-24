@@ -79,6 +79,7 @@ export async function markTagSyncCompleted(count: number): Promise<void> {
   useDbStatusStore.getState().setDbReady(true);
   useDbStatusStore.getState().setIsSyncing(false);
   useDbStatusStore.getState().setSyncProgress(100);
+  useDbStatusStore.getState().setTagsStale(false);
   useDbStatusStore.getState().setSyncError(null);
 }
 

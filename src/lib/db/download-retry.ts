@@ -48,9 +48,9 @@ export async function scheduleAutoRetry(
 }
 
 /**
- * List failed rows whose automatic retry is due (nextRetryAt <= now) and which
- * still have attempts left (retryCount < AUTO_RETRY_MAX). Ordered oldest-due
- * first so the longest-waiting item is retried first.
+ * List failed rows whose automatic retry is due (nextRetryAt <= now) and whose
+ * scheduled attempt number is within the cap (retryCount <= AUTO_RETRY_MAX).
+ * Ordered oldest-due first so the longest-waiting item is retried first.
  */
 export async function listDueAutoRetries(nowISO: string): Promise<DBDownload[]> {
   const db = await ensureDb();
@@ -60,7 +60,7 @@ export async function listDueAutoRetries(nowISO: string): Promise<DBDownload[]> 
       WHERE status = 'failed'
         AND nextRetryAt IS NOT NULL
         AND nextRetryAt <= ?
-        AND COALESCE(retryCount, 0) < ?
+        AND COALESCE(retryCount, 0) <= ?
       ORDER BY nextRetryAt ASC`,
     [nowISO, AUTO_RETRY_MAX],
   );
@@ -74,10 +74,9 @@ export async function listDueAutoRetries(nowISO: string): Promise<DBDownload[]> 
  */
 export async function clearAutoRetry(galleryId: number): Promise<void> {
   const db = await ensureDb();
-  await db.execute(
-    'UPDATE download SET retryCount = 0, nextRetryAt = NULL WHERE galleryId = ?',
-    [galleryId],
-  );
+  await db.execute('UPDATE download SET retryCount = 0, nextRetryAt = NULL WHERE galleryId = ?', [
+    galleryId,
+  ]);
   await persistDb();
 }
 
@@ -93,7 +92,7 @@ export async function earliestNextRetryAt(): Promise<string | null> {
        FROM download
       WHERE status = 'failed'
         AND nextRetryAt IS NOT NULL
-        AND COALESCE(retryCount, 0) < ?`,
+        AND COALESCE(retryCount, 0) <= ?`,
     [AUTO_RETRY_MAX],
   );
   return rows[0]?.earliest ?? null;

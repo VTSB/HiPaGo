@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useT } from '@/lib/i18n/useT';
+import { TextInput } from '@/shared/components/atoms/TextInput';
 import { useHaptic } from '@/shared/hooks/useHaptic';
 
 interface PageJumpModalProps {
@@ -129,11 +130,7 @@ export function PageJumpModal({ currentPage, totalPages, onCommit, onClose }: Pa
     (e: React.PointerEvent<HTMLDivElement>) => {
       // Only track on the sheet / handle, not inside the form fields
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'BUTTON' ||
-        target.closest('form')
-      )
+      if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.closest('form'))
         return;
       e.currentTarget.setPointerCapture(e.pointerId);
       pointerStartTimeRef.current = Date.now();
@@ -240,7 +237,7 @@ export function PageJumpModal({ currentPage, totalPages, onCommit, onClose }: Pa
                 separate "current" hint is needed). Input value and the total
                 share one size so the row reads as a single unit. */}
             <div className="mb-7 flex items-center justify-center gap-2.5">
-              <input
+              <TextInput
                 ref={inputRef}
                 type="number"
                 inputMode="numeric"
@@ -248,7 +245,10 @@ export function PageJumpModal({ currentPage, totalPages, onCommit, onClose }: Pa
                 max={totalPages}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                className="block w-20 rounded-xl border-0 bg-zinc-100 px-3 py-3 text-center text-lg font-semibold tabular-nums text-zinc-900 outline-none ring-0 focus:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:bg-zinc-800 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                fullWidth={false}
+                align="center"
+                textSize="large"
+                className="w-20 font-semibold tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
               />
               <span className="text-lg tabular-nums text-zinc-400 dark:text-zinc-500">
                 / {totalPages.toLocaleString()}

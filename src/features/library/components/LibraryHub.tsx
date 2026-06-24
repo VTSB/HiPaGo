@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useIsMobile } from '@/shared/hooks/useIsMobile';
 import { useT } from '@/lib/i18n/useT';
+import { useSettingsStore } from '@/lib/store/settings';
 import { FavoritesView } from '@/features/favorites/components/FavoritesView';
 import { HistoryView } from '@/features/history/components/HistoryView';
 import { DownloadsView } from '@/features/library/components/DownloadsView';
@@ -14,7 +15,7 @@ function parseSegment(value: string | null): Segment | null {
 }
 
 function librarySegmentHref(segment: Segment): string {
-  return segment === 'favorites' ? '/library' : `/library?tab=${segment}`;
+  return `/library?tab=${segment}`;
 }
 
 export function LibraryHub() {
@@ -22,7 +23,8 @@ export function LibraryHub() {
   const isMobile = useIsMobile();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const segment = parseSegment(searchParams.get('tab')) ?? 'favorites';
+  const libraryInitialTab = useSettingsStore((s) => s.libraryInitialTab);
+  const segment = parseSegment(searchParams.get('tab')) ?? libraryInitialTab;
 
   // Desktop: /library stays exactly the downloads page it is today.
   if (!isMobile) {

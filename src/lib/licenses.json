@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-06-20T18:00:38.455Z",
+  "generatedAt": "2026-06-24T06:06:45.639Z",
   "counts": {
     "npm": 541,
-    "cargo": 599
+    "cargo": 602
   },
   "npm": [
     {
@@ -3338,6 +3338,18 @@
       "repository": "https://github.com/cuviper/autocfg"
     },
     {
+      "name": "aws-lc-rs",
+      "version": "1.17.0",
+      "license": "ISC AND (Apache-2.0 OR ISC)",
+      "repository": "https://github.com/aws/aws-lc-rs"
+    },
+    {
+      "name": "aws-lc-sys",
+      "version": "0.41.0",
+      "license": "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)",
+      "repository": "https://github.com/aws/aws-lc-rs"
+    },
+    {
       "name": "base64",
       "version": "0.21.7",
       "license": "MIT OR Apache-2.0",
@@ -5247,7 +5259,7 @@
     },
     {
       "name": "rustls",
-      "version": "0.23.40",
+      "version": "0.23.41",
       "license": "Apache-2.0 OR ISC OR MIT",
       "repository": "https://github.com/rustls/rustls"
     },
@@ -6268,6 +6280,12 @@
     {
       "name": "webpki-root-certs",
       "version": "1.0.6",
+      "license": "CDLA-Permissive-2.0",
+      "repository": "https://github.com/rustls/webpki-roots"
+    },
+    {
+      "name": "webpki-roots",
+      "version": "1.0.8",
       "license": "CDLA-Permissive-2.0",
       "repository": "https://github.com/rustls/webpki-roots"
     },

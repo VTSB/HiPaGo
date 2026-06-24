@@ -17,7 +17,10 @@ vi.mock('../image-url', () => ({
 // Mock api client — include ApiError class for error-path tests
 vi.mock('@/lib/api/client', () => {
   class ApiError extends Error {
-    constructor(public status: number, message: string) {
+    constructor(
+      public status: number,
+      message: string,
+    ) {
       super(message);
       this.name = 'ApiError';
     }
@@ -34,6 +37,8 @@ vi.mock('@/lib/db/download', () => ({
   upsertDownload: vi.fn().mockResolvedValue(undefined),
   updateDownloadProgress: vi.fn().mockResolvedValue(undefined),
   setDownloadError: vi.fn().mockResolvedValue(undefined),
+  updateDownloadStatus: vi.fn().mockResolvedValue(undefined),
+  getDownload: vi.fn().mockResolvedValue(null),
   serializeTags: vi.fn((tags: Record<string, string[]>) => JSON.stringify(tags)),
 }));
 
@@ -47,8 +52,7 @@ vi.mock('@/lib/storage/download-store', () => ({
       this.name = 'DownloadCancelledError';
     }
   },
-  imageFileName: (index: number, ext: string) =>
-    String(index + 1).padStart(4, '0') + '.' + ext,
+  imageFileName: (index: number, ext: string) => String(index + 1).padStart(4, '0') + '.' + ext,
   galleryFolderName: (id: number) => String(id),
 }));
 
@@ -76,11 +80,18 @@ import {
   exportGalleryZip,
   getDownloadedGalleryPages,
   getDownloadedImage,
+  hasCompleteDownloadedGallery,
 } from '../download-zip';
 import { zipSync } from 'fflate';
 import { getImageUrl } from '../image-url';
 import { apiClient, ApiError } from '@/lib/api/client';
-import { upsertDownload, setDownloadError, updateDownloadProgress } from '@/lib/db/download';
+import {
+  upsertDownload,
+  setDownloadError,
+  updateDownloadProgress,
+  updateDownloadStatus,
+  getDownload,
+} from '@/lib/db/download';
 import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -179,18 +190,29 @@ describe('downloadGalleryAsZip', () => {
     anchorEl = { href: '', download: '', click: vi.fn() };
 
     vi.stubGlobal('document', { createElement: vi.fn(() => anchorEl) });
-    vi.stubGlobal('Blob', class MockBlob {
-      constructor(public parts: unknown[], public options: unknown) {}
-    });
-    const origURL = globalThis.URL;
-    vi.stubGlobal('URL', Object.assign(
-      function (...args: unknown[]) { return new origURL(...(args as [string])); },
-      {
-        ...origURL,
-        createObjectURL: vi.fn(() => 'blob:fake-url'),
-        revokeObjectURL: vi.fn(),
+    vi.stubGlobal(
+      'Blob',
+      class MockBlob {
+        constructor(
+          public parts: unknown[],
+          public options: unknown,
+        ) {}
       },
-    ));
+    );
+    const origURL = globalThis.URL;
+    vi.stubGlobal(
+      'URL',
+      Object.assign(
+        function (...args: unknown[]) {
+          return new origURL(...(args as [string]));
+        },
+        {
+          ...origURL,
+          createObjectURL: vi.fn(() => 'blob:fake-url'),
+          revokeObjectURL: vi.fn(),
+        },
+      ),
+    );
 
     vi.mocked(getImageUrl).mockReturnValue('https://example.com/image.webp');
     vi.mocked(zipSync).mockReturnValue(new Uint8Array([1, 2, 3]));
@@ -231,7 +253,14 @@ describe('downloadGalleryAsZip', () => {
       const controller = new AbortController();
       controller.abort();
       await expect(
-        downloadGalleryAsZip(1, 'Title', [makeFile(), makeFile()], makeGgConfig(), undefined, controller.signal),
+        downloadGalleryAsZip(
+          1,
+          'Title',
+          [makeFile(), makeFile()],
+          makeGgConfig(),
+          undefined,
+          controller.signal,
+        ),
       ).rejects.toMatchObject({ name: 'AbortError', message: 'Aborted' });
     });
 
@@ -242,7 +271,14 @@ describe('downloadGalleryAsZip', () => {
         return Promise.resolve(makeFetchResponse('image/webp'));
       });
       await expect(
-        downloadGalleryAsZip(1, 'Title', [makeFile('a.jpg'), makeFile('b.jpg')], makeGgConfig(), undefined, controller.signal),
+        downloadGalleryAsZip(
+          1,
+          'Title',
+          [makeFile('a.jpg'), makeFile('b.jpg')],
+          makeGgConfig(),
+          undefined,
+          controller.signal,
+        ),
       ).rejects.toMatchObject({ name: 'AbortError' });
     });
   });
@@ -266,14 +302,18 @@ describe('downloadGalleryAsZip', () => {
 
   describe('fallback extension', () => {
     it('uses file.name extension when haswebp=0 and content-type is unrecognized', async () => {
-      vi.mocked(apiClient.fetchUrl).mockResolvedValue(makeFetchResponse('application/octet-stream'));
+      vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+        makeFetchResponse('application/octet-stream'),
+      );
       await downloadGalleryAsZip(1, 'Title', [makeFile('artwork.png', 0)], makeGgConfig());
       const zipEntries = vi.mocked(zipSync).mock.calls[0][0] as Record<string, Uint8Array>;
       expect(Object.keys(zipEntries)[0]).toMatch(/\.png$/);
     });
 
     it('defaults to webp when haswebp=1 and content-type is unrecognized', async () => {
-      vi.mocked(apiClient.fetchUrl).mockResolvedValue(makeFetchResponse('application/octet-stream'));
+      vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+        makeFetchResponse('application/octet-stream'),
+      );
       await downloadGalleryAsZip(1, 'Title', [makeFile('img.jpg', 1)], makeGgConfig());
       const zipEntries = vi.mocked(zipSync).mock.calls[0][0] as Record<string, Uint8Array>;
       expect(Object.keys(zipEntries)[0]).toMatch(/\.webp$/);
@@ -351,9 +391,9 @@ describe('downloadGalleryAsZip', () => {
   describe('fetch error handling', () => {
     it('throws when response is not ok', async () => {
       vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('HTTP 404: Not Found'));
-      await expect(
-        downloadGalleryAsZip(1, 'T', [makeFile()], makeGgConfig()),
-      ).rejects.toThrow('HTTP 404');
+      await expect(downloadGalleryAsZip(1, 'T', [makeFile()], makeGgConfig())).rejects.toThrow(
+        'HTTP 404',
+      );
     });
   });
 });
@@ -367,11 +407,15 @@ describe('downloadGalleryToLibrary', () => {
     vi.clearAllMocks();
     memStore = makeMemoryStore();
     vi.mocked(createDownloadStore).mockResolvedValue(memStore);
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(makeFetchResponse('image/webp', new Uint8Array([10, 20, 30])));
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
+      makeFetchResponse('image/webp', new Uint8Array([10, 20, 30])),
+    );
     vi.mocked(getImageUrl).mockReturnValue('https://example.com/image.webp');
     vi.mocked(upsertDownload).mockResolvedValue(undefined);
     vi.mocked(setDownloadError).mockResolvedValue(undefined);
     vi.mocked(updateDownloadProgress).mockResolvedValue(undefined);
+    vi.mocked(updateDownloadStatus).mockResolvedValue(undefined);
+    vi.mocked(getDownload).mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -409,14 +453,7 @@ describe('downloadGalleryToLibrary', () => {
     vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network error'));
 
     await expect(
-      downloadGalleryToLibrary(
-        1,
-        'Gallery',
-        'thumb.jpg',
-        [makeFile()],
-        makeGgConfig(),
-        {},
-      ),
+      downloadGalleryToLibrary(1, 'Gallery', 'thumb.jpg', [makeFile()], makeGgConfig(), {}),
     ).rejects.toThrow('Network error');
 
     expect(upsertDownload).toHaveBeenCalledTimes(1);
@@ -433,14 +470,9 @@ describe('downloadGalleryToLibrary', () => {
   // AC-006 (b): first page ok → row created pageCount:1, then updateDownloadProgress per page
   it('(b) creates row with pageCount:1 on first page success, then updateDownloadProgress for subsequent pages', async () => {
     const files = [makeFile('a.jpg'), makeFile('b.jpg'), makeFile('c.jpg')];
-    await downloadGalleryToLibrary(
-      2,
-      'My Gallery',
-      'thumb.jpg',
-      files,
-      makeGgConfig(),
-      { artist: ['foo'] },
-    );
+    await downloadGalleryToLibrary(2, 'My Gallery', 'thumb.jpg', files, makeGgConfig(), {
+      artist: ['foo'],
+    });
 
     // upsertDownload called twice: once creating row (pageCount:1), once on completion
     expect(upsertDownload).toHaveBeenCalledTimes(2);
@@ -458,6 +490,84 @@ describe('downloadGalleryToLibrary', () => {
     const lastUpsert = vi.mocked(upsertDownload).mock.calls[1][0];
     expect(lastUpsert.status).toBe('complete');
     expect(lastUpsert.pageCount).toBe(3);
+  });
+
+  it('preserves an existing queuePosition on the first active row so pause remains resumable', async () => {
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 22,
+      title: 'Queued',
+      thumbnail: 'thumb.jpg',
+      tags: '{}',
+      pageCount: 0,
+      totalBytes: 0,
+      downloadedAt: '2026-01-01T00:00:00.000Z',
+      status: 'queued',
+      queuePosition: 7,
+      retryCount: 2,
+      nextRetryAt: '2026-01-01T00:01:00.000Z',
+    });
+
+    await downloadGalleryToLibrary(22, 'Queued', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
+
+    const firstUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
+    expect(firstUpsert).toMatchObject({
+      galleryId: 22,
+      status: 'downloading',
+      queuePosition: 7,
+      retryCount: 2,
+      nextRetryAt: null,
+    });
+  });
+
+  it('preserves retryCount when a retry attempt fails before the first page', async () => {
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 24,
+      title: 'Retrying',
+      thumbnail: 'thumb.jpg',
+      tags: '{}',
+      pageCount: 0,
+      totalBytes: 0,
+      downloadedAt: '2026-01-01T00:00:00.000Z',
+      status: 'queued',
+      queuePosition: 9,
+      retryCount: 2,
+      nextRetryAt: null,
+    });
+    vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network down'));
+
+    await expect(
+      downloadGalleryToLibrary(24, 'Retrying', 'thumb.jpg', [makeFile()], makeGgConfig(), {}),
+    ).rejects.toThrow('Network down');
+
+    const failedUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
+    expect(failedUpsert).toMatchObject({
+      galleryId: 24,
+      status: 'failed',
+      queuePosition: 9,
+      retryCount: 2,
+      nextRetryAt: null,
+    });
+  });
+
+  it('pause before the first page flips the queued row to paused instead of leaving it queued', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      downloadGalleryToLibrary(
+        23,
+        'Queued',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        controller.signal,
+        { isPauseSignal: () => true },
+      ),
+    ).rejects.toMatchObject({ name: 'DownloadPausedError' });
+
+    expect(updateDownloadStatus).toHaveBeenCalledWith(23, 'paused');
   });
 
   // AC-006 (c): putImageFromFile rejects → falls back to fetch, page is still written
@@ -482,7 +592,9 @@ describe('downloadGalleryToLibrary', () => {
     expect(page).toBeInstanceOf(Uint8Array);
     expect(apiClient.fetchUrl).toHaveBeenCalledTimes(1);
     // Row should be created (page was still written successfully)
-    expect(upsertDownload).toHaveBeenCalledWith(expect.objectContaining({ status: 'downloading', pageCount: 1 }));
+    expect(upsertDownload).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'downloading', pageCount: 1 }),
+    );
   });
 
   // AC-006 (d): fetchWithRetry retries transient failures then succeeds; AbortError not retried
@@ -645,14 +757,8 @@ describe('downloadGalleryToLibrary', () => {
   it('calls onProgress once per image', async () => {
     const files = [makeFile('a.jpg'), makeFile('b.jpg'), makeFile('c.jpg')];
     const progress: Array<{ current: number; total: number }> = [];
-    await downloadGalleryToLibrary(
-      2,
-      'Gallery',
-      'thumb.jpg',
-      files,
-      makeGgConfig(),
-      {},
-      (p) => progress.push({ ...p }),
+    await downloadGalleryToLibrary(2, 'Gallery', 'thumb.jpg', files, makeGgConfig(), {}, (p) =>
+      progress.push({ ...p }),
     );
     expect(progress).toHaveLength(3);
     expect(progress[0]).toEqual({ current: 1, total: 3 });
@@ -701,9 +807,7 @@ describe('downloadGalleryToLibrary', () => {
 
   it('accumulates totalBytes correctly', async () => {
     const payload = new Uint8Array([1, 2, 3, 4, 5]); // 5 bytes
-    vi.mocked(apiClient.fetchUrl).mockResolvedValue(
-      makeFetchResponse('image/webp', payload),
-    );
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue(makeFetchResponse('image/webp', payload));
     const files = [makeFile(), makeFile()]; // 2 pages
     await downloadGalleryToLibrary(5, 'G', 'th.jpg', files, makeGgConfig(), {});
 
@@ -768,7 +872,12 @@ describe('downloadGalleryToLibrary', () => {
 
   // AC-005: resume skips already-stored pages (per manifest) and fetches the rest.
   it('resume skips stored pages and fetches only the remainder', async () => {
-    await memStore.putImage(9, -1, new TextEncoder().encode(JSON.stringify(['webp', 'webp'])), 'json');
+    await memStore.putImage(
+      9,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp'])),
+      'json',
+    );
     await memStore.putImage(9, 0, new Uint8Array([1, 1]), 'webp');
     await memStore.putImage(9, 1, new Uint8Array([2, 2]), 'webp');
     vi.mocked(apiClient.fetchUrl).mockResolvedValue(
@@ -796,13 +905,23 @@ describe('downloadGalleryToLibrary', () => {
     expect(lastUpsert.status).toBe('complete');
     expect(lastUpsert.pageCount).toBe(4);
     const manifest = await memStore.getImage(9, -1, 'json');
-    expect(JSON.parse(new TextDecoder().decode(manifest!))).toEqual(['webp', 'webp', 'webp', 'webp']);
+    expect(JSON.parse(new TextDecoder().decode(manifest!))).toEqual([
+      'webp',
+      'webp',
+      'webp',
+      'webp',
+    ]);
   });
 
   // AC-005: a torn last page (manifest claims it but the file is missing) is
   // dropped and re-fetched on resume.
   it('resume re-fetches a torn last page that is missing on disk', async () => {
-    await memStore.putImage(10, -1, new TextEncoder().encode(JSON.stringify(['webp', 'webp'])), 'json');
+    await memStore.putImage(
+      10,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp'])),
+      'json',
+    );
     await memStore.putImage(10, 0, new Uint8Array([1]), 'webp');
     // page 1 intentionally absent (torn write)
     vi.mocked(apiClient.fetchUrl).mockResolvedValue(
@@ -1126,6 +1245,62 @@ describe('getDownloadedImage', () => {
   });
 });
 
+describe('hasCompleteDownloadedGallery', () => {
+  let memStore: ReturnType<typeof makeMemoryStore>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    memStore = makeMemoryStore();
+    vi.mocked(createDownloadStore).mockResolvedValue(memStore);
+  });
+
+  it('returns true when manifest covers expected pages and every file exists', async () => {
+    await memStore.putImage(
+      31,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(31, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(31, 1, new Uint8Array([2]), 'jpg');
+
+    await expect(hasCompleteDownloadedGallery(31, 2)).resolves.toBe(true);
+  });
+
+  it('returns false when manifest covers pageCount but a page file is missing', async () => {
+    await memStore.putImage(
+      32,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(32, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(32, 2)).resolves.toBe(false);
+  });
+
+  it('returns false when the manifest is shorter than the expected pageCount', async () => {
+    await memStore.putImage(33, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(33, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(33, 2)).resolves.toBe(false);
+  });
+
+  it('returns false when the manifest has stale extra pages beyond the expected pageCount', async () => {
+    await memStore.putImage(
+      34,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp', 'webp'])),
+      'json',
+    );
+    await memStore.putImage(34, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 1, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 2, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(34, 2)).resolves.toBe(false);
+  });
+});
+
 // ── exportGalleryZip (AC-007) ─────────────────────────────────────────────────
 
 describe('exportGalleryZip', () => {
@@ -1140,18 +1315,29 @@ describe('exportGalleryZip', () => {
 
     anchorEl = { href: '', download: '', click: vi.fn() };
     vi.stubGlobal('document', { createElement: vi.fn(() => anchorEl) });
-    vi.stubGlobal('Blob', class MockBlob {
-      constructor(public parts: unknown[], public options: unknown) {}
-    });
-    const origURL = globalThis.URL;
-    vi.stubGlobal('URL', Object.assign(
-      function (...args: unknown[]) { return new origURL(...(args as [string])); },
-      {
-        ...origURL,
-        createObjectURL: vi.fn(() => 'blob:fake-url'),
-        revokeObjectURL: vi.fn(),
+    vi.stubGlobal(
+      'Blob',
+      class MockBlob {
+        constructor(
+          public parts: unknown[],
+          public options: unknown,
+        ) {}
       },
-    ));
+    );
+    const origURL = globalThis.URL;
+    vi.stubGlobal(
+      'URL',
+      Object.assign(
+        function (...args: unknown[]) {
+          return new origURL(...(args as [string]));
+        },
+        {
+          ...origURL,
+          createObjectURL: vi.fn(() => 'blob:fake-url'),
+          revokeObjectURL: vi.fn(),
+        },
+      ),
+    );
   });
 
   afterEach(() => {
@@ -1209,17 +1395,17 @@ describe('exportGalleryZip', () => {
     expect(anchorEl.download).toBe('5 Bad _Title_ _ _Name_.zip');
   });
 
-  it('skips missing pages gracefully (partial download)', async () => {
+  it('throws when a manifest page is missing instead of creating a partial zip', async () => {
     // Manifest says 2 pages but only page 0 is stored
     const exts = ['webp', 'jpg'];
     await memStore.putImage(6, -1, new TextEncoder().encode(JSON.stringify(exts)), 'json');
     await memStore.putImage(6, 0, new Uint8Array([1, 2]), 'webp');
     // page 1 is intentionally missing
 
-    await exportGalleryZip(6, 'Partial');
-
-    const entries = vi.mocked(zipSync).mock.calls[0][0] as Record<string, Uint8Array>;
-    expect(Object.keys(entries)).toContain('0001.webp');
-    expect(Object.keys(entries)).not.toContain('0002.jpg');
+    await expect(exportGalleryZip(6, 'Partial')).rejects.toThrow(
+      'Missing downloaded page 2 for gallery 6',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(anchorEl.click).not.toHaveBeenCalled();
   });
 });

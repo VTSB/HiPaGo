@@ -44,6 +44,7 @@ export interface WorkOrder {
   galleryId: number;
   title: string;
   folderName: string;
+  queuePosition?: number | null;
   pages: WorkOrderPage[];
 }
 

@@ -3,6 +3,7 @@ package com.hipago.app;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.UriPermission;
 import android.net.Uri;
 
 import androidx.documentfile.provider.DocumentFile;
@@ -11,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,16 +99,24 @@ public class SafLibrary {
     }
 
     /**
-     * The tree root for file ops. Cached after first resolution. {@code
-     * fromTreeUri} itself does no IPC; validity is gated by the caller (the
-     * plugin via getTree, the worker by failing gracefully when null).
+     * The tree root for file ops. Cached after first resolution, but guarded by
+     * the persisted write grant and {@link DocumentFile#canWrite()} so a revoked
+     * SAF permission does not look writable to the background worker forever.
      */
     public DocumentFile rootDir() {
-        if (cachedRoot != null) return cachedRoot;
         Uri tree = getTreeUri();
         if (tree == null) return null;
+        if (!hasPersistedWritePermission(tree)) {
+            cachedRoot = null;
+            return null;
+        }
+        if (cachedRoot != null) {
+            if (cachedRoot.canWrite()) return cachedRoot;
+            cachedRoot = null;
+            return null;
+        }
         DocumentFile root = DocumentFile.fromTreeUri(context, tree);
-        if (root == null) return null;
+        if (root == null || !root.canWrite()) return null;
         cachedRoot = root;
         return root;
     }
@@ -114,6 +124,17 @@ public class SafLibrary {
     /** Whether a writable tree is currently available. */
     public boolean hasTree() {
         return rootDir() != null;
+    }
+
+    private boolean hasPersistedWritePermission(Uri tree) {
+        ContentResolver cr = context.getContentResolver();
+        List<UriPermission> perms = cr.getPersistedUriPermissions();
+        for (UriPermission p : perms) {
+            if (p.getUri().equals(tree) && p.isWritePermission()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // -----------------------------------------------------------------------
@@ -125,8 +146,13 @@ public class SafLibrary {
         if (relPath == null || relPath.isEmpty()) {
             throw new SecurityException("path is required");
         }
-        if (relPath.startsWith("/") || relPath.contains("..")) {
+        if (relPath.startsWith("/")) {
             throw new SecurityException("path traversal");
+        }
+        for (String segment : relPath.split("/")) {
+            if (segment.equals("..")) {
+                throw new SecurityException("path traversal");
+            }
         }
     }
 
@@ -171,6 +197,15 @@ public class SafLibrary {
 
     private static int lastSlash(String p) {
         return p.lastIndexOf('/');
+    }
+
+    static String fileNameForPath(String relPath) {
+        int idx = lastSlash(relPath);
+        return idx < 0 ? relPath : relPath.substring(idx + 1);
+    }
+
+    static String tempNameForPublish(String finalName, long nonce) {
+        return "." + finalName + ".tmp-" + Long.toHexString(nonce);
     }
 
     /** Resolve a relative FILE path to its DocumentFile, or null if missing. */
@@ -265,32 +300,89 @@ public class SafLibrary {
     /**
      * Copy a LOCAL source file (absolute or {@code file://} path, e.g. a temp in
      * the cache dir) into the tree at relative {@code toRelPath}. The source stays
-     * a normal File; only the destination is a content URI. Returns bytes written.
+     * a normal File; only the destination is a content URI. Writes go to a sibling
+     * temp document first, then publish by rename so a killed provider write does
+     * not leave partial bytes under the final filename. Returns bytes written.
      */
     public long copyFromFile(String from, String toRelPath) throws Exception {
         if (rootDir() == null) throw new Exception("NO_TREE");
         if (from == null) throw new Exception("from is required");
         String srcPath = from.startsWith("file://") ? Uri.parse(from).getPath() : from;
+        if (srcPath == null || srcPath.isEmpty()) throw new Exception("source file not found: " + from);
         File src = new File(srcPath);
         if (!src.exists() || !src.isFile()) {
             throw new Exception("source file not found: " + from);
         }
-        Uri uri = ensureFileUri(toRelPath);
-        if (uri == null) throw new Exception("copy create failed: " + toRelPath);
+        assertSafe(toRelPath);
+        int idx = lastSlash(toRelPath);
+        String dirPart = idx < 0 ? "" : toRelPath.substring(0, idx);
+        String finalName = fileNameForPath(toRelPath);
+        DocumentFile dir = resolveDir(dirPart, true);
+        if (dir == null) throw new Exception("copy create failed: " + toRelPath);
+
+        String tempName = tempNameForPublish(finalName, System.nanoTime());
+        DocumentFile existingTemp = dir.findFile(tempName);
+        if (existingTemp != null && !existingTemp.delete()) {
+            throw new Exception("copy temp cleanup failed: " + tempName);
+        }
+
+        DocumentFile temp = dir.createFile(mimeFor(finalName), tempName);
+        if (temp == null) throw new Exception("copy temp create failed: " + toRelPath);
+
         ContentResolver cr = context.getContentResolver();
         long written = 0;
-        try (FileInputStream fis = new FileInputStream(src);
-             OutputStream os = cr.openOutputStream(uri, "wt")) {
-            if (os == null) throw new Exception("openOutputStream returned null");
-            byte[] buf = new byte[65536];
-            int n;
-            while ((n = fis.read(buf)) != -1) {
-                os.write(buf, 0, n);
-                written += n;
+        try {
+            try (FileInputStream fis = new FileInputStream(src);
+                 OutputStream os = cr.openOutputStream(temp.getUri(), "wt")) {
+                if (os == null) throw new Exception("openOutputStream returned null");
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = fis.read(buf)) != -1) {
+                    os.write(buf, 0, n);
+                    written += n;
+                }
+                os.flush();
             }
-            os.flush();
+
+            long sourceSize = src.length();
+            if (sourceSize <= 0 || written != sourceSize || temp.length() != sourceSize) {
+                throw new Exception("incomplete temp SAF write");
+            }
+
+            DocumentFile existingFinal = dir.findFile(finalName);
+            if (existingFinal != null) {
+                if (!existingFinal.isFile()) throw new Exception("destination is not a file: " + toRelPath);
+                if (!existingFinal.delete()) throw new Exception("destination delete failed: " + toRelPath);
+            }
+            if (!temp.renameTo(finalName)) {
+                throw new Exception("copy publish failed: " + toRelPath);
+            }
+            DocumentFile published = dir.findFile(finalName);
+            if (published == null || !published.isFile() || published.length() != sourceSize) {
+                throw new Exception("copy publish verification failed: " + toRelPath);
+            }
+            return written;
+        } catch (Throwable t) {
+            try {
+                DocumentFile staleTemp = dir.findFile(tempName);
+                if (staleTemp != null && staleTemp.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    staleTemp.delete();
+                }
+            } catch (Throwable ignored) {
+                // Best-effort cleanup; a stale temp file is ignored by readers.
+            }
+            if (t instanceof Exception) throw (Exception) t;
+            throw new Exception(t);
         }
-        return written;
+    }
+
+    /** Return the file size for a relative file, or -1 when missing/unknown. */
+    public long size(String relPath) {
+        if (rootDir() == null) return -1L;
+        DocumentFile file = resolveFile(relPath);
+        if (file == null || !file.isFile()) return -1L;
+        return file.length();
     }
 
     /** Delete a single relative file. No-op when missing. Returns false on a hard failure. */
@@ -305,9 +397,10 @@ public class SafLibrary {
 
     /** Recursively delete a relative directory and drop any cached handles under it. */
     public void deleteDir(String relPath) {
+        assertSafe(relPath);
         if (rootDir() == null) return;
         DocumentFile dir = resolveDir(relPath, false);
-        if (dir != null && dir.exists()) {
+        if (dir != null && dir.exists() && dir.isDirectory()) {
             dir.delete(); // DocumentFile.delete removes the subtree.
         }
         dirCache.keySet().removeIf(k -> k.equals(relPath) || k.startsWith(relPath + "/"));
