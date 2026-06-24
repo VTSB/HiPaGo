@@ -1102,6 +1102,29 @@ describe('iOS background backstop (Task D)', () => {
     await run;
   });
 
+  it('cancel of an active iOS download before any page is stored removes the target row', async () => {
+    iosFlag = true;
+    queue.push({ id: 407, pageCount: 0 });
+    dl.mockImplementation(
+      async (...a: unknown[]) =>
+        new Promise<void>((_res, rej) => {
+          const signal = a[7] as AbortSignal;
+          signal.addEventListener('abort', () => {
+            rej(new DOMException('Aborted', 'AbortError'));
+          });
+        }),
+    );
+
+    const run = processQueue();
+    await new Promise((r) => setTimeout(r, 1));
+    useDownloadProgressStore.getState().cancel(407);
+    await run;
+
+    expect(workerCancels).toContain('407');
+    expect(deletedRows).toContain(407);
+    expect(downloadRows.get(407)).toBeUndefined();
+  });
+
   it('pause of an active iOS download drops the backstop work-order', async () => {
     iosFlag = true;
     queue.push({ id: 406, pageCount: 2 });
