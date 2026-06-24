@@ -27,7 +27,7 @@ import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
 import type { TagType } from '@/lib/utils/types';
 import { galleryHref } from '@/lib/utils/routes';
-import type { DownloadProgress } from '@/lib/utils/download-zip';
+import { hasCompleteDownloadedGallery, type DownloadProgress } from '@/lib/utils/download-zip';
 
 // Match the gallery-list grid (GalleryGrid GRID_AUTO) so downloaded items read
 // as the same cover-forward cards.
@@ -156,6 +156,8 @@ interface LibraryCardProps {
   /** Live "auto-retry pending" state from the store, fresher than the DB row on
    *  a just-failed item (the library-list query may not have refetched yet). */
   retryOverride?: { retryAt?: string | null; attempt?: number | null } | null;
+  isMissingFiles?: boolean;
+  canExport?: boolean;
 }
 
 interface MenuAction {
@@ -243,9 +245,13 @@ function LibraryCard({
   isRetrying,
   retryProgress,
   retryOverride,
+  isMissingFiles = false,
+  canExport = false,
 }: LibraryCardProps) {
   const t = useT();
-  const isFailed = item.status === 'failed';
+  const effectiveStatus: DBDownload['status'] =
+    item.status === 'complete' && isMissingFiles ? 'failed' : item.status;
+  const isFailed = effectiveStatus === 'failed';
   const showDownloading = item.status === 'downloading' || isRetrying;
 
   // The live store entry (retryOverride) is fresher than the DB row on a
@@ -307,7 +313,7 @@ function LibraryCard({
     if (isFailed) {
       items.push({ key: 'retry', label: t('library.retry'), onClick: () => onRetry(item) });
     }
-    if (item.status === 'complete') {
+    if (effectiveStatus === 'complete' && canExport) {
       items.push({
         key: 'export',
         label: t('library.exportZip'),
@@ -321,7 +327,7 @@ function LibraryCard({
       destructive: true,
     });
     return items;
-  }, [isFailed, item, t, onRetry, onExport, onDelete]);
+  }, [canExport, effectiveStatus, isFailed, item, t, onRetry, onExport, onDelete]);
 
   return (
     <div className="group relative">
@@ -555,6 +561,35 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     staleTime: Infinity,
   });
 
+  const completeVisibleItems = useMemo(
+    () => visibleItems.filter((item) => item.status === 'complete'),
+    [visibleItems],
+  );
+  const completeIntegrityKey = useMemo(
+    () => completeVisibleItems.map((item) => `${item.galleryId}:${item.pageCount}`).join('|'),
+    [completeVisibleItems],
+  );
+
+  const { data: completeIntegrity = {} } = useQuery({
+    queryKey: ['download-integrity', completeIntegrityKey],
+    queryFn: async () => {
+      const pairs = await Promise.all(
+        completeVisibleItems.map(async (item) => {
+          const ok =
+            (item.pageCount ?? 0) > 0
+              ? await hasCompleteDownloadedGallery(item.galleryId, item.pageCount).catch(
+                  () => false,
+                )
+              : false;
+          return [item.galleryId, ok] as const;
+        }),
+      );
+      return Object.fromEntries(pairs) as Record<number, boolean>;
+    },
+    enabled: completeVisibleItems.length > 0,
+    staleTime: 0,
+  });
+
   useEffect(() => {
     setRenderLimit(INITIAL_RENDER_COUNT);
   }, [debouncedQuery]);
@@ -747,6 +782,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 retryOverride={
                   entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
                 }
+                isMissingFiles={
+                  item.status === 'complete' && completeIntegrity[item.galleryId] === false
+                }
+                canExport={item.status === 'complete' && completeIntegrity[item.galleryId] === true}
               />
             );
           })}

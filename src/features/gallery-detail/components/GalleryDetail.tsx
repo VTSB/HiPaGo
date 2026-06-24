@@ -364,7 +364,7 @@ export function GalleryDetail({ id }: { id: number }) {
                     #{queuedPosition}
                   </span>
                 </button>
-              ) : isDownloaded && filesMissing ? (
+              ) : filesMissing ? (
                 <button
                   onClick={handleDownload}
                   title={t('detail.filesMissing')}
