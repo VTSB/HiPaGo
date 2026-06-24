@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DownloadQueueView } from '../DownloadQueueView';
 import type { QueueItem } from '@/lib/store/download-progress';
 
@@ -33,6 +33,12 @@ vi.mock('@/shared/components/AbortableImage', () => ({
 }));
 
 describe('DownloadQueueView', () => {
+  beforeEach(() => {
+    state.queue = [];
+    state.globalPaused = false;
+    vi.clearAllMocks();
+  });
+
   it('renders every active downloading row in the status panel', () => {
     state.queue = [
       {
@@ -60,5 +66,79 @@ describe('DownloadQueueView', () => {
     expect(screen.getByText('2/10 · 20%')).toBeTruthy();
     expect(screen.getByText('1/4 · 25%')).toBeTruthy();
     expect(screen.getByText('(2)')).toBeTruthy();
+  });
+
+  it('routes active pause and cancel buttons to the store actions', () => {
+    state.queue = [
+      {
+        id: 10,
+        title: 'Active download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: { current: 2, total: 10 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.queue.pause' }));
+    fireEvent.click(screen.getByRole('button', { name: 'library.queue.cancel' }));
+
+    expect(state.pause).toHaveBeenCalledWith(10);
+    expect(state.cancel).toHaveBeenCalledWith(10);
+  });
+
+  it('routes queued pause and paused resume buttons to the store actions', () => {
+    state.queue = [
+      {
+        id: 20,
+        title: 'Queued download',
+        thumbnail: '',
+        status: 'queued',
+        position: 1,
+        progress: null,
+      },
+      {
+        id: 21,
+        title: 'Paused download',
+        thumbnail: '',
+        status: 'paused',
+        position: 2,
+        progress: null,
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.queue.pause' }));
+    fireEvent.click(screen.getByRole('button', { name: 'library.queue.resume' }));
+
+    expect(state.pause).toHaveBeenCalledWith(20);
+    expect(state.resume).toHaveBeenCalledWith(21);
+  });
+
+  it('toggles pauseAll and resumeAll from the header button', () => {
+    state.queue = [
+      {
+        id: 30,
+        title: 'Queued download',
+        thumbnail: '',
+        status: 'queued',
+        position: 1,
+        progress: null,
+      },
+    ];
+
+    const { rerender } = render(<DownloadQueueView />);
+
+    fireEvent.click(screen.getByRole('button', { name: /library.queue.pauseAll/ }));
+    expect(state.pauseAll).toHaveBeenCalled();
+
+    state.globalPaused = true;
+    rerender(<DownloadQueueView />);
+
+    fireEvent.click(screen.getByRole('button', { name: /library.queue.resumeAll/ }));
+    expect(state.resumeAll).toHaveBeenCalled();
   });
 });
