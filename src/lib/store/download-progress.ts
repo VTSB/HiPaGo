@@ -148,6 +148,7 @@ let globalPaused = false;
 // every schedule/fire/queue mutation (mirrors the running/controllers
 // module-singleton pattern so the scheduler is independent of React).
 let autoRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let autoRetryArmSeq = 0;
 const METERED_AUTO_RETRY_RECHECK_MS = 60_000;
 
 // Internal helper that the store closure binds to so processQueue can push
@@ -171,6 +172,7 @@ let storeApi: {
  * re-arms. Best-effort: never throws into the caller.
  */
 export function armAutoRetryTimer(): void {
+  const seq = ++autoRetryArmSeq;
   if (autoRetryTimer !== null) {
     clearTimeout(autoRetryTimer);
     autoRetryTimer = null;
@@ -182,19 +184,21 @@ export function armAutoRetryTimer(): void {
     } catch {
       return;
     }
+    if (seq !== autoRetryArmSeq) return;
     if (!earliest) return;
     // Clamp to >= 0; an overdue item fires on the next tick.
     const delay = Math.max(0, new Date(earliest).getTime() - Date.now());
-    scheduleAutoRetryTimer(delay);
+    scheduleAutoRetryTimer(delay, seq);
   })();
 }
 
-function scheduleAutoRetryTimer(delay: number): void {
+function scheduleAutoRetryTimer(delay: number, seq = ++autoRetryArmSeq): void {
   if (autoRetryTimer !== null) {
     clearTimeout(autoRetryTimer);
     autoRetryTimer = null;
   }
   autoRetryTimer = setTimeout(() => {
+    if (seq !== autoRetryArmSeq) return;
     autoRetryTimer = null;
     void fireDueAutoRetries();
   }, delay);
@@ -608,6 +612,8 @@ export async function processQueue(): Promise<void> {
             folderName: galleryFolderName(id, next.title),
             queuePosition: null,
             lastError: null,
+            retryCount: next.retryCount ?? null,
+            nextRetryAt: null,
           });
           notifyDownloadLibraryChanged(true);
           // Surface a "downloading (background)" entry with a 0/total placeholder,

@@ -1046,6 +1046,38 @@ describe('auto-retry scheduler timer (AC-004)', () => {
     }
   });
 
+  it('ignores an older async re-arm result after a newer arm call supersedes it', async () => {
+    vi.useFakeTimers();
+    try {
+      const retry = await import('@/lib/db/download-retry');
+      const { armAutoRetryTimer } = await import('../download-progress');
+      unmetered.mockResolvedValue(true);
+      dueRows = [{ galleryId: 90, title: 'G90', thumbnail: '/tn', tags: '{}' }];
+
+      let releaseFirst: (() => void) | undefined;
+      vi.mocked(retry.earliestNextRetryAt)
+        .mockImplementationOnce(
+          () =>
+            new Promise<string | null>((resolve) => {
+              releaseFirst = () => resolve(new Date(Date.now() + 10).toISOString());
+            }),
+        )
+        .mockResolvedValueOnce(null);
+
+      armAutoRetryTimer();
+      armAutoRetryTimer();
+      await vi.advanceTimersByTimeAsync(0);
+      releaseFirst?.();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20);
+
+      const staleRequeue = enqueued.find((e) => (e.meta as { galleryId: number }).galleryId === 90);
+      expect(staleRequeue).toBeFalsy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('holds (does NOT re-enqueue) due rows when metered', async () => {
     vi.useFakeTimers();
     try {
@@ -1273,6 +1305,31 @@ describe('reconcileQueue (AC-007)', () => {
 
     expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
       expect.objectContaining({ galleryId: 11 }),
+      { keepRetryState: true, queuePosition: undefined },
+    );
+  });
+
+  it('re-enqueues zombie rows with their persisted queue position and retry state', async () => {
+    adapterRows.push({
+      galleryId: 16,
+      title: 'Z',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 3,
+      status: 'downloading',
+      queuePosition: 4,
+      retryCount: 1,
+    });
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+    dl.mockResolvedValue(undefined);
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 16 }),
+      { keepRetryState: true, queuePosition: 4 },
     );
   });
 
@@ -1354,6 +1411,7 @@ describe('reconcileQueue (AC-007)', () => {
     expect(completed).toBeFalsy();
     expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
       expect.objectContaining({ galleryId: 57 }),
+      { keepRetryState: true, queuePosition: undefined },
     );
   });
 
@@ -1425,6 +1483,7 @@ describe('reconcileQueue (AC-007)', () => {
 
     expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
       expect.objectContaining({ galleryId: 14 }),
+      { keepRetryState: true, queuePosition: undefined },
     );
     expect(workOrderWrites.map((w) => w.galleryId)).toContain('14');
     expect(workerEnqueues).toContain('14');

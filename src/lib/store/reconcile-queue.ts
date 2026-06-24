@@ -101,12 +101,15 @@ export async function reconcileQueue(): Promise<void> {
     );
 
     for (const z of zombies) {
-      await enqueueDownload({
-        galleryId: z.galleryId,
-        title: z.title,
-        thumbnail: z.thumbnail,
-        tags: deserializeTags(z.tags),
-      });
+      await enqueueDownload(
+        {
+          galleryId: z.galleryId,
+          title: z.title,
+          thumbnail: z.thumbnail,
+          tags: deserializeTags(z.tags),
+        },
+        { keepRetryState: true, queuePosition: z.queuePosition ?? undefined },
+      );
     }
 
     // Staged auto-restart (Task E): an item that was waiting to auto-retry when

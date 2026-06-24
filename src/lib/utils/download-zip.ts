@@ -442,6 +442,8 @@ export async function downloadGalleryToLibrary(
           status: 'downloading',
           folderName,
           queuePosition: existingRow?.queuePosition ?? null,
+          retryCount: existingRow?.retryCount ?? null,
+          nextRetryAt: null,
         });
         rowCreated = true;
       } else {
@@ -462,6 +464,8 @@ export async function downloadGalleryToLibrary(
       downloadedAt: now,
       status: 'complete',
       folderName,
+      retryCount: 0,
+      nextRetryAt: null,
     });
   } catch (err) {
     const e = err as Error;
@@ -502,6 +506,9 @@ export async function downloadGalleryToLibrary(
           status: 'failed',
           folderName,
           lastError: reason,
+          queuePosition: existingRow?.queuePosition ?? null,
+          retryCount: existingRow?.retryCount ?? null,
+          nextRetryAt: null,
         });
       }
     }
