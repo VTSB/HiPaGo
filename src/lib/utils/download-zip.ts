@@ -230,9 +230,9 @@ export async function getDownloadedImage(
 }
 
 /**
- * Verify that a completed gallery's manifest covers the expected page count and
- * every listed page is actually present on disk. A manifest-only check can be
- * fooled by external deletion or a stale/corrupt storage state.
+ * Verify that a completed gallery's manifest exactly matches the expected page
+ * count and every listed page is actually present on disk. A manifest-only check
+ * can be fooled by external deletion or a stale/corrupt storage state.
  */
 export async function hasCompleteDownloadedGallery(
   galleryId: number,
@@ -244,7 +244,7 @@ export async function hasCompleteDownloadedGallery(
 
   const exts = decodeManifest(manifestBytes);
   if (exts.length === 0) return false;
-  if (expectedPageCount > 0 && exts.length < expectedPageCount) return false;
+  if (expectedPageCount > 0 && exts.length !== expectedPageCount) return false;
 
   for (let i = 0; i < exts.length; i++) {
     const ext = exts[i];
