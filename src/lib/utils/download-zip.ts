@@ -334,6 +334,10 @@ export async function downloadGalleryToLibrary(
   let totalBytes = 0;
   let rowCreated = false;
   const existingRow = await getDownload(galleryId).catch(() => null);
+  if (existingRow?.status === 'downloading' && existingRow.pageCount >= total) {
+    rowCreated = true;
+    totalBytes = existingRow.totalBytes ?? 0;
+  }
 
   // ── Resume seeding (per-page verify) ──────────────────────────────────────
   // Read the manifest to learn each already-stored page's ext. The main loop
