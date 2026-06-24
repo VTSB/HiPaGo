@@ -76,6 +76,35 @@ public class DownloadWorkerPlugin extends Plugin {
         return new File(handoffDir(), galleryId + ".json");
     }
 
+    private File progressDir() {
+        return new File(getContext().getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR);
+    }
+
+    private File progressFile(String galleryId) {
+        return new File(progressDir(), galleryId + ".json");
+    }
+
+    private void deleteProgress(String galleryId) {
+        File f = progressFile(galleryId);
+        if (f.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        }
+    }
+
+    private String workOrderGalleryId(String json) {
+        try {
+            JSONObject obj = new JSONObject(json);
+            Object raw = obj.opt("galleryId");
+            if (raw == null || raw == JSONObject.NULL) {
+                return null;
+            }
+            return String.valueOf(raw);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /**
      * Persist a work-order JSON to {@code filesDir/dl-queue/<galleryId>.json} so
      * the worker can read it. TS passes the already-serialized JSON string and the
@@ -88,6 +117,12 @@ public class DownloadWorkerPlugin extends Plugin {
         if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
         if (json == null) { call.reject("json is required"); return; }
         try {
+            String payloadGalleryId = workOrderGalleryId(json);
+            if (!galleryId.equals(payloadGalleryId)) {
+                call.reject("work-order galleryId does not match filename");
+                return;
+            }
+            deleteProgress(galleryId);
             File f = orderFile(galleryId);
             File tmp = new File(handoffDir(), galleryId + ".json.tmp");
             try (FileOutputStream fos = new FileOutputStream(tmp)) {
@@ -191,9 +226,7 @@ public class DownloadWorkerPlugin extends Plugin {
     public void getProgress(PluginCall call) {
         String galleryId = call.getString("galleryId");
         if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
-        File f = new File(
-                new File(getContext().getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR),
-                galleryId + ".json");
+        File f = progressFile(galleryId);
         JSObject ret = new JSObject();
         if (!f.exists()) {
             // Absent → no active progress (not started, or already completed/cleared).
@@ -236,6 +269,7 @@ public class DownloadWorkerPlugin extends Plugin {
                 //noinspection ResultOfMethodCallIgnored
                 f.delete();
             }
+            deleteProgress(galleryId);
             File dir = handoffDir();
             File[] remaining = dir.listFiles((d, name) -> name.endsWith(".json"));
             if (remaining == null || remaining.length == 0) {

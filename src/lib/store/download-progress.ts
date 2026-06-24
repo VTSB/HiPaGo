@@ -7,7 +7,7 @@ import {
   DownloadPausedError,
   type DownloadProgress,
 } from '@/lib/utils/download-zip';
-import { DownloadCancelledError } from '@/lib/storage/download-store';
+import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
 import {
   getDownload,
   deserializeTags,
@@ -635,6 +635,8 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
       // appends a follow-up worker pass if a run is already active.
       if (isAndroid()) {
         try {
+          const downloadStore = await createDownloadStore();
+          await downloadStore.ensureReady?.();
           await handOffToAndroidWorker(id, next.title, files);
           // Leave a tracked 'downloading' row (NOT in the queue) so the worker's
           // progress survives app kill and reconcileQueue can finalize it on next
@@ -667,6 +669,14 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           storeApi?.setEntry(id, { progress: { current: 0, total: files.length }, error: null });
           startAndroidProgressPoll(id);
         } catch (e) {
+          if (e instanceof DownloadCancelledError) {
+            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+            await removeFromQueue(id);
+            storeApi?.setEntry(id, null);
+            storeApi?.markNotDownloaded(id);
+            notifyDownloadLibraryChanged(true);
+            continue;
+          }
           console.error('Queue: failed to hand off to Android worker', id, e);
           const message =
             e instanceof Error && e.message ? e.message : 'Failed to start background download';
@@ -951,11 +961,10 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         if (isIos()) {
           void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         }
-      } else if (isAndroid()) {
+      } else if (isAndroid() && get().entries[id]?.progress != null) {
         // Android: the gallery may have been handed off to the native worker
         // (no controller, not in the TS queue). Drop its work-order so the
-        // worker skips it (and stops if the handoff queue empties); also drop it
-        // from the TS queue in case it was still queued (not yet handed off).
+        // worker skips it (and stops if the handoff queue empties).
         void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         void setDownloadError(id, 'failed', 'Cancelled')
           .catch(() => {})
@@ -971,6 +980,10 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         stopAndroidProgressPoll(id);
       } else {
         // Queued/paused but not yet started → drop it from the queue.
+        if (isAndroid()) {
+          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          stopAndroidProgressPoll(id);
+        }
         void removeFromQueue(id)
           .catch(() => {})
           .finally(() => void refreshQueue());

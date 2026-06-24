@@ -15,6 +15,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DownloadPausedError, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
+import { DownloadCancelledError } from '@/lib/storage/download-store';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,17 @@ vi.mock('@/lib/utils/download-zip', async () => {
       const pages = manifestPages.get(id) ?? [];
       return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
     }),
+  };
+});
+
+const ensureDownloadStoreReady = vi.fn(async () => {});
+vi.mock('@/lib/storage/download-store', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/storage/download-store')>(
+    '@/lib/storage/download-store',
+  );
+  return {
+    ...actual,
+    createDownloadStore: vi.fn(async () => ({ ensureReady: ensureDownloadStoreReady })),
   };
 });
 
@@ -308,6 +320,8 @@ beforeEach(async () => {
   workerCancels.length = 0;
   workerWriteThrows.value = false;
   workerProgress.value = { current: null };
+  ensureDownloadStoreReady.mockReset();
+  ensureDownloadStoreReady.mockResolvedValue(undefined);
   vi.mocked(DownloadWorker.getProgress).mockClear();
   stopAndroidProgressPoll();
   androidFlag = false;
@@ -501,6 +515,39 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(scheduled).toHaveLength(1);
     expect(scheduled[0]).toMatchObject({ id: 250, attempt: 1 });
     expect(useDownloadProgressStore.getState().entries[250]?.retryAt).toBe(scheduled[0].dueAt);
+  });
+
+  it('fails Android handoff before writing work-order when download storage is not ready', async () => {
+    androidFlag = true;
+    ensureDownloadStoreReady.mockRejectedValueOnce(new Error('Select a download folder'));
+    queue.push({ id: 251, pageCount: 0 });
+    downloadRows.set(251, { retryCount: 0, status: 'failed', pageCount: 0 });
+
+    await processQueue();
+
+    expect(workOrderWrites).toEqual([]);
+    expect(workerEnqueues).not.toContain('251');
+    expect(errorRows).toContainEqual({
+      galleryId: 251,
+      status: 'failed',
+      lastError: 'Select a download folder',
+    });
+    expect(removed).toContain(251);
+  });
+
+  it('drops Android queue item without failure when storage setup is cancelled', async () => {
+    androidFlag = true;
+    ensureDownloadStoreReady.mockRejectedValueOnce(new DownloadCancelledError('cancelled'));
+    queue.push({ id: 252, pageCount: 0 });
+
+    await processQueue();
+
+    expect(workOrderWrites).toEqual([]);
+    expect(workerEnqueues).not.toContain('252');
+    expect(errorRows).toEqual([]);
+    expect(scheduled).toEqual([]);
+    expect(removed).toContain(252);
+    expect(useDownloadProgressStore.getState().entries[252]).toBeUndefined();
   });
 
   it('non-Android still runs the in-process downloader (no worker call)', async () => {
@@ -1039,6 +1086,27 @@ describe('cancel (AC-005)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(removed).toContain(42);
+  });
+
+  it('Android cancel of a queued-but-not-started item removes it without marking failure', async () => {
+    androidFlag = true;
+    queue.push({ id: 43, pageCount: 0 });
+    useDownloadProgressStore.setState({
+      entries: { 43: { progress: null, error: null, queued: true, position: 1 } },
+    });
+
+    useDownloadProgressStore.getState().cancel(43);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(workerCancels).toContain('43');
+    expect(removed).toContain(43);
+    expect(errorRows).not.toContainEqual({
+      galleryId: 43,
+      status: 'failed',
+      lastError: 'Cancelled',
+    });
+    expect(useDownloadProgressStore.getState().entries[43]).toBeUndefined();
   });
 });
 
