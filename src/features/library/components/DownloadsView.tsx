@@ -148,7 +148,7 @@ function useAutoRetryLabel(item: DBDownload): string | null {
 interface LibraryCardProps {
   item: DBDownload;
   localCoverUrl?: string | null;
-  onDelete: (galleryId: number) => void;
+  onDelete: (item: DBDownload) => void;
   onExport: (galleryId: number, title: string) => void;
   onRetry: (item: DBDownload) => void;
   isRetrying: boolean;
@@ -323,7 +323,7 @@ function LibraryCard({
     items.push({
       key: 'delete',
       label: t('library.delete'),
-      onClick: () => onDelete(item.galleryId),
+      onClick: () => onDelete(item),
       destructive: true,
     });
     return items;
@@ -615,9 +615,18 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
 
   // Delete handler: remove DB row + DownloadStore files, then invalidate queries
   const handleDelete = useCallback(
-    async (galleryId: number) => {
+    async (item: DBDownload) => {
       if (!window.confirm(t('library.confirmDelete'))) return;
+      const galleryId = item.galleryId;
       try {
+        const liveEntry = useDownloadProgressStore.getState().entries[galleryId];
+        if (item.status === 'downloading' || !!liveEntry?.progress) {
+          useDownloadProgressStore.getState().cancel(galleryId);
+        }
+        if (item.status === 'failed' && item.nextRetryAt) {
+          await clearAutoRetry(galleryId).catch(() => {});
+          useDownloadProgressStore.getState().clearRetryPending(galleryId);
+        }
         await deleteDownload(galleryId);
         try {
           const store = await createDownloadStore();
