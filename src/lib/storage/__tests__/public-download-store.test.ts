@@ -392,6 +392,22 @@ describe('AndroidPublicDownloadStore — Android-specific behaviour', () => {
     expect(fakeLib.files.has(`${LIB}/99 Some Gallery/0001.webp`)).toBe(true);
   });
 
+  it('uses an exact DB folderName instead of a cached stale prefix folder', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/123 Old Title`);
+    fakeLib.dirs.add(`${LIB}/123 New Title`);
+    const staleManifest = new TextEncoder().encode(JSON.stringify(['webp']));
+    fakeLib.files.set(`${LIB}/123 Old Title/0000.json`, toBase64(staleManifest));
+
+    const freshStore = AndroidPublicDownloadStore.create();
+    expect(await freshStore.getImage(123, -1, 'json')).toEqual(staleManifest);
+
+    expect(await freshStore.getImage(123, -1, 'json', { folderName: '123 New Title' })).toBeNull();
+    expect(await freshStore.imageExists(123, 0, 'webp', { folderName: '123 New Title' })).toBe(
+      false,
+    );
+  });
+
   it('putImage before ensureGallery creates bare "<id>" folder as last resort', async () => {
     const bytes = makeBytes(4, 0x11);
     await store.putImage(42, 0, bytes, 'webp');

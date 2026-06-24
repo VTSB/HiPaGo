@@ -5,19 +5,19 @@
  * Backed by PublicLibraryPlugin (raw java.io.File ops on absolute paths).
  * The base directory and folder naming are resolved by base-path-resolver.ts.
  *
- * Folder resolution is id-prefix based (name starts with String(id)):
- *   - cache hit → immediate return
- *   - cache miss → readdir(libraryDir), find first entry whose name equals
- *     String(id) or starts with String(id)+' '
+ * Folder resolution prefers an exact DB folderName when the caller supplies
+ * one. Legacy galleryId prefix scan remains as a fallback only for callers that
+ * do not have a persisted folderName.
  *
  * NOTE (deviation from prompt): manifest galleryId validation is intentionally
  * NOT used for folder resolution. The 0000.json manifest is a flat JSON array
  * of extension strings with no galleryId field; parsing it for id-matching
- * would add complexity without benefit. Prefix-scan on the folder name is the
- * authoritative lookup (see PLAN.md §Architecture decision).
+ * would add complexity without benefit. Prefix scan is not authoritative when a
+ * DB row carries folderName: exact lookup avoids stale old folders with the same
+ * galleryId prefix.
  */
 
-import type { DownloadStore } from '../download-store';
+import type { DownloadStore, DownloadStoreLookupOptions } from '../download-store';
 import { imageFileName, DownloadCancelledError } from '../download-store';
 import {
   galleryFolderName as resolverFolderName,
@@ -75,22 +75,52 @@ export class AndroidPublicDownloadStore implements DownloadStore {
       if (res.reason === 'cancelled') throw new DownloadCancelledError();
       throw new Error(`download folder unavailable: ${res.message}`);
     }
-    useSettingsStore
-      .getState()
-      .setDownloadTree(res.treeUri ?? null, res.displayName ?? null);
+    useSettingsStore.getState().setDownloadTree(res.treeUri ?? null, res.displayName ?? null);
   }
 
   // ── Folder resolution ──────────────────────────────────────────────────────
 
+  private isSafeFolderName(folderName: string): boolean {
+    return (
+      folderName.length > 0 &&
+      !folderName.includes('/') &&
+      !folderName.includes('\\') &&
+      !folderName.includes('\0') &&
+      folderName !== '.' &&
+      folderName !== '..'
+    );
+  }
+
   /**
    * Resolve the gallery folder name for a given galleryId.
    *
-   * 1. Cache hit → return immediately.
-   * 2. Cache miss → readdir(libraryDir), find the entry whose name equals
+   * 1. Explicit folderName option → exact directory lookup only.
+   * 2. Cache hit → return immediately.
+   * 3. Cache miss → readdir(libraryDir), find the entry whose name equals
    *    String(id) or starts with String(id)+' '.
-   * 3. Not found → return null (caller decides whether to create a bare folder).
+   * 4. Not found → return null (caller decides whether to create a bare folder).
    */
-  private async resolveFolder(galleryId: number): Promise<string | null> {
+  private async resolveFolder(
+    galleryId: number,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<string | null> {
+    const preferred = options?.folderName?.trim();
+    if (preferred) {
+      if (!this.isSafeFolderName(preferred)) return null;
+      const libDir = await resolveLibraryDir();
+      try {
+        const { exists } = await PublicLibrary.stat({ path: `${libDir}/${preferred}` });
+        if (exists) {
+          this.folderCache.set(galleryId, preferred);
+          return preferred;
+        }
+      } catch {
+        // Exact DB folder is unavailable — do not fall back to a stale prefix hit.
+      }
+      this.folderCache.delete(galleryId);
+      return null;
+    }
+
     const cached = this.folderCache.get(galleryId);
     if (cached !== undefined) return cached;
 
@@ -124,12 +154,7 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── putImage ───────────────────────────────────────────────────────────────
 
-  async putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     const libDir = await ensureLibraryDir();
     let folder = await this.resolveFolder(galleryId);
     if (!folder) {
@@ -169,8 +194,9 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     galleryId: number,
     index: number,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<Uint8Array | null> {
-    const folder = await this.resolveFolder(galleryId);
+    const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return null;
     const libDir = await resolveLibraryDir();
     const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
@@ -190,8 +216,9 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     galleryId: number,
     index: number,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<boolean> {
-    const folder = await this.resolveFolder(galleryId);
+    const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return false;
     const libDir = await resolveLibraryDir();
     const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
@@ -207,8 +234,8 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── coverUrl ──────────────────────────────────────────────────────────────
 
-  async coverUrl(galleryId: number): Promise<string | null> {
-    const folder = await this.resolveFolder(galleryId);
+  async coverUrl(galleryId: number, options?: DownloadStoreLookupOptions): Promise<string | null> {
+    const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return null;
     const libDir = await resolveLibraryDir();
     try {
@@ -253,8 +280,8 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── gallerySize ────────────────────────────────────────────────────────────
 
-  async gallerySize(galleryId: number): Promise<number> {
-    const folder = await this.resolveFolder(galleryId);
+  async gallerySize(galleryId: number, options?: DownloadStoreLookupOptions): Promise<number> {
+    const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return 0;
     const libDir = await resolveLibraryDir();
     try {
@@ -280,8 +307,8 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── deleteGallery ──────────────────────────────────────────────────────────
 
-  async deleteGallery(galleryId: number): Promise<void> {
-    const folder = await this.resolveFolder(galleryId);
+  async deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void> {
+    const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return; // Already gone — treat as success.
     const libDir = await resolveLibraryDir();
     try {
