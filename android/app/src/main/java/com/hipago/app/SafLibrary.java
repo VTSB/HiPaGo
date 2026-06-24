@@ -146,8 +146,13 @@ public class SafLibrary {
         if (relPath == null || relPath.isEmpty()) {
             throw new SecurityException("path is required");
         }
-        if (relPath.startsWith("/") || relPath.contains("..")) {
+        if (relPath.startsWith("/")) {
             throw new SecurityException("path traversal");
+        }
+        for (String segment : relPath.split("/")) {
+            if (segment.equals("..")) {
+                throw new SecurityException("path traversal");
+            }
         }
     }
 

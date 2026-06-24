@@ -44,6 +44,7 @@ const mockCreateDownloadStore = vi.fn();
 const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
 const mockHasCompleteDownloadedGallery =
   vi.fn<(galleryId: number, expectedPageCount: number) => Promise<boolean>>();
+const mockProcessQueue = vi.fn(async (_opts?: { onlyGalleryId?: number }) => {});
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockNavigation.replace }),
@@ -78,6 +79,11 @@ vi.mock('@/lib/db/download-queue', () => ({
   enqueueDownload: vi.fn(async () => 1),
 }));
 
+vi.mock('@/lib/db/download-retry', () => ({
+  clearAutoRetry: vi.fn(async () => {}),
+  AUTO_RETRY_MAX: 3,
+}));
+
 vi.mock('@/lib/store/download-progress', () => {
   // Full-enough store shape: DownloadQueueView (mounted atop DownloadsView since
   // Task B) reads queue/globalPaused + action selectors, and renders nothing when
@@ -96,11 +102,16 @@ vi.mock('@/lib/store/download-progress', () => {
     resume: vi.fn(async () => {}),
     pauseAll: vi.fn(async () => {}),
     resumeAll: vi.fn(async () => {}),
+    clearRetryPending: vi.fn(),
   };
+  const useDownloadProgressStore = Object.assign(
+    (sel: (s: typeof state) => unknown) => sel(state),
+    { getState: () => state },
+  );
   return {
     DOWNLOAD_LIBRARY_CHANGED_EVENT: 'hipago:download-library-changed',
-    processQueue: vi.fn(async () => {}),
-    useDownloadProgressStore: (sel: (s: typeof state) => unknown) => sel(state),
+    processQueue: mockProcessQueue,
+    useDownloadProgressStore,
   };
 });
 
@@ -459,6 +470,26 @@ describe('LibraryPage', () => {
     expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
     expect(screen.getByRole('menuitem', { name: 'library.retry' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
+  });
+
+  it('manual retry only starts the selected failed gallery', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 4100, title: 'Failed Retry', status: 'failed' }),
+    ]);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.retry' }));
+    });
+
+    await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4100 }));
   });
 
   it('hides export while complete-row integrity is still being checked', async () => {

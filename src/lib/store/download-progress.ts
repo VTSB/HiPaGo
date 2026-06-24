@@ -416,6 +416,10 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   }
   // A still-active poller may have been stopped for this id while we awaited.
   if (!progressPollGalleryIds.has(id)) return;
+  if (res && 'error' in res && res.error) {
+    await failAndroidDownloadIfWorkerStopped(id, res.error);
+    return;
+  }
   if (res && typeof (res as { current: number | null }).current === 'number') {
     const { current, total } = res as { current: number; total: number };
     storeApi?.setEntry(id, { progress: { current, total }, error: null });
@@ -1035,6 +1039,17 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
     pauseAll: async () => {
       globalPaused = true;
       set({ globalPaused: true });
+      let queuedRows: Awaited<ReturnType<typeof listQueue>> = [];
+      try {
+        queuedRows = await listQueue();
+      } catch {
+        queuedRows = [];
+      }
+      for (const row of queuedRows) {
+        if (row.status === 'queued') {
+          await pauseQueued(row.galleryId).catch(() => {});
+        }
+      }
       // Pause the active item too, if one is in flight.
       for (const [id, controller] of controllers) {
         pausing.add(id);

@@ -208,7 +208,9 @@ const workerCancels: string[] = [];
 const workerWriteThrows = { value: false };
 // Steers DownloadWorker.getProgress for the poller tests (in-app progress bridge).
 // Default: no progress file yet ({current:null}) so handoff tests' polls are inert.
-const workerProgress: { value: { current: number; total: number } | { current: null } } = {
+const workerProgress: {
+  value: { current: number; total: number } | { current: null; error?: string };
+} = {
   value: { current: null },
 };
 vi.mock('@/lib/plugins/downloadWorker', () => ({
@@ -680,6 +682,35 @@ describe('Android live-progress poller (AC-003)', () => {
       const callsAfterFailure = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
       await vi.advanceTimersByTimeAsync(3000);
       expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBe(callsAfterFailure);
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks Android handoff failed when the native worker reports a terminal error before progress advances', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      downloadRows.set(504, { status: 'downloading', pageCount: 8, retryCount: 0 });
+      useDownloadProgressStore.setState({
+        entries: { 504: { progress: { current: 0, total: 8 }, error: null } },
+      });
+
+      workerProgress.value = { current: null, error: 'Background download failed' };
+      startAndroidProgressPoll(504);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(errorRows).toContainEqual({
+        galleryId: 504,
+        status: 'failed',
+        lastError: 'Background download failed',
+      });
+      expect(scheduled).toHaveLength(1);
+      expect(scheduled[0]).toMatchObject({ id: 504, attempt: 1 });
+      expect(useDownloadProgressStore.getState().entries[504]?.error).toBe(
+        'Background download failed',
+      );
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -1465,6 +1496,7 @@ describe('queue actions (AC-001 / Task B)', () => {
 
     await useDownloadProgressStore.getState().pauseAll();
     expect(useDownloadProgressStore.getState().globalPaused).toBe(true);
+    expect(queue.every((q) => q.paused)).toBe(true);
 
     // Kicking the processor while globally paused must not dequeue anything.
     await processQueue();

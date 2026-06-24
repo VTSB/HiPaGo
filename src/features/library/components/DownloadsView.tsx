@@ -678,7 +678,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           { userInitiated: true },
         );
         useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
-        void processQueue();
+        void processQueue({ onlyGalleryId: item.galleryId });
       } catch (e) {
         console.error('Retry failed to enqueue:', e);
       } finally {

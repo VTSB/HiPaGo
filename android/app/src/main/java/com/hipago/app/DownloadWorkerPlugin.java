@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 
 import androidx.work.Constraints;
+import androidx.work.BackoffPolicy;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.OneTimeWorkRequest;
@@ -26,6 +27,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Capacitor plugin that bridges the TS download queue to the native
@@ -181,6 +183,7 @@ public class DownloadWorkerPlugin extends Plugin {
                     .build();
             OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(GalleryDownloadWorker.class)
                     .setConstraints(constraints)
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                     .build();
             WorkManager.getInstance(getContext()).enqueueUniqueWork(
                     GalleryDownloadWorker.UNIQUE_WORK_NAME,
@@ -244,6 +247,12 @@ public class DownloadWorkerPlugin extends Plugin {
                 }
             }
             JSONObject obj = new JSONObject(new String(bytes, "UTF-8"));
+            if (obj.has("error")) {
+                ret.put("current", JSObject.NULL);
+                ret.put("error", obj.optString("error", "Background download failed"));
+                call.resolve(ret);
+                return;
+            }
             ret.put("current", obj.getInt("current"));
             ret.put("total", obj.getInt("total"));
             call.resolve(ret);
