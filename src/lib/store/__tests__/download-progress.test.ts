@@ -51,6 +51,7 @@ vi.mock('@/lib/storage/download-store', async () => {
 const queue: { id: number; pageCount: number; paused?: boolean; pos?: number }[] = [];
 const removed: number[] = [];
 const enqueued: { meta: unknown; opts: unknown }[] = [];
+let enqueueThrows = false;
 
 vi.mock('@/lib/db/download-queue', () => ({
   dequeueNextQueued: vi.fn(async () => {
@@ -77,6 +78,7 @@ vi.mock('@/lib/db/download-queue', () => ({
     if (idx >= 0) queue.splice(idx, 1);
   }),
   enqueueDownload: vi.fn(async (meta: unknown, opts: unknown) => {
+    if (enqueueThrows) throw new Error('enqueue failed');
     enqueued.push({ meta, opts });
     const m = meta as { galleryId: number };
     const options = (opts ?? {}) as { userInitiated?: boolean; queuePosition?: number };
@@ -92,6 +94,8 @@ vi.mock('@/lib/db/download-queue', () => ({
     } else {
       queue.push({ id: m.galleryId, pageCount: 0, pos });
     }
+    const prev = downloadRows.get(m.galleryId) ?? {};
+    downloadRows.set(m.galleryId, { ...prev, status: 'queued', queuePosition: pos });
     return pos;
   }),
   // Queue surface consumed by the store actions (AC-001). listQueue() returns
@@ -156,6 +160,7 @@ vi.mock('@/lib/db/download', () => ({
       downloadedAt: '',
       status: o?.status ?? fromAdapter?.status ?? 'failed',
       retryCount: o?.retryCount ?? 0,
+      queuePosition: o?.queuePosition ?? null,
     };
   }),
   deserializeTags: vi.fn(() => ({})),
@@ -184,6 +189,8 @@ vi.mock('@/lib/db/download', () => ({
     errorRows.push({ galleryId, status, lastError });
     const prev = downloadRows.get(galleryId) ?? {};
     downloadRows.set(galleryId, { ...prev, status });
+    const queued = queue.find((q) => q.id === galleryId);
+    if (queued) queued.paused = status === 'paused';
   }),
   deleteDownload: vi.fn(async (galleryId: number) => {
     deletedRows.push(galleryId);
@@ -322,6 +329,7 @@ beforeEach(async () => {
   queue.length = 0;
   removed.length = 0;
   enqueued.length = 0;
+  enqueueThrows = false;
   adapterRows.length = 0;
   scheduled.length = 0;
   scheduleThrows = false;
@@ -1626,6 +1634,47 @@ describe('queue actions (AC-001 / Task B)', () => {
     expect(errorRows).toContainEqual({ galleryId: 88, status: 'paused', lastError: null });
     expect(downloadRows.get(88)?.queuePosition).toBe(2);
     expect(useDownloadProgressStore.getState().entries[88]).toBeUndefined();
+  });
+
+  it('pause(Android handed-off active) assigns a missing queue position so resume can see it', async () => {
+    androidFlag = true;
+    downloadRows.set(89, { status: 'downloading', pageCount: 3, queuePosition: null });
+    useDownloadProgressStore.setState({
+      entries: { 89: { progress: { current: 1, total: 3 }, error: null } },
+    });
+
+    await useDownloadProgressStore.getState().pause(89);
+
+    expect(workerCancels).toContain('89');
+    expect(enqueued).toContainEqual({
+      meta: { galleryId: 89, title: 'G89', thumbnail: '/tn', tags: {} },
+      opts: { keepRetryState: true },
+    });
+    expect(downloadRows.get(89)?.status).toBe('paused');
+    expect(downloadRows.get(89)?.queuePosition).not.toBeNull();
+
+    await useDownloadProgressStore.getState().refreshQueue();
+    expect(useDownloadProgressStore.getState().queue).toContainEqual(
+      expect.objectContaining({ id: 89, status: 'paused' }),
+    );
+  });
+
+  it('pause(Android handed-off active) keeps the live entry if queue position restore fails', async () => {
+    androidFlag = true;
+    enqueueThrows = true;
+    downloadRows.set(90, { status: 'downloading', pageCount: 3, queuePosition: null });
+    useDownloadProgressStore.setState({
+      entries: { 90: { progress: { current: 1, total: 3 }, error: null } },
+    });
+
+    await useDownloadProgressStore.getState().pause(90);
+
+    expect(workerCancels).not.toContain('90');
+    expect(errorRows).not.toContainEqual({ galleryId: 90, status: 'paused', lastError: null });
+    expect(useDownloadProgressStore.getState().entries[90]?.progress).toEqual({
+      current: 1,
+      total: 3,
+    });
   });
 
   it('resume re-drives the processor and continues a paused item', async () => {
