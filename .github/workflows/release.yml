@@ -314,6 +314,9 @@ jobs:
       - name: Sync Capacitor
         run: node node_modules/@capacitor/cli/bin/capacitor sync android
 
+      - name: Run Android unit tests
+        run: pnpm test:android:unit
+
       # Decode the operator-injected release keystore (per
       # doc/release/GUIDE__android-keystore.md) into android/app/ so the
       # signingConfigs.release block in app/build.gradle can pick it up via

@@ -97,6 +97,11 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
 }
 
 repositories {
@@ -125,6 +130,9 @@ dependencies {
     implementation "net.java.dev.jna:jna:5.14.0@aar"
     testImplementation "junit:junit:$junitVersion"
     testImplementation "org.json:json:20240303"
+    testImplementation "org.robolectric:robolectric:4.12.2"
+    testImplementation "androidx.test:core:1.5.0"
+    testImplementation "androidx.work:work-testing:2.9.1"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     if (findProject(':capacitor-cordova-android-plugins') != null) {

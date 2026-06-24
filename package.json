@@ -13,6 +13,7 @@
     "lint": "eslint",
     "test": "node scripts/test.mjs",
     "test:watch": "vitest",
+    "test:android:unit": "cd android && ./gradlew testDebugUnitTest --build-cache",
     "format": "prettier --write 'src/**/*.{ts,tsx}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx}'",
     "build:static": "node scripts/build-static.mjs",
