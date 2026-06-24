@@ -1,6 +1,5 @@
 import Foundation
 import BackgroundTasks
-import bypass
 
 /// Task D — iOS best-effort background download.
 ///
