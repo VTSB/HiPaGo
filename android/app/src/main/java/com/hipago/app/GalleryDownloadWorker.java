@@ -48,9 +48,9 @@ import uniffi.bypass.BypassKt;
  *
  * Behaviour:
  *  - Sequential: one gallery, one page at a time (no parallelism).
- *  - Resume: a non-empty page already present in the SAF tree is skipped, so an
- *    app-kill-interrupted gallery resumes from disk without trusting zero-byte
- *    placeholders.
+ *  - Resume: a page already committed in the manifest and present in the SAF tree
+ *    is skipped, so a killed/truncated provider write cannot be mistaken for a
+ *    complete page.
  *  - The {@code 0000.json} manifest (a JSON array of per-page exts) is rewritten
  *    incrementally after each page so the TS reader/reconcile sees progress.
  *  - The handoff dir is re-scanned until no new processable work-orders remain,
@@ -250,9 +250,11 @@ public class GalleryDownloadWorker extends Worker {
         int total = pages.length();
         File cacheDir = getApplicationContext().getCacheDir();
 
-        // The manifest is the per-page ext array. Seed it from any pages already
-        // on disk so an interrupted gallery resumes with a correct manifest.
+        // The manifest is the per-page ext array. Treat its length as the commit
+        // marker for already-written pages; SAF existence alone can include a
+        // non-zero partial file left by a killed provider write.
         String[] exts = new String[total];
+        int manifestCount = seedManifestExts(pages, exts);
 
         // Last time we wrote the live-progress file for this gallery (throttle).
         long lastProgressWrite = 0L;
@@ -293,10 +295,9 @@ public class GalleryDownloadWorker extends Worker {
             // here must never fail the download.
             lastProgressWrite = maybeWriteProgress(galleryId, i + 1, total, lastProgressWrite);
 
-            // Resume: skip a page already written to the SAF tree. Existence
-            // alone is not enough: a killed/truncated provider write can leave
-            // a zero-byte placeholder that must be downloaded again.
-            if (saf.size(relPath) > 0) {
+            // Resume: only skip a page if a prior manifest write committed it.
+            // Non-manifest partial files are overwritten below.
+            if (shouldSkipExistingPage(i, manifestCount, saf.size(relPath))) {
                 continue;
             }
 
@@ -343,6 +344,7 @@ public class GalleryDownloadWorker extends Worker {
                 writeProgressFailure(galleryId, "Background download failed");
                 return GalleryResult.RETRYABLE_FAILURE;
             }
+            manifestCount = Math.max(manifestCount, i + 1);
         }
 
         // All pages present → write the final, full manifest once more (defensive)
@@ -479,22 +481,56 @@ public class GalleryDownloadWorker extends Worker {
      * dir) and write the first {@code count} exts as a JSON array.
      */
     private boolean writeManifest(String pageRelPath, String[] exts, int count) {
-        int slash = pageRelPath.lastIndexOf('/');
-        String dir = slash < 0 ? "" : pageRelPath.substring(0, slash);
-        String manifestPath = (dir.isEmpty() ? "" : dir + "/") + "0000.json";
-
         JSONArray arr = new JSONArray();
         for (int k = 0; k < count; k++) {
             arr.put(exts[k] != null ? exts[k] : "webp");
         }
         try {
-            saf.writeBytes(manifestPath, arr.toString().getBytes("UTF-8"));
+            saf.writeBytes(manifestPathForPage(pageRelPath), arr.toString().getBytes("UTF-8"));
             return true;
         } catch (Throwable t) {
             // Reconcile depends on the manifest to mark the DB row complete.
             // Keep the work-order so a later worker pass can rewrite it.
             return false;
         }
+    }
+
+    private int seedManifestExts(JSONArray pages, String[] exts) {
+        JSONObject firstPage = pages.optJSONObject(0);
+        if (firstPage == null) return 0;
+
+        String firstRelPath = firstPage.optString("relPath", null);
+        if (!isValidRelPath(firstRelPath)) return 0;
+
+        try {
+            return decodeManifestExts(saf.readBytes(manifestPathForPage(firstRelPath)), exts);
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    static String manifestPathForPage(String pageRelPath) {
+        int slash = pageRelPath.lastIndexOf('/');
+        String dir = slash < 0 ? "" : pageRelPath.substring(0, slash);
+        return (dir.isEmpty() ? "" : dir + "/") + "0000.json";
+    }
+
+    static int decodeManifestExts(byte[] bytes, String[] exts) {
+        try {
+            JSONArray arr = new JSONArray(new String(bytes, "UTF-8"));
+            int count = Math.min(arr.length(), exts.length);
+            for (int i = 0; i < count; i++) {
+                String ext = arr.optString(i, "");
+                exts[i] = ext.isEmpty() ? "webp" : ext;
+            }
+            return count;
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    static boolean shouldSkipExistingPage(int pageIndex, int manifestCount, long storedSize) {
+        return pageIndex < manifestCount && storedSize > 0;
     }
 
     private Map<String, String> headersFor(JSONObject page) {
