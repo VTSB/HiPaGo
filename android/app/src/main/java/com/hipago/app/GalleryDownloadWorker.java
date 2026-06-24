@@ -208,12 +208,12 @@ public class GalleryDownloadWorker extends Worker {
         // Process by TS queuePosition first so native handoff preserves manual
         // front/reorder semantics; fall back to filename for older work-orders.
         Arrays.sort(files, Comparator
-                .comparingLong(this::orderQueuePosition)
+                .comparingLong(GalleryDownloadWorker::orderQueuePosition)
                 .thenComparing(File::getName));
         return files;
     }
 
-    private long orderQueuePosition(File orderFile) {
+    static long orderQueuePosition(File orderFile) {
         try {
             JSONObject obj = readOrder(orderFile);
             if (obj == null || !obj.has("queuePosition") || obj.isNull("queuePosition")) {
@@ -509,7 +509,7 @@ public class GalleryDownloadWorker extends Worker {
         return out.isEmpty() ? null : out;
     }
 
-    private JSONObject readOrder(File file) {
+    private static JSONObject readOrder(File file) {
         try {
             byte[] bytes = new byte[(int) file.length()];
             try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {

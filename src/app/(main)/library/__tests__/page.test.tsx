@@ -526,6 +526,28 @@ describe('LibraryPage', () => {
     expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
   });
 
+  it('shows pending auto-retry from the live store before the DB row refetches', async () => {
+    const retryAt = new Date(Date.now() + 30_000).toISOString();
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        galleryId: 4200,
+        title: 'Just Failed',
+        status: 'failed',
+        nextRetryAt: null,
+        retryCount: 0,
+      }),
+    ]);
+    mockDownloadProgressState.entries = {
+      4200: { progress: null, error: 'boom', retryAt, attempt: 1 },
+    };
+
+    await act(async () => {
+      await renderPage();
+    });
+
+    expect(await screen.findByText('library.retry.autoIn (library.retry.attempt)')).toBeTruthy();
+  });
+
   it('hides export while complete-row integrity is still being checked', async () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4004, title: 'Pending Check' })]);
     mockHasCompleteDownloadedGallery.mockReturnValue(new Promise(() => {}));
