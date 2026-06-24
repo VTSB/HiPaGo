@@ -108,7 +108,7 @@ export async function listQueue(): Promise<DBDownload[]> {
   return db.query<DBDownload>(
     `SELECT ${SELECT_COLS}
       FROM download
-     WHERE status IN ('queued', 'paused')
+     WHERE status IN ('queued', 'paused') AND queuePosition IS NOT NULL
       ORDER BY queuePosition IS NULL ASC, queuePosition ASC, downloadedAt ASC, galleryId ASC`,
   );
 }
@@ -125,7 +125,7 @@ export async function dequeueNextQueued(): Promise<DBDownload | null> {
   const rows = await db.query<DBDownload>(
     `SELECT ${SELECT_COLS}
      FROM download
-     WHERE status = 'queued'
+     WHERE status = 'queued' AND queuePosition IS NOT NULL
       ORDER BY queuePosition IS NULL ASC, queuePosition ASC, downloadedAt ASC, galleryId ASC
       LIMIT 1`,
   );

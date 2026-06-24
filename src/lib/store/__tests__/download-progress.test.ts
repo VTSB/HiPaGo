@@ -395,6 +395,25 @@ describe('processQueue (AC-005)', () => {
     expect(dl).toHaveBeenCalledTimes(1);
   });
 
+  it('re-kicks a manual onlyGalleryId request queued during another manual run', async () => {
+    queue.push({ id: 1, pageCount: 0, pos: 1 });
+    const order: number[] = [];
+    dl.mockImplementation(async (id: number) => {
+      order.push(id);
+      if (id === 1) {
+        queue.push({ id: 2, pageCount: 0, pos: 0 });
+        void processQueue({ onlyGalleryId: 2 });
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    });
+
+    await processQueue({ onlyGalleryId: 1 });
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(order).toEqual([1, 2]);
+    expect(removed).toEqual([1, 2]);
+  });
+
   it('passes resume:true when the item has prior pages', async () => {
     queue.push({ id: 5, pageCount: 4 });
     dl.mockResolvedValue(undefined);
@@ -1148,6 +1167,27 @@ describe('iOS background backstop (Task D)', () => {
 
     expect(workerCancels).toContain('406');
     await run;
+  });
+
+  it('iOS pause catch also drops the backstop work-order', async () => {
+    iosFlag = true;
+    queue.push({ id: 409, pageCount: 2 });
+    dl.mockRejectedValueOnce(new DownloadPausedError());
+
+    await processQueue();
+
+    expect(workerCancels).toContain('409');
+  });
+
+  it('iOS cancel catch also drops the backstop work-order', async () => {
+    iosFlag = true;
+    queue.push({ id: 410, pageCount: 2 });
+    dl.mockRejectedValueOnce(new DownloadCancelledError());
+
+    await processQueue();
+
+    expect(workerCancels).toContain('410');
+    expect(removed).toContain(410);
   });
 
   it('failed foreground iOS download drops the stale backstop work-order before auto-retry', async () => {
