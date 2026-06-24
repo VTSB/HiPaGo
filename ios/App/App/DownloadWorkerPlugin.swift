@@ -56,6 +56,10 @@ public class DownloadWorkerPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("json is required")
             return
         }
+        guard workOrderGalleryId(json: json) == galleryId else {
+            call.reject("work-order galleryId does not match filename")
+            return
+        }
         do {
             let url = orderFile(galleryId: galleryId)
             try json.data(using: .utf8)?.write(to: url, options: .atomic)
@@ -102,5 +106,24 @@ public class DownloadWorkerPlugin: CAPPlugin, CAPBridgedPlugin {
             DownloadBackgroundTask.shared.cancelPendingTask()
         }
         call.resolve(["remaining": remaining])
+    }
+
+    private func workOrderGalleryId(json: String) -> String? {
+        guard
+            let data = json.data(using: .utf8),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let raw = root["galleryId"]
+        else { return nil }
+
+        if let number = raw as? NSNumber {
+            return number.stringValue
+        }
+        if let int = raw as? Int {
+            return String(int)
+        }
+        if let string = raw as? String, !string.isEmpty {
+            return string
+        }
+        return nil
     }
 }
