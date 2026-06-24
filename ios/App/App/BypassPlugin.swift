@@ -1,5 +1,4 @@
 import Capacitor
-import bypass
 
 /// Capacitor plugin for ISP bypass on iOS.
 /// Wraps the Rust bypass-core library via UniFFI Swift bindings.
