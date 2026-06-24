@@ -318,8 +318,8 @@ jobs:
       # doc/release/GUIDE__android-keystore.md) into android/app/ so the
       # signingConfigs.release block in app/build.gradle can pick it up via
       # the HIPAGO_KEYSTORE_PATH Gradle property below.
-      # Step is skipped when the secret is absent so branch builds and PRs
-      # still produce an (unsigned) APK and the CI surface stays usable.
+      # Step is skipped when the secret is absent; the following signed build
+      # then fails before an unsigned artifact can be staged or uploaded.
       - name: Materialize Android release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -339,6 +339,7 @@ jobs:
           ORG_GRADLE_PROJECT_HIPAGO_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
+          HIPAGO_REQUIRE_SIGNED_RELEASE: 'true'
         run: ./gradlew assembleRelease --build-cache
 
       - name: Verify APK is installable
