@@ -34,6 +34,7 @@ vi.mock('@/lib/db/download', () => ({
 }));
 vi.mock('@/lib/utils/download-zip', () => ({
   getDownloadedGalleryPages: vi.fn(),
+  hasCompleteDownloadedGallery: vi.fn(),
 }));
 
 import {
@@ -45,7 +46,7 @@ import {
 import { fetchGalleryInfo, filesToGalleryImages } from '@/lib/api/gallery';
 import { galleryInfoToBlock, galleryInfoToImages } from '@/lib/api/parser';
 import { getDownload } from '@/lib/db/download';
-import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
+import { getDownloadedGalleryPages, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
 
 const sampleFiles: GalleryFile[] = [
   { width: 1280, height: 1800, haswebp: 1, hasavif: 1, hasavifsmalltn: 1, name: '001.jpg', hash: 'abc' },
@@ -75,6 +76,7 @@ describe('resolveGalleryDetail', () => {
     // unless a test opts in.
     vi.mocked(getDownload).mockResolvedValue(null);
     vi.mocked(getDownloadedGalleryPages).mockResolvedValue([]);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
   });
 
   it('returns cached DETAILED block + images WITHOUT calling fetchGalleryInfo', async () => {
@@ -207,6 +209,7 @@ describe('resolveGalleryDetail', () => {
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'avif' },
     ]);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(true);
     const synthImages = { id: 12345, images: [] };
     vi.mocked(filesToGalleryImages).mockReturnValue(synthImages);
 
@@ -220,6 +223,7 @@ describe('resolveGalleryDetail', () => {
     expect(result.files[1].hasavif).toBe(1);
     expect(result.files[0].haswebp).toBe(1);
     expect(result.images).toBe(synthImages);
+    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3);
     // It must NOT pollute the gallery cache with the synthetic block.
     expect(saveGalleryBlock).not.toHaveBeenCalled();
   });
@@ -248,6 +252,80 @@ describe('resolveGalleryDetail', () => {
       status: 'complete',
     } as unknown as Awaited<ReturnType<typeof getDownload>>);
     vi.mocked(getDownloadedGalleryPages).mockResolvedValue([]);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
+
+    await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
+    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3);
+    expect(getDownloadedGalleryPages).not.toHaveBeenCalled();
+  });
+
+  it('re-throws the network error when the download row is partial', async () => {
+    vi.mocked(getGalleryBlock).mockResolvedValue(null);
+    vi.mocked(getGalleryImages).mockResolvedValue(null);
+    vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 12345,
+      title: 'Partial',
+      thumbnail: '',
+      tags: '{}',
+      pageCount: 3,
+      totalBytes: 0,
+      downloadedAt: '2024-05-05T00:00:00.000Z',
+      status: 'failed',
+    } as unknown as Awaited<ReturnType<typeof getDownload>>);
+    vi.mocked(getDownloadedGalleryPages).mockResolvedValue([
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
+
+    await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
+  });
+
+  it('re-throws the network error when the manifest exists but files are incomplete', async () => {
+    vi.mocked(getGalleryBlock).mockResolvedValue(null);
+    vi.mocked(getGalleryImages).mockResolvedValue(null);
+    vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 12345,
+      title: 'Stale Complete',
+      thumbnail: '',
+      tags: '{}',
+      pageCount: 3,
+      totalBytes: 0,
+      downloadedAt: '2024-05-05T00:00:00.000Z',
+      status: 'complete',
+    } as unknown as Awaited<ReturnType<typeof getDownload>>);
+    vi.mocked(getDownloadedGalleryPages).mockResolvedValue([
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+      { index: 2, ext: 'webp' },
+    ]);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
+
+    await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
+    expect(getDownloadedGalleryPages).not.toHaveBeenCalled();
+  });
+
+  it('re-throws when completeness passes but the second manifest read is short', async () => {
+    vi.mocked(getGalleryBlock).mockResolvedValue(null);
+    vi.mocked(getGalleryImages).mockResolvedValue(null);
+    vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 12345,
+      title: 'Racy Complete',
+      thumbnail: '',
+      tags: '{}',
+      pageCount: 3,
+      totalBytes: 0,
+      downloadedAt: '2024-05-05T00:00:00.000Z',
+      status: 'complete',
+    } as unknown as Awaited<ReturnType<typeof getDownload>>);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(true);
+    vi.mocked(getDownloadedGalleryPages).mockResolvedValue([
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
 
     await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
   });

@@ -1,11 +1,21 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, useMemo, type RefCallback, type RefObject } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useMemo,
+  type RefCallback,
+  type RefObject,
+} from 'react';
 import type { GalleryImage, GgConfig } from '@/lib/utils/types';
 import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
+import { OfflineImage } from './OfflineImage';
+import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImages';
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
@@ -18,6 +28,7 @@ export function ScrollReader({
   onVisiblePageChange,
   scrollCallbackRef,
   offlineUrls,
+  offlineSources,
 }: {
   images: GalleryImage[];
   initialPage?: number;
@@ -28,6 +39,8 @@ export function ScrollReader({
   scrollNodeRef?: RefObject<HTMLDivElement | null>;
   /** When provided, use these blob URLs instead of fetching from the network. */
   offlineUrls?: string[];
+  /** Fast offline sources from useOfflineImages. */
+  offlineSources?: OfflineImageSource[];
 }) {
   const localRef = useRef<HTMLDivElement | null>(null);
   const scrolledRef = useRef(false);
@@ -49,15 +62,22 @@ export function ScrollReader({
 
   useEffect(() => {
     // Skip the gg.js network fetch when all images are served from local storage.
-    if (offlineUrls) return;
+    if (offlineSources || offlineUrls) return;
     getGgConfig().then(setGgConfig);
-  }, [offlineUrls]);
+  }, [offlineSources, offlineUrls]);
+
+  const normalizedOfflineSources = useMemo<OfflineImageSource[] | undefined>(() => {
+    if (offlineSources) return offlineSources;
+    return offlineUrls?.map((url, index) => ({ index, ext: '', url }));
+  }, [offlineSources, offlineUrls]);
 
   const urls = useMemo(() => {
-    if (offlineUrls) return offlineUrls;
+    if (normalizedOfflineSources) {
+      return normalizedOfflineSources.map((source) => source.url ?? `offline:${source.index}`);
+    }
     if (!ggConfig) return [];
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
-  }, [offlineUrls, images, ggConfig, imageFormat]);
+  }, [normalizedOfflineSources, images, ggConfig, imageFormat]);
 
   // Auto-scroll to the initial page. The page rows reserve their height via
   // aspect-ratio (see the wrapper below), so the target offset is correct
@@ -79,7 +99,8 @@ export function ScrollReader({
         if (++attempts < 30) rafId = requestAnimationFrame(align);
         return;
       }
-      const top = node.scrollTop + targetEl.getBoundingClientRect().top - node.getBoundingClientRect().top;
+      const top =
+        node.scrollTop + targetEl.getBoundingClientRect().top - node.getBoundingClientRect().top;
       if (Math.abs(top - lastTop) <= 1) {
         scrolledRef.current = true; // offset settled — lock
         return;
@@ -99,7 +120,10 @@ export function ScrollReader({
     let ticking = false;
     const onScroll = () => {
       if (!ticking) {
-        requestAnimationFrame(() => { onScrollPositionChange(el.scrollTop); ticking = false; });
+        requestAnimationFrame(() => {
+          onScrollPositionChange(el.scrollTop);
+          ticking = false;
+        });
         ticking = true;
       }
     };
@@ -224,8 +248,30 @@ export function ScrollReader({
     <div ref={setRef} className="h-screen overflow-auto cursor-grab active:cursor-grabbing">
       <div className="mx-auto" style={{ width: `${scrollZoom * 100}%` }}>
         {images.map((img, i) => (
-          <div key={`${img.hash}-${i}`} data-page-index={i} style={{ aspectRatio: `${img.width} / ${img.height}` }}>
-            <AbortableImage src={urls[i]} alt={`Page ${i + 1}`} className="w-full select-none" loading="lazy" draggable={false} style={{ aspectRatio: `${img.width} / ${img.height}` }} />
+          <div
+            key={`${img.hash}-${i}`}
+            data-page-index={i}
+            style={{ aspectRatio: `${img.width} / ${img.height}` }}
+          >
+            {normalizedOfflineSources ? (
+              <OfflineImage
+                source={normalizedOfflineSources[i]}
+                alt={`Page ${i + 1}`}
+                className="w-full select-none"
+                loading="lazy"
+                draggable={false}
+                style={{ aspectRatio: `${img.width} / ${img.height}` }}
+              />
+            ) : (
+              <AbortableImage
+                src={urls[i]}
+                alt={`Page ${i + 1}`}
+                className="w-full select-none"
+                loading="lazy"
+                draggable={false}
+                style={{ aspectRatio: `${img.width} / ${img.height}` }}
+              />
+            )}
           </div>
         ))}
       </div>

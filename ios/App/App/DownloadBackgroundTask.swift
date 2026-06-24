@@ -1,6 +1,5 @@
 import Foundation
 import BackgroundTasks
-import bypass
 
 /// Task D — iOS best-effort background download.
 ///
@@ -123,17 +122,11 @@ final class DownloadBackgroundTask {
     /// flag, runs the drain loop on a background queue, reschedules if work
     /// remains, and reports completion to the OS.
     func run(task: BGProcessingTask) {
-        // Always re-schedule a follow-up request up front: if the OS expires us
-        // mid-drain we still want another attempt queued. (Submitting again with
-        // the same identifier replaces the pending request; harmless if the queue
-        // later drains — the next run sees no work-orders and completes fast.)
-        scheduleProcessingTask()
-
         let cancelled = AtomicFlag()
         task.expirationHandler = {
             // The OS is reclaiming our time. Signal the loop to stop after the
             // current page; the partial gallery stays on disk (resume-skip) and
-            // the already-submitted follow-up request will retry later.
+            // the completion block below queues a follow-up request.
             cancelled.set()
         }
 
@@ -143,22 +136,35 @@ final class DownloadBackgroundTask {
                 return
             }
             let drained = self.drainQueue(shouldStop: { cancelled.value })
-            // success:true only when we fully drained without being cut short.
-            task.setTaskCompleted(success: drained && !cancelled.value)
+            let success = drained && !cancelled.value
+            if success {
+                if self.hasPendingWorkOrders() {
+                    self.scheduleProcessingTask()
+                } else {
+                    self.cancelPendingTask()
+                }
+            } else {
+                self.scheduleProcessingTask(after: 5 * 60)
+            }
+            task.setTaskCompleted(success: success)
         }
     }
 
     /// Submit a `BGProcessingTaskRequest` for the download identifier. Shared by
     /// `run` (reschedule) and `DownloadWorkerPlugin.enqueue` (initial submit).
     /// `requiresNetworkConnectivity` is set because every page is a network
-    /// download; `earliestBeginDate` is left nil so iOS may grant time as soon as
-    /// it sees fit. Best-effort: a submit failure (e.g. identifier not permitted,
+    /// download. Best-effort: a submit failure (e.g. identifier not permitted,
     /// simulator) is swallowed — the foreground path still downloads.
-    func scheduleProcessingTask() {
+    func scheduleProcessingTask(after delay: TimeInterval? = nil) {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
         let request = BGProcessingTaskRequest(identifier: Self.taskIdentifier)
         request.requiresNetworkConnectivity = true
         request.requiresExternalPower = false
-        request.earliestBeginDate = nil
+        if let delay, delay > 0 {
+            request.earliestBeginDate = Date(timeIntervalSinceNow: delay)
+        } else {
+            request.earliestBeginDate = nil
+        }
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
@@ -173,6 +179,15 @@ final class DownloadBackgroundTask {
     /// Cancel the pending processing request (used when the queue empties).
     func cancelPendingTask() {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
+    }
+
+    func hasPendingWorkOrders() -> Bool {
+        guard
+            let entries = try? fileManager.contentsOfDirectory(
+                at: handoffDir(), includingPropertiesForKeys: nil
+            )
+        else { return false }
+        return entries.contains { $0.pathExtension == "json" }
     }
 
     // MARK: - Drain loop (testable inner routine)
@@ -204,6 +219,7 @@ final class DownloadBackgroundTask {
 
         if orderFiles.isEmpty { return true }
 
+        var fullyDrained = true
         for orderFile in orderFiles {
             if shouldStop() { return false }
 
@@ -214,7 +230,7 @@ final class DownloadBackgroundTask {
                 continue
             }
 
-            let outcome = processGallery(order, shouldStop: shouldStop)
+            let outcome = processGallery(order, orderFile: orderFile, shouldStop: shouldStop)
             switch outcome {
             case .completed:
                 // Full success → remove the work-order so it is not reprocessed.
@@ -222,13 +238,13 @@ final class DownloadBackgroundTask {
             case .partial:
                 // A page failed: leave the gallery partial and KEEP the work-order
                 // so the next background run / foreground reconcile resumes it.
-                break
+                fullyDrained = false
             case .stopped:
                 // Expired mid-gallery: KEEP the work-order, report not-drained.
                 return false
             }
         }
-        return true
+        return fullyDrained
     }
 
     private enum GalleryOutcome {
@@ -241,7 +257,11 @@ final class DownloadBackgroundTask {
     /// `<Data>/downloads/<id>/NNNN.ext` and rewriting `0000.json` incrementally.
     /// Skips pages already on disk (resume). Mirrors `GalleryDownloadWorker.
     /// processGallery` and the TS `downloadGalleryToLibrary` page loop.
-    private func processGallery(_ order: WorkOrder, shouldStop: () -> Bool) -> GalleryOutcome {
+    private func processGallery(
+        _ order: WorkOrder,
+        orderFile: URL,
+        shouldStop: () -> Bool
+    ) -> GalleryOutcome {
         let pages = order.pages
         if pages.isEmpty {
             // Nothing to download — treat as complete so the work-order clears.
@@ -266,6 +286,11 @@ final class DownloadBackgroundTask {
 
         for (i, page) in pages.enumerated() {
             if shouldStop() { return .stopped }
+            if !fileManager.fileExists(atPath: orderFile.path) {
+                // Foreground pause/cancel removed the handoff while this task was
+                // already running. Stop this gallery without rescheduling it.
+                return .completed
+            }
 
             exts[i] = page.ext
             let dest = galleryDir.appendingPathComponent(
@@ -274,8 +299,12 @@ final class DownloadBackgroundTask {
 
             // Resume: a page already on disk is skipped (idempotent overlap with
             // the foreground downloader, which suspends while backgrounded).
-            if fileManager.fileExists(atPath: dest.path) {
+            if isNonEmptyFile(dest) {
+                writeManifest(galleryDir: galleryDir, exts: Array(exts.prefix(i + 1)))
                 continue
+            }
+            if fileManager.fileExists(atPath: dest.path) {
+                try? fileManager.removeItem(at: dest)
             }
 
             // Download via the Rust bypass core to a temp file in the caches dir,
@@ -293,6 +322,18 @@ final class DownloadBackgroundTask {
                     headers: page.headers.isEmpty ? nil : page.headers,
                     destPath: temp.path
                 )
+                if shouldStop() {
+                    try? fileManager.removeItem(at: temp)
+                    return .stopped
+                }
+                if !fileManager.fileExists(atPath: orderFile.path) {
+                    try? fileManager.removeItem(at: temp)
+                    return .completed
+                }
+                guard isNonEmptyFile(temp) else {
+                    try? fileManager.removeItem(at: temp)
+                    return .partial
+                }
                 // Move temp → final. Remove any stale dest first (defensive: a
                 // zero-byte/partial leftover from a prior crashed run).
                 if fileManager.fileExists(atPath: dest.path) {
@@ -307,29 +348,40 @@ final class DownloadBackgroundTask {
             }
 
             // Incremental manifest write (first i+1 exts) after each placed page.
-            writeManifest(galleryDir: galleryDir, exts: Array(exts.prefix(i + 1)))
+            if !writeManifest(galleryDir: galleryDir, exts: Array(exts.prefix(i + 1))) {
+                return .partial
+            }
         }
 
         // All pages present → write the final, full manifest once more (defensive).
-        writeManifest(galleryDir: galleryDir, exts: exts)
-        return .completed
+        return writeManifest(galleryDir: galleryDir, exts: exts) ? .completed : .partial
+    }
+
+    private func isNonEmptyFile(_ url: URL) -> Bool {
+        guard fileManager.fileExists(atPath: url.path) else { return false }
+        guard
+            let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+            let size = values.fileSize
+        else { return false }
+        return size > 0
     }
 
     /// Write `<galleryDir>/0000.json` as a JSON array of exts, e.g.
     /// `["webp","webp"]`. Matches `encodeManifest` in download-zip.ts
     /// (`JSON.stringify(exts)`) so `decodeManifest`/`getDownloadedGalleryPages`
-    /// reads it unchanged. A torn manifest is recoverable (TS re-derives from the
-    /// files present), so a write failure is swallowed rather than failing the
-    /// gallery.
-    private func writeManifest(galleryDir: URL, exts: [String]) {
+    /// reads it unchanged. Returning false keeps the work-order pending so the
+    /// next run can rebuild the manifest from the files already present.
+    private func writeManifest(galleryDir: URL, exts: [String]) -> Bool {
         let manifestURL = galleryDir.appendingPathComponent(Self.manifestFileName)
         do {
             // JSONSerialization on a [String] produces a compact array identical to
             // JSON.stringify(string[]) — no pretty-printing, no extra whitespace.
             let data = try JSONSerialization.data(withJSONObject: exts, options: [])
             try data.write(to: manifestURL, options: .atomic)
+            return true
         } catch {
             NSLog("[DownloadBackgroundTask] manifest write failed: \(error.localizedDescription)")
+            return false
         }
     }
 

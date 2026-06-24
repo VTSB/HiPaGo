@@ -5,8 +5,9 @@
  * On Android the worker is the SOLE downloader. TS resolves a gallery's
  * work-order, hands it off to the native side via {@link writeWorkOrder} (so TS
  * never needs raw access to the app's filesDir), then schedules the worker via
- * {@link enqueue}. One unique, Wi-Fi-constrained worker drains all pending
- * work-orders, surviving app background/kill with a foreground notification.
+ * {@link enqueue}. One unique, connected-network worker chain drains pending
+ * work-orders over Wi-Fi, ethernet, or cellular, surviving app background/kill
+ * with a foreground notification.
  *
  * {@link cancel} drops one gallery's pending work-order and stops the worker when
  * the queue empties.
@@ -26,10 +27,10 @@ export interface DownloadWorkerPlugin {
   writeWorkOrder(options: { galleryId: string; json: string }): Promise<void>;
 
   /**
-   * Schedule the unique, UNMETERED-constrained download worker (ExistingWorkPolicy
-   * KEEP). The work-order file is assumed already written. A worker already
-   * running picks up newly written work-orders, so enqueueing several galleries
-   * then calling enqueue once is sufficient.
+   * Schedule the unique, CONNECTED-constrained download worker chain
+   * (ExistingWorkPolicy.APPEND_OR_REPLACE). The work-order file is assumed
+   * already written. Appending a follow-up pass closes the race where a new
+   * work-order lands while the current worker run is already finishing.
    */
   enqueue(options: { galleryId: string }): Promise<void>;
 
@@ -45,13 +46,16 @@ export interface DownloadWorkerPlugin {
    * `filesDir/dl-progress/<galleryId>.json`. Resolves `{current, total}` while the
    * gallery is actively downloading; resolves `{current: null}` (a sentinel the TS
    * poller maps to `null`) when no progress file exists (not started, or already
-   * completed/cleared).
+   * completed/cleared). A native terminal failure is reported as
+   * `{current: null, error}` so the foreground app can fail/retry the DB row.
    *
    * Android-only: the native worker is the sole downloader on Android. iOS omits
    * this method (its foreground download is already in-process), so the TS poller
    * is isAndroid-gated and never calls it on iOS.
    */
-  getProgress(options: { galleryId: string }): Promise<{ current: number; total: number } | { current: null }>;
+  getProgress(options: {
+    galleryId: string;
+  }): Promise<{ current: number; total: number } | { current: null; error?: string }>;
 }
 
 export const DownloadWorker = registerPlugin<DownloadWorkerPlugin>('DownloadWorker');

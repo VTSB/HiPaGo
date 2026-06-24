@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import BackgroundTasks
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,7 +8,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: DownloadBackgroundTask.taskIdentifier, using: nil) { task in
+            guard let processingTask = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            DownloadBackgroundTask.shared.run(task: processingTask)
+        }
         return true
     }
 

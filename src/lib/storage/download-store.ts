@@ -28,6 +28,11 @@ export class DownloadCancelledError extends Error {
 
 // ── Interface ──────────────────────────────────────────────────────────────
 
+export interface DownloadStoreLookupOptions {
+  /** Exact Android public folder name from the DB row, e.g. "<id> <title>". */
+  folderName?: string | null;
+}
+
 export interface DownloadStore {
   /**
    * Write one image into the gallery folder.
@@ -36,12 +41,7 @@ export interface DownloadStore {
    * @param bytes      Raw image data.
    * @param ext        File extension without leading dot, e.g. "webp".
    */
-  putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void>;
+  putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void>;
 
   /**
    * Copy an existing file (e.g. a persistent image-cache file) into the gallery
@@ -65,7 +65,16 @@ export interface DownloadStore {
     galleryId: number,
     index: number,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<Uint8Array | null>;
+
+  /**
+   * A WebView-loadable URL for one stored page. Implemented by adapters that can
+   * expose native file URLs without copying bytes through JS. Returns null when
+   * the page is missing. Adapters backed by SAF/content URIs may omit this and
+   * callers should fall back to lazy getImage reads for visible pages only.
+   */
+  imageUrl?(galleryId: number, index: number, ext: string): Promise<string | null>;
 
   /**
    * Cheap existence check for a single stored page — true only when the file
@@ -80,6 +89,7 @@ export interface DownloadStore {
     galleryId: number,
     index: number,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<boolean>;
 
   /**
@@ -88,7 +98,7 @@ export interface DownloadStore {
    * Returns null when nothing is downloaded. Optional: adapters without a native
    * file URL (web) omit it, and callers fall back to the network thumbnail.
    */
-  coverUrl?(galleryId: number): Promise<string | null>;
+  coverUrl?(galleryId: number, options?: DownloadStoreLookupOptions): Promise<string | null>;
 
   /**
    * Prepare the gallery folder in public storage with the known title, so the
@@ -109,10 +119,10 @@ export interface DownloadStore {
   listGalleries(): Promise<number[]>;
 
   /** Delete a gallery folder and all its images. */
-  deleteGallery(galleryId: number): Promise<void>;
+  deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void>;
 
   /** Total bytes stored for a specific gallery. */
-  gallerySize(galleryId: number): Promise<number>;
+  gallerySize(galleryId: number, options?: DownloadStoreLookupOptions): Promise<number>;
 
   /** Total bytes stored across all galleries. */
   usage(): Promise<number>;
@@ -140,7 +150,19 @@ export function galleryFolderName(galleryId: number): string {
  * Pick and instantiate the appropriate DownloadStore adapter for the current
  * runtime platform.  Mirrors the pattern used in src/lib/db/init.ts.
  */
+let downloadStorePromise: Promise<DownloadStore> | null = null;
+
 export async function createDownloadStore(): Promise<DownloadStore> {
+  if (downloadStorePromise) return downloadStorePromise;
+
+  downloadStorePromise = createDownloadStoreUncached().catch((error) => {
+    downloadStorePromise = null;
+    throw error;
+  });
+  return downloadStorePromise;
+}
+
+async function createDownloadStoreUncached(): Promise<DownloadStore> {
   if (isTauri()) {
     const { TauriDownloadStore } = await import('./adapters/tauri');
     return TauriDownloadStore.create();
@@ -161,4 +183,8 @@ export async function createDownloadStore(): Promise<DownloadStore> {
   // Browser / Next.js web — OPFS preferred, IndexedDB-blob fallback.
   const { WebDownloadStore } = await import('./adapters/web');
   return WebDownloadStore.create();
+}
+
+export function __resetDownloadStoreForTests(): void {
+  downloadStorePromise = null;
 }
