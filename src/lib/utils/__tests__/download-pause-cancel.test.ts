@@ -21,6 +21,7 @@ const dbCalls = {
 };
 
 vi.mock('@/lib/db/download', () => ({
+  getDownload: vi.fn(async () => null),
   upsertDownload: (...a: unknown[]) => dbCalls.upsert(...a),
   updateDownloadProgress: (...a: unknown[]) => dbCalls.updateProgress(...a),
   setDownloadError: (...a: unknown[]) => dbCalls.setError(...a),
