@@ -360,14 +360,16 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
   const current = await getDownload(galleryId);
   if (!current) return false;
   if (current.status === 'complete') return true;
+  if (current.status === 'failed' && current.lastError === 'Cancelled') return false;
   if (
     (current.status !== 'downloading' && current.status !== 'failed') ||
     (current.pageCount ?? 0) <= 0
   ) {
     return false;
   }
-  if (await hasCompleteDownloadedGallery(galleryId, current.pageCount)) {
-    const pages = await getDownloadedGalleryPages(galleryId);
+  const lookup = { folderName: current.folderName ?? null };
+  if (await hasCompleteDownloadedGallery(galleryId, current.pageCount, lookup)) {
+    const pages = await getDownloadedGalleryPages(galleryId, lookup);
     await upsertDownload({
       ...current,
       pageCount: pages.length,
@@ -416,7 +418,7 @@ async function failAndroidDownloadIfWorkerStopped(id: number, message: string): 
   stopAndroidProgressPoll(id);
 }
 
-async function pauseAndroidHandedOffDownload(id: number): Promise<boolean> {
+async function prepareAndroidHandedOffPause(id: number): Promise<boolean> {
   const row = await getDownload(id).catch(() => null);
   if (row && row.queuePosition == null) {
     try {
@@ -433,10 +435,24 @@ async function pauseAndroidHandedOffDownload(id: number): Promise<boolean> {
       return false;
     }
   }
+  return true;
+}
+
+async function markAndroidHandedOffPaused(id: number): Promise<boolean> {
   try {
     await setDownloadError(id, 'paused', null);
     return true;
   } catch {
+    return false;
+  }
+}
+
+async function cancelAndroidNativeWork(id: number): Promise<boolean> {
+  try {
+    await DownloadWorker.cancel({ galleryId: String(id) });
+    return true;
+  } catch (e) {
+    console.warn('[download] failed to cancel Android native work', id, e);
     return false;
   }
 }
@@ -978,7 +994,9 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         if (row?.status === 'complete') {
           isComplete =
             (row.pageCount ?? 0) > 0
-              ? await hasCompleteDownloadedGallery(id, row.pageCount).catch(() => false)
+              ? await hasCompleteDownloadedGallery(id, row.pageCount, {
+                  folderName: row.folderName ?? null,
+                }).catch(() => false)
               : true;
         }
         set((s) => ({ downloaded: { ...s.downloaded, [id]: isComplete } }));
@@ -1057,23 +1075,29 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         // (no controller, not in the TS queue). Drop its work-order so the
         // worker skips it (and stops if the handoff queue empties).
         void (async () => {
-          await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
-          const storedPages = await getDownloadedGalleryPages(id).catch(() => []);
+          if (!(await cancelAndroidNativeWork(id))) {
+            void refreshQueue();
+            return;
+          }
+          const row = await getDownload(id).catch(() => null);
+          const storedPages = await getDownloadedGalleryPages(id, {
+            folderName: row?.folderName ?? null,
+          }).catch(() => []);
           if (storedPages.length === 0) {
             await deleteDownload(id).catch(() => {});
           } else {
             await setDownloadError(id, 'failed', 'Cancelled').catch(() => {});
             await removeFromQueue(id).catch(() => {});
           }
+          fileCache.delete(id);
+          markNotDownloaded(id);
+          setEntry(id, null);
+          // Stop this row's live-progress polling without silencing other active
+          // Android handoffs.
+          stopAndroidProgressPoll(id);
           notifyDownloadLibraryChanged(true);
           void refreshQueue();
         })();
-        fileCache.delete(id);
-        markNotDownloaded(id);
-        setEntry(id, null);
-        // Stop this row's live-progress polling without silencing other active
-        // Android handoffs.
-        stopAndroidProgressPoll(id);
       } else {
         // Queued/paused but not yet started → drop it from the queue.
         if (isAndroid()) {
@@ -1100,8 +1124,11 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         }
       } else if (isAndroid() && get().entries[id]?.progress != null) {
-        if (await pauseAndroidHandedOffDownload(id)) {
-          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+        if (
+          (await prepareAndroidHandedOffPause(id)) &&
+          (await cancelAndroidNativeWork(id)) &&
+          (await markAndroidHandedOffPaused(id))
+        ) {
           stopAndroidProgressPoll(id);
           setEntry(id, null);
           notifyDownloadLibraryChanged(true);
@@ -1156,8 +1183,11 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           .filter(([, entry]) => entry.progress != null)
           .map(([id]) => Number(id));
         for (const id of activeIds) {
-          if (await pauseAndroidHandedOffDownload(id)) {
-            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          if (
+            (await prepareAndroidHandedOffPause(id)) &&
+            (await cancelAndroidNativeWork(id)) &&
+            (await markAndroidHandedOffPaused(id))
+          ) {
             stopAndroidProgressPoll(id);
             setEntry(id, null);
           }

@@ -3,7 +3,11 @@ import { getImageUrl } from './image-url';
 import { resolveWorkOrder } from './work-order';
 import { apiClient, ApiError } from '@/lib/api/client';
 import type { GalleryFile, GgConfig } from './types';
-import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
+import {
+  createDownloadStore,
+  DownloadCancelledError,
+  type DownloadStoreLookupOptions,
+} from '@/lib/storage/download-store';
 import { getImageCache } from '@/lib/cache/image-cache';
 import {
   upsertDownload,
@@ -202,9 +206,10 @@ async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Respon
  */
 export async function getDownloadedGalleryPages(
   galleryId: number,
+  options?: DownloadStoreLookupOptions,
 ): Promise<{ index: number; ext: string }[]> {
   const store = await createDownloadStore();
-  const bytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+  const bytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
   if (!bytes) return [];
   const exts = decodeManifest(bytes);
   return exts.map((ext, index) => ({ index, ext }));
@@ -219,14 +224,15 @@ export async function getDownloadedGalleryPages(
 export async function getDownloadedImage(
   galleryId: number,
   index: number,
+  options?: DownloadStoreLookupOptions,
 ): Promise<Uint8Array | null> {
   const store = await createDownloadStore();
-  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
   if (!manifestBytes) return null;
   const exts = decodeManifest(manifestBytes);
   const ext = exts[index];
   if (!ext) return null;
-  return store.getImage(galleryId, index, ext);
+  return store.getImage(galleryId, index, ext, options);
 }
 
 /**
@@ -237,9 +243,10 @@ export async function getDownloadedImage(
 export async function hasCompleteDownloadedGallery(
   galleryId: number,
   expectedPageCount: number,
+  options?: DownloadStoreLookupOptions,
 ): Promise<boolean> {
   const store = await createDownloadStore();
-  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
   if (!manifestBytes) return false;
 
   const exts = decodeManifest(manifestBytes);
@@ -249,8 +256,8 @@ export async function hasCompleteDownloadedGallery(
   for (let i = 0; i < exts.length; i++) {
     const ext = exts[i];
     const exists = store.imageExists
-      ? await store.imageExists(galleryId, i, ext)
-      : (await store.getImage(galleryId, i, ext).catch(() => null)) !== null;
+      ? await store.imageExists(galleryId, i, ext, options)
+      : (await store.getImage(galleryId, i, ext, options).catch(() => null)) !== null;
     if (!exists) return false;
   }
 
