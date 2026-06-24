@@ -107,6 +107,38 @@ public class DownloadWorkerPlugin extends Plugin {
         }
     }
 
+    static JSObject readProgressFile(File f) {
+        JSObject ret = new JSObject();
+        if (!f.exists()) {
+            // Absent → no active progress (not started, or already completed/cleared).
+            ret.put("current", JSObject.NULL);
+            return ret;
+        }
+        try {
+            byte[] bytes = new byte[(int) f.length()];
+            try (FileInputStream fis = new FileInputStream(f)) {
+                int off = 0;
+                int n;
+                while (off < bytes.length && (n = fis.read(bytes, off, bytes.length - off)) != -1) {
+                    off += n;
+                }
+            }
+            JSONObject obj = new JSONObject(new String(bytes, "UTF-8"));
+            if (obj.has("error")) {
+                ret.put("current", JSObject.NULL);
+                ret.put("error", obj.optString("error", "Background download failed"));
+                return ret;
+            }
+            ret.put("current", obj.getInt("current"));
+            ret.put("total", obj.getInt("total"));
+            return ret;
+        } catch (Throwable t) {
+            // Unparseable / torn write → treat as no progress this tick.
+            ret.put("current", JSObject.NULL);
+            return ret;
+        }
+    }
+
     /**
      * Persist a work-order JSON to {@code filesDir/dl-queue/<galleryId>.json} so
      * the worker can read it. TS passes the already-serialized JSON string and the
@@ -235,38 +267,7 @@ public class DownloadWorkerPlugin extends Plugin {
     public void getProgress(PluginCall call) {
         String galleryId = call.getString("galleryId");
         if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
-        File f = progressFile(galleryId);
-        JSObject ret = new JSObject();
-        if (!f.exists()) {
-            // Absent → no active progress (not started, or already completed/cleared).
-            ret.put("current", JSObject.NULL);
-            call.resolve(ret);
-            return;
-        }
-        try {
-            byte[] bytes = new byte[(int) f.length()];
-            try (FileInputStream fis = new FileInputStream(f)) {
-                int off = 0;
-                int n;
-                while (off < bytes.length && (n = fis.read(bytes, off, bytes.length - off)) != -1) {
-                    off += n;
-                }
-            }
-            JSONObject obj = new JSONObject(new String(bytes, "UTF-8"));
-            if (obj.has("error")) {
-                ret.put("current", JSObject.NULL);
-                ret.put("error", obj.optString("error", "Background download failed"));
-                call.resolve(ret);
-                return;
-            }
-            ret.put("current", obj.getInt("current"));
-            ret.put("total", obj.getInt("total"));
-            call.resolve(ret);
-        } catch (Throwable t) {
-            // Unparseable / torn write → treat as no progress this tick.
-            ret.put("current", JSObject.NULL);
-            call.resolve(ret);
-        }
+        call.resolve(readProgressFile(progressFile(galleryId)));
     }
 
     /**

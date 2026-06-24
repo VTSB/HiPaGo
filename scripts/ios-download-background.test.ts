@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 
 const projectFile = resolve('ios/App/App.xcodeproj/project.pbxproj');
 const backgroundTaskFile = resolve('ios/App/App/DownloadBackgroundTask.swift');
+const downloadWorkerPluginFile = resolve('ios/App/App/DownloadWorkerPlugin.swift');
+const appDelegateFile = resolve('ios/App/App/AppDelegate.swift');
+const infoPlistFile = resolve('ios/App/App/Info.plist');
 
 describe('iOS native background downloads', () => {
   it('includes native download and UniFFI Swift files in the App target sources', () => {
@@ -59,5 +62,48 @@ describe('iOS native background downloads', () => {
     expect(source).toContain(
       'writeManifest(galleryDir: galleryDir, exts: Array(exts.prefix(i + 1)))',
     );
+  });
+
+  it('keeps the BGProcessingTask identifier aligned across Swift and Info.plist', () => {
+    const backgroundTask = readFileSync(backgroundTaskFile, 'utf8');
+    const appDelegate = readFileSync(appDelegateFile, 'utf8');
+    const plist = readFileSync(infoPlistFile, 'utf8');
+
+    expect(backgroundTask).toContain('static let taskIdentifier = "com.hipago.app.download"');
+    expect(appDelegate).toContain(
+      'BGTaskScheduler.shared.register(forTaskWithIdentifier: DownloadBackgroundTask.taskIdentifier',
+    );
+    expect(plist).toContain('<key>BGTaskSchedulerPermittedIdentifiers</key>');
+    expect(plist).toContain('<string>com.hipago.app.download</string>');
+    expect(plist).toContain('<key>UIBackgroundModes</key>');
+    expect(plist).toContain('<string>processing</string>');
+  });
+
+  it('keeps iOS background files in the same Directory.Data layout the reader uses', () => {
+    const source = readFileSync(backgroundTaskFile, 'utf8');
+
+    expect(source).toContain('private static let downloadsDirName = "downloads"');
+    expect(source).toContain(
+      'fileManager.urls(for: .documentDirectory, in: .userDomainMask).first',
+    );
+    expect(source).toContain(
+      'return documents.appendingPathComponent(Self.downloadsDirName, isDirectory: true)',
+    );
+    expect(source).toContain('String(galleryId)');
+    expect(source).toContain('String(format: "%04d.%@", index + 1, ext)');
+  });
+
+  it('keeps the iOS DownloadWorker plugin interface and handoff path aligned with TS', () => {
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+
+    expect(plugin).toContain('public let jsName = "DownloadWorker"');
+    for (const method of ['writeWorkOrder', 'enqueue', 'cancel']) {
+      expect(plugin).toContain(`CAPPluginMethod(name: "${method}"`);
+      expect(plugin).toContain(`@objc func ${method}`);
+    }
+    expect(plugin).toContain('DownloadBackgroundTask.shared.handoffDir()');
+    expect(plugin).toContain('DownloadBackgroundTask.shared.scheduleProcessingTask()');
+    expect(plugin).toContain('DownloadBackgroundTask.shared.cancelPendingTask()');
+    expect(plugin).toContain('work-order galleryId does not match filename');
   });
 });
