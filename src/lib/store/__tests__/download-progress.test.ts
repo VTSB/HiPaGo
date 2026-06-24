@@ -30,10 +30,12 @@ vi.mock('@/lib/utils/download-zip', async () => {
     ...actual,
     downloadGalleryToLibrary: (...a: unknown[]) => dl(...a),
     getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
-    hasCompleteDownloadedGallery: vi.fn(async (id: number, expectedPageCount: number) => {
-      const pages = manifestPages.get(id) ?? [];
-      return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
-    }),
+    hasCompleteDownloadedGallery: vi.fn(
+      async (id: number, expectedPageCount: number) => {
+        const pages = manifestPages.get(id) ?? [];
+        return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
+      },
+    ),
   };
 });
 
@@ -136,7 +138,14 @@ vi.mock('@/lib/db/download-queue', () => ({
 // (status:'failed', pageCount:0) so existing tests are unaffected.
 const downloadRows = new Map<
   number,
-  { retryCount?: number; status?: string; pageCount?: number; queuePosition?: number | null }
+  {
+    retryCount?: number;
+    status?: string;
+    pageCount?: number;
+    queuePosition?: number | null;
+    folderName?: string | null;
+    lastError?: string | null;
+  }
 >();
 const upsertedRows: unknown[] = [];
 const errorRows: { galleryId: number; status: string; lastError: string | null }[] = [];
@@ -159,6 +168,8 @@ vi.mock('@/lib/db/download', () => ({
       totalBytes: 0,
       downloadedAt: '',
       status: o?.status ?? fromAdapter?.status ?? 'failed',
+      folderName: o?.folderName ?? null,
+      lastError: o?.lastError ?? null,
       retryCount: o?.retryCount ?? 0,
       queuePosition: o?.queuePosition ?? null,
     };
@@ -183,12 +194,14 @@ vi.mock('@/lib/db/download', () => ({
       pageCount: (r as { pageCount?: number }).pageCount ?? prev.pageCount,
       retryCount: (r as { retryCount?: number | null }).retryCount ?? prev.retryCount,
       queuePosition: (r as { queuePosition?: number | null }).queuePosition ?? prev.queuePosition,
+      folderName: (r as { folderName?: string | null }).folderName ?? prev.folderName,
+      lastError: (r as { lastError?: string | null }).lastError ?? prev.lastError,
     });
   }),
   setDownloadError: vi.fn(async (galleryId: number, status: string, lastError: string | null) => {
     errorRows.push({ galleryId, status, lastError });
     const prev = downloadRows.get(galleryId) ?? {};
-    downloadRows.set(galleryId, { ...prev, status });
+    downloadRows.set(galleryId, { ...prev, status, lastError });
     const queued = queue.find((q) => q.id === galleryId);
     if (queued) queued.paused = status === 'paused';
   }),
@@ -227,6 +240,7 @@ const workerCancels: string[] = [];
 // Steerable: when true, writeWorkOrder rejects so the iOS backstop scheduling
 // failure path can be exercised (it must NOT fail the foreground download).
 const workerWriteThrows = { value: false };
+const workerCancelThrows = { value: false };
 // Steers DownloadWorker.getProgress for the poller tests (in-app progress bridge).
 // Default: no progress file yet ({current:null}) so handoff tests' polls are inert.
 const workerProgress: {
@@ -244,6 +258,7 @@ vi.mock('@/lib/plugins/downloadWorker', () => ({
       workerEnqueues.push(o.galleryId);
     }),
     cancel: vi.fn(async (o: { galleryId: string }) => {
+      if (workerCancelThrows.value) throw new Error('cancel failed');
       workerCancels.push(o.galleryId);
       return { remaining: 0 };
     }),
@@ -344,10 +359,13 @@ beforeEach(async () => {
   workerEnqueues.length = 0;
   workerCancels.length = 0;
   workerWriteThrows.value = false;
+  workerCancelThrows.value = false;
   workerProgress.value = { current: null };
   ensureDownloadStoreReady.mockReset();
   ensureDownloadStoreReady.mockResolvedValue(undefined);
   vi.mocked(DownloadWorker.getProgress).mockClear();
+  vi.mocked(DownloadWorker.cancel).mockClear();
+  vi.mocked(hasCompleteDownloadedGallery).mockClear();
   stopAndroidProgressPoll();
   androidFlag = false;
   iosFlag = false;
@@ -675,6 +693,56 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(deletedRows).not.toContain(102);
     expect(useDownloadProgressStore.getState().entries[102]).toBeUndefined();
   });
+
+  it('keeps Android handed-off tracking when native cancel fails', async () => {
+    androidFlag = true;
+    workerCancelThrows.value = true;
+    downloadRows.set(103, { status: 'downloading', pageCount: 5, folderName: '103 G103' });
+    useDownloadProgressStore.setState({
+      entries: { 103: { progress: { current: 2, total: 5 }, error: null } },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      useDownloadProgressStore.getState().cancel(103);
+      await new Promise((r) => setTimeout(r, 5));
+
+      expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '103' });
+      expect(useDownloadProgressStore.getState().entries[103]?.progress).toEqual({
+        current: 2,
+        total: 5,
+      });
+      expect(deletedRows).not.toContain(103);
+      expect(errorRows).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('keeps Android handed-off tracking when native pause cancel fails', async () => {
+    androidFlag = true;
+    workerCancelThrows.value = true;
+    downloadRows.set(104, { status: 'downloading', pageCount: 5, folderName: '104 G104' });
+    useDownloadProgressStore.setState({
+      entries: { 104: { progress: { current: 2, total: 5 }, error: null } },
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await useDownloadProgressStore.getState().pause(104);
+
+      expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '104' });
+      expect(useDownloadProgressStore.getState().entries[104]?.progress).toEqual({
+        current: 2,
+        total: 5,
+      });
+      expect(errorRows).not.toContainEqual({
+        galleryId: 104,
+        status: 'paused',
+        lastError: null,
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 // ── Android in-app live-progress poller (in-app progress bridge, AC-003) ──────
@@ -959,6 +1027,44 @@ describe('finalizeDownloadIfComplete (shared completion rule)', () => {
     expect(upsert).toMatchObject({ galleryId: 900, status: 'complete', pageCount: 3 });
     expect(upsert.retryCount).toBe(0);
     expect(upsert.nextRetryAt).toBeNull();
+  });
+
+  it('checks completion against the DB row folderName', async () => {
+    downloadRows.set(906, {
+      status: 'downloading',
+      pageCount: 2,
+      folderName: '906 New Title',
+    });
+    manifestPages.set(906, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+
+    const done = await finalizeDownloadIfComplete(906);
+
+    expect(done).toBe(true);
+    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(906, 2, {
+      folderName: '906 New Title',
+    });
+  });
+
+  it('does NOT finalize a user-cancelled failed row after late native completion', async () => {
+    downloadRows.set(907, {
+      status: 'failed',
+      pageCount: 2,
+      lastError: 'Cancelled',
+      folderName: '907 Cancelled',
+    });
+    manifestPages.set(907, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+
+    const done = await finalizeDownloadIfComplete(907);
+
+    expect(done).toBe(false);
+    expect(hasCompleteDownloadedGallery).not.toHaveBeenCalled();
+    expect(upsertedRows).toHaveLength(0);
   });
 
   it('does NOT finalize when the manifest is short of pageCount', async () => {

@@ -28,6 +28,11 @@ export class DownloadCancelledError extends Error {
 
 // ── Interface ──────────────────────────────────────────────────────────────
 
+export interface DownloadStoreLookupOptions {
+  /** Exact Android public folder name from the DB row, e.g. "<id> <title>". */
+  folderName?: string | null;
+}
+
 export interface DownloadStore {
   /**
    * Write one image into the gallery folder.
@@ -56,7 +61,12 @@ export interface DownloadStore {
    * Read one image from the gallery folder.
    * Returns null when the file does not exist.
    */
-  getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null>;
+  getImage(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<Uint8Array | null>;
 
   /**
    * A WebView-loadable URL for one stored page. Implemented by adapters that can
@@ -75,7 +85,12 @@ export interface DownloadStore {
    * Unlike getImage, this should NOT read the file bytes into the JS heap —
    * adapters use a stat/handle probe so resume stays cheap on large galleries.
    */
-  imageExists?(galleryId: number, index: number, ext: string): Promise<boolean>;
+  imageExists?(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean>;
 
   /**
    * A WebView-loadable URL (convertFileSrc) for the gallery's first downloaded
@@ -83,7 +98,7 @@ export interface DownloadStore {
    * Returns null when nothing is downloaded. Optional: adapters without a native
    * file URL (web) omit it, and callers fall back to the network thumbnail.
    */
-  coverUrl?(galleryId: number): Promise<string | null>;
+  coverUrl?(galleryId: number, options?: DownloadStoreLookupOptions): Promise<string | null>;
 
   /**
    * Prepare the gallery folder in public storage with the known title, so the
@@ -104,10 +119,10 @@ export interface DownloadStore {
   listGalleries(): Promise<number[]>;
 
   /** Delete a gallery folder and all its images. */
-  deleteGallery(galleryId: number): Promise<void>;
+  deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void>;
 
   /** Total bytes stored for a specific gallery. */
-  gallerySize(galleryId: number): Promise<number>;
+  gallerySize(galleryId: number, options?: DownloadStoreLookupOptions): Promise<number>;
 
   /** Total bytes stored across all galleries. */
   usage(): Promise<number>;
