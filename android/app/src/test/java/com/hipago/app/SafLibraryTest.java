@@ -26,6 +26,14 @@ public class SafLibraryTest {
         assertSecurityException("../x.webp", "path traversal");
     }
 
+    @Test
+    public void derivesFileAndTempNamesForSafPublish() {
+        assertEquals("0001.webp", SafLibrary.fileNameForPath("HiPaGo/123/0001.webp"));
+        assertEquals("0001.webp", SafLibrary.fileNameForPath("0001.webp"));
+
+        assertEquals(".0001.webp.tmp-2a", SafLibrary.tempNameForPublish("0001.webp", 42L));
+    }
+
     private static Method assertSafeMethod() {
         try {
             Method method = SafLibrary.class.getDeclaredMethod("assertSafe", String.class);
