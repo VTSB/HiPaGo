@@ -46,7 +46,8 @@ export interface DownloadWorkerPlugin {
    * `filesDir/dl-progress/<galleryId>.json`. Resolves `{current, total}` while the
    * gallery is actively downloading; resolves `{current: null}` (a sentinel the TS
    * poller maps to `null`) when no progress file exists (not started, or already
-   * completed/cleared).
+   * completed/cleared). A native terminal failure is reported as
+   * `{current: null, error}` so the foreground app can fail/retry the DB row.
    *
    * Android-only: the native worker is the sole downloader on Android. iOS omits
    * this method (its foreground download is already in-process), so the TS poller
@@ -54,7 +55,7 @@ export interface DownloadWorkerPlugin {
    */
   getProgress(options: {
     galleryId: string;
-  }): Promise<{ current: number; total: number } | { current: null }>;
+  }): Promise<{ current: number; total: number } | { current: null; error?: string }>;
 }
 
 export const DownloadWorker = registerPlugin<DownloadWorkerPlugin>('DownloadWorker');
