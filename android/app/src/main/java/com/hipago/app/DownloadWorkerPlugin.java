@@ -1,24 +1,33 @@
 package com.hipago.app;
 
+import android.Manifest;
 import android.content.Context;
+import android.content.SharedPreferences;
+import android.os.Build;
 
 import androidx.work.Constraints;
+import androidx.work.BackoffPolicy;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.NetworkType;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.WorkManager;
 
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Capacitor plugin that bridges the TS download queue to the native
@@ -27,22 +36,34 @@ import java.io.FileOutputStream;
  * On Android the worker is the SOLE downloader. TS resolves a work-order, hands
  * it off via {@link #writeWorkOrder} (so TS never needs raw access to the app's
  * {@code filesDir}), then calls {@link #enqueue} to schedule the worker. One
- * unique worker ({@link GalleryDownloadWorker#UNIQUE_WORK_NAME}, policy KEEP)
- * drains ALL pending work-order files, so enqueueing several galleries then
- * calling enqueue once is enough — the running worker picks up the new files.
+ * unique worker chain ({@link GalleryDownloadWorker#UNIQUE_WORK_NAME}, policy
+ * APPEND_OR_REPLACE) drains pending work-order files. Appending a follow-up run
+ * closes the race where a work-order is written while a previous run is already
+ * finishing.
  *
- * Network constraint: {@link NetworkType#UNMETERED} (Wi-Fi/ethernet only), so a
- * metered/no network holds the work until Wi-Fi returns (WorkManager re-runs it).
+ * Network constraint: {@link NetworkType#CONNECTED}, so downloads may run on
+ * Wi-Fi, ethernet, or cellular but still wait while the device is offline.
+ * Android 13+ notification permission is requested before enqueueing so the
+ * worker's foreground progress notification appears in the system shade.
  *
  * {@link #cancel} removes one gallery's work-order file; if no work-orders remain
  * it also cancels the unique work so the worker stops.
  *
  * DEVICE-PENDING: Java is not compiled in the sandbox; this file is verified by
  * code review here and must be smoke-tested on a physical/emulator Android
- * device (WorkManager scheduling, UNMETERED constraint, KEEP policy, cancel).
+ * device (WorkManager scheduling, CONNECTED constraint, append policy, cancel).
  */
-@CapacitorPlugin(name = "DownloadWorker")
+@CapacitorPlugin(
+        name = "DownloadWorker",
+        permissions = {
+                @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications")
+        }
+)
 public class DownloadWorkerPlugin extends Plugin {
+    private static final String NOTIFICATIONS = "notifications";
+    private static final String PREFS = "hipago_download_worker";
+    private static final String KEY_NETWORK_CONSTRAINT_VERSION = "network_constraint_version";
+    private static final int NETWORK_CONSTRAINT_CONNECTED_VERSION = 2;
 
     private File handoffDir() {
         File dir = new File(getContext().getFilesDir(), GalleryDownloadWorker.HANDOFF_DIR);
@@ -57,6 +78,35 @@ public class DownloadWorkerPlugin extends Plugin {
         return new File(handoffDir(), galleryId + ".json");
     }
 
+    private File progressDir() {
+        return new File(getContext().getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR);
+    }
+
+    private File progressFile(String galleryId) {
+        return new File(progressDir(), galleryId + ".json");
+    }
+
+    private void deleteProgress(String galleryId) {
+        File f = progressFile(galleryId);
+        if (f.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        }
+    }
+
+    private String workOrderGalleryId(String json) {
+        try {
+            JSONObject obj = new JSONObject(json);
+            Object raw = obj.opt("galleryId");
+            if (raw == null || raw == JSONObject.NULL) {
+                return null;
+            }
+            return String.valueOf(raw);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /**
      * Persist a work-order JSON to {@code filesDir/dl-queue/<galleryId>.json} so
      * the worker can read it. TS passes the already-serialized JSON string and the
@@ -69,10 +119,26 @@ public class DownloadWorkerPlugin extends Plugin {
         if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
         if (json == null) { call.reject("json is required"); return; }
         try {
+            String payloadGalleryId = workOrderGalleryId(json);
+            if (!galleryId.equals(payloadGalleryId)) {
+                call.reject("work-order galleryId does not match filename");
+                return;
+            }
+            deleteProgress(galleryId);
             File f = orderFile(galleryId);
-            try (FileOutputStream fos = new FileOutputStream(f)) {
-                fos.write(json.getBytes("UTF-8"));
+            File tmp = new File(handoffDir(), galleryId + ".json.tmp");
+            try (FileOutputStream fos = new FileOutputStream(tmp)) {
+                fos.write(json.getBytes(StandardCharsets.UTF_8));
                 fos.flush();
+                fos.getFD().sync();
+            }
+            if (f.exists() && !f.delete()) {
+                throw new Exception("replace failed: " + f.getName());
+            }
+            if (!tmp.renameTo(f)) {
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+                throw new Exception("atomic publish failed: " + f.getName());
             }
             call.resolve();
         } catch (Exception e) {
@@ -81,28 +147,69 @@ public class DownloadWorkerPlugin extends Plugin {
     }
 
     /**
-     * Enqueue the unique, Wi-Fi-constrained download worker. The work-order file is
-     * assumed already written (via {@link #writeWorkOrder}). KEEP means a worker
-     * that is already running/enqueued is left alone — it will pick up the new
-     * work-order file on its current run or the next.
+     * Enqueue the unique, connected-network download worker. The work-order file is
+     * assumed already written (via {@link #writeWorkOrder}). APPEND_OR_REPLACE keeps
+     * the current run and appends a follow-up pass, so a work-order written while a
+     * worker is already running is still guaranteed to be seen.
      */
     @PluginMethod
     public void enqueue(PluginCall call) {
+        if (shouldRequestNotificationPermission()) {
+            requestPermissionForAlias(NOTIFICATIONS, call, "notificationPermissionCallback");
+            return;
+        }
+
+        enqueueWorker(call);
+    }
+
+    @PermissionCallback
+    private void notificationPermissionCallback(PluginCall call) {
+        // A denial only hides the foreground notification from the shade; the
+        // actual WorkManager download should still proceed.
+        enqueueWorker(call);
+    }
+
+    private boolean shouldRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false;
+        PermissionState state = getPermissionState(NOTIFICATIONS);
+        return state == PermissionState.PROMPT || state == PermissionState.PROMPT_WITH_RATIONALE;
+    }
+
+    private void enqueueWorker(PluginCall call) {
         try {
+            ExistingWorkPolicy policy = workPolicyForCurrentConstraint();
             Constraints constraints = new Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.UNMETERED)
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build();
             OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(GalleryDownloadWorker.class)
                     .setConstraints(constraints)
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                     .build();
             WorkManager.getInstance(getContext()).enqueueUniqueWork(
                     GalleryDownloadWorker.UNIQUE_WORK_NAME,
-                    ExistingWorkPolicy.KEEP,
+                    policy,
                     request);
             call.resolve();
         } catch (Exception e) {
             call.reject("enqueue error: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
         }
+    }
+
+    private ExistingWorkPolicy workPolicyForCurrentConstraint() {
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int version = prefs.getInt(KEY_NETWORK_CONSTRAINT_VERSION, 0);
+        if (version >= NETWORK_CONSTRAINT_CONNECTED_VERSION) {
+            return ExistingWorkPolicy.APPEND_OR_REPLACE;
+        }
+
+        // One-time migration from the old UNMETERED work constraint. Existing
+        // WorkManager requests keep their original constraints across app
+        // updates, so replace the unique chain once; persistent work-order files
+        // let the new CONNECTED worker resume anything that was interrupted.
+        prefs.edit()
+                .putInt(KEY_NETWORK_CONSTRAINT_VERSION, NETWORK_CONSTRAINT_CONNECTED_VERSION)
+                .apply();
+        return ExistingWorkPolicy.REPLACE;
     }
 
     /**
@@ -122,9 +229,7 @@ public class DownloadWorkerPlugin extends Plugin {
     public void getProgress(PluginCall call) {
         String galleryId = call.getString("galleryId");
         if (galleryId == null || galleryId.isEmpty()) { call.reject("galleryId is required"); return; }
-        File f = new File(
-                new File(getContext().getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR),
-                galleryId + ".json");
+        File f = progressFile(galleryId);
         JSObject ret = new JSObject();
         if (!f.exists()) {
             // Absent → no active progress (not started, or already completed/cleared).
@@ -142,6 +247,12 @@ public class DownloadWorkerPlugin extends Plugin {
                 }
             }
             JSONObject obj = new JSONObject(new String(bytes, "UTF-8"));
+            if (obj.has("error")) {
+                ret.put("current", JSObject.NULL);
+                ret.put("error", obj.optString("error", "Background download failed"));
+                call.resolve(ret);
+                return;
+            }
             ret.put("current", obj.getInt("current"));
             ret.put("total", obj.getInt("total"));
             call.resolve(ret);
@@ -167,6 +278,7 @@ public class DownloadWorkerPlugin extends Plugin {
                 //noinspection ResultOfMethodCallIgnored
                 f.delete();
             }
+            deleteProgress(galleryId);
             File dir = handoffDir();
             File[] remaining = dir.listFiles((d, name) -> name.endsWith(".json"));
             if (remaining == null || remaining.length == 0) {

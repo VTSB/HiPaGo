@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { DEFAULT_IMAGE_CACHE_MAX_BYTES } from '@/lib/cache/image-cache-store';
 
 export type Locale = 'en' | 'ko';
+export type LibraryInitialTab = 'favorites' | 'history' | 'downloads';
 
 interface SettingsStoreState {
   locale: Locale;
@@ -15,6 +16,8 @@ interface SettingsStoreState {
   defaultFilterQuery: string;
   /** Android-only: block screenshots, screen recording, and recent-app previews. */
   secureScreen: boolean;
+  /** Mobile library hub tab to open when /library has no explicit tab query. */
+  libraryInitialTab: LibraryInitialTab;
   dualPage: boolean;
   gridColumns: number;
   /** Scroll-mode zoom scale. 1 = fit container width; >1 enlarges (pan), <1 shrinks. */
@@ -36,6 +39,7 @@ interface SettingsStoreState {
   setImageFormat: (format: 'auto' | 'avif' | 'webp' | 'original') => void;
   setDefaultFilterQuery: (query: string) => void;
   setSecureScreen: (enabled: boolean) => void;
+  setLibraryInitialTab: (tab: LibraryInitialTab) => void;
   setDualPage: (dual: boolean) => void;
   setGridColumns: (cols: number) => void;
   setScrollZoom: (z: number) => void;
@@ -72,6 +76,7 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     imageCacheMaxBytes?: number | null;
     defaultFilterQuery?: string;
     secureScreen?: boolean;
+    libraryInitialTab?: LibraryInitialTab;
     downloadBasePath?: string | null;
     downloadTreeUri?: string | null;
     downloadTreeName?: string | null;
@@ -107,6 +112,11 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version < 6 && s.secureScreen === undefined) {
     s = { ...s, secureScreen: true };
   }
+  // v7: mobile Library hub default tab. Preserve old behavior for existing
+  // users by defaulting to Favorites.
+  if (version < 7 && s.libraryInitialTab === undefined) {
+    s = { ...s, libraryInitialTab: 'favorites' };
+  }
   return s;
 }
 
@@ -121,6 +131,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       blurTags: DEFAULT_BLUR_TAGS,
       defaultFilterQuery: '',
       secureScreen: true,
+      libraryInitialTab: 'favorites',
       dualPage: false,
       gridColumns: 0,
       scrollZoom: 1,
@@ -134,6 +145,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setImageFormat: (format) => set({ imageFormat: format }),
       setDefaultFilterQuery: (query) => set({ defaultFilterQuery: query }),
       setSecureScreen: (enabled) => set({ secureScreen: enabled }),
+      setLibraryInitialTab: (tab) => set({ libraryInitialTab: tab }),
       setDualPage: (dual) => set({ dualPage: dual }),
       setGridColumns: (cols) => set({ gridColumns: cols }),
       setScrollZoom: (z) => set({ scrollZoom: z }),
@@ -143,7 +155,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
         set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
     }),
-    { name: 'hipago-settings', version: 6, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 7, migrate: migrateSettings },
   ),
 );
 

@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-05-20T14:44:54.858Z",
+  "generatedAt": "2026-06-24T06:06:45.639Z",
   "counts": {
-    "npm": 549,
-    "cargo": 597
+    "npm": 541,
+    "cargo": 602
   },
   "npm": [
     {
@@ -204,6 +204,30 @@
       "repository": "https://github.com/csstools/postcss-plugins"
     },
     {
+      "name": "@dnd-kit/accessibility",
+      "version": "3.1.1",
+      "license": "MIT",
+      "repository": "https://github.com/clauderic/dnd-kit"
+    },
+    {
+      "name": "@dnd-kit/core",
+      "version": "6.3.1",
+      "license": "MIT",
+      "repository": "https://github.com/clauderic/dnd-kit"
+    },
+    {
+      "name": "@dnd-kit/sortable",
+      "version": "10.0.0",
+      "license": "MIT",
+      "repository": "https://github.com/clauderic/dnd-kit"
+    },
+    {
+      "name": "@dnd-kit/utilities",
+      "version": "3.2.2",
+      "license": "MIT",
+      "repository": "https://github.com/clauderic/dnd-kit"
+    },
+    {
       "name": "@eslint-community/eslint-utils",
       "version": "4.9.1",
       "license": "MIT",
@@ -292,30 +316,6 @@
       "version": "1.1.0",
       "license": "MIT",
       "repository": "https://github.com/lovell/colour"
-    },
-    {
-      "name": "@img/sharp-libvips-linux-x64",
-      "version": "1.2.4",
-      "license": "LGPL-3.0-or-later",
-      "repository": "https://github.com/lovell/sharp-libvips"
-    },
-    {
-      "name": "@img/sharp-libvips-linuxmusl-x64",
-      "version": "1.2.4",
-      "license": "LGPL-3.0-or-later",
-      "repository": "https://github.com/lovell/sharp-libvips"
-    },
-    {
-      "name": "@img/sharp-linux-x64",
-      "version": "0.34.5",
-      "license": "Apache-2.0",
-      "repository": "https://github.com/lovell/sharp"
-    },
-    {
-      "name": "@img/sharp-linuxmusl-x64",
-      "version": "0.34.5",
-      "license": "Apache-2.0",
-      "repository": "https://github.com/lovell/sharp"
     },
     {
       "name": "@img/sharp-win32-x64",
@@ -426,18 +426,6 @@
       "repository": "https://github.com/vercel/next.js"
     },
     {
-      "name": "@next/swc-linux-x64-gnu",
-      "version": "16.1.6",
-      "license": "MIT",
-      "repository": "https://github.com/vercel/next.js"
-    },
-    {
-      "name": "@next/swc-linux-x64-musl",
-      "version": "16.1.6",
-      "license": "MIT",
-      "repository": "https://github.com/vercel/next.js"
-    },
-    {
       "name": "@next/swc-win32-x64-msvc",
       "version": "16.1.6",
       "license": "MIT",
@@ -466,18 +454,6 @@
       "version": "1.0.39",
       "license": "MIT",
       "repository": "https://github.com/SukkaW/nolyfill"
-    },
-    {
-      "name": "@rollup/rollup-linux-x64-musl",
-      "version": "4.44.0",
-      "license": "MIT",
-      "repository": "https://github.com/rollup/rollup"
-    },
-    {
-      "name": "@rollup/rollup-linux-x64-musl",
-      "version": "4.59.0",
-      "license": "MIT",
-      "repository": "https://github.com/rollup/rollup"
     },
     {
       "name": "@rollup/rollup-win32-x64-gnu",
@@ -522,12 +498,6 @@
       "repository": "https://github.com/tailwindlabs/tailwindcss"
     },
     {
-      "name": "@tailwindcss/oxide-linux-x64-musl",
-      "version": "4.2.1",
-      "license": "MIT",
-      "repository": "https://github.com/tailwindlabs/tailwindcss"
-    },
-    {
       "name": "@tanstack/query-core",
       "version": "5.90.20",
       "license": "MIT",
@@ -558,14 +528,8 @@
       "repository": "https://github.com/tauri-apps/tauri"
     },
     {
-      "name": "@tauri-apps/cli-linux-x64-gnu",
-      "version": "2.10.0",
-      "license": "Apache-2.0 OR MIT",
-      "repository": "https://github.com/tauri-apps/tauri"
-    },
-    {
-      "name": "@tauri-apps/cli-linux-x64-musl",
-      "version": "2.10.0",
+      "name": "@tauri-apps/api",
+      "version": "2.11.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/tauri-apps/tauri"
     },
@@ -574,6 +538,12 @@
       "version": "2.10.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/tauri-apps/tauri"
+    },
+    {
+      "name": "@tauri-apps/plugin-fs",
+      "version": "2.4.1",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/tauri-apps/plugins-workspace"
     },
     {
       "name": "@tauri-apps/plugin-sql",
@@ -706,18 +676,6 @@
       "version": "8.56.1",
       "license": "MIT",
       "repository": "https://github.com/typescript-eslint/typescript-eslint"
-    },
-    {
-      "name": "@unrs/resolver-binding-linux-x64-gnu",
-      "version": "1.11.1",
-      "license": "MIT",
-      "repository": "https://github.com/unrs/unrs-resolver"
-    },
-    {
-      "name": "@unrs/resolver-binding-linux-x64-musl",
-      "version": "1.11.1",
-      "license": "MIT",
-      "repository": "https://github.com/unrs/unrs-resolver"
     },
     {
       "name": "@unrs/resolver-binding-win32-x64-msvc",
@@ -2130,12 +2088,6 @@
       "repository": "https://github.com/calvinmetcalf/lie"
     },
     {
-      "name": "lightningcss-linux-x64-musl",
-      "version": "1.31.1",
-      "license": "MPL-2.0",
-      "repository": "https://github.com/parcel-bundler/lightningcss"
-    },
-    {
       "name": "localforage",
       "version": "1.10.0",
       "license": "Apache-2.0",
@@ -2611,13 +2563,13 @@
     },
     {
       "name": "resolve",
-      "version": "1.22.11",
+      "version": "2.0.0-next.6",
       "license": "MIT",
       "repository": "ssh://github.com/browserify/resolve"
     },
     {
       "name": "resolve",
-      "version": "2.0.0-next.6",
+      "version": "1.22.11",
       "license": "MIT",
       "repository": "ssh://github.com/browserify/resolve"
     },
@@ -3384,6 +3336,18 @@
       "version": "1.5.0",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/cuviper/autocfg"
+    },
+    {
+      "name": "aws-lc-rs",
+      "version": "1.17.0",
+      "license": "ISC AND (Apache-2.0 OR ISC)",
+      "repository": "https://github.com/aws/aws-lc-rs"
+    },
+    {
+      "name": "aws-lc-sys",
+      "version": "0.41.0",
+      "license": "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)",
+      "repository": "https://github.com/aws/aws-lc-rs"
     },
     {
       "name": "base64",
@@ -4260,6 +4224,12 @@
       "version": "0.1.3",
       "license": "MIT",
       "repository": "https://github.com/hyperium/http-body"
+    },
+    {
+      "name": "http-range",
+      "version": "0.1.5",
+      "license": "MIT",
+      "repository": "https://github.com/bancek/rust-http-range.git"
     },
     {
       "name": "http2",
@@ -5289,7 +5259,7 @@
     },
     {
       "name": "rustls",
-      "version": "0.23.40",
+      "version": "0.23.41",
       "license": "Apache-2.0 OR ISC OR MIT",
       "repository": "https://github.com/rustls/rustls"
     },
@@ -5766,6 +5736,12 @@
       "version": "2.5.3",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/tauri-apps/tauri"
+    },
+    {
+      "name": "tauri-plugin-fs",
+      "version": "2.4.1",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/tauri-apps/plugins-workspace"
     },
     {
       "name": "tauri-plugin-sql",
@@ -6304,6 +6280,12 @@
     {
       "name": "webpki-root-certs",
       "version": "1.0.6",
+      "license": "CDLA-Permissive-2.0",
+      "repository": "https://github.com/rustls/webpki-roots"
+    },
+    {
+      "name": "webpki-roots",
+      "version": "1.0.8",
       "license": "CDLA-Permissive-2.0",
       "repository": "https://github.com/rustls/webpki-roots"
     },

@@ -34,11 +34,7 @@ export class CapacitorDownloadStore implements DownloadStore {
 
   static async create(): Promise<CapacitorDownloadStore> {
     const mod = await import('@capacitor/filesystem');
-    return new CapacitorDownloadStore(
-      mod.Filesystem,
-      mod.Directory,
-      mod.Encoding,
-    );
+    return new CapacitorDownloadStore(mod.Filesystem, mod.Directory, mod.Encoding);
   }
 
   private galleryPath(galleryId: number): string {
@@ -68,12 +64,7 @@ export class CapacitorDownloadStore implements DownloadStore {
     return bytes;
   }
 
-  async putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     await this.Filesystem.mkdir({
       path: this.galleryPath(galleryId),
       directory: this.Directory.Data,
@@ -109,11 +100,7 @@ export class CapacitorDownloadStore implements DownloadStore {
     return stat.size ?? 0;
   }
 
-  async getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null> {
+  async getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null> {
     try {
       const result = await this.Filesystem.readFile({
         path: this.imagePath(galleryId, index, ext),
@@ -125,11 +112,7 @@ export class CapacitorDownloadStore implements DownloadStore {
     }
   }
 
-  async imageExists(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean> {
+  async imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
     try {
       // Filesystem.stat rejects when the path does not exist; a present file
       // with size 0 is a torn write and is reported as missing.
@@ -140,6 +123,20 @@ export class CapacitorDownloadStore implements DownloadStore {
       return (stat?.size ?? 0) > 0;
     } catch {
       return false;
+    }
+  }
+
+  async imageUrl(galleryId: number, index: number, ext: string): Promise<string | null> {
+    try {
+      if (!(await this.imageExists(galleryId, index, ext))) return null;
+      const { uri } = await this.Filesystem.getUri({
+        path: this.imagePath(galleryId, index, ext),
+        directory: this.Directory.Data,
+      });
+      const { Capacitor } = await import('@capacitor/core');
+      return Capacitor.convertFileSrc(uri);
+    } catch {
+      return null;
     }
   }
 

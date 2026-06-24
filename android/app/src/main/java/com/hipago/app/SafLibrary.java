@@ -3,6 +3,7 @@ package com.hipago.app;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.UriPermission;
 import android.net.Uri;
 
 import androidx.documentfile.provider.DocumentFile;
@@ -11,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,16 +99,24 @@ public class SafLibrary {
     }
 
     /**
-     * The tree root for file ops. Cached after first resolution. {@code
-     * fromTreeUri} itself does no IPC; validity is gated by the caller (the
-     * plugin via getTree, the worker by failing gracefully when null).
+     * The tree root for file ops. Cached after first resolution, but guarded by
+     * the persisted write grant and {@link DocumentFile#canWrite()} so a revoked
+     * SAF permission does not look writable to the background worker forever.
      */
     public DocumentFile rootDir() {
-        if (cachedRoot != null) return cachedRoot;
         Uri tree = getTreeUri();
         if (tree == null) return null;
+        if (!hasPersistedWritePermission(tree)) {
+            cachedRoot = null;
+            return null;
+        }
+        if (cachedRoot != null) {
+            if (cachedRoot.canWrite()) return cachedRoot;
+            cachedRoot = null;
+            return null;
+        }
         DocumentFile root = DocumentFile.fromTreeUri(context, tree);
-        if (root == null) return null;
+        if (root == null || !root.canWrite()) return null;
         cachedRoot = root;
         return root;
     }
@@ -114,6 +124,17 @@ public class SafLibrary {
     /** Whether a writable tree is currently available. */
     public boolean hasTree() {
         return rootDir() != null;
+    }
+
+    private boolean hasPersistedWritePermission(Uri tree) {
+        ContentResolver cr = context.getContentResolver();
+        List<UriPermission> perms = cr.getPersistedUriPermissions();
+        for (UriPermission p : perms) {
+            if (p.getUri().equals(tree) && p.isWritePermission()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // -----------------------------------------------------------------------
@@ -125,8 +146,13 @@ public class SafLibrary {
         if (relPath == null || relPath.isEmpty()) {
             throw new SecurityException("path is required");
         }
-        if (relPath.startsWith("/") || relPath.contains("..")) {
+        if (relPath.startsWith("/")) {
             throw new SecurityException("path traversal");
+        }
+        for (String segment : relPath.split("/")) {
+            if (segment.equals("..")) {
+                throw new SecurityException("path traversal");
+            }
         }
     }
 
@@ -291,6 +317,14 @@ public class SafLibrary {
             os.flush();
         }
         return written;
+    }
+
+    /** Return the file size for a relative file, or -1 when missing/unknown. */
+    public long size(String relPath) {
+        if (rootDir() == null) return -1L;
+        DocumentFile file = resolveFile(relPath);
+        if (file == null || !file.isFile()) return -1L;
+        return file.length();
     }
 
     /** Delete a single relative file. No-op when missing. Returns false on a hard failure. */

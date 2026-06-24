@@ -48,6 +48,8 @@ async function maxQueuePosition(): Promise<number | null> {
  * - Default: append to the back of the queue (next position = max + 1).
  * - `userInitiated: true`: jump to the FRONT of the queue (position = min - 1)
  *   so a manual tap is serviced before earlier auto-queued items.
+ * - `queuePosition`: restore a previously persisted position during launch
+ *   reconciliation instead of appending the interrupted row to the back.
  *
  * If a row already exists (e.g. a 'failed' row being retried, or a 'paused'
  * row), it is updated in place to status 'queued' with the new position; its
@@ -61,13 +63,16 @@ async function maxQueuePosition(): Promise<number | null> {
  */
 export async function enqueueDownload(
   meta: EnqueueMeta,
-  opts: { userInitiated?: boolean; keepRetryState?: boolean } = {},
+  opts: { userInitiated?: boolean; keepRetryState?: boolean; queuePosition?: number } = {},
 ): Promise<number> {
   const existing = await getDownload(meta.galleryId);
 
-  const position = opts.userInitiated
-    ? ((await minQueuePosition()) ?? 1) - 1
-    : ((await maxQueuePosition()) ?? 0) + 1;
+  const position =
+    opts.queuePosition !== undefined
+      ? opts.queuePosition
+      : opts.userInitiated
+        ? ((await minQueuePosition()) ?? 1) - 1
+        : ((await maxQueuePosition()) ?? 0) + 1;
 
   await upsertDownload({
     galleryId: meta.galleryId,
@@ -102,9 +107,9 @@ export async function listQueue(): Promise<DBDownload[]> {
   const db = await ensureDb();
   return db.query<DBDownload>(
     `SELECT ${SELECT_COLS}
-       FROM download
-      WHERE status IN ('queued', 'paused')
-      ORDER BY queuePosition ASC`,
+      FROM download
+     WHERE status IN ('queued', 'paused')
+      ORDER BY queuePosition IS NULL ASC, queuePosition ASC, downloadedAt ASC, galleryId ASC`,
   );
 }
 
@@ -119,9 +124,9 @@ export async function dequeueNextQueued(): Promise<DBDownload | null> {
   const db = await ensureDb();
   const rows = await db.query<DBDownload>(
     `SELECT ${SELECT_COLS}
-       FROM download
-      WHERE status = 'queued'
-      ORDER BY queuePosition ASC
+     FROM download
+     WHERE status = 'queued'
+      ORDER BY queuePosition IS NULL ASC, queuePosition ASC, downloadedAt ASC, galleryId ASC
       LIMIT 1`,
   );
   return rows[0] ?? null;
@@ -159,13 +164,15 @@ export async function resumeQueued(galleryId: number): Promise<void> {
  * - If the row has stored pages (pageCount > 0) it is NOT deleted — the
  *   downloaded pages and its eventual library row are kept; only the queue
  *   position is cleared (the active-run lifecycle will set the final status).
- * - If the row has no pages, the row is deleted entirely (nothing to keep).
+ * - If the row is failed it is kept even at pageCount 0 so first-page failures
+ *   remain visible in the library and can be retried.
+ * - If the row has no pages and is not failed, the row is deleted entirely.
  */
 export async function removeFromQueue(galleryId: number): Promise<void> {
   const db = await ensureDb();
   const row = await getDownload(galleryId);
   if (!row) return;
-  if (row.pageCount > 0) {
+  if (row.pageCount > 0 || row.status === 'failed') {
     await db.execute('UPDATE download SET queuePosition = NULL WHERE galleryId = ?', [galleryId]);
   } else {
     await db.execute('DELETE FROM download WHERE galleryId = ?', [galleryId]);

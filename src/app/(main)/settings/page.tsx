@@ -228,12 +228,14 @@ export default function SettingsPage() {
   const blurTags = useSettingsStore((s) => s.blurTags);
   const defaultFilterQuery = useSettingsStore((s) => s.defaultFilterQuery);
   const secureScreen = useSettingsStore((s) => s.secureScreen);
+  const libraryInitialTab = useSettingsStore((s) => s.libraryInitialTab);
   const setLocale = useSettingsStore((s) => s.setLocale);
   const setLanguage = useSettingsStore((s) => s.setLanguage);
   const setReaderMode = useSettingsStore((s) => s.setReaderMode);
   const setImageFormat = useSettingsStore((s) => s.setImageFormat);
   const setDefaultFilterQuery = useSettingsStore((s) => s.setDefaultFilterQuery);
   const setSecureScreen = useSettingsStore((s) => s.setSecureScreen);
+  const setLibraryInitialTab = useSettingsStore((s) => s.setLibraryInitialTab);
   const addBlurTag = useSettingsStore((s) => s.addBlurTag);
   const removeBlurTag = useSettingsStore((s) => s.removeBlurTag);
   const t = useT();
@@ -294,6 +296,38 @@ export default function SettingsPage() {
               { value: 'korean', label: t('settings.langFilter.korean') },
             ]}
           />
+        </div>
+
+        {/* Library Initial Tab */}
+        <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+              {t('settings.libraryInitialTab')}
+            </p>
+            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+              {t('settings.libraryInitialTab.desc')}
+            </p>
+          </div>
+          <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
+            <button
+              onClick={() => setLibraryInitialTab('favorites')}
+              className={segmentClass(libraryInitialTab === 'favorites')}
+            >
+              {t('saved.seg.favorites')}
+            </button>
+            <button
+              onClick={() => setLibraryInitialTab('history')}
+              className={segmentClass(libraryInitialTab === 'history')}
+            >
+              {t('saved.seg.history')}
+            </button>
+            <button
+              onClick={() => setLibraryInitialTab('downloads')}
+              className={segmentClass(libraryInitialTab === 'downloads')}
+            >
+              {t('saved.seg.downloads')}
+            </button>
+          </div>
         </div>
 
         {/* Tag DB Status */}

@@ -87,7 +87,9 @@ export async function setDownloadError(
 }
 
 /**
- * Update pageCount and totalBytes for an in-progress download row.
+ * Update pageCount and totalBytes for an in-progress download row. pageCount is
+ * monotonic so a native target count written before handoff is not shrunk by
+ * foreground progressive updates.
  * A no-op if the galleryId does not exist.
  */
 export async function updateDownloadProgress(
@@ -97,7 +99,7 @@ export async function updateDownloadProgress(
 ): Promise<void> {
   const db = await ensureDb();
   await db.execute(
-    'UPDATE download SET pageCount = ?, totalBytes = ? WHERE galleryId = ?',
+    'UPDATE download SET pageCount = MAX(pageCount, ?), totalBytes = ? WHERE galleryId = ?',
     [pageCount, totalBytes, galleryId],
   );
   await persistDb();
@@ -107,12 +109,12 @@ export async function updateDownloadProgress(
  * Update the folderName of an existing download row.
  * A no-op if the galleryId does not exist.
  */
-export async function setDownloadFolderName(
-  galleryId: number,
-  folderName: string,
-): Promise<void> {
+export async function setDownloadFolderName(galleryId: number, folderName: string): Promise<void> {
   const db = await ensureDb();
-  await db.execute('UPDATE download SET folderName = ? WHERE galleryId = ?', [folderName, galleryId]);
+  await db.execute('UPDATE download SET folderName = ? WHERE galleryId = ?', [
+    folderName,
+    galleryId,
+  ]);
   await persistDb();
 }
 
@@ -126,10 +128,11 @@ export async function markDownloadMigrated(
   migratedAt: string,
 ): Promise<void> {
   const db = await ensureDb();
-  await db.execute(
-    'UPDATE download SET folderName = ?, migratedAt = ? WHERE galleryId = ?',
-    [folderName, migratedAt, galleryId],
-  );
+  await db.execute('UPDATE download SET folderName = ?, migratedAt = ? WHERE galleryId = ?', [
+    folderName,
+    migratedAt,
+    galleryId,
+  ]);
   await persistDb();
 }
 

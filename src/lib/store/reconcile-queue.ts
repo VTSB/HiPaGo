@@ -34,12 +34,9 @@ let started = false;
  * So on app open we reconcile DB status from the on-disk manifest — read through
  * `getDownloadedGalleryPages` → `createDownloadStore()`, which resolves the right
  * adapter per platform (AndroidPublicDownloadStore / CapacitorDownloadStore), so
- * the SAME logic covers both folder layouts. A 'downloading' row whose manifest
- * now lists at least `pageCount` pages (the recorded target) is marked
- * 'complete'. Unfinished rows are left 'downloading' so the generic zombie step
- * re-enqueues them — on Android processQueue hands them back to the worker; on
- * iOS the in-process foreground downloader resumes them (skipping pages already
- * on disk) and reschedules its own background backstop.
+ * the SAME storage abstraction covers both folder layouts. Native handoff rows
+ * store the target `pageCount` before scheduling background work, so a manifest
+ * covering that count can be marked 'complete'.
  *
  * Best-effort: any per-row failure is swallowed so boot never breaks.
  */
@@ -84,12 +81,8 @@ export async function reconcileQueue(): Promise<void> {
   try {
     const db = await ensureDb();
 
-    // Android (Task C) + iOS (Task D): the native background downloader is
-    // DB-decoupled, so first reconcile DB status from the on-disk manifest —
-    // galleries finished while the app was gone are marked 'complete' here.
-    // Unfinished ones stay 'downloading' and fall through to the zombie
-    // re-enqueue below (Android hands them back to the worker; iOS resumes them
-    // in-process, skipping pages already on disk).
+    // Native workers are DB-decoupled; rows carry the target page count before
+    // handoff, so completed native work can be finalized from the manifest.
     if (isAndroid() || isIos()) {
       await reconcileNativeBackgroundDownloads();
     }
@@ -104,19 +97,23 @@ export async function reconcileQueue(): Promise<void> {
     );
 
     for (const z of zombies) {
-      await enqueueDownload({
-        galleryId: z.galleryId,
-        title: z.title,
-        thumbnail: z.thumbnail,
-        tags: deserializeTags(z.tags),
-      });
+      await enqueueDownload(
+        {
+          galleryId: z.galleryId,
+          title: z.title,
+          thumbnail: z.thumbnail,
+          tags: deserializeTags(z.tags),
+        },
+        { keepRetryState: true, queuePosition: z.queuePosition ?? undefined },
+      );
     }
 
     // Staged auto-restart (Task E): an item that was waiting to auto-retry when
     // the app was killed is re-evaluated at launch. Due/overdue rows (Wi-Fi-
-    // gated) are re-enqueued now; the rest keep waiting on the armed timer.
+    // gated on non-Android; Android's native worker only needs CONNECTED, so due
+    // retries are allowed on cellular there.
     const unmetered = await isUnmeteredNetwork();
-    if (unmetered) {
+    if (unmetered || isAndroid()) {
       let due: DBDownload[] = [];
       try {
         due = await listDueAutoRetries(new Date().toISOString());
@@ -137,9 +134,10 @@ export async function reconcileQueue(): Promise<void> {
       }
     }
 
-    // Auto-resume only on an unmetered network (zombies + due auto-retries +
-    // anything left queued from a prior session).
-    if (unmetered) {
+    // Auto-resume on Android only requires connectivity because the native
+    // WorkManager worker uses NetworkType.CONNECTED. Other platforms keep the
+    // Wi-Fi/ethernet gate for in-process downloads and auto-retry.
+    if (unmetered || isAndroid()) {
       void processQueue();
     }
 
@@ -147,6 +145,7 @@ export async function reconcileQueue(): Promise<void> {
     // attempt (regardless of network — the timer re-checks the gate at fire).
     armAutoRetryTimer();
   } catch (e) {
+    started = false;
     console.warn('[queue] reconcileQueue failed:', e);
   }
 }

@@ -2,102 +2,96 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { getDownload } from '@/lib/db/download';
-import { getDownloadedGalleryPages, getDownloadedImage } from '@/lib/utils/download-zip';
+import { createDownloadStore } from '@/lib/storage/download-store';
+import {
+  getDownloadedGalleryPages,
+  getDownloadedImage,
+  hasCompleteDownloadedGallery,
+} from '@/lib/utils/download-zip';
 
 export interface OfflineImageDim {
   width: number;
   height: number;
 }
 
+export interface OfflineImageSource {
+  index: number;
+  ext: string;
+  /**
+   * Immediate URL when a caller already has one. Native/file URLs do not need
+   * URL.revokeObjectURL.
+   */
+  url?: string;
+  /**
+   * Lazy page URL loader. May return a native/file URL or a blob URL. The
+   * caller owns revoking returned blob URLs.
+   */
+  loadUrl?: () => Promise<string | null>;
+}
+
 export interface OfflineImagesResult {
-  /** Blob-URL array (one per page, index-aligned). Null while loading or when
-   *  the gallery is not downloaded. */
+  /**
+   * Offline page sources, one per page. Null while loading or when the gallery
+   * is not downloaded. Sources are cheap lazy loaders: native file URLs when
+   * available, otherwise blob URLs for pages the reader mounts/displays.
+   */
+  sources: OfflineImageSource[] | null;
+  /** Compatibility mirror for immediate URL-backed sources only. */
   urls: string[] | null;
-  /** Natural pixel dimensions per page (index-aligned with urls), read from the
-   *  downloaded image bytes themselves so the reader lays out with the real
-   *  aspect ratio offline. {0,0} for a page whose dims could not be decoded
-   *  (e.g. createImageBitmap unavailable); null when not downloaded/loading. */
+  /**
+   * Natural dimensions per page. The fast path does not pre-decode every image,
+   * so this is normally null and the reader uses a stable manga-page fallback.
+   */
   dims: OfflineImageDim[] | null;
-  /** True when the DB row says "complete" but no pages were found in storage —
-   *  i.e. the stored files are missing/corrupt. */
+  /** True when the DB row says "complete" but no pages were found in storage. */
   missing: boolean;
-  /** True while the DB check + page load are in flight. */
+  /** True while the DB check + manifest load are in flight. */
   loading: boolean;
 }
 
-/** Read an image blob's natural dimensions. Returns {0,0} when decoding is not
- *  possible (createImageBitmap missing, e.g. jsdom) or the bytes are undecodable.
- *  The bitmap is closed immediately — only the dimensions are kept. */
-async function decodeDimensions(blob: Blob): Promise<OfflineImageDim> {
-  if (typeof createImageBitmap !== 'function') return { width: 0, height: 0 };
-  try {
-    const bmp = await createImageBitmap(blob);
-    const dim = { width: bmp.width, height: bmp.height };
-    bmp.close();
-    return dim;
-  } catch {
-    return { width: 0, height: 0 };
-  }
-}
-
 /**
- * For a gallery that has been fully downloaded (`status: 'complete'`), load
- * all page images from local storage and return them as Blob URLs plus their
- * natural dimensions (decoded from the bytes — no stored metadata needed).
+ * For a completed download, load only its manifest and return cheap page
+ * sources for the reader.
  *
- * Lifecycle:
- *  - Blob URLs are created with URL.createObjectURL and tracked in a ref so
- *    they can be revoked when the galleryId changes or the component unmounts,
- *    preventing memory leaks.
- *  - If getDownload returns null or status !== 'complete', urls === null and
- *    the caller falls back to the network path.
- *  - If the DB row says 'complete' but the store has no pages, missing === true
- *    so the reader can show a "files missing" state.
+ * This intentionally avoids reading every image into the JS heap before first
+ * paint. Native/file URL platforms resolve those URLs lazily. SAF/content-backed
+ * platforms get lazy blob loaders, so page mode reads only the mounted
+ * virtualized window and scroll mode reads only images near the viewport.
  */
 export function useOfflineImages(galleryId: number): OfflineImagesResult {
   const [result, setResult] = useState<OfflineImagesResult>({
+    sources: null,
     urls: null,
     dims: null,
     missing: false,
     loading: true,
   });
-
-  // Track created blob URLs so we can revoke them on galleryId change / unmount.
-  const blobUrlsRef = useRef<string[]>([]);
+  const runIdRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-
-    // Revoke any blob URLs from the previous gallery.
-    for (const u of blobUrlsRef.current) {
-      URL.revokeObjectURL(u);
-    }
-    blobUrlsRef.current = [];
+    const runId = ++runIdRef.current;
 
     async function load() {
-      // Reset to loading. Done inside load() rather than the effect body so
-      // no setState fires synchronously in the effect (react-hooks/set-state-in-effect).
-      setResult({ urls: null, dims: null, missing: false, loading: true });
+      setResult({ sources: null, urls: null, dims: null, missing: false, loading: true });
 
-      // 1. Check the download DB row.
       let row: Awaited<ReturnType<typeof getDownload>>;
       try {
         row = await getDownload(galleryId);
       } catch {
-        // DB unavailable — use network path.
-        if (!cancelled) setResult({ urls: null, dims: null, missing: false, loading: false });
+        if (!cancelled) {
+          setResult({ sources: null, urls: null, dims: null, missing: false, loading: false });
+        }
         return;
       }
 
-      if (cancelled) return;
+      if (cancelled || runId !== runIdRef.current) return;
 
       if (!row || row.status !== 'complete') {
-        // Gallery not fully downloaded — use network path.
-        setResult({ urls: null, dims: null, missing: false, loading: false });
+        setResult({ sources: null, urls: null, dims: null, missing: false, loading: false });
         return;
       }
 
-      // 2. Enumerate the stored pages.
       let pages: { index: number; ext: string }[];
       try {
         pages = await getDownloadedGalleryPages(galleryId);
@@ -105,61 +99,63 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
         pages = [];
       }
 
-      if (cancelled) return;
+      if (cancelled || runId !== runIdRef.current) return;
 
-      if (pages.length === 0) {
-        // DB row says complete but storage has no manifest → files missing.
-        setResult({ urls: null, dims: null, missing: true, loading: false });
+      let completeOnDisk = false;
+      try {
+        completeOnDisk = await hasCompleteDownloadedGallery(galleryId, row.pageCount ?? 0);
+      } catch {
+        completeOnDisk = false;
+      }
+
+      if (!completeOnDisk) {
+        setResult({ sources: null, urls: null, dims: null, missing: true, loading: false });
         return;
       }
 
-      // 3. Load each image, create a Blob URL, and read its natural dimensions.
-      const newUrls: string[] = [];
-      const newDims: OfflineImageDim[] = [];
-      for (const { index } of pages) {
-        if (cancelled) return;
-        let bytes: Uint8Array | null = null;
-        try {
-          bytes = await getDownloadedImage(galleryId, index);
-        } catch {
-          bytes = null;
-        }
-        if (bytes) {
-          // Slice to a concrete ArrayBuffer (Uint8Array.buffer may be a
-          // SharedArrayBuffer on some runtimes, which Blob rejects).
-          const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-          const blob = new Blob([buf]);
-          const url = URL.createObjectURL(blob);
-          blobUrlsRef.current.push(url);
-          newUrls.push(url);
-          // Real aspect ratio from the downloaded bytes (the dimensions live in
-          // the image itself — no need to have stored metadata at download time).
-          const dim = await decodeDimensions(blob);
-          if (cancelled) return;
-          newDims.push(dim);
-        } else {
-          // A page's bytes are missing — treat as missing files.
-          // Revoke any URLs we already created.
-          for (const u of blobUrlsRef.current) URL.revokeObjectURL(u);
-          blobUrlsRef.current = [];
-          if (!cancelled) setResult({ urls: null, dims: null, missing: true, loading: false });
-          return;
-        }
+      const store = await createDownloadStore().catch(() => null);
+      if (cancelled || runId !== runIdRef.current) return;
+
+      if (store?.imageUrl) {
+        const imageUrl = store.imageUrl.bind(store);
+        const sources: OfflineImageSource[] = pages.map(({ index, ext }) => ({
+          index,
+          ext,
+          loadUrl: () => imageUrl(galleryId, index, ext).catch(() => null),
+        }));
+        setResult({
+          sources,
+          urls: null,
+          dims: null,
+          missing: false,
+          loading: false,
+        });
+        return;
       }
 
-      if (cancelled) return;
-      setResult({ urls: newUrls, dims: newDims, missing: false, loading: false });
+      const sources: OfflineImageSource[] = pages.map(({ index, ext }) => ({
+        index,
+        ext,
+        loadUrl: async () => {
+          const bytes = await getDownloadedImage(galleryId, index).catch(() => null);
+          if (!bytes) return null;
+          const buf = bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          ) as ArrayBuffer;
+          return URL.createObjectURL(new Blob([buf]));
+        },
+      }));
+
+      if (!cancelled) {
+        setResult({ sources, urls: null, dims: null, missing: false, loading: false });
+      }
     }
 
     void load();
 
     return () => {
       cancelled = true;
-      // Revoke blob URLs when galleryId changes or component unmounts.
-      for (const u of blobUrlsRef.current) {
-        URL.revokeObjectURL(u);
-      }
-      blobUrlsRef.current = [];
     };
   }, [galleryId]);
 

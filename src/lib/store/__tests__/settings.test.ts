@@ -42,6 +42,7 @@ describe('settings store', () => {
       blurTags: ['male:yaoi'],
       defaultFilterQuery: '',
       secureScreen: true,
+      libraryInitialTab: 'favorites',
     });
   });
 
@@ -72,6 +73,10 @@ describe('settings store', () => {
 
     it('has secure screen enabled by default', () => {
       expect(useSettingsStore.getState().secureScreen).toBe(true);
+    });
+
+    it('opens the library hub on favorites by default', () => {
+      expect(useSettingsStore.getState().libraryInitialTab).toBe('favorites');
     });
   });
 
@@ -202,6 +207,15 @@ describe('settings store', () => {
       expect(useSettingsStore.getState().secureScreen).toBe(true);
       useSettingsStore.getState().setSecureScreen(false);
       expect(useSettingsStore.getState().secureScreen).toBe(false);
+    });
+  });
+
+  describe('setLibraryInitialTab', () => {
+    it('sets the library initial tab', () => {
+      useSettingsStore.getState().setLibraryInitialTab('downloads');
+      expect(useSettingsStore.getState().libraryInitialTab).toBe('downloads');
+      useSettingsStore.getState().setLibraryInitialTab('history');
+      expect(useSettingsStore.getState().libraryInitialTab).toBe('history');
     });
   });
 
