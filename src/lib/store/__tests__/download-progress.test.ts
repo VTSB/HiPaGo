@@ -14,7 +14,7 @@
  *     processor only when unmetered.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DownloadPausedError } from '@/lib/utils/download-zip';
+import { DownloadPausedError, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,10 @@ vi.mock('@/lib/utils/download-zip', async () => {
     ...actual,
     downloadGalleryToLibrary: (...a: unknown[]) => dl(...a),
     getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
+    hasCompleteDownloadedGallery: vi.fn(async (id: number, expectedPageCount: number) => {
+      const pages = manifestPages.get(id) ?? [];
+      return pages.length > 0 && (expectedPageCount <= 0 || pages.length >= expectedPageCount);
+    }),
   };
 });
 
@@ -205,12 +209,14 @@ vi.mock('@/lib/plugins/downloadWorker', () => ({
 // Auto-retry helpers (Task E). scheduleAutoRetry records calls; the due-list +
 // earliest are steered per-test.
 const scheduled: { id: number; attempt: number; dueAt: string }[] = [];
+let scheduleThrows = false;
 let dueRows: { galleryId: number; title: string; thumbnail: string; tags: string }[] = [];
 let earliest: string | null = null;
 vi.mock('@/lib/db/download-retry', () => ({
   AUTO_RETRY_BACKOFF_MS: [30_000, 300_000, 1_800_000],
   AUTO_RETRY_MAX: 3,
   scheduleAutoRetry: vi.fn(async (id: number, attempt: number, dueAt: string) => {
+    if (scheduleThrows) throw new Error('schedule failed');
     scheduled.push({ id, attempt, dueAt });
   }),
   listDueAutoRetries: vi.fn(async () => dueRows),
@@ -278,6 +284,7 @@ beforeEach(async () => {
   enqueued.length = 0;
   adapterRows.length = 0;
   scheduled.length = 0;
+  scheduleThrows = false;
   dueRows = [];
   earliest = null;
   downloadRows.clear();
@@ -716,6 +723,18 @@ describe('finalizeDownloadIfComplete (shared completion rule)', () => {
     expect(upsertedRows).toHaveLength(0);
   });
 
+  it('does NOT finalize when manifest length covers pageCount but a page is missing on disk', async () => {
+    downloadRows.set(904, { status: 'downloading', pageCount: 2 });
+    manifestPages.set(904, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    vi.mocked(hasCompleteDownloadedGallery).mockResolvedValueOnce(false);
+    const done = await finalizeDownloadIfComplete(904);
+    expect(done).toBe(false);
+    expect(upsertedRows).toHaveLength(0);
+  });
+
   it('reports already-complete rows as complete without re-upserting', async () => {
     downloadRows.set(903, { status: 'complete', pageCount: 2 });
     const done = await finalizeDownloadIfComplete(903);
@@ -971,6 +990,22 @@ describe('auto-retry scheduling on genuine failure (AC-003)', () => {
     expect(entry?.retryAt == null).toBe(true);
   });
 
+  it('shows a plain failed entry when persisting the auto-retry schedule fails', async () => {
+    queue.push({ id: 1, pageCount: 2 });
+    downloadRows.set(1, { retryCount: 0 });
+    scheduleThrows = true;
+    dl.mockImplementationOnce(async () => {
+      throw new Error('boom');
+    });
+
+    await processQueue();
+
+    expect(scheduled).toHaveLength(0);
+    const entry = useDownloadProgressStore.getState().entries[1];
+    expect(entry?.error).toBe('boom');
+    expect(entry?.retryAt == null).toBe(true);
+  });
+
   it('does NOT schedule on a user cancel (AbortError)', async () => {
     queue.push({ id: 1, pageCount: 2 });
     downloadRows.set(1, { retryCount: 0 });
@@ -1148,6 +1183,20 @@ describe('queue actions (AC-001 / Task B)', () => {
     await useDownloadProgressStore.getState().pause(8);
     expect(vi.mocked(queueOps.pauseQueued)).toHaveBeenCalledWith(8);
     expect(queue.find((q) => q.id === 8)?.paused).toBe(true);
+  });
+
+  it('pause(Android handed-off active) cancels native work and persists paused', async () => {
+    androidFlag = true;
+    downloadRows.set(88, { status: 'downloading', pageCount: 3 });
+    useDownloadProgressStore.setState({
+      entries: { 88: { progress: { current: 1, total: 3 }, error: null } },
+    });
+
+    await useDownloadProgressStore.getState().pause(88);
+
+    expect(workerCancels).toContain('88');
+    expect(errorRows).toContainEqual({ galleryId: 88, status: 'paused', lastError: null });
+    expect(useDownloadProgressStore.getState().entries[88]).toBeUndefined();
   });
 
   it('resume re-drives the processor and continues a paused item', async () => {

@@ -229,6 +229,34 @@ export async function getDownloadedImage(
   return store.getImage(galleryId, index, ext);
 }
 
+/**
+ * Verify that a completed gallery's manifest covers the expected page count and
+ * every listed page is actually present on disk. A manifest-only check can be
+ * fooled by external deletion or a stale/corrupt storage state.
+ */
+export async function hasCompleteDownloadedGallery(
+  galleryId: number,
+  expectedPageCount: number,
+): Promise<boolean> {
+  const store = await createDownloadStore();
+  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+  if (!manifestBytes) return false;
+
+  const exts = decodeManifest(manifestBytes);
+  if (exts.length === 0) return false;
+  if (expectedPageCount > 0 && exts.length < expectedPageCount) return false;
+
+  for (let i = 0; i < exts.length; i++) {
+    const ext = exts[i];
+    const exists = store.imageExists
+      ? await store.imageExists(galleryId, i, ext)
+      : (await store.getImage(galleryId, i, ext).catch(() => null)) !== null;
+    if (!exists) return false;
+  }
+
+  return true;
+}
+
 // ── AC-006: Streaming download to the library (resilience rewrite) ─────────────
 
 /**

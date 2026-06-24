@@ -80,6 +80,7 @@ import {
   exportGalleryZip,
   getDownloadedGalleryPages,
   getDownloadedImage,
+  hasCompleteDownloadedGallery,
 } from '../download-zip';
 import { zipSync } from 'fflate';
 import { getImageUrl } from '../image-url';
@@ -1207,6 +1208,48 @@ describe('getDownloadedImage', () => {
 
     const result = await getDownloadedImage(11, 1);
     expect(result).toEqual(imageBytes);
+  });
+});
+
+describe('hasCompleteDownloadedGallery', () => {
+  let memStore: ReturnType<typeof makeMemoryStore>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    memStore = makeMemoryStore();
+    vi.mocked(createDownloadStore).mockResolvedValue(memStore);
+  });
+
+  it('returns true when manifest covers expected pages and every file exists', async () => {
+    await memStore.putImage(
+      31,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(31, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(31, 1, new Uint8Array([2]), 'jpg');
+
+    await expect(hasCompleteDownloadedGallery(31, 2)).resolves.toBe(true);
+  });
+
+  it('returns false when manifest covers pageCount but a page file is missing', async () => {
+    await memStore.putImage(
+      32,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(32, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(32, 2)).resolves.toBe(false);
+  });
+
+  it('returns false when the manifest is shorter than the expected pageCount', async () => {
+    await memStore.putImage(33, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(33, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(33, 2)).resolves.toBe(false);
   });
 });
 
