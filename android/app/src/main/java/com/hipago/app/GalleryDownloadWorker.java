@@ -101,12 +101,14 @@ public class GalleryDownloadWorker extends Worker {
 
         File handoffDir = new File(getApplicationContext().getFilesDir(), HANDOFF_DIR);
 
-        // Without a SAF tree there is nowhere to write. Retry later only when
-        // there is actual work pending; otherwise finish quietly.
+        // Without a writable SAF tree there is nowhere to write. This includes a
+        // revoked persisted permission, which will not heal from WorkManager's
+        // retry loop. Keep the work-order files for app-level reconcile after the
+        // user reselects a folder, but stop this worker run.
         if (!saf.hasTree()) {
             File[] pending = listOrderFiles(handoffDir);
             pruneStaleProgress(pending);
-            return pending.length == 0 ? Result.success() : Result.retry();
+            return Result.success();
         }
 
         java.util.Set<String> failedThisRun = new java.util.HashSet<>();
@@ -154,6 +156,12 @@ public class GalleryDownloadWorker extends Worker {
                     orderFile.delete();
                     failedThisRun.remove(orderName);
                 } else {
+                    // If SAF permission disappeared during this gallery, retrying
+                    // in WorkManager will not repair it. Leave the work-order for
+                    // app-level reconcile after the user reselects a folder.
+                    if (!saf.hasTree()) {
+                        return Result.success();
+                    }
                     // Keep the file for a later scheduled/reconciled retry, but do
                     // not immediately spin on the same failing gallery in this run.
                     failedThisRun.add(orderName);
