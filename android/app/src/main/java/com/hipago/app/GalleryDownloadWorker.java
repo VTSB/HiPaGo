@@ -248,8 +248,10 @@ public class GalleryDownloadWorker extends Worker {
             // here must never fail the download.
             lastProgressWrite = maybeWriteProgress(galleryId, i + 1, total, lastProgressWrite);
 
-            // Resume: skip a page already written to the SAF tree.
-            if (saf.exists(relPath)) {
+            // Resume: skip a page already written to the SAF tree. Existence
+            // alone is not enough: a killed/truncated provider write can leave
+            // a zero-byte placeholder that must be downloaded again.
+            if (saf.size(relPath) > 0) {
                 continue;
             }
 

@@ -10,6 +10,7 @@ import {
   updateDownloadProgress,
   setDownloadError,
   updateDownloadStatus,
+  getDownload,
   serializeTags,
 } from '@/lib/db/download';
 import { parseRetryAfter } from '@/lib/api/tag-fetcher';
@@ -126,10 +127,14 @@ async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Respon
       retryAfterMs = null;
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(resolve, delay);
-        signal?.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(new DOMException('Aborted', 'AbortError'));
-        }, { once: true });
+        signal?.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+          },
+          { once: true },
+        );
       });
       // Check again after the wait.
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -148,7 +153,10 @@ async function fetchWithRetry(url: string, signal?: AbortSignal): Promise<Respon
         continue;
       }
       if (isRetryableStatus(res.status)) {
-        lastError = new ApiError(res.status, `Server error ${res.status} fetching image (attempt ${attempt + 1})`);
+        lastError = new ApiError(
+          res.status,
+          `Server error ${res.status} fetching image (attempt ${attempt + 1})`,
+        );
         continue;
       }
 
@@ -297,6 +305,7 @@ export async function downloadGalleryToLibrary(
   const pageExts: string[] = [];
   let totalBytes = 0;
   let rowCreated = false;
+  const existingRow = await getDownload(galleryId).catch(() => null);
 
   // ── Resume seeding (per-page verify) ──────────────────────────────────────
   // Read the manifest to learn each already-stored page's ext. The main loop
@@ -344,12 +353,7 @@ export async function downloadGalleryToLibrary(
           // Keep the on-disk manifest in step with the verified set, so an
           // interruption right after a refetched gap (which truncates the
           // manifest to its own index) does not drop the trailing exts.
-          await store.putImage(
-            galleryId,
-            MANIFEST_INDEX,
-            encodeManifest(pageExts),
-            MANIFEST_EXT,
-          );
+          await store.putImage(galleryId, MANIFEST_INDEX, encodeManifest(pageExts), MANIFEST_EXT);
           onProgress?.({ current: i + 1, total });
           continue;
         }
@@ -395,12 +399,7 @@ export async function downloadGalleryToLibrary(
       }
 
       // ── Incremental manifest write ───────────────────────────────────────────
-      await store.putImage(
-        galleryId,
-        MANIFEST_INDEX,
-        encodeManifest(pageExts),
-        MANIFEST_EXT,
-      );
+      await store.putImage(galleryId, MANIFEST_INDEX, encodeManifest(pageExts), MANIFEST_EXT);
 
       // ── DB row management ────────────────────────────────────────────────────
       if (!rowCreated) {
@@ -414,6 +413,7 @@ export async function downloadGalleryToLibrary(
           downloadedAt: now,
           status: 'downloading',
           folderName,
+          queuePosition: existingRow?.queuePosition ?? null,
         });
         rowCreated = true;
       } else {
@@ -444,7 +444,7 @@ export async function downloadGalleryToLibrary(
     const isPause = isAbort && opts?.isPauseSignal?.() === true;
 
     if (isPause) {
-      if (rowCreated) await updateDownloadStatus(galleryId, 'paused');
+      await updateDownloadStatus(galleryId, 'paused');
       throw new DownloadPausedError();
     }
 
@@ -512,6 +512,8 @@ export async function exportGalleryZip(galleryId: number, title: string): Promis
       // Use the same zero-padded name that the store used, e.g. "0001.webp"
       const name = String(i + 1).padStart(4, '0') + '.' + ext;
       entries[name] = bytes;
+    } else {
+      throw new Error(`Missing downloaded page ${i + 1} for gallery ${galleryId}`);
     }
   }
 

@@ -224,7 +224,10 @@ export async function fireDueAutoRetries(): Promise<void> {
     unmetered = false;
   }
 
-  if (!unmetered) {
+  // Android auto-retries are handed to WorkManager, whose constraint is
+  // NetworkType.CONNECTED, so cellular is allowed there. Other platforms keep
+  // the Wi-Fi/ethernet gate for in-process downloads.
+  if (!unmetered && !isAndroid()) {
     await rearmAutoRetryTimerAfterMeteredHold();
     return;
   }
@@ -559,6 +562,7 @@ export async function processQueue(): Promise<void> {
         } catch (e) {
           // Could not resolve the gallery's files — leave it 'failed', advance.
           console.error('Queue: failed to resolve gallery detail', id, e);
+          await setDownloadError(id, 'failed', 'Failed to resolve gallery').catch(() => {});
           await removeFromQueue(id);
           storeApi?.setEntry(id, { progress: null, error: 'Failed to resolve gallery' });
           continue;
@@ -611,9 +615,10 @@ export async function processQueue(): Promise<void> {
           startAndroidProgressPoll(id);
         } catch (e) {
           console.error('Queue: failed to hand off to Android worker', id, e);
-          await removeFromQueue(id);
           const message =
             e instanceof Error && e.message ? e.message : 'Failed to start background download';
+          await setDownloadError(id, 'failed', message).catch(() => {});
+          await removeFromQueue(id);
           storeApi?.setEntry(id, { progress: null, error: message });
         } finally {
           fileCache.delete(id);
@@ -842,8 +847,21 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       // Already running/queued for this gallery, or nothing to download.
       if (existing?.progress || existing?.queued || files.length === 0) return;
 
-      // Cache the supplied file list so the processor doesn't re-fetch the detail.
-      fileCache.set(id, { files, tags });
+      // Cache the supplied file list so the processor doesn't re-fetch the
+      // detail. Exception: offline detail fallback can synthesize `files` from a
+      // short local manifest. If the DB says a completed gallery should have
+      // more pages, force a fresh detail resolve so "re-download missing files"
+      // cannot turn a partial manifest into a smaller completed gallery.
+      const existingRow = await getDownload(id).catch(() => null);
+      if (
+        !(
+          existingRow?.status === 'complete' &&
+          (existingRow.pageCount ?? 0) > 0 &&
+          files.length < existingRow.pageCount
+        )
+      ) {
+        fileCache.set(id, { files, tags });
+      }
 
       try {
         // Manual tap = userInitiated → jump to the front of the queue (bypasses
