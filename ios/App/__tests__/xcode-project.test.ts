@@ -8,6 +8,10 @@ const projectFile = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../App.xcodeproj/project.pbxproj',
 );
+const backgroundTaskFile = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../App/DownloadBackgroundTask.swift',
+);
 
 describe('iOS Xcode project download sources', () => {
   it('includes native download Swift files in the App target sources', () => {
@@ -21,5 +25,12 @@ describe('iOS Xcode project download sources', () => {
       expect(project).toContain(`/* ${file} */`);
       expect(project).toContain(`/* ${file} in Sources */`);
     }
+  });
+
+  it('backs off failed background runs before rescheduling', () => {
+    const source = readFileSync(backgroundTaskFile, 'utf8');
+
+    expect(source).toContain('scheduleProcessingTask(after: 5 * 60)');
+    expect(source).toContain('request.earliestBeginDate = Date(timeIntervalSinceNow: delay)');
   });
 });

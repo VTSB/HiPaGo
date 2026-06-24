@@ -20,8 +20,10 @@ import java.io.File;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 
 import uniffi.bypass.BypassKt;
 
@@ -119,6 +121,9 @@ public class GalleryDownloadWorker extends Worker {
             return Result.success();
         }
 
+        Set<String> failedThisRun = new HashSet<>();
+        boolean sawRetryableFailure = false;
+
         while (!isStopped()) {
             File[] orderFiles = listOrderFiles(handoffDir);
 
@@ -135,6 +140,10 @@ public class GalleryDownloadWorker extends Worker {
             boolean processedAny = false;
 
             for (File orderFile : orderFiles) {
+                if (failedThisRun.contains(orderFile.getName())) {
+                    continue;
+                }
+
                 if (isStopped()) {
                     // WorkManager cancelled us. Stop cleanly, leaving remaining
                     // work-orders for the next run.
@@ -161,10 +170,13 @@ public class GalleryDownloadWorker extends Worker {
                     if (!saf.hasTree()) {
                         return Result.success();
                     }
-                    // Keep the file and ask WorkManager to retry with its backoff,
-                    // so background/cellular transient failures continue without
-                    // waiting for the app to relaunch.
-                    return Result.retry();
+                    // Keep the file and continue with later work-orders in this
+                    // run. WorkManager still receives Result.retry() after the
+                    // pass so transient failures get backoff without starving
+                    // unrelated queued galleries behind this one.
+                    failedThisRun.add(orderFile.getName());
+                    sawRetryableFailure = true;
+                    continue;
                 } else if (result == GalleryResult.UNRECOVERABLE) {
                     // Malformed work-order content cannot be repaired by retries.
                     orderFile.delete();
@@ -173,15 +185,16 @@ public class GalleryDownloadWorker extends Worker {
                 }
             }
 
-            // No order was parseable or processable in this pass. Finish cleanly;
-            // malformed orders were deleted above and retryable failures return
-            // Result.retry() immediately.
+            // No order was parseable or processable in this pass. Finish cleanly
+            // unless the pass only skipped files that already hit transient
+            // failures; in that case hand scheduling back to WorkManager's
+            // backoff instead of spinning in this worker.
             if (!processedAny) {
-                return Result.success();
+                return sawRetryableFailure ? Result.retry() : Result.success();
             }
         }
 
-        return Result.success();
+        return sawRetryableFailure ? Result.retry() : Result.success();
     }
 
     private File[] listOrderFiles(File handoffDir) {
