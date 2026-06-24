@@ -465,11 +465,13 @@ describe('LibraryPage', () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4003, title: 'Missing Files' })]);
     mockHasCompleteDownloadedGallery.mockResolvedValue(false);
 
+    let qc: Awaited<ReturnType<typeof renderPage>>['qc'];
     await act(async () => {
-      await renderPage();
+      ({ qc } = await renderPage());
     });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
     await waitFor(() => expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(4003, 20));
+    const invalidate = vi.spyOn(qc!, 'invalidateQueries');
 
     expect(screen.getByText('library.status.failed')).toBeTruthy();
 
@@ -493,6 +495,8 @@ describe('LibraryPage', () => {
       { userInitiated: true },
     );
     expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4003);
+    expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['download-integrity'] });
   });
 
   it('manual retry only starts the selected failed gallery', async () => {
@@ -519,6 +523,7 @@ describe('LibraryPage', () => {
       { userInitiated: true },
     );
     expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4100);
+    expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
   });
 
   it('hides export while complete-row integrity is still being checked', async () => {
