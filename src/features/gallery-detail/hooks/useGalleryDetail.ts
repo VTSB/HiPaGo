@@ -5,7 +5,7 @@ import { fetchGalleryInfo, filesToGalleryImages } from '@/lib/api/gallery';
 import { galleryInfoToBlock, galleryInfoToImages } from '@/lib/api/parser';
 import { getGalleryBlock, saveGalleryBlock, getGalleryImages, saveGalleryImages } from '@/lib/db/gallery';
 import { getDownload, deserializeTags } from '@/lib/db/download';
-import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
+import { getDownloadedGalleryPages, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
 import { GalleryBlockType } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile, GalleryImages, TagType } from '@/lib/utils/types';
 
@@ -33,6 +33,15 @@ async function offlineDownloadFallback(
     return null;
   }
   if (!row) return null;
+  if (row.status !== 'complete') return null;
+
+  let completeOnDisk = false;
+  try {
+    completeOnDisk = await hasCompleteDownloadedGallery(id, row.pageCount);
+  } catch {
+    completeOnDisk = false;
+  }
+  if (!completeOnDisk) return null;
 
   let pages: { index: number; ext: string }[] = [];
   try {
@@ -41,6 +50,7 @@ async function offlineDownloadFallback(
     pages = [];
   }
   if (pages.length === 0) return null;
+  if (row.pageCount > 0 && pages.length < row.pageCount) return null;
 
   const files: GalleryFile[] = pages
     .slice()
