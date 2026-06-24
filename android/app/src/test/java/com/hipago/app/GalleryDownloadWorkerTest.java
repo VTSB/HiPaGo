@@ -1,6 +1,7 @@
 package com.hipago.app;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -76,6 +77,37 @@ public class GalleryDownloadWorkerTest {
         assertTrue(!GalleryDownloadWorker.isValidExtension(""));
         assertTrue(!GalleryDownloadWorker.isValidExtension("../webp"));
         assertTrue(!GalleryDownloadWorker.isValidExtension("webp.tmp"));
+    }
+
+    @Test
+    public void derivesManifestPathFromPageRelPath() {
+        assertEquals(
+                "HiPaGo/123 Title/0000.json",
+                GalleryDownloadWorker.manifestPathForPage("HiPaGo/123 Title/0001.webp")
+        );
+        assertEquals("0000.json", GalleryDownloadWorker.manifestPathForPage("0001.webp"));
+    }
+
+    @Test
+    public void decodesManifestExtsAsCommittedPrefix() {
+        String[] exts = new String[3];
+
+        int count = GalleryDownloadWorker.decodeManifestExts("[\"webp\",\"avif\"]".getBytes(StandardCharsets.UTF_8), exts);
+
+        assertEquals(2, count);
+        assertEquals("webp", exts[0]);
+        assertEquals("avif", exts[1]);
+        assertEquals(null, exts[2]);
+    }
+
+    @Test
+    public void resumeSkipsOnlyPagesCommittedByManifest() {
+        assertTrue(GalleryDownloadWorker.shouldSkipExistingPage(0, 1, 12));
+        assertTrue(GalleryDownloadWorker.shouldSkipExistingPage(1, 2, 12));
+
+        assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(1, 1, 12));
+        assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(0, 1, 0));
+        assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(0, 0, 12));
     }
 
     private File writeOrder(String name, String json) throws Exception {
