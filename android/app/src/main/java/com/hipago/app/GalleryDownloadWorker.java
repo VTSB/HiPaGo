@@ -110,6 +110,7 @@ public class GalleryDownloadWorker extends Worker {
         }
 
         java.util.Set<String> failedThisRun = new java.util.HashSet<>();
+        boolean hadRetryableFailure = false;
 
         while (!isStopped()) {
             File[] orderFiles = listOrderFiles(handoffDir);
@@ -147,7 +148,7 @@ public class GalleryDownloadWorker extends Worker {
                 }
 
                 processedAny = true;
-                boolean completed = processGallery(order);
+                boolean completed = processGallery(order, orderFile);
                 if (completed) {
                     // Full success: remove the work-order so it is not reprocessed.
                     orderFile.delete();
@@ -156,13 +157,14 @@ public class GalleryDownloadWorker extends Worker {
                     // Keep the file for a later scheduled/reconciled retry, but do
                     // not immediately spin on the same failing gallery in this run.
                     failedThisRun.add(orderName);
+                    hadRetryableFailure = true;
                 }
             }
 
             // Only previously-failed files remain. Finish this run; a future
             // enqueue/reconcile will schedule another pass.
             if (!processedAny) {
-                return Result.success();
+                return hadRetryableFailure ? Result.retry() : Result.success();
             }
         }
 
@@ -188,7 +190,7 @@ public class GalleryDownloadWorker extends Worker {
      * @return true when ALL pages are present on disk (full success); false when
      *         a page failed (partial gallery left in place) or we were stopped.
      */
-    private boolean processGallery(JSONObject order) {
+    private boolean processGallery(JSONObject order, File orderFile) {
         String title = order.optString("title", "");
         // galleryId names the live-progress file the in-app poller reads. TS writes
         // numeric galleryIds; fall back to a string so a malformed id still works.
@@ -213,6 +215,13 @@ public class GalleryDownloadWorker extends Worker {
         for (int i = 0; i < total; i++) {
             if (isStopped()) {
                 // Cancelled mid-gallery — drop the stale progress file.
+                deleteProgress(galleryId);
+                return false;
+            }
+            if (!orderFile.exists()) {
+                // User cancelled this active Android handoff. Stop between pages
+                // without recreating progress; any already-written pages are left
+                // for a later explicit retry.
                 deleteProgress(galleryId);
                 return false;
             }
@@ -250,7 +259,13 @@ public class GalleryDownloadWorker extends Worker {
             File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
             try {
                 BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
-                saf.copyFromFile(temp.getAbsolutePath(), relPath);
+                long sourceSize = temp.length();
+                long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
+                long storedSize = saf.size(relPath);
+                if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
+                    saf.delete(relPath);
+                    throw new Exception("incomplete SAF write");
+                }
             } catch (Throwable t) {
                 // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
                 // gallery partial; TS re-resolves / reconciles on next open. Drop the
@@ -268,13 +283,19 @@ public class GalleryDownloadWorker extends Worker {
             // Write/update the 0000.json manifest incrementally (JSON array of
             // exts) so the reader/reconcile sees the gallery growing. The manifest
             // path is the gallery folder + 0000.json, derived from the page relPath.
-            writeManifest(relPath, exts, i + 1);
+            if (!writeManifest(relPath, exts, i + 1)) {
+                deleteProgress(galleryId);
+                return false;
+            }
         }
 
         // All pages present → write the final, full manifest once more (defensive)
         // and report success.
         String anyRelPath = pages.optJSONObject(0).optString("relPath", null);
-        if (anyRelPath != null) writeManifest(anyRelPath, exts, total);
+        if (anyRelPath != null && !writeManifest(anyRelPath, exts, total)) {
+            deleteProgress(galleryId);
+            return false;
+        }
         // Gallery complete → remove its live-progress file (the poller then reads
         // null and the row reconciles to 'complete').
         deleteProgress(galleryId);
@@ -380,7 +401,7 @@ public class GalleryDownloadWorker extends Worker {
      * Build the {@code 0000.json} manifest path from a page's relPath (same parent
      * dir) and write the first {@code count} exts as a JSON array.
      */
-    private void writeManifest(String pageRelPath, String[] exts, int count) {
+    private boolean writeManifest(String pageRelPath, String[] exts, int count) {
         int slash = pageRelPath.lastIndexOf('/');
         String dir = slash < 0 ? "" : pageRelPath.substring(0, slash);
         String manifestPath = (dir.isEmpty() ? "" : dir + "/") + "0000.json";
@@ -391,9 +412,11 @@ public class GalleryDownloadWorker extends Worker {
         }
         try {
             saf.writeBytes(manifestPath, arr.toString().getBytes("UTF-8"));
+            return true;
         } catch (Throwable t) {
-            // A torn manifest is recoverable (TS reconcile re-derives from the files
-            // present); do not fail the whole gallery over a manifest write.
+            // Reconcile depends on the manifest to mark the DB row complete.
+            // Keep the work-order so a later worker pass can rewrite it.
+            return false;
         }
     }
 

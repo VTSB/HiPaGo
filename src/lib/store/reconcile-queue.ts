@@ -137,9 +137,10 @@ export async function reconcileQueue(): Promise<void> {
       }
     }
 
-    // Auto-resume only on an unmetered network (zombies + due auto-retries +
-    // anything left queued from a prior session).
-    if (unmetered) {
+    // Auto-resume on Android only requires connectivity because the native
+    // WorkManager worker uses NetworkType.CONNECTED. Other platforms keep the
+    // Wi-Fi/ethernet gate for in-process downloads and auto-retry.
+    if (unmetered || isAndroid()) {
       void processQueue();
     }
 
