@@ -11,6 +11,7 @@ import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/downl
 import {
   getDownload,
   deserializeTags,
+  deleteDownload,
   upsertDownload,
   serializeTags,
   setDownloadError,
@@ -715,6 +716,25 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
       // download so the work-order is already on disk if the user backgrounds
       // immediately. Never blocks/fails the foreground path (it swallows errors).
       if (isIos()) {
+        // iOS background work is DB-decoupled like Android, so persist the target
+        // total before handing off. Foreground progress updates are monotonic and
+        // will not shrink this count; completion/reconcile can then trust an
+        // exact manifest-length match.
+        await upsertDownload({
+          galleryId: id,
+          title: next.title,
+          thumbnail: next.thumbnail,
+          tags: serializeTags(tags),
+          pageCount: files.length,
+          totalBytes: next.totalBytes ?? 0,
+          downloadedAt: next.downloadedAt ?? new Date().toISOString(),
+          status: 'downloading',
+          folderName: galleryFolderName(id, next.title),
+          queuePosition: next.queuePosition ?? null,
+          lastError: null,
+          retryCount: next.retryCount ?? null,
+          nextRetryAt: null,
+        });
         await scheduleIosBackgroundBackstop(id, next.title, files);
       }
 
@@ -757,6 +777,12 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           // Genuine cancel: download-zip left the row 'failed' (resumable, no
           // message). Drop it from the queue and clear the entry.
           await removeFromQueue(id);
+          if (isIos()) {
+            const storedPages = await getDownloadedGalleryPages(id).catch(() => []);
+            if (storedPages.length === 0) {
+              await deleteDownload(id).catch(() => {});
+            }
+          }
           storeApi?.markNotDownloaded(id);
           storeApi?.setEntry(id, null);
         } else {

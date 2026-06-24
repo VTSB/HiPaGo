@@ -135,6 +135,7 @@ const downloadRows = new Map<
 >();
 const upsertedRows: unknown[] = [];
 const errorRows: { galleryId: number; status: string; lastError: string | null }[] = [];
+const deletedRows: number[] = [];
 vi.mock('@/lib/db/download', () => ({
   getDownload: vi.fn(async (id: number) => {
     // Explicit per-test override wins; otherwise reflect the same row the
@@ -169,11 +170,22 @@ vi.mock('@/lib/db/download', () => ({
       const idx = queueRef().findIndex((q) => q.id === r.galleryId);
       if (idx >= 0) queueRef().splice(idx, 1);
     }
+    const prev = downloadRows.get(r.galleryId) ?? {};
+    downloadRows.set(r.galleryId, {
+      ...prev,
+      status: r.status,
+      pageCount: (r as { pageCount?: number }).pageCount ?? prev.pageCount,
+      retryCount: (r as { retryCount?: number | null }).retryCount ?? prev.retryCount,
+    });
   }),
   setDownloadError: vi.fn(async (galleryId: number, status: string, lastError: string | null) => {
     errorRows.push({ galleryId, status, lastError });
     const prev = downloadRows.get(galleryId) ?? {};
     downloadRows.set(galleryId, { ...prev, status });
+  }),
+  deleteDownload: vi.fn(async (galleryId: number) => {
+    deletedRows.push(galleryId);
+    downloadRows.delete(galleryId);
   }),
 }));
 
@@ -317,6 +329,7 @@ beforeEach(async () => {
   manifestPages.clear();
   upsertedRows.length = 0;
   errorRows.length = 0;
+  deletedRows.length = 0;
   workOrderWrites.length = 0;
   workerEnqueues.length = 0;
   workerCancels.length = 0;
@@ -991,6 +1004,9 @@ describe('iOS background backstop (Task D)', () => {
 
     // The in-process foreground downloader IS still invoked on iOS.
     expect(order).toEqual([400]);
+    expect(upsertedRows).toContainEqual(
+      expect.objectContaining({ galleryId: 400, status: 'downloading', pageCount: 1 }),
+    );
     // AND the work-order was written + the BG task enqueued as a backstop.
     expect(workOrderWrites.map((w) => w.galleryId)).toContain('400');
     expect(workerEnqueues).toContain('400');
@@ -1615,11 +1631,8 @@ describe('reconcileQueue (AC-007)', () => {
     expect(completed?.status).toBe('complete');
   });
 
-  it('iOS: does NOT infer completion from manifest length because pageCount is progressive', async () => {
+  it('iOS: marks a gallery complete when its manifest covers the target page count', async () => {
     iosFlag = true;
-    // iOS foreground rows store pageCount as current progress, not target total.
-    // A background task may have written more pages than that without finishing
-    // the full gallery, so launch reconcile must resume instead of completing.
     adapterRows.push({
       galleryId: 57,
       title: 'I',
@@ -1643,9 +1656,37 @@ describe('reconcileQueue (AC-007)', () => {
         (r as { galleryId: number }).galleryId === 57 &&
         (r as { status: string }).status === 'complete',
     );
+    expect(completed).toBeTruthy();
+  });
+
+  it('iOS: does NOT mark complete when the manifest is short of the target', async () => {
+    iosFlag = true;
+    adapterRows.push({
+      galleryId: 58,
+      title: 'I-short',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 3,
+      status: 'downloading',
+    });
+    manifestPages.set(58, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const completed = upsertedRows.find(
+      (r) =>
+        (r as { galleryId: number }).galleryId === 58 &&
+        (r as { status: string }).status === 'complete',
+    );
     expect(completed).toBeFalsy();
     expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
-      expect.objectContaining({ galleryId: 57 }),
+      expect.objectContaining({ galleryId: 58 }),
       { keepRetryState: true, queuePosition: undefined },
     );
   });

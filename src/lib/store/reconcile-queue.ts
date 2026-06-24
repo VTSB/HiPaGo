@@ -19,7 +19,7 @@ import { enqueueDownload } from '@/lib/db/download-queue';
 import { listDueAutoRetries } from '@/lib/db/download-retry';
 import { deserializeTags } from '@/lib/db/download';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
-import { isAndroid } from '@/lib/utils/platform';
+import { isAndroid, isIos } from '@/lib/utils/platform';
 import { processQueue, armAutoRetryTimer, finalizeDownloadIfComplete } from './download-progress';
 
 let started = false;
@@ -34,11 +34,9 @@ let started = false;
  * So on app open we reconcile DB status from the on-disk manifest — read through
  * `getDownloadedGalleryPages` → `createDownloadStore()`, which resolves the right
  * adapter per platform (AndroidPublicDownloadStore / CapacitorDownloadStore), so
- * the SAME storage abstraction covers both folder layouts. Android rows store
- * the target `pageCount` before native handoff, so a manifest covering that
- * count can be marked 'complete'. iOS foreground rows store progressive
- * `pageCount`, so iOS completion is intentionally not inferred here; those rows
- * fall through to the generic zombie step and resume in-process.
+ * the SAME storage abstraction covers both folder layouts. Native handoff rows
+ * store the target `pageCount` before scheduling background work, so a manifest
+ * covering that count can be marked 'complete'.
  *
  * Best-effort: any per-row failure is swallowed so boot never breaks.
  */
@@ -83,11 +81,9 @@ export async function reconcileQueue(): Promise<void> {
   try {
     const db = await ensureDb();
 
-    // Android (Task C): the native worker is DB-decoupled and Android rows carry
-    // the target page count before handoff, so completed native work can be
-    // finalized from the on-disk manifest. iOS rows carry progressive counts and
-    // are resumed below instead of being inferred complete from a partial count.
-    if (isAndroid()) {
+    // Native workers are DB-decoupled; rows carry the target page count before
+    // handoff, so completed native work can be finalized from the manifest.
+    if (isAndroid() || isIos()) {
       await reconcileNativeBackgroundDownloads();
     }
 
