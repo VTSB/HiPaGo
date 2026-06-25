@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, fireEvent } from '@testing-library/react';
+import { act, render, fireEvent, screen } from '@testing-library/react';
 import { MobileSearchPage } from '../MobileSearchPage';
+import { TagType } from '@/lib/utils/types';
 
 const mockPush = vi.fn();
 const mockBack = vi.fn();
@@ -13,7 +14,8 @@ const mockAddRecentSearch = vi.fn();
 const mockRemoveRecentSearch = vi.fn();
 const mockClearRecentSearches = vi.fn();
 
-let mockSuggestions: Array<{ tagType: string; tag: string }> = [];
+let mockSuggestions: Array<{ tagType: TagType; tag: string; localName?: string; amount: number }> =
+  [];
 let mockRecentSearches: string[] = [];
 let mockUrlQuery = '';
 
@@ -40,7 +42,8 @@ vi.mock('@/features/search/store/search.store', () => ({
 vi.mock('@/features/search/hooks/useSearch', () => ({ useSearch: vi.fn() }));
 
 vi.mock('@/lib/store/db-status', () => ({
-  useDbStatusStore: (selector: (state: { dbReady: boolean }) => unknown) => selector({ dbReady: false }),
+  useDbStatusStore: (selector: (state: { dbReady: boolean }) => unknown) =>
+    selector({ dbReady: false }),
 }));
 
 vi.mock('@/lib/i18n/useT', () => ({ useT: () => (key: string) => key }));
@@ -116,5 +119,32 @@ describe('MobileSearchPage — back navigation restores the previous query', () 
     expect(hasResults(container)).toBe(false);
     // The recent-search row renders (idle screen), not a blank page.
     expect(container.textContent).toContain('manga');
+  });
+
+  it('wraps long tag suggestions inside the mobile row instead of widening the viewport', () => {
+    mockSuggestions = [
+      {
+        tagType: TagType.SERIES,
+        tag: 'love live! nijigasaki high school idol club',
+        localName: '러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회',
+        amount: 1444,
+      },
+    ];
+
+    const { container } = render(<MobileSearchPage />);
+    const input = getInput(container);
+
+    act(() => {
+      fireEvent.change(input, { target: { value: '러브' } });
+    });
+
+    const option = screen.getByRole('option');
+    expect(option).toHaveClass('min-w-0');
+    expect(option.querySelector('.min-w-0.flex-1')).not.toBeNull();
+    expect(screen.getByText('1,444')).toHaveClass('shrink-0', 'tabular-nums');
+
+    const chip = screen.getByText('러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회');
+    expect(chip).toHaveClass('max-w-full', 'whitespace-normal', 'break-words');
+    expect(chip).toHaveStyle({ overflowWrap: 'anywhere' });
   });
 });

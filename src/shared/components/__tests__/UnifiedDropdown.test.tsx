@@ -14,8 +14,7 @@ vi.mock('next/link', () => ({
 
 // Mock useSettingsStore so useT works without localStorage
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (selector: (s: { locale: 'en' }) => unknown) =>
-    selector({ locale: 'en' }),
+  useSettingsStore: (selector: (s: { locale: 'en' }) => unknown) => selector({ locale: 'en' }),
 }));
 
 const mockSuggestions: Suggestion[] = [
@@ -25,9 +24,7 @@ const mockSuggestions: Suggestion[] = [
 
 const mockRecent = ['female:loli artist:yam', 'series:one_piece'];
 
-const mockPopular: Suggestion[] = [
-  { tag: 'schoolgirl', tagType: TagType.FEMALE, amount: 100000 },
-];
+const mockPopular: Suggestion[] = [{ tag: 'schoolgirl', tagType: TagType.FEMALE, amount: 100000 }];
 
 // ----------- buildDropdownItems tests -----------
 
@@ -221,6 +218,34 @@ describe('UnifiedDropdown', () => {
       mockSuggestions[0].tagType,
       mockSuggestions[0].localName,
     );
+  });
+
+  it('allows long suggestion labels to wrap without widening the dropdown', () => {
+    render(
+      <UnifiedDropdown
+        {...baseProps}
+        flatItems={[
+          {
+            kind: 'suggestion',
+            suggestion: {
+              tagType: TagType.SERIES,
+              tag: 'love live! nijigasaki high school idol club',
+              localName: '러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회',
+              amount: 1444,
+            },
+          },
+        ]}
+        koreanDisplay
+      />,
+    );
+
+    const option = screen.getByRole('option');
+    expect(option).toHaveClass('min-w-0');
+    expect(screen.getByText('1,444')).toHaveClass('shrink-0', 'tabular-nums');
+
+    const chip = screen.getByText('러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회');
+    expect(chip).toHaveClass('max-w-full', 'whitespace-normal', 'break-words');
+    expect(chip).toHaveStyle({ overflowWrap: 'anywhere' });
   });
 
   it('clear all button calls onClearRecents', () => {

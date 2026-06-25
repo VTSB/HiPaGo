@@ -49,20 +49,23 @@ export function SuggestionDropdown({
             onSelect(suggestion.tag, suggestion.tagType, suggestion.localName);
           }}
           onMouseEnter={() => !ignoreMouseRef.current && onHover(idx)}
-          className={`w-full flex items-center justify-between px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
+          className={`flex w-full min-w-0 items-center gap-2 px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
             idx === selectedIndex
               ? 'bg-zinc-100 dark:bg-zinc-700'
               : 'hover:bg-zinc-100 dark:hover:bg-zinc-700'
           }`}
         >
-          <TagChip
-            tag={suggestion.tag}
-            type={suggestion.tagType}
-            displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
-            linked={false}
-            size="sm"
-          />
-          <span className="text-zinc-500 dark:text-zinc-400 text-xs ml-auto flex-shrink-0">
+          <span className="min-w-0 flex-1">
+            <TagChip
+              tag={suggestion.tag}
+              type={suggestion.tagType}
+              displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
+              linked={false}
+              size="sm"
+              wrap
+            />
+          </span>
+          <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
             {suggestion.amount.toLocaleString()}
           </span>
         </button>

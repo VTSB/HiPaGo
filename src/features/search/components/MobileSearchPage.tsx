@@ -42,16 +42,8 @@ export function MobileSearchPage() {
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
 
-  const {
-    value,
-    updateValue,
-    clear,
-    syncFromQuery,
-    undo,
-    redo,
-    currentToken,
-    insertSuggestion,
-  } = useSearchInputState({ initialValue: urlQuery });
+  const { value, updateValue, clear, syncFromQuery, undo, redo, currentToken, insertSuggestion } =
+    useSearchInputState({ initialValue: urlQuery });
 
   // committed === true means the current value reflects a query that has been
   // submitted/selected (so we show the results grid). Any keystroke flips it to
@@ -96,7 +88,9 @@ export function MobileSearchPage() {
   // Load popular tags once DB is ready.
   useEffect(() => {
     if (dbReady) {
-      searchLocalTags('').then(setPopularTags).catch((e) => console.warn('[search] Popular tags load failed:', e));
+      searchLocalTags('')
+        .then(setPopularTags)
+        .catch((e) => console.warn('[search] Popular tags load failed:', e));
     }
   }, [dbReady]);
 
@@ -106,10 +100,13 @@ export function MobileSearchPage() {
     setAutocompleteQuery(currentToken);
   }, [value, currentToken, setQuery, setAutocompleteQuery]);
 
-  const handleUpdateValue = useCallback((next: string) => {
-    updateValue(next);
-    setCommitted(false);
-  }, [updateValue]);
+  const handleUpdateValue = useCallback(
+    (next: string) => {
+      updateValue(next);
+      setCommitted(false);
+    },
+    [updateValue],
+  );
 
   const doSubmit = useCallback(() => {
     const fullQuery = value.trim();
@@ -121,44 +118,67 @@ export function MobileSearchPage() {
     router.push(`/search?q=${encodeURIComponent(fullQuery)}`);
   }, [value, router, clearSuggestions, addRecentSearch]);
 
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    doSubmit();
-  }, [doSubmit]);
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      doSubmit();
+    },
+    [doSubmit],
+  );
 
-  const handleHistoryClick = useCallback((search: string) => {
-    syncFromQuery(search);
-    clearSuggestions();
-    addRecentSearch(search);
-    setCommitted(true);
-    inputRef.current?.blur();
-    router.push(`/search?q=${encodeURIComponent(search)}`);
-  }, [syncFromQuery, clearSuggestions, addRecentSearch, router]);
+  const handleHistoryClick = useCallback(
+    (search: string) => {
+      syncFromQuery(search);
+      clearSuggestions();
+      addRecentSearch(search);
+      setCommitted(true);
+      inputRef.current?.blur();
+      router.push(`/search?q=${encodeURIComponent(search)}`);
+    },
+    [syncFromQuery, clearSuggestions, addRecentSearch, router],
+  );
 
-  const handleSuggestionClick = useCallback((tag: string, tagType: string, localName?: string) => {
-    insertSuggestion(tag, tagType, localName);
-    clearSuggestions();
-    setCommitted(false);
-    inputRef.current?.focus();
-  }, [insertSuggestion, clearSuggestions]);
+  const handleSuggestionClick = useCallback(
+    (tag: string, tagType: string, localName?: string) => {
+      insertSuggestion(tag, tagType, localName);
+      clearSuggestions();
+      setCommitted(false);
+      inputRef.current?.focus();
+    },
+    [insertSuggestion, clearSuggestions],
+  );
 
   const koreanInput = isHangul(currentToken ?? '');
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.nativeEvent.isComposing) return;
-    if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); return; }
-    if (e.key === 'y' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); redo(); return; }
-  }, [undo, redo]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.nativeEvent.isComposing) return;
+      if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (e.key === 'y' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+    },
+    [undo, redo],
+  );
 
   // Tapping a popular tag goes straight to its results (Toss behaviour).
-  const handlePopularClick = useCallback((s: Suggestion) => {
-    const q = toSearchString(tagFromSuggestion(s));
-    clearSuggestions();
-    addRecentSearch(q);
-    setCommitted(true);
-    inputRef.current?.blur();
-    router.push(`/search?q=${encodeURIComponent(q)}`);
-  }, [router, clearSuggestions, addRecentSearch]);
+  const handlePopularClick = useCallback(
+    (s: Suggestion) => {
+      const q = toSearchString(tagFromSuggestion(s));
+      clearSuggestions();
+      addRecentSearch(q);
+      setCommitted(true);
+      inputRef.current?.blur();
+      router.push(`/search?q=${encodeURIComponent(q)}`);
+    },
+    [router, clearSuggestions, addRecentSearch],
+  );
 
   const typing = value.trim().length > 0;
   // committed query → results grid. Typing → tag suggestions. Idle → popular
@@ -225,11 +245,23 @@ export function MobileSearchPage() {
                   type="button"
                   role="option"
                   aria-selected={false}
-                  onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(s.tag, s.tagType, s.localName); }}
-                  className="flex min-h-[48px] w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleSuggestionClick(s.tag, s.tagType, s.localName);
+                  }}
+                  className="flex min-h-[48px] w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
                 >
-                  <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="lg" />
-                  <span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="min-w-0 flex-1">
+                    <TagChip
+                      tag={s.tag}
+                      type={s.tagType}
+                      displayName={koreanInput ? s.localName : s.tag}
+                      linked={false}
+                      size="lg"
+                      wrap
+                    />
+                  </span>
+                  <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
                     {s.amount.toLocaleString()}
                   </span>
                 </button>
@@ -250,10 +282,19 @@ export function MobileSearchPage() {
                   <button
                     key={`${s.tagType}-${s.tag}-${i}`}
                     type="button"
-                    onMouseDown={(e) => { e.preventDefault(); handlePopularClick(s); }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handlePopularClick(s);
+                    }}
                     className="shrink-0 rounded-full transition-transform active:scale-95"
                   >
-                    <TagChip tag={s.tag} type={s.tagType} displayName={koreanInput ? s.localName : s.tag} linked={false} size="lg" />
+                    <TagChip
+                      tag={s.tag}
+                      type={s.tagType}
+                      displayName={koreanInput ? s.localName : s.tag}
+                      linked={false}
+                      size="lg"
+                    />
                   </button>
                 ))}
               </div>
@@ -269,7 +310,10 @@ export function MobileSearchPage() {
                 </p>
                 <button
                   type="button"
-                  onMouseDown={(e) => { e.preventDefault(); clearRecentSearches(); }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    clearRecentSearches();
+                  }}
                   className="text-sm text-zinc-500 active:text-zinc-700 dark:text-zinc-400 dark:active:text-zinc-200"
                 >
                   {t('search.clearHistory')}
@@ -280,7 +324,10 @@ export function MobileSearchPage() {
                   <li key={q} className="relative">
                     <button
                       type="button"
-                      onMouseDown={(e) => { e.preventDefault(); handleHistoryClick(q); }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleHistoryClick(q);
+                      }}
                       className="block w-full truncate rounded-xl py-3.5 pl-3 pr-14 text-left text-base font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
                     >
                       {q.replace(/_/g, ' ')}
@@ -288,10 +335,18 @@ export function MobileSearchPage() {
                     <button
                       type="button"
                       aria-label={`${t('search.clearHistory')}: ${q}`}
-                      onMouseDown={(e) => { e.preventDefault(); removeRecentSearch(q); }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        removeRecentSearch(q);
+                      }}
                       className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-zinc-400 transition-colors hover:text-zinc-600 active:bg-zinc-300/60 dark:text-zinc-500 dark:hover:text-zinc-300 dark:active:bg-zinc-700/60"
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-[19px] w-[19px]">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        className="h-[19px] w-[19px]"
+                      >
                         <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
                       </svg>
                     </button>

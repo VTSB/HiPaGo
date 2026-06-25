@@ -103,16 +103,21 @@ function BlurTagInput({ onAdd }: { onAdd: (tag: string) => void }) {
               key={`${s.tagType}-${s.tag}-${i}`}
               type="button"
               onClick={() => handleSelect(s)}
-              className="flex min-h-12 w-full items-center justify-between px-4 py-2 text-left text-base active:bg-zinc-100 sm:min-h-0 sm:px-3 sm:text-sm sm:hover:bg-zinc-100 dark:active:bg-zinc-700 sm:dark:hover:bg-zinc-700"
+              className="flex min-h-12 w-full min-w-0 items-center gap-2 px-4 py-2 text-left text-base active:bg-zinc-100 sm:min-h-0 sm:px-3 sm:text-sm sm:hover:bg-zinc-100 dark:active:bg-zinc-700 sm:dark:hover:bg-zinc-700"
             >
-              <TagChip
-                tag={s.tag}
-                type={s.tagType}
-                displayName={locale === 'ko' && s.localName ? s.localName : undefined}
-                linked={false}
-                size="sm"
-              />
-              <span className="text-xs text-zinc-500 ml-auto">{s.amount.toLocaleString()}</span>
+              <span className="min-w-0 flex-1">
+                <TagChip
+                  tag={s.tag}
+                  type={s.tagType}
+                  displayName={locale === 'ko' && s.localName ? s.localName : undefined}
+                  linked={false}
+                  size="sm"
+                  wrap
+                />
+              </span>
+              <span className="shrink-0 text-xs text-zinc-500 tabular-nums">
+                {s.amount.toLocaleString()}
+              </span>
             </button>
           ))}
         </div>
@@ -202,16 +207,21 @@ function DefaultFilterInput({
               key={`${s.tagType}-${s.tag}-${i}`}
               type="button"
               onClick={() => handleSelect(s)}
-              className="flex min-h-12 w-full items-center justify-between px-4 py-2 text-left text-base active:bg-zinc-100 sm:min-h-0 sm:px-3 sm:text-sm sm:hover:bg-zinc-100 dark:active:bg-zinc-700 sm:dark:hover:bg-zinc-700"
+              className="flex min-h-12 w-full min-w-0 items-center gap-2 px-4 py-2 text-left text-base active:bg-zinc-100 sm:min-h-0 sm:px-3 sm:text-sm sm:hover:bg-zinc-100 dark:active:bg-zinc-700 sm:dark:hover:bg-zinc-700"
             >
-              <TagChip
-                tag={s.tag}
-                type={s.tagType}
-                displayName={locale === 'ko' && s.localName ? s.localName : undefined}
-                linked={false}
-                size="sm"
-              />
-              <span className="text-xs text-zinc-500 ml-auto">{s.amount.toLocaleString()}</span>
+              <span className="min-w-0 flex-1">
+                <TagChip
+                  tag={s.tag}
+                  type={s.tagType}
+                  displayName={locale === 'ko' && s.localName ? s.localName : undefined}
+                  linked={false}
+                  size="sm"
+                  wrap
+                />
+              </span>
+              <span className="shrink-0 text-xs text-zinc-500 tabular-nums">
+                {s.amount.toLocaleString()}
+              </span>
             </button>
           ))}
         </div>
