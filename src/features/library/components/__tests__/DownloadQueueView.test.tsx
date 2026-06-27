@@ -116,6 +116,41 @@ describe('DownloadQueueView', () => {
     expect(screen.getByText('(2)')).toBeTruthy();
   });
 
+  it('clamps active progress percentages at 100%', () => {
+    state.queue = [
+      {
+        id: 3,
+        title: 'Overreported download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: { current: 12, total: 10 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('12/10 · 100%')).toBeTruthy();
+  });
+
+  it('shows a downloading label before an active row knows its total page count', () => {
+    state.queue = [
+      {
+        id: 4,
+        title: 'Claimed download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: null,
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('library.queue.downloading')).toBeTruthy();
+    expect(screen.queryByText('0/0 · 0%')).toBeNull();
+  });
+
   it('routes active pause and cancel buttons to the store actions', () => {
     state.queue = [
       {

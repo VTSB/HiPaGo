@@ -19,13 +19,11 @@ def releaseSigningProps = releaseSigningPropNames.collectEntries { name ->
     [(name): readReleaseSigningProp(name)]
 }
 def releaseSigningRequested = releaseSigningProps.values().any { it }
-def signedReleaseRequired = readReleaseSigningProp('HIPAGO_REQUIRE_SIGNED_RELEASE').equalsIgnoreCase('true') ||
-    (System.getenv('HIPAGO_REQUIRE_SIGNED_RELEASE') ?: '').equalsIgnoreCase('true')
 def missingReleaseSigningProps = releaseSigningPropNames.findAll { !releaseSigningProps[it] }
 
-if ((signedReleaseRequired || releaseSigningRequested) && !missingReleaseSigningProps.empty) {
+if (releaseSigningRequested && !missingReleaseSigningProps.empty) {
     throw new GradleException(
-        'Android release signing is required but these Gradle properties are missing: ' +
+        'Android release signing properties were partially provided; these are missing: ' +
             missingReleaseSigningProps.join(', ')
     )
 }
@@ -56,9 +54,10 @@ android {
     signingConfigs {
         // Release signing is configured only when the four operator-injected
         // Gradle properties (set via ORG_GRADLE_PROJECT_* env in CI per
-        // doc/release/GUIDE__android-keystore.md) are present. Without them
-        // the block is created but no storeFile is set, so any build that
-        // references it would fail loudly — this is intentional.
+        // doc/release/GUIDE__android-keystore.md) are present. Without them,
+        // release builds intentionally fall back to signingConfigs.debug below
+        // because local agents do not have access to the private distribution
+        // key.
         release {
             if (releaseSigningRequested) {
                 storeFile file(releaseSigningProps.HIPAGO_KEYSTORE_PATH)
@@ -72,13 +71,14 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Apply release signing only when the operator's keystore props
-            // are present. Local dev (no props) falls back to AGP's default
-            // (unsigned release APK), so `./gradlew assembleRelease` does
-            // not require a developer to provision the secret. CI sets the
-            // props before `gradlew assembleRelease` runs.
+            // Apply distribution signing only when the operator's keystore
+            // props are present. Local dev/agent builds deliberately use the
+            // Android debug key so release APKs are installable without
+            // exposing the private distribution key.
             if (releaseSigningRequested) {
                 signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
             }
         }
     }

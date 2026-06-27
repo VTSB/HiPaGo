@@ -110,6 +110,37 @@ public class GalleryDownloadWorkerTest {
         assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(0, 0, 12));
     }
 
+    @Test
+    public void localizesDownloadNotificationStrings() {
+        assertEquals("ko", GalleryDownloadWorker.normalizeLocale("ko"));
+        assertEquals("en", GalleryDownloadWorker.normalizeLocale("fr"));
+
+        assertEquals("HiPaGo downloads", GalleryDownloadWorker.notificationTitle("en"));
+        assertEquals("HiPaGo 다운로드", GalleryDownloadWorker.notificationTitle("ko"));
+        assertEquals("Preparing downloads…", GalleryDownloadWorker.notificationPreparing("en"));
+        assertEquals("다운로드 준비 중…", GalleryDownloadWorker.notificationPreparing("ko"));
+        assertEquals(
+                "Downloading 3/10 (30%)",
+                GalleryDownloadWorker.notificationDownloading("en", 3, 10, 30)
+        );
+        assertEquals(
+                "다운로드 중 3/10 (30%)",
+                GalleryDownloadWorker.notificationDownloading("ko", 3, 10, 30)
+        );
+        assertEquals("Downloading...", GalleryDownloadWorker.notificationDownloadingIndeterminate("en"));
+        assertEquals("다운로드 중…", GalleryDownloadWorker.notificationDownloadingIndeterminate("ko"));
+        assertEquals("Downloads", GalleryDownloadWorker.notificationChannelName("en"));
+        assertEquals("다운로드", GalleryDownloadWorker.notificationChannelName("ko"));
+        assertEquals(
+                "Background gallery downloads",
+                GalleryDownloadWorker.notificationChannelDescription("en")
+        );
+        assertEquals(
+                "백그라운드 갤러리 다운로드",
+                GalleryDownloadWorker.notificationChannelDescription("ko")
+        );
+    }
+
     private File writeOrder(String name, String json) throws Exception {
         File file = temp.newFile(name);
         Files.write(file.toPath(), json.getBytes(StandardCharsets.UTF_8));

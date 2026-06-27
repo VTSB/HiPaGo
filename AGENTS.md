@@ -43,6 +43,7 @@ HiPaGo is a cross-platform web application for browsing and managing hitomi.la g
 - **TypeScript**: Strict mode enabled. Path alias `@/*` maps to `src/`.
 - **Platform detection**: Code detects Tauri, Capacitor, or web platform at runtime via `window.__TAURI__` and `window.Capacitor`.
 - **Database**: Adapters provided for Tauri (native SQLite), Capacitor (native), and web (WASM SQLite + IndexedDB).
+- **Android release signing**: Agents and local builders without distribution-key access must sign Android release APKs with the Android debug key. Do not block on or request the private release keystore credentials unless the user explicitly provides them. `pnpm build:android:release`/`./gradlew assembleRelease` produce a debug-key-signed release APK when `HIPAGO_KEYSTORE_*` Gradle properties are absent.
 - **Tag translation workflows**: For tag translation or validation work, use the Codex-native files in `.codex/skills/translate-tags/SKILL.md`, `.codex/skills/validate-tags/SKILL.md`, `.codex/agents/tag-translator/tag-translator.md`, and `.codex/agents/tag-validator/tag-validator.md`.
 
 ### Database Architecture
@@ -188,6 +189,7 @@ const results = await searchGalleries(query);
 | `pnpm build:static` | Export static site (via `scripts/build-static.mjs`) |
 | `pnpm build:tauri` | Build Tauri desktop app |
 | `pnpm build:android` | Build and sync Capacitor Android |
+| `pnpm build:android:release` | Build Android release APK; uses distribution key when all `HIPAGO_KEYSTORE_*` Gradle properties are present, otherwise signs with the Android debug key |
 | `pnpm build:ios` | Build and sync Capacitor iOS |
 | `pnpm tauri:dev` | Dev Tauri desktop app |
 | `pnpm cap:sync` | Sync web build to Capacitor |

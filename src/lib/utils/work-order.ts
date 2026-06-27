@@ -44,6 +44,8 @@ export interface WorkOrder {
   galleryId: number;
   title: string;
   folderName: string;
+  /** UI locale used by native background surfaces such as Android notifications. */
+  locale?: 'en' | 'ko';
   queuePosition?: number | null;
   pages: WorkOrderPage[];
 }
