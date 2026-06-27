@@ -209,9 +209,7 @@ final class DownloadBackgroundTask {
                 at: dir, includingPropertiesForKeys: nil
             )
             .filter { $0.pathExtension == "json" }
-            // Stable order (TS names files <galleryId>.json) so behaviour is
-            // deterministic — mirrors the Android worker's name sort.
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .sorted { compareOrderFiles($0, $1) }
         } catch {
             // No handoff dir / unreadable → nothing pending. Treat as drained.
             return true
@@ -400,6 +398,7 @@ final class DownloadBackgroundTask {
 
     struct WorkOrder {
         let galleryId: Int
+        let queuePosition: Double?
         let pages: [WorkPage]
     }
 
@@ -435,7 +434,35 @@ final class DownloadBackgroundTask {
             }
             return WorkPage(index: index, url: url, ext: ext, headers: headers)
         }
-        return WorkOrder(galleryId: galleryId, pages: pages)
+        return WorkOrder(
+            galleryId: galleryId,
+            queuePosition: parseQueuePosition(root["queuePosition"]),
+            pages: pages
+        )
+    }
+
+    private func parseQueuePosition(_ raw: Any?) -> Double? {
+        if raw == nil || raw is NSNull { return nil }
+        if let n = raw as? NSNumber { return n.doubleValue }
+        if let d = raw as? Double { return d }
+        if let i = raw as? Int { return Double(i) }
+        if let s = raw as? String { return Double(s) }
+        return nil
+    }
+
+    private func compareOrderFiles(_ lhs: URL, _ rhs: URL) -> Bool {
+        let left = readOrder(lhs)
+        let right = readOrder(rhs)
+        switch (left?.queuePosition, right?.queuePosition) {
+        case let (l?, r?) where l != r:
+            return l < r
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        default:
+            return lhs.lastPathComponent < rhs.lastPathComponent
+        }
     }
 }
 

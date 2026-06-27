@@ -87,13 +87,13 @@ export async function reconcileQueue(): Promise<void> {
       await reconcileNativeBackgroundDownloads();
     }
 
-    // Zombie 'downloading' rows with stored pages → re-enqueue with resume
-    // intent (enqueueDownload preserves pageCount/folderName so the processor
-    // resumes from where it stopped).
+    // Zombie 'downloading' rows → re-enqueue. Rows with stored pages resume
+    // from disk; rows with pageCount 0 may have been atomically claimed from
+    // the queue just before app death and should not stay stuck as active.
     const zombies = await db.query<DBDownload>(
       `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
          FROM download
-        WHERE status = 'downloading' AND pageCount > 0`,
+        WHERE status = 'downloading'`,
     );
 
     for (const z of zombies) {

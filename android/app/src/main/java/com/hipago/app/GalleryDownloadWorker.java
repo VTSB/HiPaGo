@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -76,6 +77,7 @@ public class GalleryDownloadWorker extends Worker {
 
     private static final String CHANNEL_ID = "hipago-downloads";
     private static final int NOTIFICATION_ID = 4201;
+    private static final String LOCALE_KO = "ko";
 
     /** Min interval between progress-file writes per gallery, to bound IO on big
      *  galleries. The in-app poller reads at ~1s, so once/second is plenty. */
@@ -100,16 +102,17 @@ public class GalleryDownloadWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
+        File handoffDir = new File(getApplicationContext().getFilesDir(), HANDOFF_DIR);
+        String initialLocale = firstOrderLocale(handoffDir);
+
         // Go foreground immediately so the system shows the progress notification
         // and does not kill the worker while the app is backgrounded.
         try {
-            setForegroundAsync(buildForegroundInfo("Preparing downloads…", 0, 0)).get();
+            setForegroundAsync(buildForegroundInfo(notificationPreparing(initialLocale), 0, 0, initialLocale)).get();
         } catch (Throwable t) {
             // setForegroundAsync can fail (e.g. POST_NOTIFICATIONS denied on 13+).
             // The download can still proceed; we just lose the visible progress.
         }
-
-        File handoffDir = new File(getApplicationContext().getFilesDir(), HANDOFF_DIR);
 
         // Without a writable SAF tree there is nowhere to write. This includes a
         // revoked persisted permission, which will not heal from WorkManager's
@@ -237,6 +240,7 @@ public class GalleryDownloadWorker extends Worker {
      */
     private GalleryResult processGallery(JSONObject order, File orderFile) {
         String title = order.optString("title", "");
+        String locale = normalizeLocale(order.optString("locale", ""));
         // galleryId names the live-progress file the in-app poller reads. TS writes
         // numeric galleryIds; fall back to a string so a malformed id still works.
         String galleryId = order.optString("galleryId", null);
@@ -289,7 +293,7 @@ public class GalleryDownloadWorker extends Worker {
 
             exts[i] = ext;
 
-            updateNotification(title, i + 1, total);
+            updateNotification(title, i + 1, total, locale);
             // Publish live progress (throttled) so the in-app poller can show
             // current/total while the app is foreground. Best-effort; an IO failure
             // here must never fail the download.
@@ -592,13 +596,13 @@ public class GalleryDownloadWorker extends Worker {
     // Foreground notification
     // -----------------------------------------------------------------------
 
-    private void updateNotification(String title, int current, int total) {
+    private void updateNotification(String title, int current, int total, String locale) {
         int percent = total > 0 ? Math.min(100, Math.round((current * 100f) / total)) : 0;
         String titleSuffix = title.isEmpty() ? "" : " - " + title;
         String text = total > 0
-                ? "Downloading " + current + "/" + total + " (" + percent + "%)" + titleSuffix
-                : "Downloading...";
-        ForegroundInfo info = buildForegroundInfo(text, current, total);
+                ? notificationDownloading(locale, current, total, percent) + titleSuffix
+                : notificationDownloadingIndeterminate(locale);
+        ForegroundInfo info = buildForegroundInfo(text, current, total, locale);
         try {
             setForegroundAsync(info);
         } catch (Throwable ignored) {
@@ -606,10 +610,10 @@ public class GalleryDownloadWorker extends Worker {
         }
     }
 
-    private ForegroundInfo buildForegroundInfo(String text, int current, int total) {
-        createChannel();
+    private ForegroundInfo buildForegroundInfo(String text, int current, int total, String locale) {
+        createChannel(locale);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), CHANNEL_ID)
-                .setContentTitle("HiPaGo downloads")
+                .setContentTitle(notificationTitle(locale))
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
                 .setOngoing(true)
@@ -630,17 +634,65 @@ public class GalleryDownloadWorker extends Worker {
         return new ForegroundInfo(NOTIFICATION_ID, notification);
     }
 
-    private void createChannel() {
+    private void createChannel(String locale) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager)
                     getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+            NotificationChannel existing = nm.getNotificationChannel(CHANNEL_ID);
+            if (existing == null) {
                 NotificationChannel channel = new NotificationChannel(
-                        CHANNEL_ID, "Downloads", NotificationManager.IMPORTANCE_LOW);
-                channel.setDescription("Background gallery downloads");
+                        CHANNEL_ID, notificationChannelName(locale), NotificationManager.IMPORTANCE_LOW);
+                channel.setDescription(notificationChannelDescription(locale));
                 nm.createNotificationChannel(channel);
+            } else {
+                existing.setName(notificationChannelName(locale));
+                existing.setDescription(notificationChannelDescription(locale));
+                nm.createNotificationChannel(existing);
             }
         }
+    }
+
+    private String firstOrderLocale(File handoffDir) {
+        File[] orders = listOrderFiles(handoffDir);
+        if (orders.length == 0) {
+            return normalizeLocale(Locale.getDefault().getLanguage());
+        }
+        JSONObject first = readOrder(orders[0]);
+        return first == null ? normalizeLocale(Locale.getDefault().getLanguage())
+                : normalizeLocale(first.optString("locale", ""));
+    }
+
+    static String normalizeLocale(String locale) {
+        return LOCALE_KO.equalsIgnoreCase(locale) ? LOCALE_KO : "en";
+    }
+
+    static String notificationTitle(String locale) {
+        return LOCALE_KO.equals(normalizeLocale(locale)) ? "HiPaGo 다운로드" : "HiPaGo downloads";
+    }
+
+    static String notificationPreparing(String locale) {
+        return LOCALE_KO.equals(normalizeLocale(locale)) ? "다운로드 준비 중…" : "Preparing downloads…";
+    }
+
+    static String notificationDownloading(String locale, int current, int total, int percent) {
+        if (LOCALE_KO.equals(normalizeLocale(locale))) {
+            return "다운로드 중 " + current + "/" + total + " (" + percent + "%)";
+        }
+        return "Downloading " + current + "/" + total + " (" + percent + "%)";
+    }
+
+    static String notificationDownloadingIndeterminate(String locale) {
+        return LOCALE_KO.equals(normalizeLocale(locale)) ? "다운로드 중…" : "Downloading...";
+    }
+
+    static String notificationChannelName(String locale) {
+        return LOCALE_KO.equals(normalizeLocale(locale)) ? "다운로드" : "Downloads";
+    }
+
+    static String notificationChannelDescription(String locale) {
+        return LOCALE_KO.equals(normalizeLocale(locale))
+                ? "백그라운드 갤러리 다운로드"
+                : "Background gallery downloads";
     }
 }

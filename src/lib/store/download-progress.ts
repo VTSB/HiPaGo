@@ -37,6 +37,7 @@ import { isUnmeteredNetwork } from '@/lib/utils/network';
 import { isAndroid, isIos } from '@/lib/utils/platform';
 import { buildWorkOrder, buildIosWorkOrder } from '@/lib/utils/work-order';
 import { DownloadWorker } from '@/lib/plugins/downloadWorker';
+import { useSettingsStore } from '@/lib/store/settings';
 import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
 import type { GalleryFile } from '@/lib/utils/types';
 import type { DownloadStatus } from '@/lib/db/schema';
@@ -96,7 +97,7 @@ interface DownloadProgressState {
   /** Enqueue a gallery (userInitiated) and kick the processor. */
   start: (params: StartDownloadParams) => Promise<void>;
   /** Cancel: aborts the active run, or drops a queued/paused item from the queue. */
-  cancel: (id: number) => void;
+  cancel: (id: number) => Promise<void>;
   /** Load the persisted download status for a gallery from the DB into the store. */
   refreshDownloaded: (id: number) => Promise<void>;
   /** Re-read listQueue() + the active entry and publish the reactive `queue`. */
@@ -128,6 +129,12 @@ const controllers = new Map<number, AbortController>();
 // Galleries whose active controller was aborted as a PAUSE (not a cancel). The
 // download-zip catch reads this via opts.isPauseSignal so it writes 'paused'.
 const pausing = new Set<number>();
+
+// Claimed rows have status 'downloading' before a controller/native worker
+// exists. These sets let cancel/pause requests made during that preparation
+// window stop the processor deterministically, independent of async DB timing.
+const cancellingClaimed = new Set<number>();
+const pausingClaimed = new Set<number>();
 
 // File lists are not stored on the download row; cache the ones supplied by a
 // manual start so the processor can drive that gallery without re-fetching the
@@ -178,14 +185,23 @@ async function scheduleFailureRetry(
     const retryAt = new Date(Date.now() + delay).toISOString();
     try {
       await scheduleAutoRetry(id, attempt, retryAt);
-      storeApi?.setEntry(id, { ...entry, error: message, retryAt, attempt });
+      storeApi?.setEntry(id, {
+        ...entry,
+        error: message,
+        retryAt,
+        attempt,
+        queued: false,
+        position: null,
+      });
+      storeApi?.refreshQueue();
       storeApi?.armAutoRetryTimer();
       return;
     } catch {
       // Fall through to a plain failed entry if retry persistence fails.
     }
   }
-  storeApi?.setEntry(id, { ...entry, error: message });
+  storeApi?.setEntry(id, { ...entry, error: message, queued: false, position: null });
+  storeApi?.refreshQueue();
 }
 
 /**
@@ -362,7 +378,7 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
   if (current.status === 'complete') return true;
   if (current.status === 'failed' && current.lastError === 'Cancelled') return false;
   if (
-    (current.status !== 'downloading' && current.status !== 'failed') ||
+    (current.status !== 'downloading' && current.status !== 'failed' && current.status !== 'queued') ||
     (current.pageCount ?? 0) <= 0
   ) {
     return false;
@@ -393,22 +409,24 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
  * shows downloading" bug. No-op when not actually complete (e.g. the progress
  * file is merely absent because the worker has not started yet).
  */
-async function finalizeAndroidDownloadIfComplete(id: number): Promise<void> {
+async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
   let done = false;
   try {
     done = await finalizeDownloadIfComplete(id);
   } catch {
-    return; // transient IO — re-checked on the next tick
+    return false; // transient IO — re-checked on the next tick
   }
-  if (!done) return;
+  if (!done) return false;
   storeApi?.setEntry(id, null);
   storeApi?.markDownloaded(id);
   storeApi?.refreshQueue();
   notifyDownloadLibraryChanged(true);
   stopAndroidProgressPoll(id);
+  return true;
 }
 
 async function failAndroidDownloadIfWorkerStopped(id: number, message: string): Promise<void> {
+  await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
   await setDownloadError(id, 'failed', message).catch(() => {});
   await removeFromQueue(id).catch(() => {});
   await scheduleFailureRetry(id, message);
@@ -447,6 +465,24 @@ async function markAndroidHandedOffPaused(id: number): Promise<boolean> {
   }
 }
 
+async function claimedRunWasStopped(id: number): Promise<boolean> {
+  const row = await getDownload(id).catch(() => null);
+  return (
+    globalPaused ||
+    cancellingClaimed.has(id) ||
+    pausingClaimed.has(id) ||
+    row?.status !== 'downloading'
+  );
+}
+
+function clearStoppedClaimedRun(id: number): void {
+  fileCache.delete(id);
+  cancellingClaimed.delete(id);
+  pausingClaimed.delete(id);
+  storeApi?.setEntry(id, null);
+  storeApi?.refreshQueue();
+}
+
 async function cancelAndroidNativeWork(id: number): Promise<boolean> {
   try {
     await DownloadWorker.cancel({ galleryId: String(id) });
@@ -479,7 +515,12 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   }
   if (res && typeof (res as { current: number | null }).current === 'number') {
     const { current, total } = res as { current: number; total: number };
-    storeApi?.setEntry(id, { progress: { current, total }, error: null });
+    storeApi?.setEntry(id, {
+      progress: { current, total },
+      error: null,
+      queued: false,
+      position: null,
+    });
     storeApi?.refreshQueue();
     // Worker reported every page done — confirm via the manifest and finalize
     // the row in-app so it leaves "downloading" without waiting for a relaunch.
@@ -601,6 +642,7 @@ async function handOffToAndroidWorker(
 ): Promise<void> {
   const config = await getGgConfig();
   const order = buildWorkOrder(id, title, files, config);
+  order.locale = useSettingsStore.getState().locale;
   order.queuePosition = queuePosition ?? null;
   const galleryId = String(id);
   await DownloadWorker.writeWorkOrder({ galleryId, json: JSON.stringify(order) });
@@ -628,13 +670,25 @@ async function scheduleIosBackgroundBackstop(
   id: number,
   title: string,
   files: GalleryFile[],
+  queuePosition?: number | null,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
+    if (signal?.aborted) return;
     const config = await getGgConfig();
+    if (signal?.aborted) return;
     const order = buildIosWorkOrder(id, title, files, config);
+    order.queuePosition = queuePosition ?? null;
     const galleryId = String(id);
     await DownloadWorker.writeWorkOrder({ galleryId, json: JSON.stringify(order) });
+    if (signal?.aborted) {
+      await DownloadWorker.cancel({ galleryId }).catch(() => {});
+      return;
+    }
     await DownloadWorker.enqueue({ galleryId });
+    if (signal?.aborted) {
+      await DownloadWorker.cancel({ galleryId }).catch(() => {});
+    }
   } catch (e) {
     // Backstop only — the in-process foreground download is the primary path.
     console.warn('[ios-bg] failed to schedule background backstop', id, e);
@@ -655,10 +709,18 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
   running = true;
   try {
     // Honour a global pause before dequeuing the first item, too.
-    let next = globalPaused ? null : await dequeueNextQueued();
-    for (; next; next = globalPaused ? null : await dequeueNextQueued()) {
+    let next = globalPaused ? null : await dequeueNextQueued(onlyGalleryId);
+    for (; next; next = globalPaused ? null : await dequeueNextQueued(onlyGalleryId)) {
       const id = next.galleryId;
-      if (onlyGalleryId !== undefined && id !== onlyGalleryId) break;
+      storeApi?.setEntry(id, {
+        progress: null,
+        error: null,
+        queued: true,
+        position: next.queuePosition ?? null,
+        title: next.title,
+        thumbnail: next.thumbnail,
+      });
+      storeApi?.refreshQueue();
 
       // Resolve the gallery's file list + tags. Prefer the cached list from a
       // manual start; otherwise re-fetch the detail (resume / auto-advance).
@@ -692,6 +754,21 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
         continue;
       }
 
+      const claimedRow = await getDownload(id).catch(() => null);
+      if (
+        globalPaused ||
+        cancellingClaimed.has(id) ||
+        pausingClaimed.has(id) ||
+        claimedRow?.status !== 'downloading'
+      ) {
+        fileCache.delete(id);
+        cancellingClaimed.delete(id);
+        pausingClaimed.delete(id);
+        storeApi?.setEntry(id, null);
+        storeApi?.refreshQueue();
+        continue;
+      }
+
       // ── Android branch (Task C) ───────────────────────────────────────────
       // On Android the native WorkManager worker is the SOLE downloader. Hand
       // the work-order off to it (fast, non-blocking) instead of running the
@@ -703,14 +780,13 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
         try {
           const downloadStore = await createDownloadStore();
           await downloadStore.ensureReady?.();
-          await handOffToAndroidWorker(id, next.title, files, next.queuePosition);
-          // Leave a tracked 'downloading' row (NOT in the queue) so the worker's
-          // progress survives app kill and reconcileQueue can finalize it on next
-          // open. pageCount carries the TARGET total here (the worker is
-          // DB-decoupled and writes only the SAF manifest); reconcile marks the
-          // row 'complete' once the on-disk manifest covers all pages. The row's
-          // status, not queuePosition, keeps it out of listQueue(); preserving
-          // queuePosition lets pause/resume restore the original order.
+          if (await claimedRunWasStopped(id)) {
+            clearStoppedClaimedRun(id);
+            continue;
+          }
+          // Persist the tracked 'downloading' row BEFORE native enqueue. If the
+          // app is killed immediately after WorkManager accepts the work, launch
+          // reconcile still has a DB row to match against the manifest.
           await upsertDownload({
             galleryId: id,
             title: next.title,
@@ -726,13 +802,35 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
             retryCount: next.retryCount ?? null,
             nextRetryAt: null,
           });
+          if (await claimedRunWasStopped(id)) {
+            clearStoppedClaimedRun(id);
+            continue;
+          }
+          await handOffToAndroidWorker(id, next.title, files, next.queuePosition);
+          if (await claimedRunWasStopped(id)) {
+            await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+            clearStoppedClaimedRun(id);
+            continue;
+          }
+          // The row is NOT in the TS queue anymore, but it is still tracked so
+          // worker progress survives app kill and reconcileQueue can finalize it
+          // on next open. pageCount carries the TARGET total here (the worker is
+          // DB-decoupled and writes only the SAF manifest); reconcile marks the
+          // row 'complete' once the on-disk manifest covers all pages.
           notifyDownloadLibraryChanged(true);
           // Surface a "downloading (background)" entry with a 0/total placeholder,
           // then start the in-app live-progress poller: while the app is
           // foreground it reads the worker's progress file (~1s) and advances this
           // entry's current/total in step with the notification. The poller stops
           // on completion (entry cleared) / hidden / no active download.
-          storeApi?.setEntry(id, { progress: { current: 0, total: files.length }, error: null });
+          storeApi?.setEntry(id, {
+            progress: { current: 0, total: files.length },
+            error: null,
+            queued: false,
+            position: null,
+            title: next.title,
+            thumbnail: next.thumbnail,
+          });
           startAndroidProgressPoll(id);
         } catch (e) {
           if (e instanceof DownloadCancelledError) {
@@ -767,7 +865,14 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
 
       const controller = new AbortController();
       controllers.set(id, controller);
-      storeApi?.setEntry(id, { progress: { current: 0, total: files.length }, error: null });
+      storeApi?.setEntry(id, {
+        progress: { current: 0, total: files.length },
+        error: null,
+        queued: false,
+        position: null,
+        title: next.title,
+        thumbnail: next.thumbnail,
+      });
       // Transition: this item just became the active in-flight download — the
       // queue row left listQueue() (status flipped to 'downloading'), so rebuild
       // the reactive queue to surface it as the active item.
@@ -799,7 +904,7 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           retryCount: next.retryCount ?? null,
           nextRetryAt: null,
         });
-        await scheduleIosBackgroundBackstop(id, next.title, files);
+        await scheduleIosBackgroundBackstop(id, next.title, files, next.queuePosition, controller.signal);
       }
 
       try {
@@ -812,7 +917,7 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           config,
           tags,
           (p) => {
-            storeApi?.setEntry(id, { progress: p, error: null });
+            storeApi?.setEntry(id, { progress: p, error: null, queued: false, position: null });
             notifyDownloadLibraryChanged();
           },
           controller.signal,
@@ -900,8 +1005,8 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
   // A re-check guard: if an item was enqueued during the final loop teardown,
   // kick the processor again (running is now false, so this is safe).
   if (onlyGalleryId === undefined) {
-    const pending = await dequeueNextQueued().catch(() => null);
-    if (pending) void processQueue();
+    const pending = await listQueue().catch(() => []);
+    if (pending.some((row) => row.status === 'queued')) void processQueue();
   }
 }
 
@@ -912,7 +1017,14 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       if (entry === null) {
         delete next[id];
       } else {
-        next[id] = entry;
+        const previous = next[id];
+        next[id] = {
+          ...(previous?.title !== undefined ? { title: previous.title } : {}),
+          ...(previous?.thumbnail !== undefined ? { thumbnail: previous.thumbnail } : {}),
+          ...entry,
+        };
+        if (entry.queued === false) delete next[id].queued;
+        if (entry.position === null) delete next[id].position;
       }
       return { entries: next };
     });
@@ -924,10 +1036,10 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
     set((s) => ({ downloaded: { ...s.downloaded, [id]: false } }));
 
   // Rebuild the reactive `queue`: the queued/paused rows from listQueue() merged
-  // with active in-flight items (entries whose progress is non-null). listQueue()
-  // is the source of truth for pending order; active items have already flipped
-  // to 'downloading', so they are absent from listQueue and are prepended from
-  // the live entries.
+  // with active/claimed items from entries. listQueue() is the source of truth
+  // for pending order; claimed/active items have already flipped to
+  // 'downloading', so they are absent from listQueue and are prepended from the
+  // live entries.
   const refreshQueue = async () => {
     let rows: Awaited<ReturnType<typeof listQueue>>;
     try {
@@ -939,7 +1051,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
     const entries = get().entries;
     const activeIds = Object.keys(entries)
       .map(Number)
-      .filter((id) => entries[id]?.progress);
+      .filter((id) => entries[id]?.progress || entries[id]?.queued);
 
     const pending: QueueItem[] = rows.map((r) => ({
       id: r.galleryId,
@@ -1011,7 +1123,14 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           (row.pageCount ?? 0) > 0 &&
           !get().entries[id]?.progress
         ) {
-          setEntry(id, { progress: { current: 0, total: row.pageCount }, error: null });
+          setEntry(id, {
+            progress: { current: 0, total: row.pageCount },
+            error: null,
+            queued: false,
+            position: null,
+            title: row.title,
+            thumbnail: row.thumbnail,
+          });
           startAndroidProgressPoll(id);
           void refreshQueue();
         }
@@ -1059,7 +1178,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       void refreshQueue();
       void processQueue({ onlyGalleryId: id });
     },
-    cancel: (id) => {
+    cancel: async (id) => {
       const controller = controllers.get(id);
       if (controller) {
         // Active run → genuine cancel (NOT a pause).
@@ -1068,45 +1187,60 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         // BGProcessingTask does not later resume a cancelled gallery (and cancels
         // the pending request when the handoff queue empties).
         if (isIos()) {
-          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         }
       } else if (isAndroid() && get().entries[id]?.progress != null) {
         // Android: the gallery may have been handed off to the native worker
         // (no controller, not in the TS queue). Drop its work-order so the
         // worker skips it (and stops if the handoff queue empties).
-        void (async () => {
-          if (!(await cancelAndroidNativeWork(id))) {
-            void refreshQueue();
+        if (await finalizeAndroidDownloadIfComplete(id)) {
+          fileCache.delete(id);
+          return;
+        }
+        if (!(await cancelAndroidNativeWork(id))) {
+          if (await finalizeAndroidDownloadIfComplete(id)) {
+            fileCache.delete(id);
             return;
           }
-          const row = await getDownload(id).catch(() => null);
-          const storedPages = await getDownloadedGalleryPages(id, {
-            folderName: row?.folderName ?? null,
-          }).catch(() => []);
-          if (storedPages.length === 0) {
-            await deleteDownload(id).catch(() => {});
-          } else {
-            await setDownloadError(id, 'failed', 'Cancelled').catch(() => {});
-            await removeFromQueue(id).catch(() => {});
-          }
-          fileCache.delete(id);
-          markNotDownloaded(id);
-          setEntry(id, null);
-          // Stop this row's live-progress polling without silencing other active
-          // Android handoffs.
-          stopAndroidProgressPoll(id);
-          notifyDownloadLibraryChanged(true);
           void refreshQueue();
-        })();
+          return;
+        }
+        if (await finalizeAndroidDownloadIfComplete(id)) {
+          fileCache.delete(id);
+          return;
+        }
+        const row = await getDownload(id).catch(() => null);
+        const storedPages = await getDownloadedGalleryPages(id, {
+          folderName: row?.folderName ?? null,
+        }).catch(() => []);
+        if (storedPages.length === 0) {
+          await deleteDownload(id).catch(() => {});
+        } else {
+          await setDownloadError(id, 'failed', 'Cancelled').catch(() => {});
+          await removeFromQueue(id).catch(() => {});
+        }
+        fileCache.delete(id);
+        markNotDownloaded(id);
+        setEntry(id, null);
+        // Stop this row's live-progress polling without silencing other active
+        // Android handoffs.
+        stopAndroidProgressPoll(id);
+        notifyDownloadLibraryChanged(true);
+        void refreshQueue();
       } else {
         // Queued/paused but not yet started → drop it from the queue.
         if (isAndroid()) {
-          void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
+          await DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
           stopAndroidProgressPoll(id);
         }
-        void removeFromQueue(id)
-          .catch(() => {})
-          .finally(() => void refreshQueue());
+        const entry = get().entries[id];
+        if (entry?.queued) cancellingClaimed.add(id);
+        const row = await getDownload(id).catch(() => null);
+        if (entry?.queued && row?.status === 'downloading' && (row.pageCount ?? 0) > 0) {
+          await setDownloadError(id, 'failed', 'Cancelled').catch(() => {});
+        }
+        await removeFromQueue(id).catch(() => {});
+        void refreshQueue();
         fileCache.delete(id);
         setEntry(id, null);
       }
@@ -1124,9 +1258,15 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         }
       } else if (isAndroid() && get().entries[id]?.progress != null) {
+        if (await finalizeAndroidDownloadIfComplete(id)) {
+          fileCache.delete(id);
+          await refreshQueue();
+          return;
+        }
         if (
           (await prepareAndroidHandedOffPause(id)) &&
           (await cancelAndroidNativeWork(id)) &&
+          !(await finalizeAndroidDownloadIfComplete(id)) &&
           (await markAndroidHandedOffPaused(id))
         ) {
           stopAndroidProgressPoll(id);
@@ -1135,7 +1275,15 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         }
       } else {
         // Not-yet-started queued item → just hold it.
-        await pauseQueued(id);
+        const entry = get().entries[id];
+        const row = await getDownload(id).catch(() => null);
+        if (entry?.queued && row?.status === 'downloading') {
+          pausingClaimed.add(id);
+          await setDownloadError(id, 'paused', null);
+          setEntry(id, null);
+        } else {
+          await pauseQueued(id);
+        }
       }
       await refreshQueue();
     },
@@ -1178,14 +1326,27 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           void DownloadWorker.cancel({ galleryId: String(id) }).catch(() => {});
         }
       }
+      const claimedIds = Object.entries(get().entries)
+        .filter(([, entry]) => entry.queued && entry.progress == null)
+        .map(([id]) => Number(id));
+      for (const id of claimedIds) {
+        pausingClaimed.add(id);
+        await setDownloadError(id, 'paused', null).catch(() => {});
+        setEntry(id, null);
+      }
       if (isAndroid()) {
         const activeIds = Object.entries(get().entries)
           .filter(([, entry]) => entry.progress != null)
           .map(([id]) => Number(id));
         for (const id of activeIds) {
+          if (await finalizeAndroidDownloadIfComplete(id)) {
+            fileCache.delete(id);
+            continue;
+          }
           if (
             (await prepareAndroidHandedOffPause(id)) &&
             (await cancelAndroidNativeWork(id)) &&
+            !(await finalizeAndroidDownloadIfComplete(id)) &&
             (await markAndroidHandedOffPaused(id))
           ) {
             stopAndroidProgressPoll(id);

@@ -41,7 +41,13 @@ export interface DownloadStore {
    * @param bytes      Raw image data.
    * @param ext        File extension without leading dot, e.g. "webp".
    */
-  putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void>;
+  putImage(
+    galleryId: number,
+    index: number,
+    bytes: Uint8Array,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<void>;
 
   /**
    * Copy an existing file (e.g. a persistent image-cache file) into the gallery
@@ -55,6 +61,7 @@ export interface DownloadStore {
     index: number,
     srcPath: string,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<number>;
 
   /**

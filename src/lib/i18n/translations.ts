@@ -6,7 +6,7 @@ const translations = {
   'nav.search': { en: 'Search', ko: '검색' },
   'nav.favorites': { en: 'Favorites', ko: '즐겨찾기' },
   'nav.history': { en: 'History', ko: '기록' },
-  'nav.library': { en: 'Library', ko: '라이브러리' },
+  'nav.library': { en: 'Library', ko: '보관함' },
   'nav.saved': { en: 'Library', ko: '보관함' },
   'nav.settings': { en: 'Settings', ko: '설정' },
 
@@ -112,7 +112,7 @@ const translations = {
   'db.error.dismiss': { en: 'Dismiss', ko: '닫기' },
 
   // Library (offline downloads)
-  'library.title': { en: 'Library', ko: '라이브러리' },
+  'library.title': { en: 'Library', ko: '보관함' },
   'library.empty': { en: 'No downloaded galleries yet.', ko: '다운로드된 갤러리가 없습니다.' },
   'library.storageUsed': { en: 'Storage used', ko: '사용 중인 저장 공간' },
   'library.pages': { en: 'pages', ko: '페이지' },
@@ -189,10 +189,10 @@ const translations = {
   'settings.langFilter.english': { en: 'English', ko: '영어' },
   'settings.langFilter.chinese': { en: 'Chinese', ko: '중국어' },
   'settings.langFilter.korean': { en: 'Korean', ko: '한국어' },
-  'settings.libraryInitialTab': { en: 'Library Start Tab', ko: '라이브러리 시작 탭' },
+  'settings.libraryInitialTab': { en: 'Library Start Tab', ko: '보관함 시작 탭' },
   'settings.libraryInitialTab.desc': {
     en: 'Choose which tab opens first when entering Library',
-    ko: '라이브러리에 들어갈 때 처음 열 탭을 선택합니다',
+    ko: '보관함에 들어갈 때 처음 열 탭을 선택합니다',
   },
   'settings.tagDb': { en: 'Tag DB', ko: '태그 DB' },
   'settings.tagDb.desc': {
@@ -232,10 +232,10 @@ const translations = {
   'settings.reader.scroll': { en: 'Scroll', ko: '스크롤' },
   'settings.imageFormat': { en: 'Image Format', ko: '이미지 형식' },
   'settings.imageFormat.desc': { en: 'Preferred image format for loading', ko: '이미지 로딩 형식' },
-  'settings.secureScreen': { en: 'Secure Screen', ko: '보안 화면' },
+  'settings.secureScreen': { en: 'Hide in Recents', ko: '최근 앱 숨김' },
   'settings.secureScreen.desc': {
-    en: 'Hide app content from Android screenshots, screen recording, and recent apps',
-    ko: 'Android 스크린샷, 화면 녹화, 최근 앱 화면에서 앱 내용을 숨깁니다',
+    en: 'Hide app content from Android recent-app previews while allowing screenshots',
+    ko: '스크린샷은 허용하고 Android 최근 앱 미리보기에서만 앱 내용을 숨깁니다',
   },
   'settings.secureScreen.off': { en: 'Off', ko: '끔' },
   'settings.secureScreen.on': { en: 'On', ko: '켬' },

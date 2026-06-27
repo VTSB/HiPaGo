@@ -56,21 +56,27 @@ const enqueued: { meta: unknown; opts: unknown }[] = [];
 let enqueueThrows = false;
 
 vi.mock('@/lib/db/download-queue', () => ({
-  dequeueNextQueued: vi.fn(async () => {
+  dequeueNextQueued: vi.fn(async (onlyGalleryId?: number) => {
     // Mirror the SQL `WHERE status = 'queued' ORDER BY queuePosition`: paused
     // items are NOT dequeued; lowest position runs next.
     const item = queue
       .slice()
       .sort((a, b) => (a.pos ?? a.id) - (b.pos ?? b.id))
-      .find((q) => !q.paused);
+      .find((q) => !q.paused && (onlyGalleryId === undefined || q.id === onlyGalleryId));
     if (!item) return null;
+    downloadRows.set(item.id, {
+      ...(downloadRows.get(item.id) ?? {}),
+      status: 'downloading',
+      pageCount: item.pageCount,
+      queuePosition: item.pos ?? item.id,
+    });
     return {
       galleryId: item.id,
       title: `G${item.id}`,
       thumbnail: '/tn',
       tags: '{}',
       pageCount: item.pageCount,
-      status: 'queued',
+      status: 'downloading',
       queuePosition: item.pos ?? item.id,
     };
   }),
@@ -78,6 +84,12 @@ vi.mock('@/lib/db/download-queue', () => ({
     removed.push(id);
     const idx = queue.findIndex((q) => q.id === id);
     if (idx >= 0) queue.splice(idx, 1);
+    const row = downloadRows.get(id);
+    if (row && (row.pageCount ?? 0) === 0 && row.status !== 'failed') {
+      downloadRows.delete(id);
+    } else if (row) {
+      downloadRows.set(id, { ...row, queuePosition: null });
+    }
   }),
   enqueueDownload: vi.fn(async (meta: unknown, opts: unknown) => {
     if (enqueueThrows) throw new Error('enqueue failed');
@@ -106,13 +118,17 @@ vi.mock('@/lib/db/download-queue', () => ({
     queue
       .slice()
       .sort((a, b) => (a.pos ?? a.id) - (b.pos ?? b.id))
+      .filter((q) => {
+        const status = downloadRows.get(q.id)?.status ?? (q.paused ? 'paused' : 'queued');
+        return status === 'queued' || status === 'paused';
+      })
       .map((q) => ({
         galleryId: q.id,
         title: `G${q.id}`,
         thumbnail: '/tn',
         tags: '{}',
         pageCount: q.pageCount,
-        status: q.paused ? 'paused' : 'queued',
+        status: downloadRows.get(q.id)?.status === 'paused' || q.paused ? 'paused' : 'queued',
         queuePosition: q.pos ?? q.id,
       })),
   ),
@@ -338,7 +354,9 @@ import {
 } from '../download-progress';
 import { DownloadWorker } from '@/lib/plugins/downloadWorker';
 import * as queueOps from '@/lib/db/download-queue';
+import * as downloadDb from '@/lib/db/download';
 import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
+import { useSettingsStore } from '@/lib/store/settings';
 
 beforeEach(async () => {
   queue.length = 0;
@@ -379,6 +397,7 @@ beforeEach(async () => {
     queue: [],
     globalPaused: false,
   });
+  useSettingsStore.setState({ locale: 'en' });
   // Clear the module-level globalPaused flag (queue is already empty, so this is
   // a pure reset — it kicks an empty processQueue which is a no-op).
   await useDownloadProgressStore.getState().resumeAll();
@@ -516,11 +535,15 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(upserted?.status).toBe('downloading');
     expect(upserted?.pageCount).toBe(1); // resolveGalleryDetail returns 1 file
     expect(upserted?.queuePosition).toBe(100);
+    expect(vi.mocked(downloadDb.upsertDownload).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(DownloadWorker.enqueue).mock.invocationCallOrder[0],
+    );
     expect(useDownloadProgressStore.getState().entries[100]?.progress?.total).toBe(1);
   });
 
   it('the work-order JSON carries pages with index/url/ext/relPath/headers', async () => {
     androidFlag = true;
+    useSettingsStore.setState({ locale: 'ko' });
     queue.push({ id: 200, pageCount: 0, pos: 7 });
     await processQueue();
 
@@ -528,6 +551,7 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(write).toBeTruthy();
     const order = JSON.parse(write!.json);
     expect(order.galleryId).toBe(200);
+    expect(order.locale).toBe('ko');
     expect(order.queuePosition).toBe(7);
     expect(order.pages).toHaveLength(1);
     const page = order.pages[0];
@@ -694,6 +718,55 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(useDownloadProgressStore.getState().entries[102]).toBeUndefined();
   });
 
+  it('cancel on Android finalizes instead of failing when native work already completed', async () => {
+    androidFlag = true;
+    manifestPages.set(105, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    downloadRows.set(105, { status: 'downloading', pageCount: 2 });
+    useDownloadProgressStore.setState({
+      entries: { 105: { progress: { current: 1, total: 2 }, error: null } },
+    });
+
+    useDownloadProgressStore.getState().cancel(105);
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(workerCancels).not.toContain('105');
+    expect(errorRows).not.toContainEqual({
+      galleryId: 105,
+      status: 'failed',
+      lastError: 'Cancelled',
+    });
+    expect(useDownloadProgressStore.getState().entries[105]).toBeUndefined();
+    expect(useDownloadProgressStore.getState().downloaded[105]).toBe(true);
+    expect(upsertedRows.at(-1)).toMatchObject({ galleryId: 105, status: 'complete' });
+  });
+
+  it('pause on Android finalizes instead of pausing when native work already completed', async () => {
+    androidFlag = true;
+    manifestPages.set(106, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    downloadRows.set(106, { status: 'downloading', pageCount: 2 });
+    useDownloadProgressStore.setState({
+      entries: { 106: { progress: { current: 1, total: 2 }, error: null } },
+    });
+
+    await useDownloadProgressStore.getState().pause(106);
+
+    expect(workerCancels).not.toContain('106');
+    expect(errorRows).not.toContainEqual({
+      galleryId: 106,
+      status: 'paused',
+      lastError: null,
+    });
+    expect(useDownloadProgressStore.getState().entries[106]).toBeUndefined();
+    expect(useDownloadProgressStore.getState().downloaded[106]).toBe(true);
+    expect(upsertedRows.at(-1)).toMatchObject({ galleryId: 106, status: 'complete' });
+  });
+
   it('keeps Android handed-off tracking when native cancel fails', async () => {
     androidFlag = true;
     workerCancelThrows.value = true;
@@ -828,6 +901,7 @@ describe('Android live-progress poller (AC-003)', () => {
         'Background download stopped before completion',
       );
       expect(useDownloadProgressStore.getState().entries[503]?.retryAt).toBe(scheduled[0].dueAt);
+      expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '503' });
       const callsAfterFailure = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
       await vi.advanceTimersByTimeAsync(3000);
       expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBe(callsAfterFailure);
@@ -860,6 +934,7 @@ describe('Android live-progress poller (AC-003)', () => {
       expect(useDownloadProgressStore.getState().entries[504]?.error).toBe(
         'Background download failed',
       );
+      expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '504' });
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -1196,7 +1271,7 @@ describe('iOS background backstop (Task D)', () => {
 
   it('iOS work-order JSON uses the numeric downloads/<id>/ layout (not HiPaGo/<id title>)', async () => {
     iosFlag = true;
-    queue.push({ id: 401, pageCount: 0 });
+    queue.push({ id: 401, pageCount: 0, pos: 7.5 });
     dl.mockResolvedValue(undefined);
 
     await processQueue();
@@ -1205,6 +1280,7 @@ describe('iOS background backstop (Task D)', () => {
     expect(write).toBeTruthy();
     const orderJson = JSON.parse(write!.json);
     expect(orderJson.galleryId).toBe(401);
+    expect(orderJson.queuePosition).toBe(7.5);
     expect(orderJson.folderName).toBe('401'); // numeric-only, no title
     expect(orderJson.pages).toHaveLength(1);
     const page = orderJson.pages[0];
@@ -1366,10 +1442,7 @@ describe('cancel (AC-005)', () => {
   it('cancel of a queued-but-not-started item removes it without aborting', async () => {
     queue.push({ id: 42, pageCount: 0 });
     // No active controller for 42 → cancel goes through removeFromQueue.
-    useDownloadProgressStore.getState().cancel(42);
-    // removeFromQueue is fire-and-forget; flush the microtask queue.
-    await Promise.resolve();
-    await Promise.resolve();
+    await useDownloadProgressStore.getState().cancel(42);
     expect(removed).toContain(42);
   });
 
@@ -1380,9 +1453,7 @@ describe('cancel (AC-005)', () => {
       entries: { 43: { progress: null, error: null, queued: true, position: 1 } },
     });
 
-    useDownloadProgressStore.getState().cancel(43);
-    await Promise.resolve();
-    await Promise.resolve();
+    await useDownloadProgressStore.getState().cancel(43);
 
     expect(workerCancels).toContain('43');
     expect(removed).toContain(43);
@@ -1727,6 +1798,119 @@ describe('queue actions (AC-001 / Task B)', () => {
     expect(queue.find((q) => q.id === 8)?.paused).toBe(true);
   });
 
+  it('cancel during the claimed-before-live gap prevents the download from starting', async () => {
+    queue.push({ id: 91, pageCount: 3 });
+    let releaseDetail!: () => void;
+    const detailGate = new Promise<void>((resolve) => {
+      releaseDetail = resolve;
+    });
+    vi.mocked(resolveGalleryDetail).mockImplementationOnce(async () => {
+      await detailGate;
+      return {
+        files: [
+          {
+            name: '91.webp',
+            hash: 'h',
+            width: 1,
+            height: 1,
+            haswebp: 1,
+            hasavif: 0,
+            hasavifsmalltn: 0,
+          },
+        ],
+      };
+    });
+
+    const run = processQueue();
+    await new Promise((r) => setTimeout(r, 1));
+    expect(useDownloadProgressStore.getState().entries[91]?.queued).toBe(true);
+
+    useDownloadProgressStore.getState().cancel(91);
+    releaseDetail();
+    await run;
+
+    expect(dl).not.toHaveBeenCalled();
+    expect(workerEnqueues).not.toContain('91');
+    expect(removed).toContain(91);
+    expect(errorRows).toContainEqual({ galleryId: 91, status: 'failed', lastError: 'Cancelled' });
+    expect(downloadRows.get(91)?.status).toBe('failed');
+    expect(useDownloadProgressStore.getState().entries[91]).toBeUndefined();
+  });
+
+  it('pause during the claimed-before-live gap parks the row instead of starting it', async () => {
+    queue.push({ id: 92, pageCount: 0, pos: 3 });
+    let releaseDetail!: () => void;
+    const detailGate = new Promise<void>((resolve) => {
+      releaseDetail = resolve;
+    });
+    vi.mocked(resolveGalleryDetail).mockImplementationOnce(async () => {
+      await detailGate;
+      return {
+        files: [
+          {
+            name: '92.webp',
+            hash: 'h',
+            width: 1,
+            height: 1,
+            haswebp: 1,
+            hasavif: 0,
+            hasavifsmalltn: 0,
+          },
+        ],
+      };
+    });
+
+    const run = processQueue();
+    await new Promise((r) => setTimeout(r, 1));
+    expect(useDownloadProgressStore.getState().entries[92]?.queued).toBe(true);
+
+    await useDownloadProgressStore.getState().pause(92);
+    releaseDetail();
+    await run;
+
+    expect(dl).not.toHaveBeenCalled();
+    expect(workerEnqueues).not.toContain('92');
+    expect(downloadRows.get(92)?.status).toBe('paused');
+    expect(useDownloadProgressStore.getState().entries[92]).toBeUndefined();
+  });
+
+  it('pauseAll during the claimed-before-live gap parks the row instead of starting it', async () => {
+    queue.push({ id: 93, pageCount: 0, pos: 4 });
+    let releaseDetail!: () => void;
+    const detailGate = new Promise<void>((resolve) => {
+      releaseDetail = resolve;
+    });
+    vi.mocked(resolveGalleryDetail).mockImplementationOnce(async () => {
+      await detailGate;
+      return {
+        files: [
+          {
+            name: '93.webp',
+            hash: 'h',
+            width: 1,
+            height: 1,
+            haswebp: 1,
+            hasavif: 0,
+            hasavifsmalltn: 0,
+          },
+        ],
+      };
+    });
+
+    const run = processQueue();
+    await new Promise((r) => setTimeout(r, 1));
+    expect(useDownloadProgressStore.getState().entries[93]?.queued).toBe(true);
+
+    await useDownloadProgressStore.getState().pauseAll();
+    releaseDetail();
+    await run;
+
+    expect(dl).not.toHaveBeenCalled();
+    expect(workerEnqueues).not.toContain('93');
+    expect(downloadRows.get(93)?.status).toBe('paused');
+    expect(useDownloadProgressStore.getState().entries[93]).toBeUndefined();
+  });
+
   it('pause(Android handed-off active) cancels native work and persists paused', async () => {
     androidFlag = true;
     downloadRows.set(88, { status: 'downloading', pageCount: 3, queuePosition: 2 });
@@ -1781,6 +1965,26 @@ describe('queue actions (AC-001 / Task B)', () => {
       current: 1,
       total: 3,
     });
+  });
+
+  it('pauseAll(Android handed-off active) finalizes completed native work instead of marking it paused', async () => {
+    androidFlag = true;
+    downloadRows.set(94, { status: 'downloading', pageCount: 2, queuePosition: 5 });
+    manifestPages.set(94, [
+      { index: 1, ext: 'webp' },
+      { index: 2, ext: 'webp' },
+    ]);
+    useDownloadProgressStore.setState({
+      entries: { 94: { progress: { current: 2, total: 2 }, error: null } },
+    });
+
+    await useDownloadProgressStore.getState().pauseAll();
+
+    expect(workerCancels).not.toContain('94');
+    expect(errorRows).not.toContainEqual({ galleryId: 94, status: 'paused', lastError: null });
+    expect(downloadRows.get(94)?.status).toBe('complete');
+    expect(useDownloadProgressStore.getState().downloaded[94]).toBe(true);
+    expect(useDownloadProgressStore.getState().entries[94]).toBeUndefined();
   });
 
   it('resume re-drives the processor and continues a paused item', async () => {
@@ -1883,6 +2087,30 @@ describe('reconcileQueue (AC-007)', () => {
     expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
       expect.objectContaining({ galleryId: 16 }),
       { keepRetryState: true, queuePosition: 4 },
+    );
+  });
+
+  it('re-enqueues a claimed-but-not-started row with pageCount 0', async () => {
+    adapterRows.push({
+      galleryId: 17,
+      title: 'Claimed',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 0,
+      status: 'downloading',
+      queuePosition: 2,
+      retryCount: 0,
+    });
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+    dl.mockResolvedValue(undefined);
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(vi.mocked(queueOps.enqueueDownload)).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 17 }),
+      { keepRetryState: true, queuePosition: 2 },
     );
   });
 

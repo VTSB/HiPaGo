@@ -74,10 +74,74 @@ function encodeManifest(exts: string[]): Uint8Array {
 /** Decode the per-page ext array from stored bytes. Returns [] on error. */
 function decodeManifest(bytes: Uint8Array): string[] {
   try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as string[];
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    if (!parsed.every((ext) => typeof ext === 'string' && ext.length > 0)) return [];
+    return parsed;
   } catch {
     return [];
   }
+}
+
+const DOWNLOAD_CHECKPOINT_PAGE_INTERVAL = 10;
+const ZIP_EXPORT_READ_CONCURRENCY = 8;
+
+function shouldWriteDownloadCheckpoint(pageCount: number, total: number): boolean {
+  return (
+    pageCount === 1 ||
+    pageCount >= total ||
+    pageCount % DOWNLOAD_CHECKPOINT_PAGE_INTERVAL === 0
+  );
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+}
+
+async function storedPageSize(
+  store: Awaited<ReturnType<typeof createDownloadStore>>,
+  galleryId: number,
+  index: number,
+  ext: string,
+  options: DownloadStoreLookupOptions,
+): Promise<number> {
+  const size = store.imageSize
+    ? await store.imageSize(galleryId, index, ext, options)
+    : null;
+  if (size !== null) return size;
+  const bytes = await store.getImage(galleryId, index, ext, options).catch(() => null);
+  return bytes?.byteLength ?? 0;
+}
+
+async function manifestBackedGallerySize(
+  store: Awaited<ReturnType<typeof createDownloadStore>>,
+  galleryId: number,
+  exts: string[],
+  options: DownloadStoreLookupOptions,
+): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < exts.length; i++) {
+    total += await storedPageSize(store, galleryId, i, exts[i], options);
+  }
+  return total;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 // ── Fetch with retry/backoff (mirrors tag-fetcher.ts HttpFetcher) ─────────────
@@ -232,7 +296,8 @@ export async function getDownloadedImage(
   const exts = decodeManifest(manifestBytes);
   const ext = exts[index];
   if (!ext) return null;
-  return store.getImage(galleryId, index, ext, options);
+  const bytes = await store.getImage(galleryId, index, ext, options);
+  return bytes && bytes.byteLength > 0 ? bytes : null;
 }
 
 /**
@@ -309,8 +374,9 @@ export async function downloadGalleryToLibrary(
   const total = files.length;
   const now = new Date().toISOString();
 
-  // Compute the folder name (pure string, safe on all platforms).
-  const folderName = galleryFolderName(galleryId, title);
+  const existingRow = await getDownload(galleryId).catch(() => null);
+  const folderName = existingRow?.folderName ?? galleryFolderName(galleryId, title);
+  const lookup = { folderName };
 
   const store = await createDownloadStore();
 
@@ -322,7 +388,7 @@ export async function downloadGalleryToLibrary(
   }
 
   // Prepare the gallery folder in public storage if the adapter supports it.
-  if (store.ensureGallery) {
+  if (store.ensureGallery && !existingRow?.folderName) {
     await store.ensureGallery(galleryId, title);
   }
 
@@ -340,7 +406,7 @@ export async function downloadGalleryToLibrary(
   const pageExts: string[] = [];
   let totalBytes = 0;
   let rowCreated = false;
-  const existingRow = await getDownload(galleryId).catch(() => null);
+  let resumeManifestNeedsExtension = false;
   if (existingRow?.status === 'downloading' && existingRow.pageCount >= total) {
     rowCreated = true;
     totalBytes = existingRow.totalBytes ?? 0;
@@ -353,17 +419,26 @@ export async function downloadGalleryToLibrary(
   let manifestExts: string[] = [];
   if (opts?.resume) {
     try {
-      const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+      const manifestBytes = await store.getImage(
+        galleryId,
+        MANIFEST_INDEX,
+        MANIFEST_EXT,
+        lookup,
+      );
       if (manifestBytes) manifestExts = decodeManifest(manifestBytes);
     } catch {
       // No manifest / unreadable — manifestExts stays empty (full re-download).
     }
     if (manifestExts.length > 0) {
       // A row already exists from the prior attempt. Flip it back to
-      // 'downloading' and clear the stale error; seed totalBytes from disk so
-      // skipped (already-present) pages keep contributing to the size stat.
+      // 'downloading' and clear the stale error; seed totalBytes only from
+      // manifest-backed pages. Checkpointed downloads may leave newer tail
+      // files on disk that are not in the manifest yet; those pages will be
+      // re-fetched and must not be counted twice.
       rowCreated = true;
-      totalBytes = await store.gallerySize(galleryId).catch(() => 0);
+      totalBytes = await manifestBackedGallerySize(store, galleryId, manifestExts, lookup).catch(
+        () => 0,
+      );
       await setDownloadError(galleryId, 'downloading', null);
     }
   }
@@ -371,13 +446,13 @@ export async function downloadGalleryToLibrary(
   // Probe whether a page already exists on disk: prefer the cheap
   // store.imageExists (stat, size>0) and fall back to reading the bytes.
   const pageIsPresent = async (index: number, ext: string): Promise<boolean> => {
-    if (store.imageExists) return store.imageExists(galleryId, index, ext);
-    return (await store.getImage(galleryId, index, ext).catch(() => null)) !== null;
+    if (store.imageExists) return store.imageExists(galleryId, index, ext, lookup);
+    return (await store.getImage(galleryId, index, ext, lookup).catch(() => null)) !== null;
   };
 
   try {
     for (let i = 0; i < total; i++) {
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      throwIfAborted(signal);
 
       // ── Resume: skip a page already present on disk ──────────────────────────
       // Only checkable when the manifest knows this index's ext; an unknown ext
@@ -389,10 +464,20 @@ export async function downloadGalleryToLibrary(
           // disk-seeded totalBytes (rowCreated is true whenever a manifest
           // existed, which is the only way knownExt is set). Skip the network.
           pageExts.push(knownExt);
-          // Keep the on-disk manifest in step with the verified set, so an
-          // interruption right after a refetched gap (which truncates the
-          // manifest to its own index) does not drop the trailing exts.
-          await store.putImage(galleryId, MANIFEST_INDEX, encodeManifest(pageExts), MANIFEST_EXT);
+          // A fully-present resume already has a complete manifest, so avoid
+          // rewriting it for every skipped page. Once a missing gap was
+          // refetched, though, the manifest was truncated to that index; extend
+          // it over subsequent verified skipped pages so an interruption does
+          // not drop their exts.
+          if (resumeManifestNeedsExtension) {
+            await store.putImage(
+              galleryId,
+              MANIFEST_INDEX,
+              encodeManifest(pageExts),
+              MANIFEST_EXT,
+              lookup,
+            );
+          }
           onProgress?.({ current: i + 1, total });
           continue;
         }
@@ -415,7 +500,9 @@ export async function downloadGalleryToLibrary(
         const cachedPath = await imageCache.cachedFilePath(url).catch(() => null);
         if (cachedPath) {
           try {
-            const size = await store.putImageFromFile(galleryId, i, cachedPath, urlExt);
+            throwIfAborted(signal);
+            const size = await store.putImageFromFile(galleryId, i, cachedPath, urlExt, lookup);
+            throwIfAborted(signal);
             pageExts.push(urlExt);
             totalBytes += size;
             pageWritten = true;
@@ -428,17 +515,35 @@ export async function downloadGalleryToLibrary(
       // ── Network fetch path ───────────────────────────────────────────────────
       if (!pageWritten) {
         const res = await fetchWithRetry(url, signal);
+        throwIfAborted(signal);
         const buf = await res.arrayBuffer();
+        throwIfAborted(signal);
         const ext = deriveExt(res, file);
         const bytes = new Uint8Array(buf);
 
-        await store.putImage(galleryId, i, bytes, ext);
+        await store.putImage(galleryId, i, bytes, ext, lookup);
+        throwIfAborted(signal);
         pageExts.push(ext);
         totalBytes += bytes.byteLength;
       }
 
-      // ── Incremental manifest write ───────────────────────────────────────────
-      await store.putImage(galleryId, MANIFEST_INDEX, encodeManifest(pageExts), MANIFEST_EXT);
+      // ── Checkpoint manifest write ────────────────────────────────────────────
+      // Writing the growing manifest after every page is expensive on Web OPFS /
+      // IndexedDB and Android public storage. Checkpoints keep resume bounded:
+      // an interruption can lose only the unmanifested tail, which is safely
+      // re-fetched on the next resume.
+      const pageCount = i + 1;
+      const wroteManifest = shouldWriteDownloadCheckpoint(pageCount, total);
+      if (wroteManifest) {
+        await store.putImage(
+          galleryId,
+          MANIFEST_INDEX,
+          encodeManifest(pageExts),
+          MANIFEST_EXT,
+          lookup,
+        );
+      }
+      if (opts?.resume) resumeManifestNeedsExtension = !wroteManifest;
 
       // ── DB row management ────────────────────────────────────────────────────
       if (!rowCreated) {
@@ -458,7 +563,9 @@ export async function downloadGalleryToLibrary(
         });
         rowCreated = true;
       } else {
-        await updateDownloadProgress(galleryId, i + 1, totalBytes);
+        await updateDownloadProgress(galleryId, pageCount, totalBytes, {
+          persist: shouldWriteDownloadCheckpoint(pageCount, total),
+        });
       }
 
       onProgress?.({ current: i + 1, total });
@@ -542,25 +649,37 @@ export async function downloadGalleryToLibrary(
  */
 export async function exportGalleryZip(galleryId: number, title: string): Promise<void> {
   const store = await createDownloadStore();
+  const row = await getDownload(galleryId).catch(() => null);
+  const options: DownloadStoreLookupOptions = { folderName: row?.folderName ?? null };
 
   // Load the manifest to know how many pages and their exts.
-  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+  const manifestBytes = await store.getImage(
+    galleryId,
+    MANIFEST_INDEX,
+    MANIFEST_EXT,
+    options,
+  );
   if (!manifestBytes) {
     throw new Error(`No manifest found for gallery ${galleryId}. Is it fully downloaded?`);
   }
   const exts = decodeManifest(manifestBytes);
+  if (exts.length === 0) {
+    throw new Error(`Downloaded manifest for gallery ${galleryId} is empty or corrupt`);
+  }
 
-  const entries: Record<string, Uint8Array> = {};
-  for (let i = 0; i < exts.length; i++) {
-    const ext = exts[i];
-    const bytes = await store.getImage(galleryId, i, ext);
-    if (bytes) {
-      // Use the same zero-padded name that the store used, e.g. "0001.webp"
-      const name = String(i + 1).padStart(4, '0') + '.' + ext;
-      entries[name] = bytes;
-    } else {
+  const pages = await mapWithConcurrency(exts, ZIP_EXPORT_READ_CONCURRENCY, async (ext, i) => {
+    const bytes = await store.getImage(galleryId, i, ext, options);
+    if (!bytes || bytes.byteLength === 0) {
       throw new Error(`Missing downloaded page ${i + 1} for gallery ${galleryId}`);
     }
+    return { index: i, ext, bytes };
+  });
+
+  const entries: Record<string, Uint8Array> = {};
+  for (const page of pages) {
+    // Use the same zero-padded name that the store used, e.g. "0001.webp"
+    const name = String(page.index + 1).padStart(4, '0') + '.' + page.ext;
+    entries[name] = page.bytes;
   }
 
   const zipped = zipSync(entries, { level: 0 });

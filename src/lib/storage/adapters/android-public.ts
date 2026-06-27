@@ -154,9 +154,15 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── putImage ───────────────────────────────────────────────────────────────
 
-  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
+  async putImage(
+    galleryId: number,
+    index: number,
+    bytes: Uint8Array,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<void> {
     const libDir = await ensureLibraryDir();
-    let folder = await this.resolveFolder(galleryId);
+    let folder = await this.resolveFolder(galleryId, options);
     if (!folder) {
       // No title available here — create a bare numeric folder as last resort.
       folder = String(galleryId);
@@ -174,9 +180,10 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     index: number,
     srcPath: string,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<number> {
     const libDir = await ensureLibraryDir();
-    let folder = await this.resolveFolder(galleryId);
+    let folder = await this.resolveFolder(galleryId, options);
     if (!folder) {
       folder = String(galleryId);
       await PublicLibrary.mkdir({ path: `${libDir}/${folder}` });

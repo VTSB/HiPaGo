@@ -48,6 +48,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
 }
 
+function progressPercent(progress: DownloadProgress): number {
+  if (progress.total <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((progress.current / progress.total) * 100)));
+}
+
 // ---------------------------------------------------------------------------
 // Cover status badge — a small overlay on the card cover (not a button row).
 // Only downloading/failed surface a badge; a complete card stays clean.
@@ -292,11 +297,7 @@ function LibraryCard({
   }, [tagEntries]);
 
   const progressLabel = retryProgress
-    ? `${retryProgress.current}/${retryProgress.total} · ${
-        retryProgress.total > 0
-          ? Math.round((retryProgress.current / retryProgress.total) * 100)
-          : 0
-      }%`
+    ? `${retryProgress.current}/${retryProgress.total} · ${progressPercent(retryProgress)}%`
     : null;
   const rememberCurrentListUrl = useCallback(() => {
     try {
@@ -488,6 +489,8 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
   const storeEntries = useDownloadProgressStore((s) => s.entries);
+  const downloadedFlags = useDownloadProgressStore((s) => s.downloaded);
+  const hasQueuedWork = useDownloadProgressStore((s) => s.queue.length > 0);
   const refreshQueue = useDownloadProgressStore((s) => s.refreshQueue);
 
   const handleQueryChange = useCallback((v: string) => {
@@ -621,9 +624,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
       try {
         const liveEntry = useDownloadProgressStore.getState().entries[galleryId];
         if (item.status === 'downloading' || !!liveEntry?.progress) {
-          useDownloadProgressStore.getState().cancel(galleryId);
+          await useDownloadProgressStore.getState().cancel(galleryId);
         }
-        if (item.status === 'failed' && item.nextRetryAt) {
+        if (item.status === 'failed' && (item.nextRetryAt || liveEntry?.retryAt)) {
           await clearAutoRetry(galleryId).catch(() => {});
           useDownloadProgressStore.getState().clearRetryPending(galleryId);
         }
@@ -704,6 +707,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   );
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);
+  const showQueueOnly = !hasQuery && totalCount === 0 && hasQueuedWork;
 
   return (
     <>
@@ -749,7 +753,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         <div className="flex justify-center py-12">
           <Spinner size="md" />
         </div>
-      ) : totalCount === 0 ? (
+      ) : totalCount === 0 && !showQueueOnly ? (
         <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -778,11 +782,16 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
             </Link>
           )}
         </div>
-      ) : (
+      ) : showQueueOnly ? null : (
         <div className={GRID_CLASS}>
           {visibleItems.map((item) => {
             const entry = storeEntries[item.galleryId];
-            const isRetrying = !!entry?.progress;
+            const progress = entry?.progress ?? null;
+            const activeRedownload =
+              item.status === 'complete' && downloadedFlags[item.galleryId] === false;
+            const staleCompleteProgress =
+              item.status === 'complete' && !activeRedownload;
+            const isRetrying = !!progress && !staleCompleteProgress;
             return (
               <LibraryCard
                 key={item.galleryId}
@@ -792,7 +801,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 onExport={handleExport}
                 onRetry={handleRetry}
                 isRetrying={isRetrying}
-                retryProgress={entry?.progress ?? null}
+                retryProgress={isRetrying ? progress : null}
                 retryOverride={
                   entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
                 }

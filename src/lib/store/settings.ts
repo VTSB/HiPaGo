@@ -14,7 +14,7 @@ interface SettingsStoreState {
   blurTags: string[];
   /** Search-query syntax applied to every list/search result set. */
   defaultFilterQuery: string;
-  /** Android-only: block screenshots, screen recording, and recent-app previews. */
+  /** Android-only: hide app content from recent-app previews. */
   secureScreen: boolean;
   /** Mobile library hub tab to open when /library has no explicit tab query. */
   libraryInitialTab: LibraryInitialTab;
@@ -107,8 +107,8 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version < 5 && s.defaultFilterQuery === undefined) {
     s = { ...s, defaultFilterQuery: '' };
   }
-  // v6: Android screenshot/recent-app preview protection. Default enabled for
-  // existing users as well, so the secure-screen protection applies by default.
+  // v6: Android recent-app preview protection. Default enabled for existing
+  // users as well, so the secure-screen protection applies by default.
   if (version < 6 && s.secureScreen === undefined) {
     s = { ...s, secureScreen: true };
   }
