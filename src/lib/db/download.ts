@@ -96,13 +96,14 @@ export async function updateDownloadProgress(
   galleryId: number,
   pageCount: number,
   totalBytes: number,
+  options: { persist?: boolean } = {},
 ): Promise<void> {
   const db = await ensureDb();
   await db.execute(
     'UPDATE download SET pageCount = MAX(pageCount, ?), totalBytes = ? WHERE galleryId = ?',
     [pageCount, totalBytes, galleryId],
   );
-  await persistDb();
+  if (options.persist ?? true) await persistDb();
 }
 
 /**

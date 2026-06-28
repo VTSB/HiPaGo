@@ -1680,6 +1680,49 @@ describe('auto-retry scheduler timer (AC-004)', () => {
 });
 
 describe('queue actions (AC-001 / Task B)', () => {
+  it('ignores a stale refreshQueue result after a completed active entry is cleared', async () => {
+    let getDownloadCalled!: () => void;
+    const getDownloadStarted = new Promise<void>((resolve) => {
+      getDownloadCalled = resolve;
+    });
+    let releaseGetDownload!: () => void;
+    const getDownloadGate = new Promise<void>((resolve) => {
+      releaseGetDownload = resolve;
+    });
+    vi.mocked(downloadDb.getDownload).mockImplementationOnce(async (id: number) => {
+      getDownloadCalled();
+      await getDownloadGate;
+      return {
+        galleryId: id,
+        title: `G${id}`,
+        thumbnail: '/tn',
+        tags: '{}',
+        pageCount: 1,
+        totalBytes: 0,
+        downloadedAt: '',
+        status: 'downloading',
+        folderName: null,
+        lastError: null,
+        retryCount: 0,
+        queuePosition: null,
+      };
+    });
+
+    useDownloadProgressStore.setState({
+      entries: { 70: { progress: { current: 1, total: 1 }, error: null } },
+      queue: [],
+    });
+    const staleRefresh = useDownloadProgressStore.getState().refreshQueue();
+    await getDownloadStarted;
+
+    useDownloadProgressStore.setState({ entries: {}, queue: [] });
+    await useDownloadProgressStore.getState().refreshQueue();
+    releaseGetDownload();
+    await staleRefresh;
+
+    expect(useDownloadProgressStore.getState().queue).toEqual([]);
+  });
+
   it('manual start processes only the tapped gallery and leaves stale queued work parked', async () => {
     queue.push({ id: 80, pageCount: 0, pos: 5 });
     const order: number[] = [];
@@ -1818,7 +1861,7 @@ describe('queue actions (AC-001 / Task B)', () => {
             hasavifsmalltn: 0,
           },
         ],
-      };
+      } as Awaited<ReturnType<typeof resolveGalleryDetail>>;
     });
 
     const run = processQueue();
@@ -1857,7 +1900,7 @@ describe('queue actions (AC-001 / Task B)', () => {
             hasavifsmalltn: 0,
           },
         ],
-      };
+      } as Awaited<ReturnType<typeof resolveGalleryDetail>>;
     });
 
     const run = processQueue();
@@ -1894,7 +1937,7 @@ describe('queue actions (AC-001 / Task B)', () => {
             hasavifsmalltn: 0,
           },
         ],
-      };
+      } as Awaited<ReturnType<typeof resolveGalleryDetail>>;
     });
 
     const run = processQueue();
