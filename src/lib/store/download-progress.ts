@@ -45,6 +45,9 @@ import type { DownloadStatus } from '@/lib/db/schema';
 interface DownloadEntry {
   progress: DownloadProgress | null;
   error: string | null;
+  /** Best-effort gallery metadata used while composing the live queue row. */
+  title?: string;
+  thumbnail?: string;
   /** True while the gallery is queued but its active run has not started yet. */
   queued?: boolean;
   /** The gallery's position in the queue while queued (null once it starts). */
@@ -145,6 +148,7 @@ const fileCache = new Map<number, { files: GalleryFile[]; tags: Record<string, s
 // async DB read — that would be a read-then-write race (PLAN decision 6).
 let running = false;
 const pendingManualKicks = new Set<number>();
+let refreshQueueRunSeq = 0;
 
 // Module-level global-pause flag. Read synchronously at the top of the processor
 // loop so a pauseAll() stops auto-advance immediately (the store's reactive
@@ -1041,6 +1045,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
   // 'downloading', so they are absent from listQueue and are prepended from the
   // live entries.
   const refreshQueue = async () => {
+    const runSeq = ++refreshQueueRunSeq;
     let rows: Awaited<ReturnType<typeof listQueue>>;
     try {
       rows = await listQueue();
@@ -1078,6 +1083,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         };
       }),
     );
+    if (runSeq !== refreshQueueRunSeq) return;
     const activeIdSet = new Set(activeIds);
     const queue: QueueItem[] = [...activeItems, ...pending.filter((p) => !activeIdSet.has(p.id))];
     set({ queue });

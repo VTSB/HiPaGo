@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { DBDownload } from '@/lib/db/schema';
+import type { QueueItem } from '@/lib/store/download-progress';
 
 // Stub matchMedia (jsdom doesn't ship it) so the useIsMobile branch in the new
 // LibraryHub wrapper resolves deterministically to "desktop" — on desktop the
@@ -55,7 +56,7 @@ const mockRetryOps = vi.hoisted(() => ({
 const mockDownloadProgressState = vi.hoisted(() => ({
   entries: {},
   downloaded: {},
-  queue: [],
+  queue: [] as QueueItem[],
   globalPaused: false,
   start: vi.fn(async () => {}),
   cancel: vi.fn(),
@@ -75,7 +76,9 @@ const mockCreateDownloadStore = vi.fn();
 const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
 const mockHasCompleteDownloadedGallery =
   vi.fn<(galleryId: number, expectedPageCount: number) => Promise<boolean>>();
-const mockProcessQueue = vi.fn(async (_opts?: { onlyGalleryId?: number }) => {});
+const mockProcessQueue = vi
+  .fn<(opts?: { onlyGalleryId?: number }) => Promise<void>>()
+  .mockResolvedValue(undefined);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockNavigation.replace }),

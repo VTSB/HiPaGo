@@ -100,6 +100,17 @@ export interface DownloadStore {
   ): Promise<boolean>;
 
   /**
+   * Cheap size lookup for a stored page. Optional: adapters that omit it force
+   * callers to fall back to reading the image bytes.
+   */
+  imageSize?(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<number | null>;
+
+  /**
    * A WebView-loadable URL (convertFileSrc) for the gallery's first downloaded
    * page, to use as an offline cover — no image bytes pass through the JS heap.
    * Returns null when nothing is downloaded. Optional: adapters without a native
