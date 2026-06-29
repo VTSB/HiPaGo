@@ -29,6 +29,28 @@ describe('TagChip', () => {
     expect(screen.getByText('big breasts ♀')).toBeInTheDocument();
   });
 
+  it('keeps regular chips on one line by default', () => {
+    render(<TagChip tag="big breasts" type={TagType.FEMALE} linked={false} />);
+
+    expect(screen.getByText('big breasts ♀')).toHaveClass('whitespace-nowrap');
+  });
+
+  it('can wrap long labels inside constrained suggestion rows', () => {
+    render(
+      <TagChip
+        tag="love live! nijigasaki high school idol club"
+        type={TagType.SERIES}
+        displayName="러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회"
+        linked={false}
+        wrap
+      />,
+    );
+
+    const chip = screen.getByText('러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회');
+    expect(chip).toHaveClass('min-w-0', 'max-w-full', 'whitespace-normal', 'break-words');
+    expect(chip).toHaveStyle({ overflowWrap: 'anywhere' });
+  });
+
   it('renders the Korean tag name when Korean locale translations are loaded', () => {
     useSettingsStore.setState({ locale: 'ko' });
     useTagI18nStore.setState({

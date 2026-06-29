@@ -29,6 +29,12 @@
 .DS_Store
 *.pem
 
+# IDE local state
+/.idea/caches/
+/android/.idea/caches/
+/android/.idea/deviceManager.xml
+/android/.idea/runConfigurations.xml
+
 # debug
 npm-debug.log*
 yarn-debug.log*
