@@ -191,6 +191,16 @@ describe('listQueue + dequeueNextQueued', () => {
     expect((await getDownload(1))!.status).toBe('downloading');
   });
 
+  it('excludes queued rows whose queuePosition was cleared', async () => {
+    await upsertDownload(makeRow({ galleryId: 1, status: 'queued', queuePosition: null }));
+    await upsertDownload(makeRow({ galleryId: 2, status: 'queued', queuePosition: 3 }));
+    await upsertDownload(makeRow({ galleryId: 3, status: 'paused', queuePosition: 2 }));
+
+    const q = await listQueue();
+    expect(q.map((r) => r.galleryId)).toEqual([3, 2]);
+    expect((await dequeueNextQueued())!.galleryId).toBe(2);
+  });
+
   it('dequeueNextQueued returns null when nothing is queued', async () => {
     await enqueueDownload(meta(1));
     await pauseQueued(1);
