@@ -21,6 +21,7 @@
  *   --batch <batchId>    Batch ID (for save-translations, save-verdicts)
  *   --input <json>       JSON string or @file path
  *   --fresh              Delete existing batches and start fresh (for analyze)
+ *   --use-stale-cache    Reuse _tagcache.json even when older than 24h (for analyze)
  */
 
 import path from 'path';
@@ -132,6 +133,7 @@ async function main() {
       }
       const fresh = flags['fresh'] === 'true';
       const refreshTags = flags['refresh-tags'] === 'true';
+      const useStaleCache = flags['use-stale-cache'] === 'true';
       const categoryFilter = flags['category'];
       const includeFailed = flags['include-failed'] === 'true';
 
@@ -152,9 +154,10 @@ async function main() {
       }
       const cacheFresh = cached && Date.now() - new Date(cached.fetchedAt).getTime() < TTL_MS;
 
-      if (cacheFresh) {
+      if (cached && (cacheFresh || useStaleCache)) {
         tags = cached!.tags;
-        console.error(`[analyze] Using cached tag list (${tags.length} tags, fetched ${cached!.fetchedAt}). Use --refresh-tags to re-crawl.`);
+        const staleNote = cacheFresh ? '' : ' (stale cache forced by --use-stale-cache)';
+        console.error(`[analyze] Using cached tag list (${tags.length} tags, fetched ${cached!.fetchedAt})${staleNote}. Use --refresh-tags to re-crawl.`);
       } else {
         console.error(`[analyze] Crawling tags for lang=${lang}...`);
         // Fail-closed: a crawl failure for either source mode aborts. Validate
@@ -329,7 +332,7 @@ async function main() {
       console.error('Usage: pnpm translate-tags <subcommand> [flags]');
       console.error('');
       console.error('Subcommands:');
-      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--category <cat>] [--fresh] [--refresh-tags] [--include-failed]');
+      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--category <cat>] [--fresh] [--refresh-tags] [--use-stale-cache] [--include-failed]');
       console.error('  get-batch           --lang ko --id <batchId>');
       console.error('  save-translations   --lang ko --batch <batchId> --input \'{"translations":[...]}\'');
       console.error('  save-verdicts       --lang ko --batch <batchId> --input \'{"verdicts":[...]}\'');
