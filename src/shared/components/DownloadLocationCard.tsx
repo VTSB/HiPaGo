@@ -14,11 +14,12 @@
  * Visibility: rendered only on Android (isAndroid()); returns null elsewhere.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { isAndroid } from '@/lib/utils/platform';
 import { PublicLibrary } from '@/lib/plugins/publicLibrary';
+import { notifyDownloadLibraryChanged } from '@/lib/store/download-progress';
 
 export function DownloadLocationCard() {
   const t = useT();
@@ -26,6 +27,29 @@ export function DownloadLocationCard() {
   const treeUri = useSettingsStore((s) => s.downloadTreeUri);
   const setDownloadTree = useSettingsStore((s) => s.setDownloadTree);
   const [busy, setBusy] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+
+  const scanExistingDownloads = useCallback(
+    async (showEmpty = true) => {
+      setScanMessage(null);
+      try {
+        const { restoreDownloadsFromPublicFolder } =
+          await import('@/lib/storage/migrate-downloads');
+        const result = await restoreDownloadsFromPublicFolder();
+        if (result.imported > 0) {
+          notifyDownloadLibraryChanged(true);
+          setScanMessage(
+            t('settings.downloadLocation.restoreDone').replace('{count}', String(result.imported)),
+          );
+        } else if (showEmpty) {
+          setScanMessage(t('settings.downloadLocation.restoreNone'));
+        }
+      } catch {
+        setScanMessage(t('settings.downloadLocation.restoreFailed'));
+      }
+    },
+    [t],
+  );
 
   // Reconcile the settings mirror with the native persisted tree on mount —
   // the grant can be lost (folder deleted, app data cleared) outside the app.
@@ -58,8 +82,18 @@ export function DownloadLocationCard() {
     try {
       const { treeUri: uri, displayName } = await PublicLibrary.openDocumentTree();
       setDownloadTree(uri, displayName);
+      await scanExistingDownloads(false);
     } catch {
       // User cancelled the picker — leave the current selection untouched.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleScan = async () => {
+    setBusy(true);
+    try {
+      await scanExistingDownloads(true);
     } finally {
       setBusy(false);
     }
@@ -109,16 +143,33 @@ export function DownloadLocationCard() {
           </button>
 
           {selected && (
-            <button
-              type="button"
-              onClick={handleClear}
-              disabled={busy}
-              className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors active:bg-zinc-100 disabled:opacity-40 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-            >
-              {t('settings.downloadLocation.clear')}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleScan}
+                disabled={busy}
+                className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors active:bg-zinc-100 disabled:opacity-40 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+              >
+                {busy
+                  ? t('settings.downloadLocation.scanning')
+                  : t('settings.downloadLocation.restore')}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClear}
+                disabled={busy}
+                className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors active:bg-zinc-100 disabled:opacity-40 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+              >
+                {t('settings.downloadLocation.clear')}
+              </button>
+            </>
           )}
         </div>
+
+        {scanMessage && (
+          <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">{scanMessage}</p>
+        )}
 
         {!selected && (
           <p className="mt-3 text-xs text-zinc-400 dark:text-zinc-500">

@@ -239,6 +239,24 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     }
   }
 
+  async imageSize(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<number | null> {
+    const folder = await this.resolveFolder(galleryId, options);
+    if (!folder) return null;
+    const libDir = await resolveLibraryDir();
+    const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
+    try {
+      const { exists, size } = await PublicLibrary.stat({ path: filePath });
+      return exists && (size ?? 0) > 0 ? (size ?? 0) : null;
+    } catch {
+      return null;
+    }
+  }
+
   // ── coverUrl ──────────────────────────────────────────────────────────────
 
   async coverUrl(galleryId: number, options?: DownloadStoreLookupOptions): Promise<string | null> {
@@ -280,6 +298,28 @@ export class AndroidPublicDownloadStore implements DownloadStore {
         if (!isNaN(id)) ids.push(id);
       }
       return ids;
+    } catch {
+      return [];
+    }
+  }
+
+  async listGalleryFolders(): Promise<{ galleryId: number; folderName: string; title: string }[]> {
+    const libDir = await resolveLibraryDir();
+    try {
+      const { files } = await PublicLibrary.readdir({ path: libDir });
+      const folders: { galleryId: number; folderName: string; title: string }[] = [];
+      for (const entry of files) {
+        const name = entry.name;
+        if (name === '.nomedia') continue;
+        const match = /^(\d+)(?:\s+(.*))?$/.exec(name);
+        if (!match) continue;
+        const galleryId = Number(match[1]);
+        if (!Number.isSafeInteger(galleryId) || galleryId <= 0) continue;
+        const title = match[2]?.trim() || `Gallery ${galleryId}`;
+        folders.push({ galleryId, folderName: name, title });
+        this.folderCache.set(galleryId, name);
+      }
+      return folders;
     } catch {
       return [];
     }

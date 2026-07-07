@@ -10,7 +10,7 @@
  *  - mount reconciles the settings mirror with the native persisted tree
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // ── Platform mock — controlled per test ─────────────────────────────────────
@@ -27,6 +27,15 @@ const pub = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/plugins/publicLibrary', () => ({ PublicLibrary: pub }));
 
+const restoreMock = vi.hoisted(() => vi.fn());
+const notifyMock = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/storage/migrate-downloads', () => ({
+  restoreDownloadsFromPublicFolder: restoreMock,
+}));
+vi.mock('@/lib/store/download-progress', () => ({
+  notifyDownloadLibraryChanged: notifyMock,
+}));
+
 // ── i18n passthrough — echo keys ────────────────────────────────────────────
 vi.mock('@/lib/i18n/useT', () => ({ useT: () => (k: string) => k }));
 
@@ -38,6 +47,8 @@ beforeEach(() => {
   pub.getTree.mockReset().mockResolvedValue({ treeUri: null, displayName: null, valid: false });
   pub.openDocumentTree.mockReset();
   pub.clearTree.mockReset().mockResolvedValue(undefined);
+  restoreMock.mockReset().mockResolvedValue({ imported: 0, skipped: 0, failed: 0 });
+  notifyMock.mockReset();
   useSettingsStore.getState().setDownloadTree(null, null);
 });
 
@@ -68,7 +79,10 @@ describe('DownloadLocationCard (SAF)', () => {
 
   it('picking a folder stores tree + name and shows change/clear', async () => {
     _isAndroid = true;
-    pub.openDocumentTree.mockResolvedValue({ treeUri: 'content://tree/abc', displayName: 'MyDownloads' });
+    pub.openDocumentTree.mockResolvedValue({
+      treeUri: 'content://tree/abc',
+      displayName: 'MyDownloads',
+    });
     await mount();
     const pick = screen.getByText('settings.downloadLocation.select');
     await act(async () => {
@@ -80,12 +94,60 @@ describe('DownloadLocationCard (SAF)', () => {
     expect(useSettingsStore.getState().downloadTreeName).toBe('MyDownloads');
     expect(screen.getByText('MyDownloads')).toBeTruthy();
     expect(screen.getByText('settings.downloadLocation.change')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('settings.downloadLocation.restore')).toBeTruthy());
     expect(screen.getByText('settings.downloadLocation.clear')).toBeTruthy();
+    expect(restoreMock).toHaveBeenCalled();
+  });
+
+  it('shows imported count and notifies the library after manually scanning existing downloads', async () => {
+    _isAndroid = true;
+    pub.getTree.mockResolvedValue({
+      treeUri: 'content://tree/abc',
+      displayName: 'MyDownloads',
+      valid: true,
+    });
+    await mount();
+    restoreMock.mockResolvedValueOnce({ imported: 2, skipped: 0, failed: 0 });
+    const scan = screen.getByText('settings.downloadLocation.restore');
+
+    await act(async () => {
+      fireEvent.click(scan);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(notifyMock).toHaveBeenCalledWith(true));
+    expect(screen.getByText('settings.downloadLocation.restoreDone')).toBeTruthy();
+  });
+
+  it('manual scan reports when there is nothing to restore', async () => {
+    _isAndroid = true;
+    pub.getTree.mockResolvedValue({
+      treeUri: 'content://tree/abc',
+      displayName: 'MyDownloads',
+      valid: true,
+    });
+    await mount();
+    restoreMock.mockClear();
+    const scan = screen.getByText('settings.downloadLocation.restore');
+
+    await act(async () => {
+      fireEvent.click(scan);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(restoreMock).toHaveBeenCalled());
+    expect(screen.getByText('settings.downloadLocation.restoreNone')).toBeTruthy();
   });
 
   it('clear releases the tree and resets the mirror', async () => {
     _isAndroid = true;
-    pub.getTree.mockResolvedValue({ treeUri: 'content://tree/abc', displayName: 'MyDownloads', valid: true });
+    pub.getTree.mockResolvedValue({
+      treeUri: 'content://tree/abc',
+      displayName: 'MyDownloads',
+      valid: true,
+    });
     await mount();
     expect(useSettingsStore.getState().downloadTreeUri).toBe('content://tree/abc');
     const clear = screen.getByText('settings.downloadLocation.clear');

@@ -25,9 +25,16 @@
  */
 
 import { isAndroid } from '@/lib/utils/platform';
-import { listDownloads, markDownloadMigrated, setDownloadFolderName, deleteDownload } from '@/lib/db/download';
+import {
+  listDownloads,
+  markDownloadMigrated,
+  setDownloadFolderName,
+  deleteDownload,
+  getDownload,
+  upsertDownload,
+} from '@/lib/db/download';
 import { galleryFolderName } from '@/lib/storage/base-path-resolver';
-import type { DownloadStore } from '@/lib/storage/download-store';
+import type { DownloadStore, DownloadStoreLookupOptions } from '@/lib/storage/download-store';
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -44,12 +51,44 @@ function nowISO(): string {
 function decodeManifest(bytes: Uint8Array): string[] | null {
   try {
     const text = new TextDecoder().decode(bytes);
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed as string[];
+    const parsed = JSON.parse(text) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed.length > 0 &&
+      parsed.every((ext) => typeof ext === 'string' && ext.length > 0)
+    ) {
+      return parsed;
+    }
     return null;
   } catch {
     return null;
   }
+}
+
+async function listRestorableFolders(
+  store: DownloadStore,
+): Promise<{ galleryId: number; folderName: string; title: string }[]> {
+  if (store.listGalleryFolders) return store.listGalleryFolders();
+
+  const ids = await store.listGalleries();
+  return ids.map((galleryId) => ({
+    galleryId,
+    folderName: String(galleryId),
+    title: `Gallery ${galleryId}`,
+  }));
+}
+
+async function storedPageSize(
+  store: DownloadStore,
+  galleryId: number,
+  index: number,
+  ext: string,
+  options: DownloadStoreLookupOptions,
+): Promise<number | null> {
+  if (store.imageSize) return store.imageSize(galleryId, index, ext, options);
+  if (store.imageExists && !(await store.imageExists(galleryId, index, ext, options))) return null;
+  const bytes = await store.getImage(galleryId, index, ext, options).catch(() => null);
+  return bytes && bytes.byteLength > 0 ? bytes.byteLength : null;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────────
@@ -61,7 +100,10 @@ function decodeManifest(bytes: Uint8Array): string[] | null {
  * Guard: no-op on non-Android platforms.
  * Returns { migrated, reconciled } counts.
  */
-export async function migrateDownloadsToPublic(): Promise<{ migrated: number; reconciled: number }> {
+export async function migrateDownloadsToPublic(): Promise<{
+  migrated: number;
+  reconciled: number;
+}> {
   if (!isAndroid()) return { migrated: 0, reconciled: 0 };
 
   // Lazy-import adapters to avoid loading native modules on non-Android paths.
@@ -152,6 +194,96 @@ export async function migrateDownloadsToPublic(): Promise<{ migrated: number; re
   const reconciled = await reconcileLibrary(newStore);
 
   return { migrated, reconciled };
+}
+
+/**
+ * Restore DB download rows from the user-selected Android public download
+ * folder after app data loss/reinstall.
+ *
+ * Source of truth is the app's manifest file in each gallery folder:
+ *   <picked tree>/HiPaGo/<galleryId> <title>/0000.json
+ *
+ * Only complete folders are imported: every extension listed by 0000.json must
+ * have a corresponding non-empty 0001.*, 0002.*, ... page file. Metadata that is
+ * not present on disk (thumbnail/tags) is restored conservatively as empty; the
+ * library view still uses the local first page as cover.
+ */
+export async function restoreDownloadsFromPublicFolder(
+  store?: DownloadStore,
+): Promise<{ imported: number; skipped: number; failed: number }> {
+  if (!isAndroid()) return { imported: 0, skipped: 0, failed: 0 };
+
+  let publicStore = store;
+  if (!publicStore) {
+    const { AndroidPublicDownloadStore } = await import('./adapters/android-public');
+    publicStore = AndroidPublicDownloadStore.create();
+  }
+
+  const folders = await listRestorableFolders(publicStore);
+  const restoredAt = nowISO();
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const folder of folders) {
+    const { galleryId, folderName, title } = folder;
+    const lookup = { folderName };
+    try {
+      const manifest = await publicStore.getImage(galleryId, -1, 'json', lookup);
+      const exts = manifest ? decodeManifest(manifest) : null;
+      if (!exts) {
+        failed++;
+        continue;
+      }
+
+      let totalBytes = 0;
+      let complete = true;
+      for (let i = 0; i < exts.length; i++) {
+        const size = await storedPageSize(publicStore, galleryId, i, exts[i], lookup);
+        if (size === null) {
+          complete = false;
+          break;
+        }
+        totalBytes += size;
+      }
+      if (!complete) {
+        failed++;
+        continue;
+      }
+
+      const existing = await getDownload(galleryId).catch(() => null);
+      if (
+        existing?.status === 'complete' &&
+        existing.pageCount === exts.length &&
+        existing.folderName === folderName
+      ) {
+        skipped++;
+        continue;
+      }
+
+      await upsertDownload({
+        galleryId,
+        title: existing?.title || title,
+        thumbnail: existing?.thumbnail ?? '',
+        tags: existing?.tags ?? '{}',
+        pageCount: exts.length,
+        totalBytes,
+        downloadedAt: existing?.downloadedAt ?? restoredAt,
+        status: 'complete',
+        folderName,
+        migratedAt: existing?.migratedAt ?? restoredAt,
+        lastError: null,
+        queuePosition: null,
+        retryCount: 0,
+        nextRetryAt: null,
+      });
+      imported++;
+    } catch {
+      failed++;
+    }
+  }
+
+  return { imported, skipped, failed };
 }
 
 /**

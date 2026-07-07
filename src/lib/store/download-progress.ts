@@ -382,7 +382,9 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
   if (current.status === 'complete') return true;
   if (current.status === 'failed' && current.lastError === 'Cancelled') return false;
   if (
-    (current.status !== 'downloading' && current.status !== 'failed' && current.status !== 'queued') ||
+    (current.status !== 'downloading' &&
+      current.status !== 'failed' &&
+      current.status !== 'queued') ||
     (current.pageCount ?? 0) <= 0
   ) {
     return false;
@@ -413,7 +415,7 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
  * shows downloading" bug. No-op when not actually complete (e.g. the progress
  * file is merely absent because the worker has not started yet).
  */
-async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
+export async function finalizeNativeDownloadIfComplete(id: number): Promise<boolean> {
   let done = false;
   try {
     done = await finalizeDownloadIfComplete(id);
@@ -427,6 +429,10 @@ async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
   notifyDownloadLibraryChanged(true);
   stopAndroidProgressPoll(id);
   return true;
+}
+
+async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
+  return finalizeNativeDownloadIfComplete(id);
 }
 
 async function failAndroidDownloadIfWorkerStopped(id: number, message: string): Promise<void> {
@@ -908,7 +914,13 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           retryCount: next.retryCount ?? null,
           nextRetryAt: null,
         });
-        await scheduleIosBackgroundBackstop(id, next.title, files, next.queuePosition, controller.signal);
+        await scheduleIosBackgroundBackstop(
+          id,
+          next.title,
+          files,
+          next.queuePosition,
+          controller.signal,
+        );
       }
 
       try {
@@ -1107,7 +1119,17 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
     refreshQueue,
     refreshDownloaded: async (id) => {
       try {
-        const row = await getDownload(id);
+        let row = await getDownload(id);
+        if (
+          (isAndroid() || isIos()) &&
+          row &&
+          (row.status === 'downloading' || row.status === 'failed') &&
+          (row.pageCount ?? 0) > 0 &&
+          row.lastError !== 'Cancelled' &&
+          (await finalizeNativeDownloadIfComplete(id).catch(() => false))
+        ) {
+          row = await getDownload(id);
+        }
         let isComplete = false;
         if (row?.status === 'complete') {
           isComplete =

@@ -30,12 +30,10 @@ vi.mock('@/lib/utils/download-zip', async () => {
     ...actual,
     downloadGalleryToLibrary: (...a: unknown[]) => dl(...a),
     getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
-    hasCompleteDownloadedGallery: vi.fn(
-      async (id: number, expectedPageCount: number) => {
-        const pages = manifestPages.get(id) ?? [];
-        return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
-      },
-    ),
+    hasCompleteDownloadedGallery: vi.fn(async (id: number, expectedPageCount: number) => {
+      const pages = manifestPages.get(id) ?? [];
+      return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
+    }),
   };
 });
 
@@ -1074,6 +1072,21 @@ describe('Android live-progress poller (AC-003)', () => {
 
     expect(useDownloadProgressStore.getState().downloaded[803]).toBe(false);
     expect(useDownloadProgressStore.getState().entries[803]).toBeUndefined();
+  });
+
+  it('refreshDownloaded finalizes a completed native background row before updating the detail button', async () => {
+    iosFlag = true;
+    downloadRows.set(804, { status: 'downloading', pageCount: 2 });
+    manifestPages.set(804, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+
+    await useDownloadProgressStore.getState().refreshDownloaded(804);
+
+    expect(useDownloadProgressStore.getState().downloaded[804]).toBe(true);
+    expect(useDownloadProgressStore.getState().entries[804]).toBeUndefined();
+    expect(upsertedRows.at(-1)).toMatchObject({ galleryId: 804, status: 'complete' });
   });
 });
 
@@ -2205,6 +2218,12 @@ describe('reconcileQueue (AC-007)', () => {
       | undefined;
     expect(completed?.status).toBe('complete');
     expect(completed?.queuePosition).toBeNull();
+    expect(useDownloadProgressStore.getState().downloaded[55]).toBe(true);
+    expect(useDownloadProgressStore.getState().entries[55]).toBeUndefined();
+    expect(vi.mocked(queueOps.enqueueDownload)).not.toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 55 }),
+      expect.anything(),
+    );
   });
 
   it('Android: recovers a failed row when native retry later completed on disk', async () => {
@@ -2262,6 +2281,42 @@ describe('reconcileQueue (AC-007)', () => {
         (r as { status: string }).status === 'complete',
     );
     expect(completed).toBeTruthy();
+    expect(useDownloadProgressStore.getState().downloaded[57]).toBe(true);
+  });
+
+  it('native foreground reconcile finalizes a queued row after the guarded launch reconcile already ran', async () => {
+    iosFlag = true;
+    unmetered.mockResolvedValue(false);
+    adapterRows.push({
+      galleryId: 60,
+      title: 'Late',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 2,
+      status: 'downloading',
+    });
+    downloadRows.set(60, { status: 'downloading', pageCount: 2 });
+    const { reconcileQueue, reconcileNativeBackgroundDownloads, __resetReconcileQueueForTests } =
+      await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(useDownloadProgressStore.getState().downloaded[60]).not.toBe(true);
+
+    manifestPages.set(60, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+    ]);
+    await reconcileQueue();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(useDownloadProgressStore.getState().downloaded[60]).not.toBe(true);
+
+    await reconcileNativeBackgroundDownloads();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(useDownloadProgressStore.getState().downloaded[60]).toBe(true);
+    expect(upsertedRows.at(-1)).toMatchObject({ galleryId: 60, status: 'complete' });
   });
 
   it('iOS: does NOT mark complete when the manifest is short of the target', async () => {
