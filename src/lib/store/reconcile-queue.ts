@@ -17,10 +17,14 @@ import { ensureDb } from '@/lib/db/adapter';
 import type { DBDownload } from '@/lib/db/schema';
 import { enqueueDownload } from '@/lib/db/download-queue';
 import { listDueAutoRetries } from '@/lib/db/download-retry';
-import { deserializeTags } from '@/lib/db/download';
+import { deserializeTags, getDownload } from '@/lib/db/download';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
 import { isAndroid, isIos } from '@/lib/utils/platform';
-import { processQueue, armAutoRetryTimer, finalizeDownloadIfComplete } from './download-progress';
+import {
+  processQueue,
+  armAutoRetryTimer,
+  finalizeNativeDownloadIfComplete,
+} from './download-progress';
 
 let started = false;
 
@@ -36,37 +40,42 @@ let started = false;
  * adapter per platform (AndroidPublicDownloadStore / CapacitorDownloadStore), so
  * the SAME storage abstraction covers both folder layouts. Native handoff rows
  * store the target `pageCount` before scheduling background work, so a manifest
- * covering that count can be marked 'complete'.
+ * covering that count can be marked 'complete'. Include 'queued' rows too: an
+ * earlier foreground reconcile may have re-queued an incomplete native row, and
+ * the native worker can finish later while the GUI still shows it as pending.
  *
  * Best-effort: any per-row failure is swallowed so boot never breaks.
  */
-async function reconcileNativeBackgroundDownloads(): Promise<void> {
+export async function reconcileNativeBackgroundDownloads(): Promise<number> {
+  if (!isAndroid() && !isIos()) return 0;
   let db;
   try {
     db = await ensureDb();
   } catch {
-    return;
+    return 0;
   }
   let rows: DBDownload[] = [];
   try {
     rows = await db.query<DBDownload>(
       `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
          FROM download
-        WHERE status IN ('downloading', 'failed') AND pageCount > 0`,
+        WHERE status IN ('downloading', 'failed', 'queued') AND pageCount > 0`,
     );
   } catch {
-    return;
+    return 0;
   }
 
+  let completed = 0;
   for (const row of rows) {
     try {
       // ONE completion rule, shared with the Android in-app poller: a
       // 'downloading' row whose manifest now covers all pages → 'complete'.
-      await finalizeDownloadIfComplete(row.galleryId);
+      if (await finalizeNativeDownloadIfComplete(row.galleryId)) completed++;
     } catch {
       // Leave the row as-is; the zombie re-enqueue path will resume it.
     }
   }
+  return completed;
 }
 
 /** Reset the guard — test-only. */
@@ -83,9 +92,7 @@ export async function reconcileQueue(): Promise<void> {
 
     // Native workers are DB-decoupled; rows carry the target page count before
     // handoff, so completed native work can be finalized from the manifest.
-    if (isAndroid() || isIos()) {
-      await reconcileNativeBackgroundDownloads();
-    }
+    await reconcileNativeBackgroundDownloads();
 
     // Zombie 'downloading' rows → re-enqueue. Rows with stored pages resume
     // from disk; rows with pageCount 0 may have been atomically claimed from
@@ -97,6 +104,8 @@ export async function reconcileQueue(): Promise<void> {
     );
 
     for (const z of zombies) {
+      const latest = await getDownload(z.galleryId).catch(() => null);
+      if (latest?.status === 'complete') continue;
       await enqueueDownload(
         {
           galleryId: z.galleryId,

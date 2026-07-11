@@ -13,6 +13,7 @@
  *   summary            Show a summary of all verdicts from batch files
  *   apply              Apply PASS verdicts to {lang}.ai.json
  *   status             Show batch completion status
+ *   cancel-retry       Restore a retried failure to the failed archive
  *
  * Common flags:
  *   --lang <code>        Language code (e.g. ko)
@@ -36,9 +37,10 @@ import {
   crawlTags,
   getStatus,
   readFailed,
-  writeFailed,
   findDuplicateTranslations,
   pruneOrphanTranslations,
+  retryFailed,
+  cancelRetry,
 } from './translate-tags-logic';
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
@@ -315,14 +317,22 @@ async function main() {
     case 'retry': {
       const lang = requireFlag(flags, 'lang');
       const id = requireFlag(flags, 'id');
-      const failed = readFailed(I18N_DIR, lang);
-      if (!(id in failed)) {
+      if (!retryFailed({ lang, id, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR })) {
         console.error(`[retry] ${id} not in ${lang}.failed.json — nothing to do`);
         break;
       }
-      delete failed[id];
-      writeFailed(I18N_DIR, lang, failed);
       console.error(`[retry] removed ${id} from ${lang}.failed.json — it will be re-batched on next analyze`);
+      break;
+    }
+
+    case 'cancel-retry': {
+      const lang = requireFlag(flags, 'lang');
+      const id = requireFlag(flags, 'id');
+      if (!cancelRetry({ lang, id, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR })) {
+        console.error(`[cancel-retry] ${id} was not restored (not in retry history or already present in ${lang}.failed.json)`);
+        break;
+      }
+      console.error(`[cancel-retry] restored ${id} to ${lang}.failed.json and removed it from retry history`);
       break;
     }
 
@@ -343,6 +353,7 @@ async function main() {
       console.error('  prune-orphans       --lang ko [--dry-run] [--file ko.json]  (default: prunes both ko.json + ko.ai.json)');
       console.error('  list-failed         --lang ko');
       console.error('  retry               --lang ko --id <category:name>');
+      console.error('  cancel-retry        --lang ko --id <category:name>');
       process.exit(1);
     }
   }

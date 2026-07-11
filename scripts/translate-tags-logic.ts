@@ -262,6 +262,57 @@ export function writeFailed(i18nDir: string, lang: string, failed: FailedArchive
   writeJsonAtomic(failedPath(i18nDir, lang), sorted);
 }
 
+function retryHistoryPath(outputDir: string, lang: string): string {
+  return path.join(outputDir, lang, 'retry-history.json');
+}
+
+function readRetryHistory(outputDir: string, lang: string): FailedArchive {
+  return readJsonSafe<FailedArchive>(retryHistoryPath(outputDir, lang), {});
+}
+
+/** Remove a failure from the analyze skip-list while retaining its attempt count. */
+export function retryFailed(opts: {
+  lang: string;
+  id: string;
+  i18nDir: string;
+  outputDir: string;
+}): boolean {
+  const { lang, id, i18nDir, outputDir } = opts;
+  const failed = readFailed(i18nDir, lang);
+  const record = failed[id];
+  if (!record) return false;
+  const history = readRetryHistory(outputDir, lang);
+  history[id] = record;
+  fs.mkdirSync(path.join(outputDir, lang), { recursive: true });
+  writeJsonAtomic(retryHistoryPath(outputDir, lang), history);
+  delete failed[id];
+  writeFailed(i18nDir, lang, failed);
+  return true;
+}
+
+/** Undo retryFailed without changing any archived failure metadata. */
+export function cancelRetry(opts: {
+  lang: string;
+  id: string;
+  i18nDir: string;
+  outputDir: string;
+}): boolean {
+  const { lang, id, i18nDir, outputDir } = opts;
+  const history = readRetryHistory(outputDir, lang);
+  const record = history[id];
+  if (!record) return false;
+
+  const failed = readFailed(i18nDir, lang);
+  // Never discard either record when state has diverged since retryFailed.
+  if (failed[id]) return false;
+
+  failed[id] = record;
+  writeFailed(i18nDir, lang, failed);
+  delete history[id];
+  writeJsonAtomic(retryHistoryPath(outputDir, lang), history);
+  return true;
+}
+
 // ─── File helpers ─────────────────────────────────────────────────────────────
 
 function readJsonSafe<T>(filePath: string, fallback: T): T {
@@ -1119,12 +1170,14 @@ export async function applyVerdicts(opts: {
     );
     if (archivable.length > 0) {
       const failed = readFailed(i18nDir, lang);
+      const retryHistory = readRetryHistory(outputDir, lang);
       const today = new Date().toISOString().slice(0, 10);
       let newArchived = 0, bumped = 0;
       for (const item of archivable) {
         if (!isValidCategory(item.key.split(':')[0])) continue;
-        const prev = failed[item.key];
+        const prev = failed[item.key] ?? retryHistory[item.key];
         if (prev) {
+          failed[item.key] = prev;
           prev.tried = today;
           prev.verdict = item.verdict as 'REJECT' | '_NEEDS_REVIEW';
           prev.attempts = (prev.attempts ?? 1) + 1;
@@ -1139,8 +1192,10 @@ export async function applyVerdicts(opts: {
           };
           newArchived++;
         }
+        delete retryHistory[item.key];
       }
       writeFailed(i18nDir, lang, failed);
+      writeJsonAtomic(retryHistoryPath(outputDir, lang), retryHistory);
       console.error(
         `[applyVerdicts] archived ${newArchived} new, ${bumped} re-tried in ${lang}.failed.json`
       );
@@ -1160,6 +1215,7 @@ export async function applyVerdicts(opts: {
         typeof v.suggestion?.newName === 'string' &&
         v.suggestion.newName.trim().length > 0
     );
+
     const hasApplicable = passItems.length > 0 || inaccurateItems.length > 0 || outdatedItems.length > 0;
     if (!hasApplicable) {
       console.error('[applyVerdicts] No applicable verdicts.');
@@ -1167,6 +1223,8 @@ export async function applyVerdicts(opts: {
 
     const existing = readTranslationsFlat(aiJsonPath);
     const merged = { ...existing };
+    const retryHistory = readRetryHistory(outputDir, lang);
+    const completedRetryKeys = new Set<string>();
     let newPass = 0, changedPass = 0, newInaccurate = 0, changedInaccurate = 0, newOutdated = 0;
     let rejectedCategory = 0, rejectedNotExist = 0, rejectedDuplicate = 0;
 
@@ -1241,6 +1299,7 @@ export async function applyVerdicts(opts: {
       if (typeof item.translation !== 'string' || item.translation.trim() === '') continue;
       // Duplicate gate: reject if this value is already owned by another tag.
       if (!claimValue(item.key, item.translation)) continue;
+      completedRetryKeys.add(item.key);
       const prev = merged[item.key];
       if (prev === undefined) newPass++;
       else if (prev !== item.translation) changedPass++;
@@ -1252,6 +1311,7 @@ export async function applyVerdicts(opts: {
       const newTranslation = item.suggestion!.newTranslation!;
       // Duplicate gate: reject if this value is already owned by another tag.
       if (!claimValue(item.key, newTranslation)) continue;
+      completedRetryKeys.add(item.key);
       const prev = merged[item.key];
       if (prev === undefined) newInaccurate++;
       else if (prev !== newTranslation) changedInaccurate++;
@@ -1282,6 +1342,7 @@ export async function applyVerdicts(opts: {
       }
       // Duplicate gate on the rename *target* key.
       if (!claimValue(newKey, translation)) continue;
+      completedRetryKeys.add(item.key);
       if (merged[item.key] === undefined && merged[newKey] === translation) continue;
       delete merged[item.key];
       merged[newKey] = translation;
@@ -1307,8 +1368,9 @@ export async function applyVerdicts(opts: {
       for (const d of dupRejected) {
         if (!isValidCategory(d.key.split(':')[0])) continue;
         const reason = `duplicate translation "${d.translation}" already used by ${d.owner} in the same category`;
-        const prev = failed[d.key];
+        const prev = failed[d.key] ?? retryHistory[d.key];
         if (prev) {
+          failed[d.key] = prev;
           prev.tried = today;
           prev.verdict = 'REJECT';
           prev.attempts = (prev.attempts ?? 1) + 1;
@@ -1316,12 +1378,19 @@ export async function applyVerdicts(opts: {
         } else {
           failed[d.key] = { tried: today, verdict: 'REJECT', attempts: 1, reason };
         }
+        delete retryHistory[d.key];
       }
       writeFailed(i18nDir, lang, failed);
       console.error(
         `[applyVerdicts] rejected ${rejectedDuplicate} duplicate-translation verdict entries (archived to ${lang}.failed.json)`
       );
     }
+
+    // Consume retry metadata only after an applicable verdict actually passes
+    // every write gate. Duplicate PASS/INACCURATE/OUTDATED rejections above
+    // instead rearchive that metadata with attempts incremented.
+    for (const key of completedRetryKeys) delete retryHistory[key];
+    writeJsonAtomic(retryHistoryPath(outputDir, lang), retryHistory);
 
     const totalChanges = newPass + changedPass + newInaccurate + changedInaccurate + newOutdated;
     if (totalChanges === 0) {
