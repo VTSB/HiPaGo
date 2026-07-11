@@ -18,6 +18,7 @@ import type { DBDownload } from '@/lib/db/schema';
 class MemStore {
   private files = new Map<string, Uint8Array>();
   private galleries = new Set<number>();
+  private folderNames = new Map<number, { folderName: string; title: string }>();
 
   key(galleryId: number, index: number, ext: string): string {
     const idx = index + 1;
@@ -38,6 +39,19 @@ class MemStore {
     return [...this.galleries];
   }
 
+  setGalleryFolder(galleryId: number, folderName: string, title: string): void {
+    this.galleries.add(galleryId);
+    this.folderNames.set(galleryId, { folderName, title });
+  }
+
+  async listGalleryFolders(): Promise<{ galleryId: number; folderName: string; title: string }[]> {
+    return [...this.galleries].map((galleryId) => ({
+      galleryId,
+      folderName: this.folderNames.get(galleryId)?.folderName ?? String(galleryId),
+      title: this.folderNames.get(galleryId)?.title ?? `Gallery ${galleryId}`,
+    }));
+  }
+
   async deleteGallery(galleryId: number): Promise<void> {
     const prefix = `${galleryId}/`;
     for (const k of [...this.files.keys()]) {
@@ -50,8 +64,12 @@ class MemStore {
     // No-op for tests — folder concept is implicit.
   }
 
-  async gallerySize(): Promise<number> { return 0; }
-  async usage(): Promise<number> { return 0; }
+  async gallerySize(): Promise<number> {
+    return 0;
+  }
+  async usage(): Promise<number> {
+    return 0;
+  }
 }
 
 // ── Mock helpers ─────────────────────────────────────────────────────────────
@@ -66,6 +84,7 @@ let mockRows: DBDownload[];
 const markMigratedCalls: Array<[number, string, string]> = [];
 const setFolderCalls: Array<[number, string]> = [];
 const deletedRows: number[] = [];
+const upsertedRows: DBDownload[] = [];
 
 vi.mock('@/lib/utils/platform', () => ({
   isAndroid: () => mockIsAndroid,
@@ -85,6 +104,11 @@ vi.mock('@/lib/db/download', () => ({
   deleteDownload: vi.fn(async (id: number) => {
     deletedRows.push(id);
     mockRows = mockRows.filter((r) => r.galleryId !== id);
+  }),
+  getDownload: vi.fn(async (id: number) => mockRows.find((row) => row.galleryId === id) ?? null),
+  upsertDownload: vi.fn(async (row: DBDownload) => {
+    upsertedRows.push(row);
+    mockRows = [...mockRows.filter((existing) => existing.galleryId !== row.galleryId), row];
   }),
 }));
 
@@ -110,7 +134,11 @@ vi.mock('@/lib/storage/base-path-resolver', () => ({
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-import { migrateDownloadsToPublic, reconcileLibrary } from '../migrate-downloads';
+import {
+  migrateDownloadsToPublic,
+  reconcileLibrary,
+  restoreDownloadsFromPublicFolder,
+} from '../migrate-downloads';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -160,7 +188,7 @@ describe('migrateDownloadsToPublic — basic migration', () => {
     const manifest = makeManifest(['webp', 'jpg']);
     await mockOldStore.putImage(100, -1, manifest, 'json'); // 0000.json
     await mockOldStore.putImage(100, 0, makeBytes(10, 0x01), 'webp'); // 0001.webp
-    await mockOldStore.putImage(100, 1, makeBytes(10, 0x02), 'jpg');  // 0002.jpg
+    await mockOldStore.putImage(100, 1, makeBytes(10, 0x02), 'jpg'); // 0002.jpg
 
     const result = await migrateDownloadsToPublic();
 
@@ -374,7 +402,11 @@ describe('reconcileLibrary', () => {
   });
 
   it('prunes a DB row whose new folder is missing (no manifest)', async () => {
-    const row = makeRow({ galleryId: 900, title: 'Dead Row', migratedAt: '2026-01-01T00:00:00.000Z' });
+    const row = makeRow({
+      galleryId: 900,
+      title: 'Dead Row',
+      migratedAt: '2026-01-01T00:00:00.000Z',
+    });
     mockRows = [row];
     // New store has no files for gallery 900
 
@@ -385,7 +417,11 @@ describe('reconcileLibrary', () => {
   });
 
   it('keeps a valid DB row whose new folder has the manifest', async () => {
-    const row = makeRow({ galleryId: 901, title: 'Live Row', migratedAt: '2026-01-01T00:00:00.000Z' });
+    const row = makeRow({
+      galleryId: 901,
+      title: 'Live Row',
+      migratedAt: '2026-01-01T00:00:00.000Z',
+    });
     mockRows = [row];
     // New store has the manifest
     await mockNewStore.putImage(901, -1, makeManifest(['webp']), 'json');
@@ -397,8 +433,16 @@ describe('reconcileLibrary', () => {
   });
 
   it('prunes dead rows and keeps valid rows when both exist', async () => {
-    const rowDead = makeRow({ galleryId: 902, title: 'Dead', migratedAt: '2026-01-01T00:00:00.000Z' });
-    const rowLive = makeRow({ galleryId: 903, title: 'Live', migratedAt: '2026-01-01T00:00:00.000Z' });
+    const rowDead = makeRow({
+      galleryId: 902,
+      title: 'Dead',
+      migratedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const rowLive = makeRow({
+      galleryId: 903,
+      title: 'Live',
+      migratedAt: '2026-01-01T00:00:00.000Z',
+    });
     mockRows = [rowDead, rowLive];
 
     // Only 903 has a manifest
@@ -411,6 +455,24 @@ describe('reconcileLibrary', () => {
     expect(deletedRows).not.toContain(903);
   });
 
+  it('does not prune a row when manifest I/O throws', async () => {
+    mockRows = [
+      makeRow({
+        galleryId: 904,
+        folderName: '904 Keep Me',
+        migratedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    mockNewStore.getImage = vi.fn(async () => {
+      throw new Error('temporary storage failure');
+    });
+
+    const pruned = await reconcileLibrary(mockNewStore);
+
+    expect(pruned).toBe(0);
+    expect(deletedRows).not.toContain(904);
+  });
+
   it('returns 0 on non-Android (standalone call)', async () => {
     mockIsAndroid = false;
     const row = makeRow({ galleryId: 950 });
@@ -420,5 +482,69 @@ describe('reconcileLibrary', () => {
 
     expect(pruned).toBe(0);
     expect(deletedRows).toHaveLength(0);
+  });
+});
+
+describe('restoreDownloadsFromPublicFolder', () => {
+  beforeEach(() => {
+    mockIsAndroid = true;
+    mockOldStore = new MemStore();
+    mockNewStore = new MemStore();
+    mockRows = [];
+    upsertedRows.length = 0;
+    vi.clearAllMocks();
+  });
+
+  it('rebuilds a complete DB row from a titled folder, manifest, and page files', async () => {
+    mockNewStore.setGalleryFolder(1200, '1200 Saved title', 'Saved title');
+    await mockNewStore.putImage(1200, -1, makeManifest(['webp', 'jpg']), 'json');
+    await mockNewStore.putImage(1200, 0, makeBytes(11), 'webp');
+    await mockNewStore.putImage(1200, 1, makeBytes(13), 'jpg');
+
+    const result = await restoreDownloadsFromPublicFolder(mockNewStore);
+
+    expect(result).toEqual({ imported: 1, skipped: 0, failed: 0 });
+    expect(upsertedRows).toHaveLength(1);
+    expect(upsertedRows[0]).toMatchObject({
+      galleryId: 1200,
+      title: 'Saved title',
+      pageCount: 2,
+      totalBytes: 24,
+      status: 'complete',
+      folderName: '1200 Saved title',
+    });
+  });
+
+  it('does not restore a folder when a page listed by the manifest is missing', async () => {
+    mockNewStore.setGalleryFolder(1300, '1300 Incomplete', 'Incomplete');
+    await mockNewStore.putImage(1300, -1, makeManifest(['webp', 'webp']), 'json');
+    await mockNewStore.putImage(1300, 0, makeBytes(9), 'webp');
+
+    const result = await restoreDownloadsFromPublicFolder(mockNewStore);
+
+    expect(result).toEqual({ imported: 0, skipped: 0, failed: 1 });
+    expect(upsertedRows).toHaveLength(0);
+  });
+
+  it('does not shrink a catalog-restored partial target into a false completion', async () => {
+    mockNewStore.setGalleryFolder(1400, '1400 Partial', 'Partial');
+    await mockNewStore.putImage(1400, -1, makeManifest(['webp']), 'json');
+    await mockNewStore.putImage(1400, 0, makeBytes(9), 'webp');
+    mockRows = [
+      makeRow({
+        galleryId: 1400,
+        title: 'Partial',
+        status: 'failed',
+        pageCount: 3,
+        folderName: '1400 Partial',
+        migratedAt: '2026-07-11T00:00:00.000Z',
+      }),
+    ];
+
+    const result = await restoreDownloadsFromPublicFolder(mockNewStore);
+
+    expect(result).toEqual({ imported: 0, skipped: 1, failed: 0 });
+    expect(upsertedRows).toHaveLength(0);
+    expect(mockRows[0]).toMatchObject({ status: 'failed', pageCount: 3 });
   });
 });

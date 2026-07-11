@@ -40,6 +40,7 @@ describe('settings store', () => {
       readerMode: 'page',
       imageFormat: 'auto',
       blurTags: ['male:yaoi'],
+      favoriteTags: [],
       defaultFilterQuery: '',
       secureScreen: true,
       libraryInitialTab: 'favorites',
@@ -65,6 +66,10 @@ describe('settings store', () => {
 
     it('has default blurTags containing male:yaoi', () => {
       expect(useSettingsStore.getState().blurTags).toEqual(['male:yaoi']);
+    });
+
+    it('has no favorite tags by default', () => {
+      expect(useSettingsStore.getState().favoriteTags).toEqual([]);
     });
 
     it('has no default result filter', () => {
@@ -239,6 +244,41 @@ describe('settings store', () => {
       useSettingsStore.setState({ blurTags: ['male:yaoi', 'female:big breasts', 'tag:c'] });
       useSettingsStore.getState().removeBlurTag('female:big breasts');
       expect(useSettingsStore.getState().blurTags).toEqual(['male:yaoi', 'tag:c']);
+    });
+  });
+
+  describe('favorite tags', () => {
+    it('adds distinct canonical tag keys without duplicates', () => {
+      const { addFavoriteTag } = useSettingsStore.getState();
+
+      addFavoriteTag('artist:sample_artist');
+      addFavoriteTag('artist:sample_artist');
+      addFavoriteTag('series:sample_artist');
+
+      expect(useSettingsStore.getState().favoriteTags).toEqual([
+        'artist:sample_artist',
+        'series:sample_artist',
+      ]);
+    });
+
+    it('removes only the requested favorite key', () => {
+      useSettingsStore.setState({
+        favoriteTags: ['artist:sample_artist', 'series:sample_series'],
+      });
+
+      useSettingsStore.getState().removeFavoriteTag('artist:sample_artist');
+
+      expect(useSettingsStore.getState().favoriteTags).toEqual(['series:sample_series']);
+    });
+
+    it('toggles a favorite key on and off', () => {
+      const { toggleFavoriteTag } = useSettingsStore.getState();
+
+      toggleFavoriteTag('tag:sample_tag');
+      expect(useSettingsStore.getState().favoriteTags).toEqual(['tag:sample_tag']);
+
+      toggleFavoriteTag('tag:sample_tag');
+      expect(useSettingsStore.getState().favoriteTags).toEqual([]);
     });
   });
 

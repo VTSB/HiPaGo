@@ -5,6 +5,31 @@ import { DEFAULT_IMAGE_CACHE_MAX_BYTES } from '@/lib/cache/image-cache-store';
 export type Locale = 'en' | 'ko';
 export type LibraryInitialTab = 'favorites' | 'history' | 'downloads';
 
+/**
+ * Whether this installation already had local settings when the client bundle
+ * first loaded. Capture this before initLocaleOnce or a folder selection can
+ * persist defaults, so a reinstall remains distinguishable during backup
+ * restoration.
+ */
+export const hadPersistedSettingsAtBoot = (() => {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    const raw = localStorage.getItem('hipago-settings');
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as unknown;
+    return (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      'state' in parsed &&
+      typeof parsed.state === 'object' &&
+      parsed.state !== null
+    );
+  } catch {
+    return false;
+  }
+})();
+
 interface SettingsStoreState {
   locale: Locale;
   language: string;
@@ -12,6 +37,7 @@ interface SettingsStoreState {
   readerMode: 'page' | 'scroll';
   imageFormat: 'auto' | 'avif' | 'webp' | 'original';
   blurTags: string[];
+  favoriteTags: string[];
   /** Search-query syntax applied to every list/search result set. */
   defaultFilterQuery: string;
   /** Android-only: hide app content from recent-app previews. */
@@ -47,6 +73,9 @@ interface SettingsStoreState {
   setDownloadTree: (uri: string | null, name: string | null) => void;
   addBlurTag: (tag: string) => void;
   removeBlurTag: (tag: string) => void;
+  addFavoriteTag: (tag: string) => void;
+  removeFavoriteTag: (tag: string) => void;
+  toggleFavoriteTag: (tag: string) => void;
 }
 
 // furry/snuff/guro/scat each appear under BOTH the female: and male: hitomi
@@ -80,6 +109,7 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
     downloadBasePath?: string | null;
     downloadTreeUri?: string | null;
     downloadTreeName?: string | null;
+    favoriteTags?: string[];
   };
   // v1: union the safety blur tags once.
   if (version < 1) {
@@ -117,6 +147,10 @@ export function migrateSettings(persisted: unknown, version: number): unknown {
   if (version < 7 && s.libraryInitialTab === undefined) {
     s = { ...s, libraryInitialTab: 'favorites' };
   }
+  // v8: metadata favorites are persisted as canonical type:name keys.
+  if (version < 8 && !Array.isArray(s.favoriteTags)) {
+    s = { ...s, favoriteTags: [] };
+  }
   return s;
 }
 
@@ -129,6 +163,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       readerMode: 'page',
       imageFormat: 'auto',
       blurTags: DEFAULT_BLUR_TAGS,
+      favoriteTags: [],
       defaultFilterQuery: '',
       secureScreen: true,
       libraryInitialTab: 'favorites',
@@ -154,8 +189,20 @@ export const useSettingsStore = create<SettingsStoreState>()(
       addBlurTag: (tag) =>
         set((s) => ({ blurTags: s.blurTags.includes(tag) ? s.blurTags : [...s.blurTags, tag] })),
       removeBlurTag: (tag) => set((s) => ({ blurTags: s.blurTags.filter((t) => t !== tag) })),
+      addFavoriteTag: (tag) =>
+        set((s) => ({
+          favoriteTags: s.favoriteTags.includes(tag) ? s.favoriteTags : [...s.favoriteTags, tag],
+        })),
+      removeFavoriteTag: (tag) =>
+        set((s) => ({ favoriteTags: s.favoriteTags.filter((t) => t !== tag) })),
+      toggleFavoriteTag: (tag) =>
+        set((s) => ({
+          favoriteTags: s.favoriteTags.includes(tag)
+            ? s.favoriteTags.filter((t) => t !== tag)
+            : [...s.favoriteTags, tag],
+        })),
     }),
-    { name: 'hipago-settings', version: 7, migrate: migrateSettings },
+    { name: 'hipago-settings', version: 8, migrate: migrateSettings },
   ),
 );
 

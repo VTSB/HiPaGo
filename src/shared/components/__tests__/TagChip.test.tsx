@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { useSettingsStore } from '@/lib/store/settings';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { toFavoriteTagKey } from '@/lib/utils/tag-favorites';
 import { TagType } from '@/lib/utils/types';
 import { TagChip } from '../TagChip';
 
 describe('TagChip', () => {
   beforeEach(() => {
-    useSettingsStore.setState({ locale: 'en' });
+    useSettingsStore.setState({ locale: 'en', favoriteTags: [] });
     useTagI18nStore.setState({
       isLoaded: false,
       loadedLocale: null,
@@ -27,6 +28,45 @@ describe('TagChip', () => {
     render(<TagChip tag="big breasts" type={TagType.FEMALE} linked={false} />);
 
     expect(screen.getByText('big breasts ♀')).toBeInTheDocument();
+  });
+
+  it('shows a non-interactive filled-star indicator for a favorite tag', () => {
+    const key = toFavoriteTagKey(TagType.ARTIST, 'favorite artist');
+    useSettingsStore.setState({ favoriteTags: [key] });
+
+    render(<TagChip tag="favorite artist" type={TagType.ARTIST} />);
+
+    const chip = screen.getByRole('link');
+    expect(chip).toHaveAttribute('data-favorite', 'true');
+    const favoriteIndicator = chip.querySelector('[data-favorite-indicator]');
+    expect(favoriteIndicator).toHaveTextContent('★');
+    expect(favoriteIndicator).toHaveClass('text-current', 'opacity-80');
+    expect(favoriteIndicator).not.toHaveClass('text-amber-500', 'dark:text-amber-400');
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('matches a legacy generic female suffix to the canonical female favorite', () => {
+    const key = toFavoriteTagKey(TagType.FEMALE, 'legacy tag');
+    useSettingsStore.setState({ favoriteTags: [key] });
+
+    render(<TagChip tag="legacy tag ♀" type={TagType.TAG} linked={false} />);
+
+    const chip = screen.getByText(/legacy tag/);
+    expect(chip).toHaveAttribute('data-tag-key', key);
+    expect(chip).toHaveAttribute('data-favorite', 'true');
+  });
+
+  it('matches favorite identity regardless of case and surrounding whitespace', () => {
+    const key = toFavoriteTagKey(TagType.ARTIST, 'favorite artist');
+    useSettingsStore.setState({ favoriteTags: [key] });
+
+    const { container } = render(
+      <TagChip tag="  FAVORITE Artist  " type={TagType.ARTIST} linked={false} />,
+    );
+
+    const chip = container.querySelector('[data-tag-key]');
+    expect(chip).toHaveAttribute('data-tag-key', key);
+    expect(chip).toHaveAttribute('data-favorite', 'true');
   });
 
   it('keeps regular chips on one line by default', () => {

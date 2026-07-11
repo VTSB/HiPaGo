@@ -2,12 +2,95 @@ import { ensureDb } from './adapter';
 import { TAG_TYPE_TO_BYTE, BYTE_TO_TAG_TYPE } from '@/lib/utils/types';
 import type { TagType, Suggestion } from '@/lib/utils/types';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { useSettingsStore } from '@/lib/store/settings';
+import { tagFromQualified, type HitomiTag } from '@/lib/utils/hitomi-tag';
+import { prioritizeSuggestions } from '@/lib/utils/tag-favorites';
 
 interface TagRow {
   tagId: number;
   type: number;
   name: string;
   count: number;
+}
+
+type SearchDb = Awaited<ReturnType<typeof ensureDb>>;
+
+async function loadLocalCountMap(
+  db: SearchDb,
+  rows: readonly TagRow[],
+): Promise<Map<number, number>> {
+  const localCountMap = new Map<number, number>();
+  const zeroCountIds = rows.filter((row) => row.count === 0).map((row) => row.tagId);
+
+  const CHUNK = 50;
+  for (let i = 0; i < zeroCountIds.length; i += CHUNK) {
+    const chunk = zeroCountIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const counts = await db.query<{ tagId: number; cnt: number }>(
+      `SELECT tagId, COUNT(*) as cnt FROM gallery_tag WHERE tagId IN (${placeholders}) GROUP BY tagId`,
+      chunk,
+    );
+    for (const row of counts) localCountMap.set(row.tagId, row.cnt);
+  }
+
+  return localCountMap;
+}
+
+function effectiveCount(row: TagRow, localCountMap: ReadonlyMap<number, number>): number {
+  return row.count > 0 ? row.count : (localCountMap.get(row.tagId) ?? 0);
+}
+
+function deduplicateRows(rows: readonly TagRow[]): TagRow[] {
+  const seen = new Set<number>();
+  return rows.filter((row) => {
+    if (seen.has(row.tagId)) return false;
+    seen.add(row.tagId);
+    return true;
+  });
+}
+
+async function loadFavoriteRows(
+  db: SearchDb,
+  favoriteTags: readonly string[],
+  tagTypeFilter?: TagType,
+): Promise<TagRow[]> {
+  const parsed = favoriteTags
+    .map((key) => tagFromQualified(key))
+    .filter(
+      (tag): tag is HitomiTag =>
+        tag !== null && (tagTypeFilter === undefined || tag.type === tagTypeFilter),
+    );
+
+  const namesByType = new Map<number, Set<string>>();
+  for (const tag of parsed) {
+    const typeByte = TAG_TYPE_TO_BYTE[tag.type];
+    const names = namesByType.get(typeByte) ?? new Set<string>();
+    names.add(tag.searchForm.toLowerCase());
+    names.add(tag.displayForm.toLowerCase());
+    namesByType.set(typeByte, names);
+  }
+  if (namesByType.size === 0) return [];
+
+  // Query once per namespace (and only chunk very large sets) instead of
+  // building an OR branch per favorite. One parameter is reserved for type,
+  // leaving ample headroom below SQLite's common 999-variable limit.
+  const CHUNK = 900;
+  const rows: TagRow[] = [];
+  for (const [typeByte, names] of namesByType) {
+    const allNames = Array.from(names);
+    for (let i = 0; i < allNames.length; i += CHUNK) {
+      const chunk = allNames.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      rows.push(
+        ...(await db.query<TagRow>(
+          `SELECT tagId, type, name, count FROM tag WHERE type = ? AND LOWER(name) IN (${placeholders})`,
+          [typeByte, ...chunk],
+        )),
+      );
+    }
+  }
+
+  return rows;
 }
 
 export async function searchLocalTags(
@@ -18,28 +101,42 @@ export async function searchLocalTags(
   const db = await ensureDb();
   const trimmed = query.trim().toLowerCase();
   const i18nStore = useTagI18nStore.getState();
+  const favoriteTags = useSettingsStore.getState().favoriteTags ?? [];
 
-  // Empty query: return top tags by count directly from DB
+  // Empty query: merge the normal popular slice with exact favorite rows.
+  // A favorite can be far below the SQL LIMIT by count, but it still belongs
+  // at the front of the user-facing popular list.
   if (!trimmed) {
-    const topTags = tagTypeFilter !== undefined
-      ? await db.query<TagRow>(
-          'SELECT tagId, type, name, count FROM tag WHERE type = ? ORDER BY CASE WHEN count > 0 THEN count ELSE (SELECT COUNT(*) FROM gallery_tag WHERE tagId = tag.tagId) END DESC LIMIT ?',
-          [TAG_TYPE_TO_BYTE[tagTypeFilter], limit],
-        )
-      : await db.query<TagRow>(
-          'SELECT tagId, type, name, count FROM tag ORDER BY CASE WHEN count > 0 THEN count ELSE (SELECT COUNT(*) FROM gallery_tag WHERE tagId = tag.tagId) END DESC LIMIT ?',
-          [limit],
-        );
-    const filtered = topTags.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
-    return filtered.map((t) => {
-      const tagType = BYTE_TO_TAG_TYPE[t.type];
-      return {
-        tag: t.name,
-        tagType,
-        amount: t.count,
-        localName: i18nStore.isLoaded ? i18nStore.getLocal(tagType as string, t.name) : undefined,
-      };
-    });
+    const topTags =
+      tagTypeFilter !== undefined
+        ? await db.query<TagRow>(
+            'SELECT tagId, type, name, count FROM tag WHERE type = ? ORDER BY CASE WHEN count > 0 THEN count ELSE (SELECT COUNT(*) FROM gallery_tag WHERE tagId = tag.tagId) END DESC LIMIT ?',
+            [TAG_TYPE_TO_BYTE[tagTypeFilter], limit],
+          )
+        : await db.query<TagRow>(
+            'SELECT tagId, type, name, count FROM tag ORDER BY CASE WHEN count > 0 THEN count ELSE (SELECT COUNT(*) FROM gallery_tag WHERE tagId = tag.tagId) END DESC LIMIT ?',
+            [limit],
+          );
+    const favoriteRows = await loadFavoriteRows(db, favoriteTags, tagTypeFilter);
+    const merged = deduplicateRows([...topTags, ...favoriteRows]);
+    const localCountMap = await loadLocalCountMap(db, merged);
+    merged.sort((a, b) => effectiveCount(b, localCountMap) - effectiveCount(a, localCountMap));
+
+    const suggestions = merged
+      .filter((row) => BYTE_TO_TAG_TYPE[row.type] !== undefined)
+      .map((row) => {
+        const tagType = BYTE_TO_TAG_TYPE[row.type];
+        return {
+          tag: row.name,
+          tagType,
+          amount: effectiveCount(row, localCountMap),
+          localName: i18nStore.isLoaded
+            ? i18nStore.getLocal(tagType as string, row.name)
+            : undefined,
+        };
+      });
+
+    return prioritizeSuggestions(suggestions, favoriteTags).slice(0, limit);
   }
 
   const prefix = trimmed + '%';
@@ -63,7 +160,10 @@ export async function searchLocalTags(
   const secondaryResults: TagRow[] = [];
   if (i18nStore.isLoaded) {
     const typeFilter = tagTypeFilter !== undefined ? (tagTypeFilter as string) : undefined;
-    const i18nMatches = i18nStore.searchByLocal(trimmed, typeFilter ? { type: typeFilter } : undefined);
+    const i18nMatches = i18nStore.searchByLocal(
+      trimmed,
+      typeFilter ? { type: typeFilter } : undefined,
+    );
 
     if (i18nMatches.length > 0) {
       // Collect all names per type to batch-fetch from DB
@@ -92,51 +192,28 @@ export async function searchLocalTags(
     }
   }
 
-  // Deduplicate by tagId
-  const seen = new Set<number>();
-  const merged = [...primaryResults, ...secondaryResults].filter((t) => {
-    if (seen.has(t.tagId)) return false;
-    seen.add(t.tagId);
-    return true;
-  });
+  const merged = deduplicateRows([...primaryResults, ...secondaryResults]);
+  const localCountMap = await loadLocalCountMap(db, merged);
 
-  // Build effective count map for zero-count tags using local gallery_tag frequency
-  const localCountMap = new Map<number, number>();
-  const zeroCountIds = merged.filter((t) => t.count === 0).map((t) => t.tagId);
-  if (zeroCountIds.length > 0) {
-    const CHUNK = 50;
-    for (let i = 0; i < zeroCountIds.length; i += CHUNK) {
-      const chunk = zeroCountIds.slice(i, i + CHUNK);
-      const placeholders = chunk.map(() => '?').join(',');
-      const rows = await db.query<{ tagId: number; cnt: number }>(
-        `SELECT tagId, COUNT(*) as cnt FROM gallery_tag WHERE tagId IN (${placeholders}) GROUP BY tagId`,
-        chunk,
-      );
-      for (const r of rows) localCountMap.set(r.tagId, r.cnt);
-    }
-  }
-
-  // Sort by effective count descending, slice to limit
+  // Preserve the established count ranking within each partition, but move
+  // favorites ahead before applying the result limit.
   merged.sort((a, b) => {
-    const aEff = a.count > 0 ? a.count : (localCountMap.get(a.tagId) || 0);
-    const bEff = b.count > 0 ? b.count : (localCountMap.get(b.tagId) || 0);
-    return bEff - aEff;
+    return effectiveCount(b, localCountMap) - effectiveCount(a, localCountMap);
   });
-  const sliced = merged.slice(0, limit);
 
-  const filtered = sliced.filter((t) => BYTE_TO_TAG_TYPE[t.type] !== undefined);
-  if (filtered.length === 0) return [];
+  const suggestions = merged
+    .filter((row) => BYTE_TO_TAG_TYPE[row.type] !== undefined)
+    .map((row) => {
+      const tagType = BYTE_TO_TAG_TYPE[row.type];
+      return {
+        tag: row.name,
+        tagType,
+        amount: effectiveCount(row, localCountMap),
+        localName: i18nStore.isLoaded ? i18nStore.getLocal(tagType as string, row.name) : undefined,
+      };
+    });
 
-  return filtered.map((t) => {
-    const tagType = BYTE_TO_TAG_TYPE[t.type];
-    const effectiveCount = t.count > 0 ? t.count : (localCountMap.get(t.tagId) || 0);
-    return {
-      tag: t.name,
-      tagType,
-      amount: effectiveCount,
-      localName: i18nStore.isLoaded ? i18nStore.getLocal(tagType as string, t.name) : undefined,
-    };
-  });
+  return prioritizeSuggestions(suggestions, favoriteTags).slice(0, limit);
 }
 
 export async function searchLocalGalleryIdsByTag(
@@ -151,25 +228,20 @@ export async function searchLocalGalleryIdsByTag(
   );
   if (tags.length === 0) return [];
 
-  const rows = await db.query<{ id: number }>(
-    'SELECT id FROM gallery_tag WHERE tagId = ?',
-    [tags[0].tagId],
-  );
+  const rows = await db.query<{ id: number }>('SELECT id FROM gallery_tag WHERE tagId = ?', [
+    tags[0].tagId,
+  ]);
   return rows.map((r) => r.id).sort((a, b) => b - a);
 }
 
-export async function searchLocalGalleryIdsByTitle(
-  titleQuery: string,
-): Promise<number[]> {
+export async function searchLocalGalleryIdsByTitle(titleQuery: string): Promise<number[]> {
   const db = await ensureDb();
   const q = '%' + titleQuery.toLowerCase() + '%';
-  const rows = await db.query<{ id: number }>(
-    'SELECT id FROM gallery WHERE LOWER(title) LIKE ?',
-    [q],
-  );
+  const rows = await db.query<{ id: number }>('SELECT id FROM gallery WHERE LOWER(title) LIKE ?', [
+    q,
+  ]);
   return rows.map((r) => r.id).sort((a, b) => b - a);
 }
-
 
 export async function filterHistoryByTags(
   tags: Array<{ type: TagType; name: string }>,

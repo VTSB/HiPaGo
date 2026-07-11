@@ -136,6 +136,12 @@ export interface DownloadStore {
   /** List all gallery IDs that have at least one stored image. */
   listGalleries(): Promise<number[]>;
 
+  /**
+   * Optional richer directory listing for stores that preserve gallery folder
+   * names, e.g. Android public storage's "<id> <title>" directories.
+   */
+  listGalleryFolders?(): Promise<{ galleryId: number; folderName: string; title: string }[]>;
+
   /** Delete a gallery folder and all its images. */
   deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void>;
 

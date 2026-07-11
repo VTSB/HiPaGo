@@ -263,10 +263,28 @@ const translations = {
     en: 'Pick a folder for offline galleries. The app creates a HiPaGo subfolder inside it. Files stay visible in a file manager and persist after uninstall, but are hidden from the Gallery app (.nomedia). You only choose the folder once.',
     ko: '오프라인 갤러리를 저장할 폴더를 선택하세요. 그 안에 HiPaGo 하위 폴더를 앱이 자동으로 만듭니다. 파일 관리자에서는 보이고 앱 삭제 후에도 유지되지만, 갤러리 앱에는 표시되지 않습니다(.nomedia). 폴더는 한 번만 고르면 됩니다.',
   },
+  'settings.downloadLocation.backupDesc': {
+    en: 'The download list and app settings are backed up as downloads.json and settings.json (with recovery copies) in the HiPaGo folder. After reinstalling, select the same parent folder once to restore them automatically.',
+    ko: '다운로드 목록과 앱 설정은 HiPaGo 폴더의 downloads.json과 settings.json에 복구용 사본과 함께 백업됩니다. 앱을 다시 설치한 뒤 같은 상위 폴더를 한 번 선택하면 자동으로 복원됩니다.',
+  },
   'settings.downloadLocation.current': { en: 'Current folder', ko: '현재 폴더' },
   'settings.downloadLocation.notSelected': { en: 'Not selected yet', ko: '아직 선택 안 됨' },
   'settings.downloadLocation.select': { en: 'Select folder', ko: '폴더 선택' },
   'settings.downloadLocation.change': { en: 'Change folder', ko: '폴더 변경' },
+  'settings.downloadLocation.restore': { en: 'Restore backup', ko: '백업 복원' },
+  'settings.downloadLocation.restoring': { en: 'Restoring…', ko: '복원 중…' },
+  'settings.downloadLocation.restoreDone': {
+    en: 'Backup restore finished. Saved downloads and settings were applied when available.',
+    ko: '백업 복원을 마쳤습니다. 저장된 다운로드 목록과 설정을 확인해 적용했습니다.',
+  },
+  'settings.downloadLocation.restoreEmpty': {
+    en: 'No backup data was found in this folder. New changes will be backed up automatically.',
+    ko: '이 폴더에서 복원할 백업을 찾지 못했습니다. 앞으로의 변경 내용은 자동으로 백업됩니다.',
+  },
+  'settings.downloadLocation.restoreFailed': {
+    en: 'Could not restore the backup. Make sure you selected the folder that contains HiPaGo.',
+    ko: '백업을 복원하지 못했습니다. HiPaGo 폴더가 들어 있는 상위 폴더를 선택했는지 확인하세요.',
+  },
   'settings.downloadLocation.clear': { en: 'Clear', ko: '해제' },
   'settings.downloadLocation.hint': {
     en: 'If not set, you will be asked to pick a folder on your first download.',

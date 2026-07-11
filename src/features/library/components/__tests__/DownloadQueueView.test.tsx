@@ -133,6 +133,24 @@ describe('DownloadQueueView', () => {
     expect(screen.getByText('12/10 · 100%')).toBeTruthy();
   });
 
+  it('does not round an incomplete active download up to 100%', () => {
+    state.queue = [
+      {
+        id: 30,
+        title: 'Almost complete download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: { current: 199, total: 200 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('199/200 · 99%')).toBeTruthy();
+    expect(screen.queryByText('199/200 · 100%')).toBeNull();
+  });
+
   it('shows a downloading label before an active row knows its total page count', () => {
     state.queue = [
       {

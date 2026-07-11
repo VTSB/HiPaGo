@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { DBDownload } from '@/lib/db/schema';
 import type { QueueItem } from '@/lib/store/download-progress';
+import { toFavoriteTagKey } from '@/lib/utils/tag-favorites';
+import { TagType } from '@/lib/utils/types';
 
 // Stub matchMedia (jsdom doesn't ship it) so the useIsMobile branch in the new
 // LibraryHub wrapper resolves deterministically to "desktop" — on desktop the
@@ -46,6 +48,7 @@ const mockDevice = vi.hoisted(() => ({
 }));
 const mockSettings = vi.hoisted(() => ({
   libraryInitialTab: 'favorites' as 'favorites' | 'history' | 'downloads',
+  favoriteTags: [] as string[],
 }));
 const mockQueueOps = vi.hoisted(() => ({
   enqueueDownload: vi.fn(async () => 1),
@@ -184,8 +187,14 @@ vi.mock('@/lib/store/settings', () => ({
     sel: (s: {
       locale: string;
       libraryInitialTab: 'favorites' | 'history' | 'downloads';
+      favoriteTags: string[];
     }) => unknown,
-  ) => sel({ locale: 'en', libraryInitialTab: mockSettings.libraryInitialTab }),
+  ) =>
+    sel({
+      locale: 'en',
+      libraryInitialTab: mockSettings.libraryInitialTab,
+      favoriteTags: mockSettings.favoriteTags,
+    }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -232,6 +241,7 @@ describe('LibraryPage', () => {
     vi.clearAllMocks();
     mockDevice.isMobile = false;
     mockSettings.libraryInitialTab = 'favorites';
+    mockSettings.favoriteTags = [];
     mockDownloadProgressState.entries = {};
     mockDownloadProgressState.downloaded = {};
     mockDownloadProgressState.queue = [];
@@ -492,6 +502,32 @@ describe('LibraryPage', () => {
 
     expect(screen.getByText('Sized Gallery')).toBeTruthy();
     expect(screen.queryByText(/42/)).toBeNull();
+  });
+
+  it('shows favorite metadata first on downloaded gallery cards', async () => {
+    const favoriteKey = toFavoriteTagKey(TagType.TAG, 'favorite tag');
+    mockSettings.libraryInitialTab = 'downloads';
+    mockSettings.favoriteTags = [favoriteKey];
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        title: 'Tagged Download',
+        tags: JSON.stringify({
+          artist: ['priority artist'],
+          tag: ['favorite tag', 'ordinary tag'],
+        }),
+      }),
+    ]);
+
+    let view: Awaited<ReturnType<typeof renderPage>>;
+    await act(async () => {
+      view = await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    const renderedKeys = Array.from(view!.container.querySelectorAll('[data-tag-key]')).map((tag) =>
+      tag.getAttribute('data-tag-key'),
+    );
+    expect(renderedKeys[0]).toBe(favoriteKey);
   });
 
   // ── AC-004: delete action ─────────────────────────────────────────────────

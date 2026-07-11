@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, fireEvent } from '@testing-library/react';
+import { act, render, fireEvent, waitFor } from '@testing-library/react';
 import { SearchBar } from '../SearchBar';
 import * as UnifiedDropdownModule from '@/shared/components/UnifiedDropdown';
+import { useSettingsStore } from '@/lib/store/settings';
+import { TagType, type Suggestion } from '@/lib/utils/types';
+
+const { mockSearchLocalTags, mockDbState } = vi.hoisted(() => ({
+  mockSearchLocalTags: vi.fn().mockResolvedValue([]),
+  mockDbState: { dbReady: false },
+}));
 
 const mockPush = vi.fn();
 const mockSetQuery = vi.fn();
@@ -12,27 +19,36 @@ const mockAddRecentSearch = vi.fn();
 const mockRemoveRecentSearch = vi.fn();
 const mockClearRecentSearches = vi.fn();
 
-let mockSuggestions: Array<{ tagType: string; tag: string }> = [];
+let mockSuggestions: Suggestion[] = [];
 let mockRecentSearches: string[] = [];
 let mockUrlQuery = '';
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
-  useSearchParams: () => ({ get: (key: string) => key === 'q' ? mockUrlQuery : '' }),
+  useSearchParams: () => ({ get: (key: string) => (key === 'q' ? mockUrlQuery : '') }),
 }));
 
 vi.mock('@/features/search/store/search.store', () => ({
-  useSearchStore: (selector: (state: Record<string, unknown>) => unknown) => selector({
-    query: '',
-    suggestions: mockSuggestions,
-    recentSearches: mockRecentSearches,
-    setQuery: mockSetQuery,
-    setAutocompleteQuery: mockSetAutocompleteQuery,
-    clearSuggestions: mockClearSuggestions,
-    addRecentSearch: mockAddRecentSearch,
-    removeRecentSearch: mockRemoveRecentSearch,
-    clearRecentSearches: mockClearRecentSearches,
-  }),
+  useSearchStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      query: '',
+      suggestions: mockSuggestions,
+      recentSearches: mockRecentSearches,
+      setQuery: mockSetQuery,
+      setAutocompleteQuery: mockSetAutocompleteQuery,
+      clearSuggestions: mockClearSuggestions,
+      addRecentSearch: mockAddRecentSearch,
+      removeRecentSearch: mockRemoveRecentSearch,
+      clearRecentSearches: mockClearRecentSearches,
+    }),
 }));
 
 vi.mock('@/features/search/hooks/useSearch', () => ({
@@ -40,7 +56,7 @@ vi.mock('@/features/search/hooks/useSearch', () => ({
 }));
 
 vi.mock('@/lib/store/db-status', () => ({
-  useDbStatusStore: (selector: (state: { dbReady: boolean }) => unknown) => selector({ dbReady: false }),
+  useDbStatusStore: (selector: (state: { dbReady: boolean }) => unknown) => selector(mockDbState),
 }));
 
 vi.mock('@/lib/i18n/useT', () => ({
@@ -52,14 +68,23 @@ vi.mock('@/shared/hooks/useClickOutside', () => ({
 }));
 
 vi.mock('@/lib/db/search-local', () => ({
-  searchLocalTags: vi.fn().mockResolvedValue([]),
+  searchLocalTags: mockSearchLocalTags,
 }));
 
 vi.mock('@/shared/components/UnifiedDropdown', () => ({
-  UnifiedDropdown: (props: { onSelectSuggestion: (tag: string, tagType: string) => void; onSelectRecent: (q: string) => void }) => {
+  UnifiedDropdown: (props: {
+    onSelectSuggestion: (tag: string, tagType: string) => void;
+    onSelectRecent: (q: string) => void;
+  }) => {
     (globalThis as Record<string, unknown>).__onSelectSuggestion = props.onSelectSuggestion;
     (globalThis as Record<string, unknown>).__onSelectRecent = props.onSelectRecent;
-    return <div data-testid="unified-dropdown" />;
+    return (
+      <div data-testid="unified-dropdown">
+        <button type="button" data-testid="search-dropdown-favorite">
+          favorite
+        </button>
+      </div>
+    );
   },
   buildDropdownItems: vi.fn(() => []),
 }));
@@ -74,6 +99,9 @@ describe('SearchBar', () => {
     mockSuggestions = [];
     mockRecentSearches = [];
     mockUrlQuery = '';
+    mockDbState.dbReady = false;
+    mockSearchLocalTags.mockResolvedValue([]);
+    useSettingsStore.setState({ favoriteTags: [] });
     delete (globalThis as Record<string, unknown>).__onSelectSuggestion;
     delete (globalThis as Record<string, unknown>).__onSelectRecent;
   });
@@ -120,7 +148,11 @@ describe('SearchBar', () => {
     });
 
     act(() => {
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', nativeEvent: { isComposing: false } });
+      fireEvent.keyDown(input, {
+        key: 'Enter',
+        code: 'Enter',
+        nativeEvent: { isComposing: false },
+      });
     });
 
     expect(mockAddRecentSearch).toHaveBeenCalledWith('manga');
@@ -132,7 +164,11 @@ describe('SearchBar', () => {
     const input = getInput(container);
 
     act(() => {
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', nativeEvent: { isComposing: false } });
+      fireEvent.keyDown(input, {
+        key: 'Enter',
+        code: 'Enter',
+        nativeEvent: { isComposing: false },
+      });
     });
 
     expect(mockAddRecentSearch).not.toHaveBeenCalled();
@@ -149,7 +185,12 @@ describe('SearchBar', () => {
 
     // Should not throw
     act(() => {
-      fireEvent.keyDown(input, { key: 'z', ctrlKey: true, code: 'KeyZ', nativeEvent: { isComposing: false } });
+      fireEvent.keyDown(input, {
+        key: 'z',
+        ctrlKey: true,
+        code: 'KeyZ',
+        nativeEvent: { isComposing: false },
+      });
     });
 
     expect(container).toBeTruthy();
@@ -164,7 +205,12 @@ describe('SearchBar', () => {
     });
 
     act(() => {
-      fireEvent.keyDown(input, { key: 'y', ctrlKey: true, code: 'KeyY', nativeEvent: { isComposing: false } });
+      fireEvent.keyDown(input, {
+        key: 'y',
+        ctrlKey: true,
+        code: 'KeyY',
+        nativeEvent: { isComposing: false },
+      });
     });
 
     expect(container).toBeTruthy();
@@ -191,7 +237,10 @@ describe('SearchBar', () => {
 
   it('does not show dropdown on mount even when flatItems are populated', () => {
     vi.mocked(UnifiedDropdownModule.buildDropdownItems).mockReturnValue([
-      { kind: 'suggestion', suggestion: { tag: 'test', tagType: 'female' as never, amount: 1 } } as never,
+      {
+        kind: 'suggestion',
+        suggestion: { tag: 'test', tagType: 'female' as never, amount: 1 },
+      } as never,
     ]);
 
     const { container } = render(<SearchBar />);
@@ -204,7 +253,10 @@ describe('SearchBar', () => {
 
   it('shows dropdown only after input receives focus', () => {
     vi.mocked(UnifiedDropdownModule.buildDropdownItems).mockReturnValue([
-      { kind: 'suggestion', suggestion: { tag: 'test', tagType: 'female' as never, amount: 1 } } as never,
+      {
+        kind: 'suggestion',
+        suggestion: { tag: 'test', tagType: 'female' as never, amount: 1 },
+      } as never,
     ]);
 
     const { container } = render(<SearchBar />);
@@ -220,5 +272,116 @@ describe('SearchBar', () => {
     expect(container.querySelector('[data-testid="unified-dropdown"]')).not.toBeNull();
 
     vi.mocked(UnifiedDropdownModule.buildDropdownItems).mockReturnValue([]);
+  });
+
+  it('keeps the dropdown open when Tab moves focus from the input into it', () => {
+    vi.useFakeTimers();
+    vi.mocked(UnifiedDropdownModule.buildDropdownItems).mockReturnValue([
+      {
+        kind: 'suggestion',
+        suggestion: { tag: 'test', tagType: TagType.ARTIST, amount: 1 },
+      },
+    ]);
+    const { container, getByTestId } = render(<SearchBar />);
+    const input = getInput(container);
+
+    fireEvent.focus(input);
+    const favoriteButton = getByTestId('search-dropdown-favorite');
+    fireEvent.keyDown(input, { key: 'Tab', code: 'Tab' });
+    fireEvent.blur(input);
+    favoriteButton.focus();
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+
+    expect(favoriteButton).toHaveFocus();
+    expect(container.querySelector('[data-testid="unified-dropdown"]')).not.toBeNull();
+
+    vi.mocked(UnifiedDropdownModule.buildDropdownItems).mockReturnValue([]);
+    vi.useRealTimers();
+  });
+
+  it('re-prioritizes existing suggestions immediately when favorites change', () => {
+    mockSuggestions = [
+      { tag: 'regular artist', tagType: TagType.ARTIST, amount: 100 },
+      { tag: 'favorite artist', tagType: TagType.ARTIST, amount: 1 },
+    ];
+
+    render(<SearchBar />);
+
+    let latestArgs = vi.mocked(UnifiedDropdownModule.buildDropdownItems).mock.calls.at(-1)?.[0];
+    expect(latestArgs?.suggestions.map((suggestion) => suggestion.tag)).toEqual([
+      'regular artist',
+      'favorite artist',
+    ]);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:favorite_artist'] });
+    });
+
+    latestArgs = vi.mocked(UnifiedDropdownModule.buildDropdownItems).mock.calls.at(-1)?.[0];
+    expect(latestArgs?.suggestions.map((suggestion) => suggestion.tag)).toEqual([
+      'favorite artist',
+      'regular artist',
+    ]);
+  });
+
+  it('reloads popular tags when favorites change so a low-count favorite can join the list', async () => {
+    mockDbState.dbReady = true;
+    mockSearchLocalTags
+      .mockResolvedValueOnce([{ tag: 'popular regular', tagType: TagType.TAG, amount: 100 }])
+      .mockResolvedValueOnce([
+        { tag: 'popular favorite', tagType: TagType.TAG, amount: 1 },
+        { tag: 'popular regular', tagType: TagType.TAG, amount: 100 },
+      ]);
+
+    render(<SearchBar />);
+    await waitFor(() => expect(mockSearchLocalTags).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['tag:popular_favorite'] });
+    });
+
+    await waitFor(() => expect(mockSearchLocalTags).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const latestArgs = vi.mocked(UnifiedDropdownModule.buildDropdownItems).mock.calls.at(-1)?.[0];
+      expect(latestArgs?.popularTags.map((suggestion) => suggestion.tag)).toEqual([
+        'popular favorite',
+        'popular regular',
+      ]);
+    });
+  });
+
+  it('ignores a stale popular-tag response after favorites trigger a newer request', async () => {
+    mockDbState.dbReady = true;
+    const staleRequest = deferred<Suggestion[]>();
+    mockSearchLocalTags
+      .mockReturnValueOnce(staleRequest.promise)
+      .mockResolvedValueOnce([{ tag: 'latest favorite', tagType: TagType.TAG, amount: 1 }]);
+
+    render(<SearchBar />);
+    await waitFor(() => expect(mockSearchLocalTags).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['tag:latest_favorite'] });
+    });
+    await waitFor(() => expect(mockSearchLocalTags).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const latestArgs = vi.mocked(UnifiedDropdownModule.buildDropdownItems).mock.calls.at(-1)?.[0];
+      expect(latestArgs?.popularTags.map((suggestion) => suggestion.tag)).toEqual([
+        'latest favorite',
+      ]);
+    });
+
+    await act(async () => {
+      staleRequest.resolve([{ tag: 'stale regular', tagType: TagType.TAG, amount: 100 }]);
+      await staleRequest.promise;
+      await Promise.resolve();
+    });
+
+    const latestArgs = vi.mocked(UnifiedDropdownModule.buildDropdownItems).mock.calls.at(-1)?.[0];
+    expect(latestArgs?.popularTags.map((suggestion) => suggestion.tag)).toEqual([
+      'latest favorite',
+    ]);
   });
 });

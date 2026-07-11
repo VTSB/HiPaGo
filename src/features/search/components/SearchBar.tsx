@@ -11,11 +11,14 @@ import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
+import { prioritizeSuggestions } from '@/lib/utils/tag-favorites';
 
 export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
   const router = useRouter();
+  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const setQuery = useSearchStore((s) => s.setQuery);
@@ -28,19 +31,12 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
   const removeRecentSearch = useSearchStore((s) => s.removeRecentSearch);
   const clearRecentSearches = useSearchStore((s) => s.clearRecentSearches);
   const dbReady = useDbStatusStore((s) => s.dbReady);
+  const favoriteTags = useSettingsStore((s) => s.favoriteTags);
   const t = useT();
   const [popularTags, setPopularTags] = useState<Suggestion[]>([]);
 
-  const {
-    value,
-    updateValue,
-    clear,
-    syncFromQuery,
-    undo,
-    redo,
-    currentToken,
-    insertSuggestion,
-  } = useSearchInputState();
+  const { value, updateValue, clear, syncFromQuery, undo, redo, currentToken, insertSuggestion } =
+    useSearchInputState();
 
   const searchParams = useSearchParams();
   const lastSyncedUrlQueryRef = useRef<string | null>(null);
@@ -64,33 +60,20 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
     return () => cancelAnimationFrame(id);
   }, [autoFocus]);
 
-  // selectedIndex is stored alongside the suggestions snapshot it belongs to.
-  // When suggestions changes identity, the effective index is derived as -1
-  // during render — no setState needed, no effect needed.
-  const [selectionState, setSelectionState] = useState<{
-    snapshot: Suggestion[];
-    index: number;
-  }>(() => ({ snapshot: suggestions, index: -1 }));
-
-  const selectedIndex =
-    selectionState.snapshot === suggestions ? selectionState.index : -1;
-
-  const setSelectedIndex = useCallback((indexOrUpdater: number | ((prev: number) => number)) => {
-    setSelectionState((prev) => {
-      const next =
-        typeof indexOrUpdater === 'function'
-          ? indexOrUpdater(prev.snapshot === suggestions ? prev.index : -1)
-          : indexOrUpdater;
-      return { snapshot: suggestions, index: next };
-    });
-  }, [suggestions]);
-
   // Load popular tags once DB is ready
   useEffect(() => {
+    let cancelled = false;
     if (dbReady) {
-      searchLocalTags('').then(setPopularTags).catch((e) => console.warn('[search] Popular tags load failed:', e));
+      searchLocalTags('')
+        .then((results) => {
+          if (!cancelled) setPopularTags(results);
+        })
+        .catch((e) => console.warn('[search] Popular tags load failed:', e));
     }
-  }, [dbReady]);
+    return () => {
+      cancelled = true;
+    };
+  }, [dbReady, favoriteTags]);
 
   // Sync active input to store for autocomplete
   useEffect(() => {
@@ -99,12 +82,47 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
   }, [value, currentToken, setQuery, setAutocompleteQuery]);
 
   // Flat items for unified dropdown
-  const flatItems = useMemo(() => buildDropdownItems({
-    inputText: value,
-    recentSearches,
-    suggestions,
-    popularTags,
-  }), [value, recentSearches, suggestions, popularTags]);
+  const prioritizedSuggestions = useMemo(
+    () => prioritizeSuggestions(suggestions, favoriteTags),
+    [suggestions, favoriteTags],
+  );
+  const prioritizedPopularTags = useMemo(
+    () => prioritizeSuggestions(popularTags, favoriteTags),
+    [popularTags, favoriteTags],
+  );
+
+  const flatItems = useMemo(
+    () =>
+      buildDropdownItems({
+        inputText: value,
+        recentSearches,
+        suggestions: prioritizedSuggestions,
+        popularTags: prioritizedPopularTags,
+      }),
+    [value, recentSearches, prioritizedSuggestions, prioritizedPopularTags],
+  );
+
+  // Keep the keyboard index tied to the exact list being rendered. Favorite
+  // changes can reorder both suggestions and popular tags.
+  const [selectionState, setSelectionState] = useState(() => ({
+    snapshot: flatItems,
+    index: -1,
+  }));
+
+  const selectedIndex = selectionState.snapshot === flatItems ? selectionState.index : -1;
+
+  const setSelectedIndex = useCallback(
+    (indexOrUpdater: number | ((prev: number) => number)) => {
+      setSelectionState((prev) => {
+        const next =
+          typeof indexOrUpdater === 'function'
+            ? indexOrUpdater(prev.snapshot === flatItems ? prev.index : -1)
+            : indexOrUpdater;
+        return { snapshot: flatItems, index: next };
+      });
+    },
+    [flatItems],
+  );
 
   const doSubmit = useCallback(() => {
     const fullQuery = value.trim();
@@ -123,73 +141,123 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
     [doSubmit],
   );
 
-  const handleHistoryClick = useCallback((search: string) => {
-    syncFromQuery(search);
-    setShowDropdown(false);
-    clearSuggestions();
-    addRecentSearch(search);
-    router.push(`/search?q=${encodeURIComponent(search)}`);
-  }, [syncFromQuery, clearSuggestions, addRecentSearch, router]);
+  const handleHistoryClick = useCallback(
+    (search: string) => {
+      syncFromQuery(search);
+      setShowDropdown(false);
+      clearSuggestions();
+      addRecentSearch(search);
+      router.push(`/search?q=${encodeURIComponent(search)}`);
+    },
+    [syncFromQuery, clearSuggestions, addRecentSearch, router],
+  );
 
-  const handleSuggestionClick = useCallback((tag: string, tagType: string, localName?: string) => {
-    insertSuggestion(tag, tagType, localName);
-    clearSuggestions();
-    setSelectedIndex(-1);
-    setShowDropdown(false);
-    inputRef.current?.focus();
-  }, [insertSuggestion, clearSuggestions, setSelectedIndex]);
+  const handleSuggestionClick = useCallback(
+    (tag: string, tagType: string, localName?: string) => {
+      insertSuggestion(tag, tagType, localName);
+      clearSuggestions();
+      setSelectedIndex(-1);
+      setShowDropdown(false);
+      inputRef.current?.focus();
+    },
+    [insertSuggestion, clearSuggestions, setSelectedIndex],
+  );
 
   // Drive suggestion display + insertion script by the active token, not locale.
   const koreanInput = isHangul(currentToken ?? '');
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    // IME guard
-    if (e.nativeEvent.isComposing) return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // IME guard
+      if (e.nativeEvent.isComposing) return;
 
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault();
-        if (!showDropdown) { setShowDropdown(true); return; }
-        setSelectedIndex(prev => prev < flatItems.length - 1 ? prev + 1 : 0);
-        return;
-      case 'ArrowUp':
-        e.preventDefault();
-        setSelectedIndex(prev => prev > 0 ? prev - 1 : flatItems.length - 1);
-        return;
-      case 'Enter':
-        e.preventDefault();
-        if (selectedIndex >= 0 && selectedIndex < flatItems.length) {
-          const item = flatItems[selectedIndex];
-          if (item.kind === 'recent') { handleHistoryClick(item.query); }
-          else if (item.kind === 'suggestion') { handleSuggestionClick(item.suggestion.tag, item.suggestion.tagType, item.suggestion.localName); }
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          if (!showDropdown) {
+            setShowDropdown(true);
+            return;
+          }
+          setSelectedIndex((prev) => (prev < flatItems.length - 1 ? prev + 1 : 0));
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          setSelectedIndex((prev) => (prev > 0 ? prev - 1 : flatItems.length - 1));
+          return;
+        case 'Enter':
+          e.preventDefault();
+          if (selectedIndex >= 0 && selectedIndex < flatItems.length) {
+            const item = flatItems[selectedIndex];
+            if (item.kind === 'recent') {
+              handleHistoryClick(item.query);
+            } else if (item.kind === 'suggestion') {
+              handleSuggestionClick(
+                item.suggestion.tag,
+                item.suggestion.tagType,
+                item.suggestion.localName,
+              );
+            }
+            setSelectedIndex(-1);
+          } else {
+            doSubmit();
+          }
+          return;
+        case 'Escape':
+          setShowDropdown(false);
           setSelectedIndex(-1);
-        } else {
-          doSubmit();
-        }
-        return;
-      case 'Escape':
-        setShowDropdown(false);
-        setSelectedIndex(-1);
-        return;
-      case 'z':
-        if (e.ctrlKey || e.metaKey) { e.preventDefault(); undo(); return; }
-        break;
-      case 'y':
-        if (e.ctrlKey || e.metaKey) { e.preventDefault(); redo(); return; }
-        break;
-    }
-  }, [showDropdown, flatItems, selectedIndex, undo, redo, doSubmit, handleHistoryClick, handleSuggestionClick, setSelectedIndex]);
+          return;
+        case 'z':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            undo();
+            return;
+          }
+          break;
+        case 'y':
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            redo();
+            return;
+          }
+          break;
+      }
+    },
+    [
+      showDropdown,
+      flatItems,
+      selectedIndex,
+      undo,
+      redo,
+      doSubmit,
+      handleHistoryClick,
+      handleSuggestionClick,
+      setSelectedIndex,
+    ],
+  );
 
   // Handle click outside
   const handleClickOutside = useCallback(() => {
     setShowDropdown(false);
   }, []);
-  useClickOutside([inputRef, dropdownRef], handleClickOutside);
+  useClickOutside([rootRef], handleClickOutside);
+  const handleInputBlur = useCallback(() => {
+    setTimeout(() => {
+      if (rootRef.current?.contains(document.activeElement)) return;
+      setShowDropdown(false);
+    }, 150);
+  }, []);
 
   // Handle keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey && e.key === 'k') || (e.key === '/' && !(document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement))) {
+      if (
+        (e.ctrlKey && e.key === 'k') ||
+        (e.key === '/' &&
+          !(
+            document.activeElement instanceof HTMLInputElement ||
+            document.activeElement instanceof HTMLTextAreaElement
+          ))
+      ) {
         e.preventDefault();
         inputRef.current?.focus();
       }
@@ -207,7 +275,7 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
   }, [showDropdown, clearSuggestions]);
 
   return (
-    <div className="relative w-full max-w-md">
+    <div ref={rootRef} className="relative w-full max-w-md">
       <form onSubmit={handleSubmit}>
         <SearchInput
           leadingIcon
@@ -215,8 +283,10 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
           value={value}
           onChange={updateValue}
           onKeyDown={handleKeyDown}
-          onFocus={() => { setShowDropdown(true); }}
-          onBlur={() => { setTimeout(() => setShowDropdown(false), 150); }}
+          onFocus={() => {
+            setShowDropdown(true);
+          }}
+          onBlur={handleInputBlur}
           onClear={clear}
           placeholder={t('search.placeholder')}
           inputRef={inputRef}
@@ -229,7 +299,9 @@ export function SearchBar({ autoFocus = false }: { autoFocus?: boolean } = {}) {
             flatItems={flatItems}
             selectedIndex={selectedIndex}
             onSelectRecent={handleHistoryClick}
-            onSelectSuggestion={(tag, tagType, localName) => handleSuggestionClick(tag, tagType, localName)}
+            onSelectSuggestion={(tag, tagType, localName) =>
+              handleSuggestionClick(tag, tagType, localName)
+            }
             onRemoveRecent={removeRecentSearch}
             onClearRecents={clearRecentSearches}
             koreanDisplay={koreanInput}

@@ -26,6 +26,15 @@ export function DbInitializer() {
 
     initializeDatabase()
       .then(async () => {
+        // Restore before migration/reconciliation so startup defaults cannot
+        // replace a catalog left in the public download tree after reinstall.
+        if (isAndroid()) {
+          await import('@/lib/storage/public-backup')
+            .then(async (backup) => {
+              await backup.restorePublicBackup();
+            })
+            .catch((e) => console.warn('[backup] public backup restore failed:', e));
+        }
         // Android-only: run one-time Data→public migration + reconciliation
         // after DB is ready. Best-effort — never propagates errors into boot.
         if (isAndroid()) {
@@ -39,6 +48,13 @@ export function DbInitializer() {
         await import('@/lib/store/reconcile-queue')
           .then(({ reconcileQueue }) => reconcileQueue())
           .catch((e) => console.warn('[queue] reconcile failed:', e));
+        // Enable writes only after every startup restore and migration has
+        // completed, preventing an empty fresh install from winning the race.
+        if (isAndroid()) {
+          await import('@/lib/storage/public-backup')
+            .then(({ startPublicBackupSync }) => startPublicBackupSync())
+            .catch((e) => console.warn('[backup] public backup sync failed to start:', e));
+        }
         return checkDbReady();
       })
       .then((ready) => {
@@ -68,9 +84,10 @@ export function DbInitializer() {
     const loadForLocale = (locale: string) => {
       if (locale === prevLocale) return;
       prevLocale = locale;
-      useTagI18nStore.getState().loadLocale(locale).catch((e) =>
-        console.warn('[i18n] Failed to load locale:', e)
-      );
+      useTagI18nStore
+        .getState()
+        .loadLocale(locale)
+        .catch((e) => console.warn('[i18n] Failed to load locale:', e));
     };
     // Fire immediately with current value
     loadForLocale(useSettingsStore.getState().locale);

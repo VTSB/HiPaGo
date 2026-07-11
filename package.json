@@ -1,6 +1,6 @@
 {
   "name": "hipago",
-  "version": "9.9.9",
+  "version": "0.0.67",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@10.30.3",

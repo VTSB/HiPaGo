@@ -111,6 +111,23 @@ public class GalleryDownloadWorkerTest {
     }
 
     @Test
+    public void progressCountsOnlyManifestCommittedPages() {
+        // The final page has started, but only nine pages are durable: never show
+        // 10/10 until the manifest commit succeeds.
+        assertEquals(9, GalleryDownloadWorker.committedProgressCount(9, 9));
+        assertEquals(10, GalleryDownloadWorker.committedProgressCount(9, 10));
+        assertEquals(0, GalleryDownloadWorker.committedProgressCount(0, 0));
+    }
+
+    @Test
+    public void progressPercentReachesOneHundredOnlyWhenComplete() {
+        assertEquals(99, GalleryDownloadWorker.progressPercent(199, 200));
+        assertEquals(100, GalleryDownloadWorker.progressPercent(200, 200));
+        assertEquals(100, GalleryDownloadWorker.progressPercent(201, 200));
+        assertEquals(0, GalleryDownloadWorker.progressPercent(0, 0));
+    }
+
+    @Test
     public void localizesDownloadNotificationStrings() {
         assertEquals("ko", GalleryDownloadWorker.normalizeLocale("ko"));
         assertEquals("en", GalleryDownloadWorker.normalizeLocale("fr"));

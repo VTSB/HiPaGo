@@ -217,6 +217,27 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
     expect(result).toBeNull();
   });
 
+  it('getImage propagates storage I/O errors instead of reporting a missing file', async () => {
+    await store.ensureGallery(998, 'Transient Error');
+    fakeLib.exists = async () => {
+      throw new Error('temporary SAF failure');
+    };
+
+    await expect(store.getImage(998, -1, 'json')).rejects.toThrow('temporary SAF failure');
+  });
+
+  it('exact folder lookup propagates a stat error so reconciliation stays conservative', async () => {
+    fakeLib.stat = async () => {
+      throw new Error('temporary stat failure');
+    };
+
+    await expect(
+      AndroidPublicDownloadStore.create().getImage(997, -1, 'json', {
+        folderName: '997 Existing Folder',
+      }),
+    ).rejects.toThrow('temporary stat failure');
+  });
+
   // imageExists (stat-backed, size>0)
 
   it('imageExists returns true for a present non-empty page', async () => {
@@ -236,6 +257,21 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
   it('imageExists returns false when the ext differs', async () => {
     await store.putImage(100, 2, makeBytes(8), 'webp');
     expect(await store.imageExists(100, 2, 'jpg')).toBe(false);
+  });
+
+  it('imageSize returns the stored byte size and null for a missing page', async () => {
+    await store.putImage(100, 3, makeBytes(12), 'webp');
+    expect(await store.imageSize(100, 3, 'webp')).toBe(12);
+    expect(await store.imageSize(100, 4, 'webp')).toBeNull();
+  });
+
+  it('imageSize propagates a transient stat error during restore validation', async () => {
+    await store.ensureGallery(101, 'Restore Validation');
+    fakeLib.stat = async () => {
+      throw new Error('temporary page stat failure');
+    };
+
+    await expect(store.imageSize(101, 0, 'webp')).rejects.toThrow('temporary page stat failure');
   });
 
   it('putImage overwrites an existing file', async () => {
@@ -446,6 +482,27 @@ describe('AndroidPublicDownloadStore — Android-specific behaviour', () => {
       expect(typeof id).toBe('number');
       expect(isNaN(id)).toBe(false);
     }
+  });
+
+  it('listGalleryFolders returns strict IDs, folder names, and title fallbacks', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/123 Named Gallery`);
+    fakeLib.dirs.add(`${LIB}/456`);
+    fakeLib.dirs.add(`${LIB}/789invalid`);
+
+    expect(await store.listGalleryFolders()).toEqual([
+      { galleryId: 123, folderName: '123 Named Gallery', title: 'Named Gallery' },
+      { galleryId: 456, folderName: '456', title: 'Gallery 456' },
+    ]);
+  });
+
+  it('listGalleryFolders propagates a transient directory read error', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.readdir = async () => {
+      throw new Error('temporary directory failure');
+    };
+
+    await expect(store.listGalleryFolders()).rejects.toThrow('temporary directory failure');
   });
 
   it('putImageFromFile copies from srcPath to the gallery folder', async () => {

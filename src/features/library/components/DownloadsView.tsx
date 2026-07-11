@@ -28,6 +28,9 @@ import type { DBDownload } from '@/lib/db/schema';
 import type { TagType } from '@/lib/utils/types';
 import { galleryHref } from '@/lib/utils/routes';
 import { hasCompleteDownloadedGallery, type DownloadProgress } from '@/lib/utils/download-zip';
+import { useSettingsStore } from '@/lib/store/settings';
+import { prioritizeFavorites, toFavoriteTagKey } from '@/lib/utils/tag-favorites';
+import { downloadProgressPercent } from '@/lib/utils/download-progress-percent';
 
 // Match the gallery-list grid (GalleryGrid GRID_AUTO) so downloaded items read
 // as the same cover-forward cards.
@@ -46,11 +49,6 @@ function formatBytes(bytes: number): string {
   const units = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(1024));
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
-}
-
-function progressPercent(progress: DownloadProgress): number {
-  if (progress.total <= 0) return 0;
-  return Math.min(100, Math.max(0, Math.round((progress.current / progress.total) * 100)));
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +252,7 @@ function LibraryCard({
   canExport = false,
 }: LibraryCardProps) {
   const t = useT();
+  const favoriteTags = useSettingsStore((state) => state.favoriteTags ?? []);
   const effectiveStatus: DBDownload['status'] =
     item.status === 'complete' && isMissingFiles ? 'failed' : item.status;
   const isFailed = effectiveStatus === 'failed';
@@ -293,11 +292,11 @@ function LibraryCard({
       }
     }
     all.sort((a, b) => a.priority - b.priority);
-    return all;
-  }, [tagEntries]);
+    return prioritizeFavorites(all, favoriteTags, ({ tag, type }) => toFavoriteTagKey(type, tag));
+  }, [tagEntries, favoriteTags]);
 
   const progressLabel = retryProgress
-    ? `${retryProgress.current}/${retryProgress.total} · ${progressPercent(retryProgress)}%`
+    ? `${retryProgress.current}/${retryProgress.total} · ${downloadProgressPercent(retryProgress)}%`
     : null;
   const rememberCurrentListUrl = useCallback(() => {
     try {
@@ -789,8 +788,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
             const progress = entry?.progress ?? null;
             const activeRedownload =
               item.status === 'complete' && downloadedFlags[item.galleryId] === false;
-            const staleCompleteProgress =
-              item.status === 'complete' && !activeRedownload;
+            const staleCompleteProgress = item.status === 'complete' && !activeRedownload;
             const isRetrying = !!progress && !staleCompleteProgress;
             return (
               <LibraryCard

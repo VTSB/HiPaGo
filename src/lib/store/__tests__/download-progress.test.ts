@@ -30,12 +30,10 @@ vi.mock('@/lib/utils/download-zip', async () => {
     ...actual,
     downloadGalleryToLibrary: (...a: unknown[]) => dl(...a),
     getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
-    hasCompleteDownloadedGallery: vi.fn(
-      async (id: number, expectedPageCount: number) => {
-        const pages = manifestPages.get(id) ?? [];
-        return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
-      },
-    ),
+    hasCompleteDownloadedGallery: vi.fn(async (id: number, expectedPageCount: number) => {
+      const pages = manifestPages.get(id) ?? [];
+      return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
+    }),
   };
 });
 
@@ -888,6 +886,16 @@ describe('Android live-progress poller (AC-003)', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       workerProgress.value = { current: null };
+      await vi.advanceTimersByTimeAsync(2000);
+
+      // A transient missing/torn progress read is tolerated while the worker's
+      // manifest catches up.
+      expect(errorRows).not.toContainEqual({
+        galleryId: 503,
+        status: 'failed',
+        lastError: 'Background download stopped before completion',
+      });
+
       await vi.advanceTimersByTimeAsync(1000);
 
       expect(errorRows).toContainEqual({
@@ -935,6 +943,39 @@ describe('Android live-progress poller (AC-003)', () => {
         'Background download failed',
       );
       expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '504' });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('finalizes from the manifest when the native progress bridge rejects', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      downloadRows.set(505, { status: 'downloading', pageCount: 1 });
+      manifestPages.set(505, [{ index: 0, ext: 'webp' }]);
+      useDownloadProgressStore.setState({
+        entries: { 505: { progress: { current: 0, total: 1 }, error: null } },
+        queue: [
+          {
+            id: 505,
+            title: 'G505',
+            thumbnail: '/tn',
+            status: 'downloading',
+            position: null,
+            progress: { current: 0, total: 1 },
+          },
+        ],
+      });
+      vi.mocked(DownloadWorker.getProgress).mockRejectedValueOnce(new Error('bridge unavailable'));
+
+      startAndroidProgressPoll(505);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(useDownloadProgressStore.getState().entries[505]).toBeUndefined();
+      expect(useDownloadProgressStore.getState().queue).toEqual([]);
+      expect(downloadRows.get(505)?.status).toBe('complete');
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -995,6 +1036,35 @@ describe('Android live-progress poller (AC-003)', () => {
         .mock.calls.map((c) => (c[0] as { galleryId: string }).galleryId);
       expect(polledIds).toContain('600');
       expect(polledIds).toContain('601');
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not overlap progress reads for the same gallery', async () => {
+    vi.useFakeTimers();
+    let releaseRead!: () => void;
+    try {
+      androidFlag = true;
+      useDownloadProgressStore.setState({
+        entries: { 602: { progress: { current: 0, total: 4 }, error: null } },
+      });
+      vi.mocked(DownloadWorker.getProgress).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            releaseRead = () => resolve({ current: 1, total: 4 });
+          }),
+      );
+
+      startAndroidProgressPoll(602);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(vi.mocked(DownloadWorker.getProgress)).toHaveBeenCalledTimes(1);
+
+      releaseRead();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(vi.mocked(DownloadWorker.getProgress)).toHaveBeenCalledTimes(2);
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -1206,12 +1276,26 @@ describe('Android poller finalizes completion in-app (AC-003)', () => {
       ]);
       useDownloadProgressStore.setState({
         entries: { 910: { progress: { current: 1, total: 2 }, error: null } },
+        queue: [
+          {
+            id: 910,
+            title: 'G910',
+            thumbnail: '/tn',
+            status: 'downloading',
+            position: null,
+            progress: { current: 1, total: 2 },
+          },
+        ],
       });
       workerProgress.value = { current: 2, total: 2 };
+      // Completion must clear the reactive row even when the best-effort DB
+      // refresh fails for this tick; otherwise a stopped poller leaves 100% stuck.
+      vi.mocked(queueOps.listQueue).mockRejectedValueOnce(new Error('temporary DB read failure'));
       startAndroidProgressPoll(910);
       await vi.advanceTimersByTimeAsync(0);
 
       expect(useDownloadProgressStore.getState().entries[910]).toBeUndefined();
+      expect(useDownloadProgressStore.getState().queue).toEqual([]);
       expect(useDownloadProgressStore.getState().downloaded[910]).toBe(true);
       const upsert = upsertedRows.at(-1) as { galleryId: number; status: string };
       expect(upsert).toMatchObject({ galleryId: 910, status: 'complete' });
@@ -1680,6 +1764,30 @@ describe('auto-retry scheduler timer (AC-004)', () => {
 });
 
 describe('queue actions (AC-001 / Task B)', () => {
+  it('drops a stale active entry when the DB row is already complete', async () => {
+    downloadRows.set(69, { status: 'complete', pageCount: 1 });
+    useDownloadProgressStore.setState({
+      entries: { 69: { progress: { current: 1, total: 1 }, error: null } },
+      downloaded: {},
+      queue: [
+        {
+          id: 69,
+          title: 'G69',
+          thumbnail: '/tn',
+          status: 'downloading',
+          position: null,
+          progress: { current: 1, total: 1 },
+        },
+      ],
+    });
+
+    await useDownloadProgressStore.getState().refreshQueue();
+
+    expect(useDownloadProgressStore.getState().entries[69]).toBeUndefined();
+    expect(useDownloadProgressStore.getState().downloaded[69]).toBe(true);
+    expect(useDownloadProgressStore.getState().queue).toEqual([]);
+  });
+
   it('ignores a stale refreshQueue result after a completed active entry is cleared', async () => {
     let getDownloadCalled!: () => void;
     const getDownloadStarted = new Promise<void>((resolve) => {

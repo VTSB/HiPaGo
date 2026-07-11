@@ -337,6 +337,7 @@ export async function fireDueAutoRetries(): Promise<void> {
 // when no Android download is active, or when the document is hidden
 // (backgrounded); it resumes on 'visible' if any handoff is still active.
 const PROGRESS_POLL_INTERVAL_MS = 1000;
+const PROGRESS_MISSING_GRACE_POLLS = 3;
 const LIBRARY_CHANGE_THROTTLE_MS = 750;
 
 export const DOWNLOAD_LIBRARY_CHANGED_EVENT = 'hipago:download-library-changed';
@@ -356,6 +357,13 @@ let progressPollTimer: ReturnType<typeof setInterval> | null = null;
 // galleries sequentially, but multiple rows can be handed off quickly; polling
 // all active ids avoids locking the in-app % display onto the last handed-off id.
 const progressPollGalleryIds = new Set<number>();
+// Prevent an expensive SAF manifest verification from overlapping the next
+// interval tick for the same gallery.
+const progressPollInFlightIds = new Set<number>();
+// A missing progress file can briefly race worker cleanup / SAF visibility.
+// Require several consecutive misses before treating an incomplete manifest as
+// a stopped worker.
+const progressPollMissingCounts = new Map<number, number>();
 
 /** Clear the single poll interval (does NOT forget which gallery was active). */
 function clearProgressPollTimer(): void {
@@ -382,7 +390,9 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
   if (current.status === 'complete') return true;
   if (current.status === 'failed' && current.lastError === 'Cancelled') return false;
   if (
-    (current.status !== 'downloading' && current.status !== 'failed' && current.status !== 'queued') ||
+    (current.status !== 'downloading' &&
+      current.status !== 'failed' &&
+      current.status !== 'queued') ||
     (current.pageCount ?? 0) <= 0
   ) {
     return false;
@@ -508,7 +518,9 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   try {
     res = await DownloadWorker.getProgress({ galleryId: String(id) });
   } catch {
-    // Plugin unavailable / rejected this tick — leave the last known value.
+    // The bridge can reject even though native work completed. Reconcile from
+    // the authoritative manifest so the last visible progress cannot stick.
+    await finalizeAndroidDownloadIfComplete(id);
     return;
   }
   // A still-active poller may have been stopped for this id while we awaited.
@@ -519,6 +531,7 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   }
   if (res && typeof (res as { current: number | null }).current === 'number') {
     const { current, total } = res as { current: number; total: number };
+    progressPollMissingCounts.delete(id);
     storeApi?.setEntry(id, {
       progress: { current, total },
       error: null,
@@ -538,12 +551,26 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   // manifest first. If the manifest is still incomplete after we had observed
   // native progress, treat it as a stopped/failed worker instead of leaving the
   // row stuck as "downloading" until next app launch.
-  await finalizeAndroidDownloadIfComplete(id);
+  if (await finalizeAndroidDownloadIfComplete(id)) return;
   if (!progressPollGalleryIds.has(id)) return;
   const lastProgress = useDownloadProgressStore.getState().entries[id]?.progress;
   if (lastProgress && lastProgress.current > 0) {
-    await failAndroidDownloadIfWorkerStopped(id, 'Background download stopped before completion');
+    const misses = (progressPollMissingCounts.get(id) ?? 0) + 1;
+    progressPollMissingCounts.set(id, misses);
+    if (misses >= PROGRESS_MISSING_GRACE_POLLS) {
+      await failAndroidDownloadIfWorkerStopped(id, 'Background download stopped before completion');
+    }
+  } else {
+    progressPollMissingCounts.delete(id);
   }
+}
+
+function scheduleAndroidProgressPoll(id: number): void {
+  if (!progressPollGalleryIds.has(id) || progressPollInFlightIds.has(id)) return;
+  progressPollInFlightIds.add(id);
+  void pollAndroidProgressOnce(id).finally(() => {
+    progressPollInFlightIds.delete(id);
+  });
 }
 
 /**
@@ -561,7 +588,7 @@ export function startAndroidProgressPoll(id: number): void {
     return;
   }
   // Immediate first read so the card leaves 0/total without waiting a full tick.
-  void pollAndroidProgressOnce(id);
+  scheduleAndroidProgressPoll(id);
   if (progressPollTimer !== null) return;
   progressPollTimer = setInterval(() => {
     if (progressPollGalleryIds.size === 0) {
@@ -569,7 +596,7 @@ export function startAndroidProgressPoll(id: number): void {
       return;
     }
     for (const galleryId of [...progressPollGalleryIds]) {
-      void pollAndroidProgressOnce(galleryId);
+      scheduleAndroidProgressPoll(galleryId);
     }
   }, PROGRESS_POLL_INTERVAL_MS);
 }
@@ -582,8 +609,10 @@ export function startAndroidProgressPoll(id: number): void {
 export function stopAndroidProgressPoll(id?: number): void {
   if (id === undefined) {
     progressPollGalleryIds.clear();
+    progressPollMissingCounts.clear();
   } else {
     progressPollGalleryIds.delete(id);
+    progressPollMissingCounts.delete(id);
   }
   if (progressPollGalleryIds.size === 0) clearProgressPollTimer();
 }
@@ -608,7 +637,7 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
       }
       if (progressPollGalleryIds.size > 0 && progressPollTimer === null) {
         for (const id of [...progressPollGalleryIds]) {
-          void pollAndroidProgressOnce(id);
+          scheduleAndroidProgressPoll(id);
         }
         progressPollTimer = setInterval(() => {
           if (progressPollGalleryIds.size === 0) {
@@ -616,7 +645,7 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
             return;
           }
           for (const galleryId of [...progressPollGalleryIds]) {
-            void pollAndroidProgressOnce(galleryId);
+            scheduleAndroidProgressPoll(galleryId);
           }
         }, PROGRESS_POLL_INTERVAL_MS);
       }
@@ -908,7 +937,13 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           retryCount: next.retryCount ?? null,
           nextRetryAt: null,
         });
-        await scheduleIosBackgroundBackstop(id, next.title, files, next.queuePosition, controller.signal);
+        await scheduleIosBackgroundBackstop(
+          id,
+          next.title,
+          files,
+          next.queuePosition,
+          controller.signal,
+        );
       }
 
       try {
@@ -1020,6 +1055,11 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       const next = { ...s.entries };
       if (entry === null) {
         delete next[id];
+        // Active rows are derived from entries, so remove the matching reactive
+        // queue row in the same state update. A subsequent DB refresh can re-add
+        // it when this was a pause, but terminal completion/cancel must not leave
+        // a stale 100% item behind if listQueue() transiently fails.
+        return { entries: next, queue: s.queue.filter((item) => item.id !== id) };
       } else {
         const previous = next[id];
         next[id] = {
@@ -1067,26 +1107,41 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       progress: null,
     }));
 
-    const activeItems = await Promise.all(
+    const activeRows = await Promise.all(
       activeIds.map(async (id) => {
         const active = entries[id];
         // Active items flipped to 'downloading', so they are no longer in
         // listQueue(); read their rows directly for title/thumbnail metadata.
         const activeRow = await getDownload(id).catch(() => null);
-        return {
-          id,
-          title: activeRow?.title ?? '',
-          thumbnail: activeRow?.thumbnail ?? '',
-          status: 'downloading' as const,
-          position: null,
-          progress: active?.progress ?? null,
-        };
+        return { id, active, activeRow };
       }),
     );
     if (runSeq !== refreshQueueRunSeq) return;
-    const activeIdSet = new Set(activeIds);
+    const completedActiveIds = activeRows
+      .filter(({ activeRow }) => activeRow?.status === 'complete')
+      .map(({ id }) => id);
+    const activeItems: QueueItem[] = activeRows
+      .filter(({ activeRow }) => activeRow?.status !== 'complete')
+      .map(({ id, active, activeRow }) => ({
+        id,
+        title: activeRow?.title ?? '',
+        thumbnail: activeRow?.thumbnail ?? '',
+        status: 'downloading',
+        position: null,
+        progress: active?.progress ?? null,
+      }));
+    const activeIdSet = new Set(activeItems.map(({ id }) => id));
     const queue: QueueItem[] = [...activeItems, ...pending.filter((p) => !activeIdSet.has(p.id))];
-    set({ queue });
+    set((state) => {
+      if (completedActiveIds.length === 0) return { queue };
+      const nextEntries = { ...state.entries };
+      const nextDownloaded = { ...state.downloaded };
+      for (const id of completedActiveIds) {
+        delete nextEntries[id];
+        nextDownloaded[id] = true;
+      }
+      return { queue, entries: nextEntries, downloaded: nextDownloaded };
+    });
   };
 
   // Bind the module-level processor to this store instance.

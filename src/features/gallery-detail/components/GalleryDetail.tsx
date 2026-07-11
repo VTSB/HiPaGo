@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
-import { TagChip } from '@/shared/components/TagChip';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
 import { AbortableImage } from '@/shared/components/AbortableImage';
@@ -23,6 +22,9 @@ import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteTo
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
 import { useDownloadedFilesPresent } from '@/features/gallery-detail/hooks/useDownloadedFilesPresent';
 import { readerHref } from '@/lib/utils/routes';
+import { TagFavoriteChip } from '@/shared/components/TagFavoriteChip';
+import { useSettingsStore } from '@/lib/store/settings';
+import { prioritizeFavorites, toFavoriteTagKey } from '@/lib/utils/tag-favorites';
 
 const INITIAL_THUMBNAILS = 20;
 const LOAD_MORE_COUNT = 20;
@@ -47,6 +49,7 @@ export function GalleryDetail({ id }: { id: number }) {
   const [renderState, setRenderState] = useState({ id, count: INITIAL_THUMBNAILS });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const t = useT();
+  const favoriteTags = useSettingsStore((state) => state.favoriteTags ?? []);
   const renderedCount = renderState.id === id ? renderState.count : INITIAL_THUMBNAILS;
   const backTargetRef = useRef('/');
 
@@ -182,11 +185,19 @@ export function GalleryDetail({ id }: { id: number }) {
     setTimeout(() => setCopied(false), 2000);
   }, [id]);
 
-  const tagEntries = displayBlock
-    ? (Object.entries(displayBlock.tags) as [TagType, string[]][]).sort(
-        ([a], [b]) => (TAG_ORDER[a] ?? 99) - (TAG_ORDER[b] ?? 99),
-      )
-    : [];
+  const tagEntries = useMemo(() => {
+    if (!displayBlock) return [];
+
+    return (Object.entries(displayBlock.tags) as [TagType, string[]][])
+      .sort(([a], [b]) => (TAG_ORDER[a] ?? 99) - (TAG_ORDER[b] ?? 99))
+      .map(
+        ([type, tags]) =>
+          [type, prioritizeFavorites(tags, favoriteTags, (tag) => toFavoriteTagKey(type, tag))] as [
+            TagType,
+            string[],
+          ],
+      );
+  }, [displayBlock, favoriteTags]);
 
   const tagI18n = useTagI18n(tagEntries);
   const localizedMediaType = useTagLocalName(TagType.TYPE, block?.mediaType);
@@ -325,7 +336,7 @@ export function GalleryDetail({ id }: { id: number }) {
                   </span>
                   <div className="flex min-w-0 flex-wrap gap-1">
                     {tags.map((tag) => (
-                      <TagChip
+                      <TagFavoriteChip
                         key={tag}
                         tag={tag}
                         type={type}

@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.util.AtomicFile;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -17,6 +18,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -293,62 +295,69 @@ public class GalleryDownloadWorker extends Worker {
 
             exts[i] = ext;
 
-            updateNotification(title, i + 1, total, locale);
-            // Publish live progress (throttled) so the in-app poller can show
-            // current/total while the app is foreground. Best-effort; an IO failure
-            // here must never fail the download.
-            lastProgressWrite = maybeWriteProgress(galleryId, i + 1, total, lastProgressWrite);
-
             // Resume: only skip a page if a prior manifest write committed it.
             // Non-manifest partial files are overwritten below.
-            if (shouldSkipExistingPage(i, manifestCount, saf.size(relPath))) {
-                continue;
-            }
+            if (!shouldSkipExistingPage(i, manifestCount, saf.size(relPath))) {
+                // Download to a temp file in the cache dir via the Rust core, then copy
+                // into the SAF tree and delete the temp. The image never enters the JS
+                // heap (this is native code).
+                File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
+                try {
+                    BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
+                    if (isStopped() || !orderFile.exists()) {
+                        deleteProgress(galleryId);
+                        return GalleryResult.CANCELED;
+                    }
+                    long sourceSize = temp.length();
+                    long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
+                    long storedSize = saf.size(relPath);
+                    if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
+                        saf.delete(relPath);
+                        throw new Exception("incomplete SAF write");
+                    }
+                } catch (Throwable t) {
+                    // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
+                    // gallery partial; TS re-resolves / reconciles on next open. Publish
+                    // an explicit failure sentinel so a foreground app can fail/retry the
+                    // DB row without waiting for relaunch.
+                    writeProgressFailure(galleryId, "Background download failed");
+                    return GalleryResult.RETRYABLE_FAILURE;
+                } finally {
+                    if (temp.exists()) {
+                        // Best-effort temp cleanup; a stale temp is harmless (cache dir).
+                        //noinspection ResultOfMethodCallIgnored
+                        temp.delete();
+                    }
+                }
 
-            // Download to a temp file in the cache dir via the Rust core, then copy
-            // into the SAF tree and delete the temp. The image never enters the JS
-            // heap (this is native code).
-            File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
-            try {
-                BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
+                // Write/update the 0000.json manifest incrementally (JSON array of
+                // exts) so the reader/reconcile sees the gallery growing. The manifest
+                // path is the gallery folder + 0000.json, derived from the page relPath.
                 if (isStopped() || !orderFile.exists()) {
                     deleteProgress(galleryId);
                     return GalleryResult.CANCELED;
                 }
-                long sourceSize = temp.length();
-                long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
-                long storedSize = saf.size(relPath);
-                if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
-                    saf.delete(relPath);
-                    throw new Exception("incomplete SAF write");
+                if (!writeManifest(relPath, exts, i + 1)) {
+                    writeProgressFailure(galleryId, "Background download failed");
+                    return GalleryResult.RETRYABLE_FAILURE;
                 }
-            } catch (Throwable t) {
-                // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
-                // gallery partial; TS re-resolves / reconciles on next open. Publish
-                // an explicit failure sentinel so a foreground app can fail/retry the
-                // DB row without waiting for relaunch.
-                writeProgressFailure(galleryId, "Background download failed");
-                return GalleryResult.RETRYABLE_FAILURE;
-            } finally {
-                if (temp.exists()) {
-                    // Best-effort temp cleanup; a stale temp is harmless (cache dir).
-                    //noinspection ResultOfMethodCallIgnored
-                    temp.delete();
-                }
+                manifestCount = Math.max(manifestCount, i + 1);
             }
 
-            // Write/update the 0000.json manifest incrementally (JSON array of
-            // exts) so the reader/reconcile sees the gallery growing. The manifest
-            // path is the gallery folder + 0000.json, derived from the page relPath.
-            if (isStopped() || !orderFile.exists()) {
-                deleteProgress(galleryId);
-                return GalleryResult.CANCELED;
+            // Progress means "pages durably committed", not "page started". In
+            // particular, never publish 100% here: the defensive final manifest
+            // write below must also succeed before the worker reports completion.
+            int committed = committedProgressCount(i, manifestCount);
+            if (committed < total) {
+                updateNotification(title, committed, total, locale);
+                // Best-effort; an IO failure here must never fail the download.
+                lastProgressWrite = maybeWriteProgress(
+                        galleryId,
+                        committed,
+                        total,
+                        lastProgressWrite
+                );
             }
-            if (!writeManifest(relPath, exts, i + 1)) {
-                writeProgressFailure(galleryId, "Background download failed");
-                return GalleryResult.RETRYABLE_FAILURE;
-            }
-            manifestCount = Math.max(manifestCount, i + 1);
         }
 
         // All pages present → write the final, full manifest once more (defensive)
@@ -362,6 +371,11 @@ public class GalleryDownloadWorker extends Worker {
             writeProgressFailure(galleryId, "Background download failed");
             return GalleryResult.RETRYABLE_FAILURE;
         }
+        // Publish 100% only after every page and the final manifest are durable.
+        // The app can now safely finalize the DB row and remove the queue item as
+        // soon as it observes either this value or the deleted progress file.
+        updateNotification(title, total, total, locale);
+        maybeWriteProgress(galleryId, total, total, lastProgressWrite);
         // Gallery complete → remove its live-progress file (the poller then reads
         // null and the row reconciles to 'complete').
         deleteProgress(galleryId);
@@ -405,11 +419,7 @@ public class GalleryDownloadWorker extends Worker {
             JSONObject obj = new JSONObject();
             obj.put("current", current);
             obj.put("total", total);
-            File f = new File(progressDir(), galleryId + ".json");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
-                fos.write(obj.toString().getBytes("UTF-8"));
-                fos.flush();
-            }
+            writeProgressObject(galleryId, obj);
         } catch (Throwable t) {
             // Progress is advisory; a failed write just leaves the last value.
             return lastWrite;
@@ -422,10 +432,7 @@ public class GalleryDownloadWorker extends Worker {
         if (galleryId == null || galleryId.isEmpty()) return;
         try {
             File f = new File(progressDir(), galleryId + ".json");
-            if (f.exists()) {
-                //noinspection ResultOfMethodCallIgnored
-                f.delete();
-            }
+            new AtomicFile(f).delete();
         } catch (Throwable ignored) {
             // Best-effort cleanup; a stale file just reads as the last value until
             // the next run prunes it (pruneStaleProgress) or getProgress returns it.
@@ -439,13 +446,29 @@ public class GalleryDownloadWorker extends Worker {
             JSONObject obj = new JSONObject();
             obj.put("current", JSONObject.NULL);
             obj.put("error", message);
-            File f = new File(progressDir(), galleryId + ".json");
-            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
-                fos.write(obj.toString().getBytes("UTF-8"));
-                fos.flush();
-            }
+            writeProgressObject(galleryId, obj);
         } catch (Throwable ignored) {
             // Best-effort failure signal; TS still has launch reconcile fallback.
+        }
+    }
+
+    /** Atomically replace a progress file so readers never observe torn JSON. */
+    private void writeProgressObject(String galleryId, JSONObject obj) throws Throwable {
+        AtomicFile atomic = new AtomicFile(new File(progressDir(), galleryId + ".json"));
+        FileOutputStream out = null;
+        try {
+            out = atomic.startWrite();
+            out.write(obj.toString().getBytes("UTF-8"));
+            atomic.finishWrite(out);
+        } catch (Throwable t) {
+            if (out != null) {
+                try {
+                    atomic.failWrite(out);
+                } catch (Throwable ignored) {
+                    // Preserve the original write error.
+                }
+            }
+            throw t;
         }
     }
 
@@ -537,6 +560,15 @@ public class GalleryDownloadWorker extends Worker {
         return pageIndex < manifestCount && storedSize > 0;
     }
 
+    /**
+     * Progress is bounded by both the page currently being processed and the
+     * manifest's committed prefix. This keeps a started-but-uncommitted page from
+     * advancing the UI, especially the last page from publishing a false 100%.
+     */
+    static int committedProgressCount(int pageIndex, int manifestCount) {
+        return Math.max(0, Math.min(pageIndex + 1, manifestCount));
+    }
+
     private Map<String, String> headersFor(JSONObject page) {
         JSONObject h = page.optJSONObject("headers");
         if (h == null) return null;
@@ -597,7 +629,7 @@ public class GalleryDownloadWorker extends Worker {
     // -----------------------------------------------------------------------
 
     private void updateNotification(String title, int current, int total, String locale) {
-        int percent = total > 0 ? Math.min(100, Math.round((current * 100f) / total)) : 0;
+        int percent = progressPercent(current, total);
         String titleSuffix = title.isEmpty() ? "" : " - " + title;
         String text = total > 0
                 ? notificationDownloading(locale, current, total, percent) + titleSuffix
@@ -680,6 +712,12 @@ public class GalleryDownloadWorker extends Worker {
             return "다운로드 중 " + current + "/" + total + " (" + percent + "%)";
         }
         return "Downloading " + current + "/" + total + " (" + percent + "%)";
+    }
+
+    static int progressPercent(int current, int total) {
+        if (total <= 0) return 0;
+        if (current >= total) return 100;
+        return Math.max(0, Math.min(99, Math.round((current * 100f) / total)));
     }
 
     static String notificationDownloadingIndeterminate(String locale) {
