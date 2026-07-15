@@ -203,10 +203,10 @@ export async function migrateDownloadsToPublic(): Promise<{
  * Source of truth is the app's manifest file in each gallery folder:
  *   <picked tree>/HiPaGo/<galleryId> <title>/0000.json
  *
- * Only complete folders are imported: every extension listed by 0000.json must
- * have a corresponding non-empty 0001.*, 0002.*, ... page file. Metadata that is
- * not present on disk (thumbnail/tags) is restored conservatively as empty; the
- * library view still uses the local first page as cover.
+ * Complete folders are restored as complete. Partial/torn folders are restored
+ * as failed rows so their valid pages remain visible and the normal manual retry
+ * path can resolve fresh gallery metadata and resume them. Metadata that is not
+ * present on disk (thumbnail/tags) is restored conservatively as empty.
  */
 export async function restoreDownloadsFromPublicFolder(
   store?: DownloadStore,
@@ -242,17 +242,14 @@ export async function restoreDownloadsFromPublicFolder(
         const size = await storedPageSize(publicStore, galleryId, i, exts[i], lookup);
         if (size === null) {
           complete = false;
-          break;
+          continue;
         }
         totalBytes += size;
-      }
-      if (!complete) {
-        failed++;
-        continue;
       }
 
       const existing = await getDownload(galleryId).catch(() => null);
       if (
+        complete &&
         existing?.status === 'complete' &&
         existing.pageCount === exts.length &&
         existing.folderName === folderName
@@ -269,10 +266,10 @@ export async function restoreDownloadsFromPublicFolder(
         pageCount: exts.length,
         totalBytes,
         downloadedAt: existing?.downloadedAt ?? restoredAt,
-        status: 'complete',
+        status: complete ? 'complete' : 'failed',
         folderName,
         migratedAt: existing?.migratedAt ?? restoredAt,
-        lastError: null,
+        lastError: complete ? null : 'Recovered partial download',
         queuePosition: null,
         retryCount: 0,
         nextRetryAt: null,

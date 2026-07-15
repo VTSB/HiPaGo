@@ -356,6 +356,14 @@ let progressPollTimer: ReturnType<typeof setInterval> | null = null;
 // galleries sequentially, but multiple rows can be handed off quickly; polling
 // all active ids avoids locking the in-app % display onto the last handed-off id.
 const progressPollGalleryIds = new Set<number>();
+const missingProgressAfterStartCount = new Map<number, number>();
+// A fresh JS session cannot know whether a persisted Android `downloading` row
+// had already made progress before the WebView was recreated. Track rows that
+// were rehydrated from DB so an absent native progress file can be treated as a
+// stopped worker after a grace period instead of leaving the UI stuck at 0/N.
+const rehydratedAndroidPollIds = new Set<number>();
+const MISSING_PROGRESS_FAILURE_GRACE_TICKS = 3;
+const REHYDRATED_MISSING_PROGRESS_FAILURE_GRACE_TICKS = 15;
 
 /** Clear the single poll interval (does NOT forget which gallery was active). */
 function clearProgressPollTimer(): void {
@@ -525,6 +533,8 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   }
   if (res && typeof (res as { current: number | null }).current === 'number') {
     const { current, total } = res as { current: number; total: number };
+    missingProgressAfterStartCount.delete(id);
+    rehydratedAndroidPollIds.delete(id);
     storeApi?.setEntry(id, {
       progress: { current, total },
       error: null,
@@ -544,11 +554,21 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
   // manifest first. If the manifest is still incomplete after we had observed
   // native progress, treat it as a stopped/failed worker instead of leaving the
   // row stuck as "downloading" until next app launch.
-  await finalizeAndroidDownloadIfComplete(id);
+  if (await finalizeAndroidDownloadIfComplete(id)) return;
   if (!progressPollGalleryIds.has(id)) return;
   const lastProgress = useDownloadProgressStore.getState().entries[id]?.progress;
-  if (lastProgress && lastProgress.current > 0) {
-    await failAndroidDownloadIfWorkerStopped(id, 'Background download stopped before completion');
+  if (lastProgress && (lastProgress.current > 0 || rehydratedAndroidPollIds.has(id))) {
+    const missingCount = (missingProgressAfterStartCount.get(id) ?? 0) + 1;
+    missingProgressAfterStartCount.set(id, missingCount);
+    const graceTicks = rehydratedAndroidPollIds.has(id)
+      ? REHYDRATED_MISSING_PROGRESS_FAILURE_GRACE_TICKS
+      : MISSING_PROGRESS_FAILURE_GRACE_TICKS;
+    if (missingCount >= graceTicks) {
+      await failAndroidDownloadIfWorkerStopped(
+        id,
+        'Background download stopped before completion',
+      );
+    }
   }
 }
 
@@ -557,9 +577,13 @@ async function pollAndroidProgressOnce(id: number): Promise<void> {
  * same id; retargets (clear + rearm) for a different id. No-op off Android, when
  * the document is hidden, or with no DOM. Called from the Android handoff branch.
  */
-export function startAndroidProgressPoll(id: number): void {
+export function startAndroidProgressPoll(
+  id: number,
+  options: { rehydrated?: boolean } = {},
+): void {
   if (!isAndroid()) return;
   progressPollGalleryIds.add(id);
+  if (options.rehydrated) rehydratedAndroidPollIds.add(id);
   // Don't poll while backgrounded (the notification carries progress there); the
   // visibilitychange listener resumes it on foreground.
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
@@ -588,8 +612,12 @@ export function startAndroidProgressPoll(id: number): void {
 export function stopAndroidProgressPoll(id?: number): void {
   if (id === undefined) {
     progressPollGalleryIds.clear();
+    missingProgressAfterStartCount.clear();
+    rehydratedAndroidPollIds.clear();
   } else {
     progressPollGalleryIds.delete(id);
+    missingProgressAfterStartCount.delete(id);
+    rehydratedAndroidPollIds.delete(id);
   }
   if (progressPollGalleryIds.size === 0) clearProgressPollTimer();
 }
@@ -1159,7 +1187,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
             title: row.title,
             thumbnail: row.thumbnail,
           });
-          startAndroidProgressPoll(id);
+          startAndroidProgressPoll(id, { rehydrated: true });
           void refreshQueue();
         }
       } catch {

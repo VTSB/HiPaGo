@@ -9,6 +9,7 @@ import { useDbStatusStore } from '@/lib/store/db-status';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
 import { isAndroid, isIos } from '@/lib/utils/platform';
+import { PublicLibrary } from '@/lib/plugins/publicLibrary';
 
 /**
  * Invisible component that initializes the SQLite database on mount,
@@ -29,6 +30,18 @@ export function DbInitializer() {
         // Android-only: run one-time Data→public migration + reconciliation
         // after DB is ready. Best-effort — never propagates errors into boot.
         if (isAndroid()) {
+          // The persisted native URI grant survives WebView/localStorage loss.
+          // Restore its mirror before migration and queue reconciliation.
+          await PublicLibrary.getTree()
+            .then((info) => {
+              useSettingsStore
+                .getState()
+                .setDownloadTree(
+                  info.valid && info.treeUri ? info.treeUri : null,
+                  info.valid ? (info.displayName ?? null) : null,
+                );
+            })
+            .catch((e) => console.warn('[download] tree restore failed:', e));
           await import('@/lib/storage/migrate-downloads')
             .then(async ({ migrateDownloadsToPublic, restoreDownloadsFromPublicFolder }) => {
               await migrateDownloadsToPublic();

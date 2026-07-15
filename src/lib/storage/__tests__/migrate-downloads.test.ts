@@ -542,15 +542,27 @@ describe('restoreDownloadsFromPublicFolder', () => {
     expect(upsertedRows[0].migratedAt).toBeTruthy();
   });
 
-  it('does not import a folder when the manifest references a missing page', async () => {
+  it('restores a folder with a missing page as a resumable failed download', async () => {
     mockNewStore.setGalleryFolder(1300, '1300 Partial', 'Partial');
     await mockNewStore.putImage(1300, -1, makeManifest(['webp', 'jpg']), 'json');
     await mockNewStore.putImage(1300, 0, makeBytes(10), 'webp');
 
     const result = await restoreDownloadsFromPublicFolder(mockNewStore);
 
-    expect(result).toEqual({ imported: 0, skipped: 0, failed: 1 });
-    expect(upsertedRows).toHaveLength(0);
+    expect(result).toEqual({ imported: 1, skipped: 0, failed: 0 });
+    expect(upsertedRows).toHaveLength(1);
+    expect(upsertedRows[0]).toMatchObject({
+      galleryId: 1300,
+      title: 'Partial',
+      pageCount: 2,
+      totalBytes: 10,
+      status: 'failed',
+      folderName: '1300 Partial',
+      lastError: 'Recovered partial download',
+      queuePosition: null,
+      retryCount: 0,
+      nextRetryAt: null,
+    });
   });
 
   it('skips a DB row that already points at the same complete public folder', async () => {

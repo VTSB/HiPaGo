@@ -4,7 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { DbInitializer } from '@/shared/components/DbInitializer';
 import { DbErrorOverlay } from '@/shared/components/DbErrorOverlay';
-import { initLocaleOnce, useSettingsStore } from '@/lib/store/settings';
+import {
+  initLocaleOnce,
+  initializeSettingsPersistence,
+  useSettingsStore,
+} from '@/lib/store/settings';
 import { AndroidBackButtonProvider } from '@/shared/providers/AndroidBackButtonProvider';
 import { setSecureScreen } from '@/lib/plugins/secureScreen';
 
@@ -13,6 +17,7 @@ const LOCALE_TO_LANG: Record<string, string> = { en: 'en', ko: 'ko' };
 export function Providers({ children }: { children: ReactNode }) {
   const locale = useSettingsStore((s) => s.locale);
   const secureScreen = useSettingsStore((s) => s.secureScreen);
+  const [settingsReady, setSettingsReady] = useState(false);
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -27,7 +32,15 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
   useEffect(() => {
-    initLocaleOnce();
+    let active = true;
+    void initializeSettingsPersistence().finally(() => {
+      if (!active) return;
+      initLocaleOnce();
+      setSettingsReady(true);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -54,7 +67,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <AndroidBackButtonProvider>
-        <DbInitializer />
+        {settingsReady && <DbInitializer />}
         <DbErrorOverlay />
         {children}
       </AndroidBackButtonProvider>
