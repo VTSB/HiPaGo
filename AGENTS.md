@@ -205,3 +205,13 @@ const results = await searchGalleries(query);
 - **Path alias**: `@/*` → `src/*`
 
 <!-- MANUAL: Add project-specific conventions, architectural decisions, or domain knowledge here. -->
+
+## Translation queue handoff rules
+
+- For Korean tag translation work, the authoritative live check is `npx tsx scripts/translate-tags.ts status --lang ko`. Do not infer progress from batch count alone or from old `analyze` output.
+- Report tag-item counts by summing `tagCount` across batch statuses. The top-level `translated` field is a batch count, not a tag-word count.
+- Keep `artist` and `group` out of Korean queue work unless explicitly requested. Verify the live batch list contains no `artist`/`group` batches before reporting totals.
+- Process one batch at a time when worker reliability is degraded. A batch is complete only when its live status is `validated` with matching translation and verdict counts.
+- Use the configured GPT-5.6 Luna Light alias available in the environment; if a literal model name is rejected, record and use the supported alias rather than repeatedly spawning failed workers.
+- Never let workers inspect old logs, memories, unrelated batch files, or spawn nested agents. If a worker only scans history, hits thread limits, or exits before CLI saves, stop it and retry the same batch after clearing stale CLI worker processes.
+- Translation-only commits should include only `src/lib/data/tags-i18n/ko.ai.json` and `src/lib/data/tags-i18n/ko.failed.json`. Keep generated temp payloads and run logs out of commits.
