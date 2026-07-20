@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useSearch } from '../useSearch';
+import { useSettingsStore } from '@/lib/store/settings';
 
 type SearchState = {
   query: string;
@@ -50,16 +51,17 @@ let storeState: SearchState = {
 let dbReady = true;
 
 vi.mock('@/features/search/store/search.store', () => ({
-  useSearchStore: (selector: (state: Record<string, unknown>) => unknown) => selector({
-    ...storeState,
-    setQuery: mockSetQuery,
-    setAutocompleteQuery: mockSetAutocompleteQuery,
-    addRecentSearch: mockAddRecentSearch,
-    setIsSearching: mockSetIsSearching,
-    setSuggestions: mockSetSuggestions,
-    clearSuggestions: mockClearSuggestions,
-    setIsLoadingSuggestions: mockSetIsLoadingSuggestions,
-  }),
+  useSearchStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({
+      ...storeState,
+      setQuery: mockSetQuery,
+      setAutocompleteQuery: mockSetAutocompleteQuery,
+      addRecentSearch: mockAddRecentSearch,
+      setIsSearching: mockSetIsSearching,
+      setSuggestions: mockSetSuggestions,
+      clearSuggestions: mockClearSuggestions,
+      setIsLoadingSuggestions: mockSetIsLoadingSuggestions,
+    }),
 }));
 
 vi.mock('@/lib/store/db-status', () => ({
@@ -92,6 +94,7 @@ describe('useSearch autocomplete term selection', () => {
       recentSearches: [],
     };
     dbReady = true;
+    useSettingsStore.setState({ favoriteTags: [] });
     mockSearchLocalTags.mockResolvedValue([]);
     mockGetSuggestionsForQuery.mockResolvedValue([]);
   });
@@ -270,6 +273,61 @@ describe('useSearch autocomplete term selection', () => {
     await Promise.resolve();
 
     expect(mockSetSuggestions).toHaveBeenCalledWith([{ tag: 'male:dragon' }]);
+  });
+
+  it('refetches local autocomplete when favorites change so a limited-out item can join', async () => {
+    mockSearchLocalTags
+      .mockResolvedValueOnce([{ tag: 'regular-result' }])
+      .mockResolvedValueOnce([{ tag: 'favorite-result' }, { tag: 'regular-result' }]);
+    storeState = {
+      ...storeState,
+      autocompleteQuery: 'artist:ar',
+    };
+
+    renderHook(() => useSearch());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(mockSearchLocalTags).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:favorite_result'] });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(mockSearchLocalTags).toHaveBeenCalledTimes(2);
+    expect(mockSetSuggestions).toHaveBeenLastCalledWith([
+      { tag: 'favorite-result' },
+      { tag: 'regular-result' },
+    ]);
+  });
+
+  it('does not refetch remote autocomplete when favorites change', async () => {
+    dbReady = false;
+    mockGetSuggestionsForQuery.mockResolvedValue([{ tag: 'remote-result' }]);
+    storeState = {
+      ...storeState,
+      autocompleteQuery: 'remote',
+    };
+
+    renderHook(() => useSearch());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:new_favorite'] });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledTimes(1);
   });
 
   it('suppresses stale local results when a later query resolves later', async () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { TagChip } from '@/shared/components/TagChip';
+import { TagFavoriteChip } from '@/shared/components/TagFavoriteChip';
 import { useT } from '@/lib/i18n/useT';
 import type { Suggestion } from '@/lib/utils/types';
 import type { RefObject } from 'react';
@@ -30,7 +30,7 @@ export function SuggestionDropdown({
 
   return (
     <div
-      role="listbox"
+      role="region"
       aria-label={t('search.title')}
       className="absolute top-full mt-1 w-full rounded-lg border border-zinc-300 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800 z-50 max-h-80 overflow-y-auto"
     >
@@ -38,37 +38,48 @@ export function SuggestionDropdown({
         {suggestions.length} {t('search.results')}
       </span>
       {suggestions.map((suggestion, idx) => (
-        <button
-          key={`${suggestion.tagType}-${suggestion.tag}-${idx}`}
-          id={`search-option-${idx}`}
-          type="button"
-          role="option"
-          aria-selected={idx === selectedIndex}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            onSelect(suggestion.tag, suggestion.tagType, suggestion.localName);
-          }}
+        <div
+          key={`${suggestion.tagType}-${suggestion.tag}`}
           onMouseEnter={() => !ignoreMouseRef.current && onHover(idx)}
-          className={`flex w-full min-w-0 items-center gap-2 px-4 py-2 text-left text-sm first:rounded-t-lg last:rounded-b-lg transition-colors ${
+          className={`relative flex w-full min-w-0 items-center first:rounded-t-lg last:rounded-b-lg transition-colors ${
             idx === selectedIndex
               ? 'bg-zinc-100 dark:bg-zinc-700'
               : 'hover:bg-zinc-100 dark:hover:bg-zinc-700'
           }`}
         >
-          <span className="min-w-0 flex-1">
-            <TagChip
-              tag={suggestion.tag}
-              type={suggestion.tagType}
-              displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
-              linked={false}
-              size="sm"
-              wrap
-            />
-          </span>
-          <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
-            {suggestion.amount.toLocaleString()}
-          </span>
-        </button>
+          <button
+            id={`search-option-${idx}`}
+            type="button"
+            data-search-option
+            aria-current={idx === selectedIndex ? 'true' : undefined}
+            aria-label={`${koreanDisplay ? (suggestion.localName ?? suggestion.tag) : suggestion.tag} ${suggestion.amount.toLocaleString()}`}
+            onMouseDown={(event) => {
+              event.preventDefault();
+            }}
+            onClick={() => onSelect(suggestion.tag, suggestion.tagType, suggestion.localName)}
+            className="absolute inset-0 z-0 w-full rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500"
+          >
+            <span className="sr-only">
+              {koreanDisplay ? (suggestion.localName ?? suggestion.tag) : suggestion.tag}{' '}
+              {suggestion.amount.toLocaleString()}
+            </span>
+          </button>
+          <div className="pointer-events-none relative z-10 flex w-full min-w-0 items-center gap-2 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <TagFavoriteChip
+                tag={suggestion.tag}
+                type={suggestion.tagType}
+                displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
+                linked={false}
+                size="sm"
+                wrap
+              />
+            </span>
+            <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
+              {suggestion.amount.toLocaleString()}
+            </span>
+          </div>
+        </div>
       ))}
     </div>
   );

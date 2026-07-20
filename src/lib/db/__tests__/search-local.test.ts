@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
 import { getDb } from '../adapter';
 import {
@@ -9,6 +9,7 @@ import {
 } from '../search-local';
 import { TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
+import { useSettingsStore } from '@/lib/store/settings';
 import { getChoseong, disassemble } from 'es-hangul';
 
 /** Build a searchIndex entry matching the store's internal format */
@@ -33,15 +34,36 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearAllTables();
+  useSettingsStore.setState({ favoriteTags: [] });
 });
 
 async function seedTags() {
   const db = getDb();
-  const r1 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.ARTIST], 'artist_alpha', 100]);
-  const r2 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.ARTIST], 'artist_beta', 50]);
-  const r3 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.SERIES], 'art_series', 200]);
-  const r4 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'action', 500]);
-  const r5 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'armor', 30]);
+  const r1 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+    TAG_TYPE_TO_BYTE[TagType.ARTIST],
+    'artist_alpha',
+    100,
+  ]);
+  const r2 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+    TAG_TYPE_TO_BYTE[TagType.ARTIST],
+    'artist_beta',
+    50,
+  ]);
+  const r3 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+    TAG_TYPE_TO_BYTE[TagType.SERIES],
+    'art_series',
+    200,
+  ]);
+  const r4 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+    TAG_TYPE_TO_BYTE[TagType.TAG],
+    'action',
+    500,
+  ]);
+  const r5 = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+    TAG_TYPE_TO_BYTE[TagType.FEMALE],
+    'armor',
+    30,
+  ]);
   return {
     artistTag1: r1.lastInsertRowId,
     artistTag2: r2.lastInsertRowId,
@@ -54,22 +76,37 @@ async function seedTags() {
 async function seedGalleries(tagIds: Record<string, number>) {
   const db = getDb();
   await db.execute(
-    "INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [100, 1, 'Art Collection Vol 1', '2024-01-01', '', '', ''],
   );
   await db.execute(
-    "INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [200, 1, 'Battle Arena', '2024-02-01', '', '', ''],
   );
   await db.execute(
-    "INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [300, 1, 'Comic Series Alpha', '2024-03-01', '', '', ''],
   );
-  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [100, tagIds.artistTag1]);
-  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [100, tagIds.tag1]);
-  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [200, tagIds.artistTag1]);
-  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [200, tagIds.artistTag2]);
-  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [300, tagIds.seriesTag]);
+  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+    100,
+    tagIds.artistTag1,
+  ]);
+  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+    100,
+    tagIds.tag1,
+  ]);
+  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+    200,
+    tagIds.artistTag1,
+  ]);
+  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+    200,
+    tagIds.artistTag2,
+  ]);
+  await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+    300,
+    tagIds.seriesTag,
+  ]);
 }
 
 describe('searchLocalTags', () => {
@@ -107,6 +144,77 @@ describe('searchLocalTags', () => {
     expect(results.length).toBe(2);
   });
 
+  it('moves a matching favorite ahead before applying the result limit', async () => {
+    const db = getDb();
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'rank_high',
+      100,
+    ]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'rank_middle',
+      50,
+    ]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'rank_favorite',
+      1,
+    ]);
+    useSettingsStore.setState({ favoriteTags: ['artist:rank_favorite'] });
+
+    const results = await searchLocalTags('rank', TagType.ARTIST, 2);
+
+    expect(results.map((result) => result.tag)).toEqual(['rank_favorite', 'rank_high']);
+  });
+
+  it('keeps count ranking stable within favorite and non-favorite groups', async () => {
+    const db = getDb();
+    for (const [name, count] of [
+      ['stable_regular_high', 100],
+      ['stable_favorite_high', 30],
+      ['stable_favorite_low', 10],
+      ['stable_regular_low', 1],
+    ] as const) {
+      await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+        TAG_TYPE_TO_BYTE[TagType.ARTIST],
+        name,
+        count,
+      ]);
+    }
+    useSettingsStore.setState({
+      favoriteTags: ['artist:stable_favorite_low', 'artist:stable_favorite_high'],
+    });
+
+    const results = await searchLocalTags('stable', TagType.ARTIST, 4);
+
+    expect(results.map((result) => result.tag)).toEqual([
+      'stable_favorite_high',
+      'stable_favorite_low',
+      'stable_regular_high',
+      'stable_regular_low',
+    ]);
+  });
+
+  it('matches favorite identity by both tag type and name', async () => {
+    const db = getDb();
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'shared_name',
+      1,
+    ]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.SERIES],
+      'shared_name',
+      100,
+    ]);
+    useSettingsStore.setState({ favoriteTags: ['artist:shared_name'] });
+
+    const results = await searchLocalTags('shared', undefined, 2);
+
+    expect(results.map((result) => result.tagType)).toEqual([TagType.ARTIST, TagType.SERIES]);
+  });
+
   it('returns localName from TagI18nStore when i18n is loaded', async () => {
     await seedTags();
     // Populate TagI18nStore with a Korean name for artist_alpha
@@ -122,7 +230,12 @@ describe('searchLocalTags', () => {
     expect(match?.localName).toBe('아티스트알파');
 
     // Cleanup store
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
+    useTagI18nStore.setState({
+      nameToLocal: new Map(),
+      localToNames: new Map(),
+      searchIndex: [],
+      isLoaded: false,
+    });
   });
 
   it('Korean query uses TagI18nStore.searchByLocal', async () => {
@@ -149,7 +262,12 @@ describe('searchLocalTags', () => {
     expect(names).toContain('artist_alpha');
     expect(results.some((r) => r.tagType === TagType.ARTIST)).toBe(true);
 
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
+    useTagI18nStore.setState({
+      nameToLocal: new Map(),
+      localToNames: new Map(),
+      searchIndex: [],
+      isLoaded: false,
+    });
   });
 
   it('Korean query with tagType filter uses TagI18nStore.searchByLocal filtered', async () => {
@@ -176,7 +294,12 @@ describe('searchLocalTags', () => {
     expect(names).not.toContain('art_series');
     results.forEach((r) => expect(r.tagType).toBe(TagType.ARTIST));
 
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
+    useTagI18nStore.setState({
+      nameToLocal: new Map(),
+      localToNames: new Map(),
+      searchIndex: [],
+      isLoaded: false,
+    });
   });
 
   it('초성 query returns matching results via TagI18nStore', async () => {
@@ -185,9 +308,7 @@ describe('searchLocalTags', () => {
     useTagI18nStore.setState({
       nameToLocal: new Map([['artist:artist_alpha', '아티스트알파']]),
       localToNames: new Map([['아티스트알파', ['artist:artist_alpha']]]),
-      searchIndex: [
-        buildSearchEntry('artist', 'artist_alpha', '아티스트알파'),
-      ],
+      searchIndex: [buildSearchEntry('artist', 'artist_alpha', '아티스트알파')],
       isLoaded: true,
     });
 
@@ -197,13 +318,23 @@ describe('searchLocalTags', () => {
     const names = results.map((r) => r.tag);
     expect(names).toContain('artist_alpha');
 
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
+    useTagI18nStore.setState({
+      nameToLocal: new Map(),
+      localToNames: new Map(),
+      searchIndex: [],
+      isLoaded: false,
+    });
   });
 
   it('without i18n loaded still returns English-only results', async () => {
     await seedTags();
     // Ensure store is not loaded
-    useTagI18nStore.setState({ nameToLocal: new Map(), localToNames: new Map(), searchIndex: [], isLoaded: false });
+    useTagI18nStore.setState({
+      nameToLocal: new Map(),
+      localToNames: new Map(),
+      searchIndex: [],
+      isLoaded: false,
+    });
 
     const results = await searchLocalTags('art');
     const names = results.map((r) => r.tag);
@@ -254,7 +385,6 @@ describe('searchLocalGalleryIdsByTitle', () => {
   });
 });
 
-
 describe('hasLocalSearchData', () => {
   it('returns true when tags exist', async () => {
     await seedTags();
@@ -270,21 +400,45 @@ describe('searchLocalTags search query hybrid ranking (JS sort)', () => {
   it('search results rank count=0 tags by local gallery_tag frequency', async () => {
     const db = getDb();
     // bear: count=50, no gallery_tag links needed
-    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'bear', 50]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'bear',
+      50,
+    ]);
     // beauty: count=0, 10 gallery_tag links
-    const rBeauty = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'beauty', 0]);
+    const rBeauty = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'beauty',
+      0,
+    ]);
     const beautyId = rBeauty.lastInsertRowId;
     // beast: count=0, 3 gallery_tag links
-    const rBeast = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'beast', 0]);
+    const rBeast = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'beast',
+      0,
+    ]);
     const beastId = rBeast.lastInsertRowId;
 
     for (let i = 1; i <= 10; i++) {
-      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [7000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [7000 + i, beautyId]);
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [7000 + i, 1, `G${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        7000 + i,
+        beautyId,
+      ]);
     }
     for (let i = 1; i <= 3; i++) {
-      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [8000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [8000 + i, beastId]);
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [8000 + i, 1, `G${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        8000 + i,
+        beastId,
+      ]);
     }
 
     const results = await searchLocalTags('bea');
@@ -304,14 +458,28 @@ describe('searchLocalTags search query hybrid ranking (JS sort)', () => {
   it('count=0 tags without gallery_tag links rank last in search', async () => {
     const db = getDb();
     // abc: count=0, no gallery_tag
-    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'abc', 0]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'abc',
+      0,
+    ]);
     // abd: count=0, 5 gallery_tag links
-    const rAbd = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'abd', 0]);
+    const rAbd = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'abd',
+      0,
+    ]);
     const abdId = rAbd.lastInsertRowId;
 
     for (let i = 1; i <= 5; i++) {
-      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [9000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [9000 + i, abdId]);
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [9000 + i, 1, `G${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        9000 + i,
+        abdId,
+      ]);
     }
 
     const results = await searchLocalTags('ab');
@@ -327,15 +495,172 @@ describe('searchLocalTags search query hybrid ranking (JS sort)', () => {
 });
 
 describe('searchLocalTags empty query hybrid ranking', () => {
+  it('includes and prioritizes a low-count favorite outside the popular SQL limit', async () => {
+    const db = getDb();
+    for (const [name, count] of [
+      ['popular_high', 100],
+      ['popular_middle', 50],
+      ['popular_favorite', 1],
+    ] as const) {
+      await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+        TAG_TYPE_TO_BYTE[TagType.ARTIST],
+        name,
+        count,
+      ]);
+    }
+    useSettingsStore.setState({ favoriteTags: ['artist:popular_favorite'] });
+
+    const results = await searchLocalTags('', TagType.ARTIST, 2);
+
+    expect(results.map((result) => result.tag)).toEqual(['popular_favorite', 'popular_high']);
+  });
+
+  it('exact-loads a mixed-case DB tag from its lowercase canonical favorite key', async () => {
+    const db = getDb();
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'regular_artist',
+      100,
+    ]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'Mixed_Case_Artist',
+      1,
+    ]);
+    useSettingsStore.setState({ favoriteTags: ['artist:mixed_case_artist'] });
+
+    const results = await searchLocalTags('', TagType.ARTIST, 1);
+
+    expect(results.map((result) => result.tag)).toEqual(['Mixed_Case_Artist']);
+  });
+
+  it('groups exact favorite loads by tag type instead of emitting one OR branch per favorite', async () => {
+    const db = getDb();
+    for (const [type, name] of [
+      [TagType.ARTIST, 'grouped_one'],
+      [TagType.ARTIST, 'grouped_two'],
+      [TagType.SERIES, 'grouped_series'],
+    ] as const) {
+      await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+        TAG_TYPE_TO_BYTE[type],
+        name,
+        1,
+      ]);
+    }
+    useSettingsStore.setState({
+      favoriteTags: ['artist:grouped_one', 'artist:grouped_two', 'series:grouped_series'],
+    });
+    const querySpy = vi.spyOn(db, 'query');
+
+    try {
+      await searchLocalTags('', undefined, 3);
+      const favoriteQueries = querySpy.mock.calls
+        .map(([sql]) => String(sql))
+        .filter((sql) => sql.includes('WHERE type = ? AND LOWER(name) IN'));
+
+      expect(favoriteQueries).toHaveLength(2);
+      expect(favoriteQueries.every((sql) => !sql.includes(' OR '))).toBe(true);
+    } finally {
+      querySpy.mockRestore();
+    }
+  });
+
+  it('keeps type-filtered popular favorites isolated from other tag types', async () => {
+    const db = getDb();
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'artist_regular',
+      100,
+    ]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+      'artist_favorite',
+      1,
+    ]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.SERIES],
+      'series_favorite',
+      1000,
+    ]);
+    useSettingsStore.setState({
+      favoriteTags: ['series:series_favorite', 'artist:artist_favorite'],
+    });
+
+    const results = await searchLocalTags('', TagType.ARTIST, 2);
+
+    expect(results.map((result) => `${result.tagType}:${result.tag}`)).toEqual([
+      'artist:artist_favorite',
+      'artist:artist_regular',
+    ]);
+  });
+
+  it('uses local gallery frequency to rank zero-count favorites, including one outside the SQL limit', async () => {
+    const db = getDb();
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'local_regular',
+      100,
+    ]);
+    const many = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'local_many',
+      0,
+    ]);
+    const few = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'local_few',
+      0,
+    ]);
+
+    for (let i = 1; i <= 3; i++) {
+      await db.execute(
+        'INSERT INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [9100 + i, 1, `Many ${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        9100 + i,
+        many.lastInsertRowId,
+      ]);
+    }
+    await db.execute(
+      'INSERT INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [9201, 1, 'Few 1', '2024-01-01', '', '', ''],
+    );
+    await db.execute('INSERT INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+      9201,
+      few.lastInsertRowId,
+    ]);
+    useSettingsStore.setState({ favoriteTags: ['tag:local_few', 'tag:local_many'] });
+
+    const results = await searchLocalTags('', TagType.TAG, 2);
+
+    expect(results.map((result) => [result.tag, result.amount])).toEqual([
+      ['local_many', 3],
+      ['local_few', 1],
+    ]);
+  });
+
   it('ranks count>0 tags above count=0 tags', async () => {
     const db = getDb();
     // Tag A: count=100
-    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_a', 100]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'tag_a',
+      100,
+    ]);
     // Tag B: count=0, linked to 5 galleries
-    const rB = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_b', 0]);
+    const rB = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'tag_b',
+      0,
+    ]);
     const tagBId = rB.lastInsertRowId;
     // Tag C: count=0, linked to 2 galleries
-    const rC = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'tag_c', 0]);
+    const rC = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'tag_c',
+      0,
+    ]);
     const tagCId = rC.lastInsertRowId;
 
     // Insert galleries and gallery_tag links for B (5 links)
@@ -344,7 +669,10 @@ describe('searchLocalTags empty query hybrid ranking', () => {
         'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [1000 + i, 1, `Gallery ${i}`, '2024-01-01', '', '', ''],
       );
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [1000 + i, tagBId]);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        1000 + i,
+        tagBId,
+      ]);
     }
     // Insert galleries and gallery_tag links for C (2 links)
     for (let i = 1; i <= 2; i++) {
@@ -352,7 +680,10 @@ describe('searchLocalTags empty query hybrid ranking', () => {
         'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [2000 + i, 1, `Gallery C${i}`, '2024-01-01', '', '', ''],
       );
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [2000 + i, tagCId]);
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        2000 + i,
+        tagCId,
+      ]);
     }
     // Tag A has no gallery_tag links but count=100
 
@@ -374,23 +705,50 @@ describe('searchLocalTags empty query hybrid ranking', () => {
 
   it('count=0 tags with gallery_tag references rank by local frequency', async () => {
     const db = getDb();
-    const rX = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'zero_x', 0]);
-    const rY = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'zero_y', 0]);
-    const rZ = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'zero_z', 0]);
+    const rX = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'zero_x',
+      0,
+    ]);
+    const rY = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'zero_y',
+      0,
+    ]);
+    const rZ = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'zero_z',
+      0,
+    ]);
     const tagXId = rX.lastInsertRowId;
     const tagYId = rY.lastInsertRowId;
     const tagZId = rZ.lastInsertRowId;
 
     // X: 4 gallery_tag refs, Y: 7 refs, Z: 1 ref
     for (let i = 1; i <= 4; i++) {
-      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [3000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [3000 + i, tagXId]);
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [3000 + i, 1, `G${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        3000 + i,
+        tagXId,
+      ]);
     }
     for (let i = 1; i <= 7; i++) {
-      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [4000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [4000 + i, tagYId]);
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [4000 + i, 1, `G${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        4000 + i,
+        tagYId,
+      ]);
     }
-    await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [5001, 1, 'GZ1', '2024-01-01', '', '', '']);
+    await db.execute(
+      'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [5001, 1, 'GZ1', '2024-01-01', '', '', ''],
+    );
     await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [5001, tagZId]);
 
     const results = await searchLocalTags('');
@@ -409,14 +767,28 @@ describe('searchLocalTags empty query hybrid ranking', () => {
 
   it('count=0 tags with no gallery_tag references rank after those with references', async () => {
     const db = getDb();
-    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'no_ref', 0]);
-    const rWithRef = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [TAG_TYPE_TO_BYTE[TagType.TAG], 'with_ref', 0]);
+    await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'no_ref',
+      0,
+    ]);
+    const rWithRef = await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'with_ref',
+      0,
+    ]);
     const tagWithRefId = rWithRef.lastInsertRowId;
 
     // with_ref linked to 3 galleries
     for (let i = 1; i <= 3; i++) {
-      await db.execute('INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', [6000 + i, 1, `G${i}`, '2024-01-01', '', '', '']);
-      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [6000 + i, tagWithRefId]);
+      await db.execute(
+        'INSERT OR REPLACE INTO gallery (id, type, title, date, thumbnail, url, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [6000 + i, 1, `G${i}`, '2024-01-01', '', '', ''],
+      );
+      await db.execute('INSERT OR IGNORE INTO gallery_tag (id, tagId) VALUES (?, ?)', [
+        6000 + i,
+        tagWithRefId,
+      ]);
     }
     // no_ref has no gallery_tag links
 

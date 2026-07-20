@@ -1,13 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSearchStore } from '@/features/search/store/search.store';
 import { useSearch } from '@/features/search/hooks/useSearch';
 import { SearchInput } from '@/shared/components/SearchInput';
 import { useSearchInputState } from '@/shared/hooks/useSearchInputState';
 import { SearchResults } from '@/features/search/components/SearchResults';
-import { TagChip } from '@/shared/components/TagChip';
+import { TagFavoriteChip } from '@/shared/components/TagFavoriteChip';
 import { tagFromSuggestion, toSearchString } from '@/lib/utils/hitomi-tag';
 import { isHangul } from '@/lib/utils/tag-query';
 import type { Suggestion } from '@/lib/utils/types';
@@ -15,6 +15,8 @@ import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
 import { SyncErrorBanner } from '@/shared/components/SyncErrorBanner';
 import { useT } from '@/lib/i18n/useT';
+import { useSettingsStore } from '@/lib/store/settings';
+import { prioritizeSuggestions } from '@/lib/utils/tag-favorites';
 
 /**
  * Full-page mobile search experience: a search input pinned at the top of the
@@ -36,8 +38,18 @@ export function MobileSearchPage() {
   const removeRecentSearch = useSearchStore((s) => s.removeRecentSearch);
   const clearRecentSearches = useSearchStore((s) => s.clearRecentSearches);
   const dbReady = useDbStatusStore((s) => s.dbReady);
+  const favoriteTags = useSettingsStore((s) => s.favoriteTags);
   const t = useT();
   const [popularTags, setPopularTags] = useState<Suggestion[]>([]);
+
+  const prioritizedSuggestions = useMemo(
+    () => prioritizeSuggestions(suggestions, favoriteTags),
+    [suggestions, favoriteTags],
+  );
+  const prioritizedPopularTags = useMemo(
+    () => prioritizeSuggestions(popularTags, favoriteTags),
+    [popularTags, favoriteTags],
+  );
 
   const searchParams = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
@@ -87,12 +99,18 @@ export function MobileSearchPage() {
 
   // Load popular tags once DB is ready.
   useEffect(() => {
+    let cancelled = false;
     if (dbReady) {
       searchLocalTags('')
-        .then(setPopularTags)
+        .then((results) => {
+          if (!cancelled) setPopularTags(results);
+        })
         .catch((e) => console.warn('[search] Popular tags load failed:', e));
     }
-  }, [dbReady]);
+    return () => {
+      cancelled = true;
+    };
+  }, [dbReady, favoriteTags]);
 
   // Sync active input to the store for autocomplete.
   useEffect(() => {
@@ -237,22 +255,30 @@ export function MobileSearchPage() {
       {showResults ? (
         <SearchResults />
       ) : typing ? (
-        suggestions.length > 0 && (
-          <ul role="listbox" aria-label={t('search.tagSuggestions')} className="space-y-0.5">
-            {suggestions.map((s, i) => (
-              <li key={`${s.tagType}-${s.tag}-${i}`}>
+        prioritizedSuggestions.length > 0 && (
+          <ul aria-label={t('search.tagSuggestions')} className="space-y-0.5">
+            {prioritizedSuggestions.map((s) => (
+              <li
+                key={`${s.tagType}-${s.tag}`}
+                className="relative flex min-h-[48px] min-w-0 items-center rounded-xl transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
+              >
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={false}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    handleSuggestionClick(s.tag, s.tagType, s.localName);
+                  data-search-option
+                  aria-label={`${koreanInput ? (s.localName ?? s.tag) : s.tag} ${s.amount.toLocaleString()}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
                   }}
-                  className="flex min-h-[48px] w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
+                  onClick={() => handleSuggestionClick(s.tag, s.tagType, s.localName)}
+                  className="absolute inset-0 z-0 w-full rounded-xl text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500"
                 >
+                  <span className="sr-only">
+                    {koreanInput ? (s.localName ?? s.tag) : s.tag} {s.amount.toLocaleString()}
+                  </span>
+                </button>
+                <div className="pointer-events-none relative z-10 flex w-full min-w-0 items-center gap-2 px-3 py-2">
                   <span className="min-w-0 flex-1">
-                    <TagChip
+                    <TagFavoriteChip
                       tag={s.tag}
                       type={s.tagType}
                       displayName={koreanInput ? s.localName : s.tag}
@@ -264,7 +290,7 @@ export function MobileSearchPage() {
                   <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
                     {s.amount.toLocaleString()}
                   </span>
-                </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -272,30 +298,23 @@ export function MobileSearchPage() {
       ) : (
         <>
           {/* 인기 태그 — horizontal chip scroller */}
-          {popularTags.length > 0 && (
+          {prioritizedPopularTags.length > 0 && (
             <section className="mb-7">
               <p className="mb-3 px-1 text-sm font-medium text-zinc-500 dark:text-zinc-400">
                 {t('search.popularTags')}
               </p>
               <div className="-mx-4 flex items-center gap-2.5 overflow-x-auto scrollbar-hide px-4 py-1.5">
-                {popularTags.map((s, i) => (
-                  <button
-                    key={`${s.tagType}-${s.tag}-${i}`}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      handlePopularClick(s);
-                    }}
-                    className="shrink-0 rounded-full transition-transform active:scale-95"
-                  >
-                    <TagChip
-                      tag={s.tag}
-                      type={s.tagType}
-                      displayName={koreanInput ? s.localName : s.tag}
-                      linked={false}
-                      size="lg"
-                    />
-                  </button>
+                {prioritizedPopularTags.map((s) => (
+                  <TagFavoriteChip
+                    key={`${s.tagType}-${s.tag}`}
+                    tag={s.tag}
+                    type={s.tagType}
+                    displayName={koreanInput ? s.localName : s.tag}
+                    linked={false}
+                    size="lg"
+                    onSelect={() => handlePopularClick(s)}
+                    className="shrink-0 transition-transform active:scale-95"
+                  />
                 ))}
               </div>
             </section>
@@ -312,8 +331,8 @@ export function MobileSearchPage() {
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    clearRecentSearches();
                   }}
+                  onClick={clearRecentSearches}
                   className="text-sm text-zinc-500 active:text-zinc-700 dark:text-zinc-400 dark:active:text-zinc-200"
                 >
                   {t('search.clearHistory')}
@@ -326,8 +345,8 @@ export function MobileSearchPage() {
                       type="button"
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        handleHistoryClick(q);
                       }}
+                      onClick={() => handleHistoryClick(q)}
                       className="block w-full truncate rounded-xl py-3.5 pl-3 pr-14 text-left text-base font-semibold text-zinc-800 transition-colors hover:bg-zinc-100 active:bg-zinc-200/70 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:active:bg-zinc-800/70"
                     >
                       {q.replace(/_/g, ' ')}
@@ -337,8 +356,8 @@ export function MobileSearchPage() {
                       aria-label={`${t('search.clearHistory')}: ${q}`}
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        removeRecentSearch(q);
                       }}
+                      onClick={() => removeRecentSearch(q)}
                       className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-zinc-400 transition-colors hover:text-zinc-600 active:bg-zinc-300/60 dark:text-zinc-500 dark:hover:text-zinc-300 dark:active:bg-zinc-700/60"
                     >
                       <svg

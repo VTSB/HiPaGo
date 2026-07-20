@@ -61,12 +61,15 @@ describe('SearchInput', () => {
     expect(screen.queryByRole('button', { name: /clear/i })).toBeNull();
   });
 
-  it('clear button calls onClear via onMouseDown', () => {
+  it('clear button preserves focus on mouse-down and clears on click', () => {
     const onClear = vi.fn();
     setup({ value: 'female:loli', onClear });
     const clearBtn = screen.getByRole('button', { name: /clear/i });
     fireEvent.mouseDown(clearBtn);
-    expect(onClear).toHaveBeenCalled();
+    expect(onClear).not.toHaveBeenCalled();
+    fireEvent.click(clearBtn);
+    expect(onClear).toHaveBeenCalledTimes(1);
+    expect(clearBtn).toHaveAttribute('type', 'button');
   });
 
   it('clear button uses onMouseDown to prevent blur', () => {
