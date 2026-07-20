@@ -144,6 +144,51 @@ describe('listQueue + dequeueNextQueued', () => {
     await pauseQueued(1); // pos 1 now paused → skipped
     const next = await dequeueNextQueued();
     expect(next!.galleryId).toBe(2);
+    expect(next!.status).toBe('downloading');
+    expect((await getDownload(2))!.status).toBe('downloading');
+  });
+
+  it('excludes queued rows whose queuePosition was cleared', async () => {
+    await upsertDownload(makeRow({ galleryId: 1, status: 'queued', queuePosition: null }));
+    await upsertDownload(makeRow({ galleryId: 2, status: 'queued', queuePosition: 3 }));
+    await upsertDownload(makeRow({ galleryId: 3, status: 'paused', queuePosition: 2 }));
+
+    const q = await listQueue();
+    expect(q.map((r) => r.galleryId)).toEqual([3, 2]);
+    expect((await dequeueNextQueued())!.galleryId).toBe(2);
+  });
+
+  it('atomically claims a queued row before returning it', async () => {
+    await enqueueDownload(meta(1));
+
+    const claimed = await dequeueNextQueued();
+    const stored = await getDownload(1);
+
+    expect(claimed).toMatchObject({ galleryId: 1, status: 'downloading' });
+    expect(stored).toMatchObject({ galleryId: 1, status: 'downloading' });
+  });
+
+  it('can claim a specific queued row without claiming earlier queued work', async () => {
+    await enqueueDownload(meta(1)); // pos 1
+    await enqueueDownload(meta(2)); // pos 2
+
+    const claimed = await dequeueNextQueued(2);
+
+    expect(claimed).toMatchObject({ galleryId: 2, status: 'downloading' });
+    expect((await getDownload(1))!.status).toBe('queued');
+    expect((await getDownload(2))!.status).toBe('downloading');
+  });
+
+  it('allows only one concurrent dequeue caller to claim a single queued row', async () => {
+    await enqueueDownload(meta(1));
+
+    const results = await Promise.all([dequeueNextQueued(), dequeueNextQueued()]);
+    const claimed = results.filter((row): row is DBDownload => row !== null);
+
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]).toMatchObject({ galleryId: 1, status: 'downloading' });
+    expect(results.filter((row) => row === null)).toHaveLength(1);
+    expect((await getDownload(1))!.status).toBe('downloading');
   });
 
   it('excludes queued rows whose queuePosition was cleared', async () => {

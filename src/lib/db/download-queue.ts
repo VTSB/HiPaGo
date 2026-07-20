@@ -117,17 +117,39 @@ export async function listQueue(): Promise<DBDownload[]> {
  * Return the next dequeueable item: the lowest-position 'queued' row (NOT
  * 'paused' — paused items are explicitly held). Returns null when none.
  *
- * This is a pure READ; the caller flips it to 'downloading' via the normal
- * download path. The synchronous single-flight guard lives in the processor.
+ * Claims the row before returning it. The conditional UPDATE is the ownership
+ * boundary: if another caller already moved the selected row out of 'queued',
+ * this caller observes zero changes and returns null instead of returning the
+ * same work item.
  */
-export async function dequeueNextQueued(): Promise<DBDownload | null> {
+export async function dequeueNextQueued(galleryId?: number): Promise<DBDownload | null> {
   const db = await ensureDb();
-  const rows = await db.query<DBDownload>(
-    `SELECT ${SELECT_COLS}
-     FROM download
-     WHERE status = 'queued' AND queuePosition IS NOT NULL
+
+  const candidates = await db.query<{ galleryId: number }>(
+    `SELECT galleryId
+       FROM download
+      WHERE status = 'queued' AND queuePosition IS NOT NULL
+        ${galleryId === undefined ? '' : 'AND galleryId = ?'}
       ORDER BY queuePosition IS NULL ASC, queuePosition ASC, downloadedAt ASC, galleryId ASC
       LIMIT 1`,
+    galleryId === undefined ? [] : [galleryId],
+  );
+  const claimedGalleryId = candidates[0]?.galleryId;
+  if (claimedGalleryId === undefined) return null;
+
+  const result = await db.execute(
+    "UPDATE download SET status = 'downloading' WHERE galleryId = ? AND status = 'queued'",
+    [claimedGalleryId],
+  );
+  if (result.changes === 0) return null;
+
+  await persistDb();
+
+  const rows = await db.query<DBDownload>(
+    `SELECT ${SELECT_COLS}
+       FROM download
+      WHERE galleryId = ?`,
+    [claimedGalleryId],
   );
   return rows[0] ?? null;
 }

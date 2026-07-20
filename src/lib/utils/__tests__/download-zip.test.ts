@@ -484,8 +484,18 @@ describe('downloadGalleryToLibrary', () => {
 
     // updateDownloadProgress called for pages 2 and 3 (i+1 = 2, 3)
     expect(updateDownloadProgress).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(updateDownloadProgress).mock.calls[0]).toEqual([2, 2, expect.any(Number)]);
-    expect(vi.mocked(updateDownloadProgress).mock.calls[1]).toEqual([2, 3, expect.any(Number)]);
+    expect(vi.mocked(updateDownloadProgress).mock.calls[0]).toEqual([
+      2,
+      2,
+      expect.any(Number),
+      { persist: false },
+    ]);
+    expect(vi.mocked(updateDownloadProgress).mock.calls[1]).toEqual([
+      2,
+      3,
+      expect.any(Number),
+      { persist: true },
+    ]);
 
     const lastUpsert = vi.mocked(upsertDownload).mock.calls[1][0];
     expect(lastUpsert.status).toBe('complete');
@@ -680,6 +690,66 @@ describe('downloadGalleryToLibrary', () => {
     expect(upsertDownload).not.toHaveBeenCalled();
   });
 
+  it('(d) abort after the response body is read does not write a stale page', async () => {
+    const controller = new AbortController();
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h: string) => (h === 'content-type' ? 'image/webp' : null),
+      } as unknown as Headers,
+      arrayBuffer: () => {
+        controller.abort();
+        return Promise.resolve(new Uint8Array([4, 5, 6]).buffer as ArrayBuffer);
+      },
+    } as unknown as Response);
+
+    await expect(
+      downloadGalleryToLibrary(
+        32,
+        'G',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(await memStore.getImage(32, 0, 'webp')).toBeNull();
+    expect(await memStore.getImage(32, -1, 'json')).toBeNull();
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
+
+  it('(d) abort after page storage skips manifest and DB progress writes', async () => {
+    const controller = new AbortController();
+    const putImage = vi.spyOn(memStore, 'putImage').mockImplementation(async (galleryId, index, bytes, ext) => {
+      memStore.store.set(`${galleryId}/${String(index + 1).padStart(4, '0')}.${ext}`, bytes);
+      controller.abort();
+    });
+
+    await expect(
+      downloadGalleryToLibrary(
+        33,
+        'G',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(putImage).toHaveBeenCalledWith(33, 0, expect.any(Uint8Array), 'webp', {
+      folderName: '33 G',
+    });
+    expect(await memStore.getImage(33, 0, 'webp')).toBeInstanceOf(Uint8Array);
+    expect(await memStore.getImage(33, -1, 'json')).toBeNull();
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
+
   it('(d) does not retry caller AbortError — rethrows immediately', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -820,6 +890,32 @@ describe('downloadGalleryToLibrary', () => {
 
     const firstUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
     expect(firstUpsert.folderName).toBe('42 My Title');
+  });
+
+  it('reuses an existing persisted folderName while resuming', async () => {
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 43,
+      title: 'Old',
+      thumbnail: 'thumb.jpg',
+      tags: '{}',
+      pageCount: 1,
+      totalBytes: 1,
+      downloadedAt: '2026-01-01T00:00:00.000Z',
+      status: 'failed',
+      folderName: '43 Persisted Folder',
+    });
+    const putImage = vi.spyOn(memStore, 'putImage');
+
+    await downloadGalleryToLibrary(43, 'New Title', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
+
+    expect(putImage).toHaveBeenCalledWith(43, 0, expect.any(Uint8Array), 'webp', {
+      folderName: '43 Persisted Folder',
+    });
+    expect(vi.mocked(upsertDownload).mock.calls.at(-1)?.[0]).toMatchObject({
+      galleryId: 43,
+      status: 'complete',
+      folderName: '43 Persisted Folder',
+    });
   });
 
   // AC-003: user cancel (SAF picker backout via ensureReady) before any page is
@@ -1243,6 +1339,69 @@ describe('getDownloadedImage', () => {
     const result = await getDownloadedImage(11, 1);
     expect(result).toEqual(imageBytes);
   });
+
+  it('returns null for a zero-byte torn page', async () => {
+    await memStore.putImage(13, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(13, 0, new Uint8Array(), 'webp');
+
+    await expect(getDownloadedImage(13, 0)).resolves.toBeNull();
+  });
+});
+
+describe('hasCompleteDownloadedGallery', () => {
+  let memStore: ReturnType<typeof makeMemoryStore>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    memStore = makeMemoryStore();
+    vi.mocked(createDownloadStore).mockResolvedValue(memStore);
+  });
+
+  it('returns true when manifest covers expected pages and every file exists', async () => {
+    await memStore.putImage(
+      31,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(31, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(31, 1, new Uint8Array([2]), 'jpg');
+
+    await expect(hasCompleteDownloadedGallery(31, 2)).resolves.toBe(true);
+  });
+
+  it('returns false when manifest covers pageCount but a page file is missing', async () => {
+    await memStore.putImage(
+      32,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(32, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(32, 2)).resolves.toBe(false);
+  });
+
+  it('returns false when the manifest is shorter than the expected pageCount', async () => {
+    await memStore.putImage(33, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(33, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(33, 2)).resolves.toBe(false);
+  });
+
+  it('returns false when the manifest has stale extra pages beyond the expected pageCount', async () => {
+    await memStore.putImage(
+      34,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp', 'webp'])),
+      'json',
+    );
+    await memStore.putImage(34, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 1, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 2, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(34, 2)).resolves.toBe(false);
+  });
 });
 
 describe('hasCompleteDownloadedGallery', () => {
@@ -1348,6 +1507,30 @@ describe('exportGalleryZip', () => {
   it('throws when no manifest is found', async () => {
     await expect(exportGalleryZip(999, 'Missing')).rejects.toThrow(
       'No manifest found for gallery 999',
+    );
+  });
+
+  it('throws when the stored manifest is empty or corrupt instead of creating an empty zip', async () => {
+    await memStore.putImage(
+      999,
+      -1,
+      new TextEncoder().encode(JSON.stringify({ 0: 'webp' })),
+      'json',
+    );
+
+    await expect(exportGalleryZip(999, 'Corrupt')).rejects.toThrow(
+      'Downloaded manifest for gallery 999 is empty or corrupt',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(anchorEl.click).not.toHaveBeenCalled();
+  });
+
+  it('throws when a manifest page exists as a zero-byte torn file', async () => {
+    await memStore.putImage(997, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(997, 0, new Uint8Array(), 'webp');
+
+    await expect(exportGalleryZip(997, 'Torn')).rejects.toThrow(
+      'Missing downloaded page 1 for gallery 997',
     );
   });
 

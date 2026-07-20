@@ -2,6 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { DBDownload } from '@/lib/db/schema';
+import type { QueueItem } from '@/lib/store/download-progress';
+import { toFavoriteTagKey } from '@/lib/utils/tag-favorites';
+import { TagType } from '@/lib/utils/types';
 
 // Stub matchMedia (jsdom doesn't ship it) so the useIsMobile branch in the new
 // LibraryHub wrapper resolves deterministically to "desktop" — on desktop the
@@ -24,6 +27,15 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
   });
 }
 
+if (typeof window !== 'undefined' && !window.IntersectionObserver) {
+  class MockIntersectionObserver {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  }
+  vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+}
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -36,6 +48,7 @@ const mockDevice = vi.hoisted(() => ({
 }));
 const mockSettings = vi.hoisted(() => ({
   libraryInitialTab: 'favorites' as 'favorites' | 'history' | 'downloads',
+  favoriteTags: [] as string[],
 }));
 const mockQueueOps = vi.hoisted(() => ({
   enqueueDownload: vi.fn(async () => 1),
@@ -46,7 +59,7 @@ const mockRetryOps = vi.hoisted(() => ({
 const mockDownloadProgressState = vi.hoisted(() => ({
   entries: {},
   downloaded: {},
-  queue: [],
+  queue: [] as QueueItem[],
   globalPaused: false,
   start: vi.fn(async () => {}),
   cancel: vi.fn(),
@@ -66,7 +79,9 @@ const mockCreateDownloadStore = vi.fn();
 const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
 const mockHasCompleteDownloadedGallery =
   vi.fn<(galleryId: number, expectedPageCount: number) => Promise<boolean>>();
-const mockProcessQueue = vi.fn(async (_opts?: { onlyGalleryId?: number }) => {});
+const mockProcessQueue = vi
+  .fn<(opts?: { onlyGalleryId?: number }) => Promise<void>>()
+  .mockResolvedValue(undefined);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockNavigation.replace }),
@@ -172,8 +187,14 @@ vi.mock('@/lib/store/settings', () => ({
     sel: (s: {
       locale: string;
       libraryInitialTab: 'favorites' | 'history' | 'downloads';
+      favoriteTags: string[];
     }) => unknown,
-  ) => sel({ locale: 'en', libraryInitialTab: mockSettings.libraryInitialTab }),
+  ) =>
+    sel({
+      locale: 'en',
+      libraryInitialTab: mockSettings.libraryInitialTab,
+      favoriteTags: mockSettings.favoriteTags,
+    }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -220,6 +241,7 @@ describe('LibraryPage', () => {
     vi.clearAllMocks();
     mockDevice.isMobile = false;
     mockSettings.libraryInitialTab = 'favorites';
+    mockSettings.favoriteTags = [];
     mockDownloadProgressState.entries = {};
     mockDownloadProgressState.downloaded = {};
     mockDownloadProgressState.queue = [];
@@ -275,6 +297,103 @@ describe('LibraryPage', () => {
 
     expect(screen.getByText('Gallery One')).toBeTruthy();
     expect(screen.getByText('Gallery Two')).toBeTruthy();
+  });
+
+  it('does not show a downloading badge for a complete row with stale 100% progress', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1010, title: 'Already Complete', status: 'complete', pageCount: 20 }),
+    ]);
+    mockDownloadProgressState.entries = {
+      1010: { progress: { current: 20, total: 20 }, error: null },
+    };
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    expect(screen.getByText('Already Complete')).toBeTruthy();
+    expect(screen.queryByText('20/20 · 100%')).toBeNull();
+    expect(screen.getByRole('button', { name: 'library.more' })).toBeTruthy();
+  });
+
+  it('does not show a downloading badge for a complete row with stale partial progress', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1012, title: 'Complete With Stale Entry', status: 'complete' }),
+    ]);
+    mockDownloadProgressState.downloaded = { 1012: true };
+    mockDownloadProgressState.entries = {
+      1012: { progress: { current: 19, total: 20 }, error: null },
+    };
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    expect(screen.getByText('Complete With Stale Entry')).toBeTruthy();
+    expect(screen.queryByText('19/20 · 95%')).toBeNull();
+    expect(screen.getByRole('button', { name: 'library.more' })).toBeTruthy();
+  });
+
+  it('does not show stale partial progress for an unseeded complete row', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1014, title: 'Complete Unseeded', status: 'complete' }),
+    ]);
+    mockDownloadProgressState.entries = {
+      1014: { progress: { current: 19, total: 20 }, error: null },
+    };
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    expect(screen.getByText('Complete Unseeded')).toBeTruthy();
+    expect(screen.queryByText('19/20 · 95%')).toBeNull();
+    expect(screen.getByRole('button', { name: 'library.more' })).toBeTruthy();
+  });
+
+  it('still shows progress for an active re-download of a complete row', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1011, title: 'Re-downloading', status: 'complete', pageCount: 20 }),
+    ]);
+    mockDownloadProgressState.downloaded = { 1011: false };
+    mockDownloadProgressState.entries = {
+      1011: { progress: { current: 7, total: 20 }, error: null },
+    };
+
+    await act(async () => {
+      await renderPage();
+    });
+    await screen.findByText('7/20 · 35%');
+
+    expect(screen.getByText('Re-downloading')).toBeTruthy();
+    expect(screen.getByText('7/20 · 35%')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'library.more' })).toBeNull();
+  });
+
+  it('does not show the empty library CTA when only queued downloads exist', async () => {
+    mockListDownloads.mockResolvedValue([]);
+    mockDownloadProgressState.queue = [
+      {
+        id: 1013,
+        title: 'Queued Only',
+        thumbnail: '',
+        status: 'queued',
+        position: 1,
+        progress: null,
+      },
+    ];
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    expect(screen.getByText('Queued Only')).toBeTruthy();
+    expect(screen.queryByText('library.empty')).toBeNull();
+    expect(screen.queryByText('empty.browseGalleries')).toBeNull();
   });
 
   it('renders total item count in the heading', async () => {
@@ -385,6 +504,32 @@ describe('LibraryPage', () => {
     expect(screen.queryByText(/42/)).toBeNull();
   });
 
+  it('shows favorite metadata first on downloaded gallery cards', async () => {
+    const favoriteKey = toFavoriteTagKey(TagType.TAG, 'favorite tag');
+    mockSettings.libraryInitialTab = 'downloads';
+    mockSettings.favoriteTags = [favoriteKey];
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        title: 'Tagged Download',
+        tags: JSON.stringify({
+          artist: ['priority artist'],
+          tag: ['favorite tag', 'ordinary tag'],
+        }),
+      }),
+    ]);
+
+    let view: Awaited<ReturnType<typeof renderPage>>;
+    await act(async () => {
+      view = await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    const renderedKeys = Array.from(view!.container.querySelectorAll('[data-tag-key]')).map((tag) =>
+      tag.getAttribute('data-tag-key'),
+    );
+    expect(renderedKeys[0]).toBe(favoriteKey);
+  });
+
   // ── AC-004: delete action ─────────────────────────────────────────────────
 
   it('calls deleteDownload and deleteGallery when delete is confirmed', async () => {
@@ -468,6 +613,39 @@ describe('LibraryPage', () => {
     expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(2003);
     expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(2003);
     expect(mockDeleteDownload).toHaveBeenCalledWith(2003);
+  });
+
+  it('clears live pending auto-retry before deleting a just-failed row', async () => {
+    const retryAt = new Date(Date.now() + 30_000).toISOString();
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        galleryId: 2004,
+        title: 'Live Retry Pending',
+        status: 'failed',
+        nextRetryAt: null,
+        retryCount: 0,
+      }),
+    ]);
+    mockDownloadProgressState.entries = {
+      2004: { progress: null, error: 'boom', retryAt, attempt: 1 },
+    };
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
+    });
+
+    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(2004);
+    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(2004);
+    expect(mockDeleteDownload).toHaveBeenCalledWith(2004);
   });
 
   it('does NOT delete when the confirm dialog is cancelled', async () => {

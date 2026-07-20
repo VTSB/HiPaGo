@@ -92,22 +92,23 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
         return;
       }
 
+      const lookup = { folderName: row.folderName ?? null };
+      const expectedPageCount = row.pageCount ?? 0;
       let pages: { index: number; ext: string }[];
       try {
-        pages = await getDownloadedGalleryPages(galleryId);
+        pages = await getDownloadedGalleryPages(galleryId, lookup);
       } catch {
         pages = [];
       }
 
       if (cancelled || runId !== runIdRef.current) return;
 
-      let completeOnDisk = false;
-      try {
-        completeOnDisk = await hasCompleteDownloadedGallery(galleryId, row.pageCount ?? 0);
-      } catch {
-        completeOnDisk = false;
-      }
-
+      const completeOnDisk = await hasCompleteDownloadedGallery(
+        galleryId,
+        expectedPageCount,
+        lookup,
+      ).catch(() => false);
+      if (cancelled || runId !== runIdRef.current) return;
       if (!completeOnDisk) {
         setResult({ sources: null, urls: null, dims: null, missing: true, loading: false });
         return;

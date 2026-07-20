@@ -24,6 +24,7 @@ import { AbortableImage } from '@/shared/components/AbortableImage';
 import { useT } from '@/lib/i18n/useT';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import { useDownloadProgressStore, type QueueItem } from '@/lib/store/download-progress';
+import { downloadProgressPercent } from '@/lib/utils/download-progress-percent';
 
 // ---------------------------------------------------------------------------
 // Shared row chrome
@@ -121,7 +122,8 @@ function ActiveRow({ item }: { item: QueueItem }) {
 
   const current = item.progress?.current ?? 0;
   const total = item.progress?.total ?? 0;
-  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  const hasProgressTotal = total > 0;
+  const pct = downloadProgressPercent({ current, total });
 
   return (
     <div className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/60">
@@ -141,7 +143,7 @@ function ActiveRow({ item }: { item: QueueItem }) {
             />
           </div>
           <span className="shrink-0 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-            {current}/{total} · {pct}%
+            {hasProgressTotal ? `${current}/${total} · ${pct}%` : t('library.queue.downloading')}
           </span>
         </div>
       </div>

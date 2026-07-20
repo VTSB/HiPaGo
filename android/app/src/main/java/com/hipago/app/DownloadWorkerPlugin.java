@@ -2,6 +2,7 @@ package com.hipago.app;
 
 import android.Manifest;
 import android.content.Context;
+import android.util.AtomicFile;
 import android.content.SharedPreferences;
 import android.os.Build;
 
@@ -97,10 +98,7 @@ public class DownloadWorkerPlugin extends Plugin {
 
     private void deleteProgress(String galleryId) {
         File f = progressFile(galleryId);
-        if (f.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            f.delete();
-        }
+        new AtomicFile(f).delete();
     }
 
     private String workOrderGalleryId(String json) {

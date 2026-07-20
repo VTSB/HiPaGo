@@ -1,5 +1,6 @@
 import { ensureDb, persistDb } from './adapter';
 import type { DBDownload, DownloadStatus } from './schema';
+import { notifyDownloadCatalogChanged } from '@/lib/storage/public-backup-events';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,6 +53,7 @@ export async function upsertDownload(row: DBDownload): Promise<void> {
     ],
   );
   await persistDb();
+  notifyDownloadCatalogChanged();
 }
 
 /**
@@ -65,6 +67,7 @@ export async function updateDownloadStatus(
   const db = await ensureDb();
   await db.execute('UPDATE download SET status = ? WHERE galleryId = ?', [status, galleryId]);
   await persistDb();
+  notifyDownloadCatalogChanged();
 }
 
 /**
@@ -84,6 +87,7 @@ export async function setDownloadError(
     galleryId,
   ]);
   await persistDb();
+  notifyDownloadCatalogChanged();
 }
 
 /**
@@ -96,13 +100,17 @@ export async function updateDownloadProgress(
   galleryId: number,
   pageCount: number,
   totalBytes: number,
+  options: { persist?: boolean } = {},
 ): Promise<void> {
   const db = await ensureDb();
   await db.execute(
     'UPDATE download SET pageCount = MAX(pageCount, ?), totalBytes = ? WHERE galleryId = ?',
     [pageCount, totalBytes, galleryId],
   );
-  await persistDb();
+  if (options.persist ?? true) {
+    await persistDb();
+    notifyDownloadCatalogChanged();
+  }
 }
 
 /**
@@ -116,6 +124,7 @@ export async function setDownloadFolderName(galleryId: number, folderName: strin
     galleryId,
   ]);
   await persistDb();
+  notifyDownloadCatalogChanged();
 }
 
 /**
@@ -134,6 +143,7 @@ export async function markDownloadMigrated(
     galleryId,
   ]);
   await persistDb();
+  notifyDownloadCatalogChanged();
 }
 
 /**
@@ -144,6 +154,7 @@ export async function deleteDownload(galleryId: number): Promise<void> {
   const db = await ensureDb();
   await db.execute('DELETE FROM download WHERE galleryId = ?', [galleryId]);
   await persistDb();
+  notifyDownloadCatalogChanged();
 }
 
 // ---------------------------------------------------------------------------
