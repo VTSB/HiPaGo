@@ -13,6 +13,7 @@
  *   summary            Show a summary of all verdicts from batch files
  *   apply              Apply PASS verdicts to {lang}.ai.json
  *   status             Show batch completion status
+ *   cancel-retry       Restore a retried failure to the failed archive
  *
  * Common flags:
  *   --lang <code>        Language code (e.g. ko)
@@ -21,6 +22,7 @@
  *   --batch <batchId>    Batch ID (for save-translations, save-verdicts)
  *   --input <json>       JSON string or @file path
  *   --fresh              Delete existing batches and start fresh (for analyze)
+ *   --use-stale-cache    Reuse _tagcache.json even when older than 24h (for analyze)
  */
 
 import path from 'path';
@@ -35,9 +37,10 @@ import {
   crawlTags,
   getStatus,
   readFailed,
-  writeFailed,
   findDuplicateTranslations,
   pruneOrphanTranslations,
+  retryFailed,
+  cancelRetry,
 } from './translate-tags-logic';
 
 // ─── Arg parsing ─────────────────────────────────────────────────────────────
@@ -132,6 +135,7 @@ async function main() {
       }
       const fresh = flags['fresh'] === 'true';
       const refreshTags = flags['refresh-tags'] === 'true';
+      const useStaleCache = flags['use-stale-cache'] === 'true';
       const categoryFilter = flags['category'];
       const includeFailed = flags['include-failed'] === 'true';
 
@@ -152,9 +156,10 @@ async function main() {
       }
       const cacheFresh = cached && Date.now() - new Date(cached.fetchedAt).getTime() < TTL_MS;
 
-      if (cacheFresh) {
+      if (cached && (cacheFresh || useStaleCache)) {
         tags = cached!.tags;
-        console.error(`[analyze] Using cached tag list (${tags.length} tags, fetched ${cached!.fetchedAt}). Use --refresh-tags to re-crawl.`);
+        const staleNote = cacheFresh ? '' : ' (stale cache forced by --use-stale-cache)';
+        console.error(`[analyze] Using cached tag list (${tags.length} tags, fetched ${cached!.fetchedAt})${staleNote}. Use --refresh-tags to re-crawl.`);
       } else {
         console.error(`[analyze] Crawling tags for lang=${lang}...`);
         // Fail-closed: a crawl failure for either source mode aborts. Validate
@@ -312,14 +317,22 @@ async function main() {
     case 'retry': {
       const lang = requireFlag(flags, 'lang');
       const id = requireFlag(flags, 'id');
-      const failed = readFailed(I18N_DIR, lang);
-      if (!(id in failed)) {
+      if (!retryFailed({ lang, id, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR })) {
         console.error(`[retry] ${id} not in ${lang}.failed.json — nothing to do`);
         break;
       }
-      delete failed[id];
-      writeFailed(I18N_DIR, lang, failed);
       console.error(`[retry] removed ${id} from ${lang}.failed.json — it will be re-batched on next analyze`);
+      break;
+    }
+
+    case 'cancel-retry': {
+      const lang = requireFlag(flags, 'lang');
+      const id = requireFlag(flags, 'id');
+      if (!cancelRetry({ lang, id, i18nDir: I18N_DIR, outputDir: OUTPUT_DIR })) {
+        console.error(`[cancel-retry] ${id} was not restored (not in retry history or already present in ${lang}.failed.json)`);
+        break;
+      }
+      console.error(`[cancel-retry] restored ${id} to ${lang}.failed.json and removed it from retry history`);
       break;
     }
 
@@ -329,7 +342,7 @@ async function main() {
       console.error('Usage: pnpm translate-tags <subcommand> [flags]');
       console.error('');
       console.error('Subcommands:');
-      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--category <cat>] [--fresh] [--refresh-tags] [--include-failed]');
+      console.error('  analyze             --lang ko --max-batches <n> [--source translate|validate] [--category <cat>] [--fresh] [--refresh-tags] [--use-stale-cache] [--include-failed]');
       console.error('  get-batch           --lang ko --id <batchId>');
       console.error('  save-translations   --lang ko --batch <batchId> --input \'{"translations":[...]}\'');
       console.error('  save-verdicts       --lang ko --batch <batchId> --input \'{"verdicts":[...]}\'');
@@ -340,6 +353,7 @@ async function main() {
       console.error('  prune-orphans       --lang ko [--dry-run] [--file ko.json]  (default: prunes both ko.json + ko.ai.json)');
       console.error('  list-failed         --lang ko');
       console.error('  retry               --lang ko --id <category:name>');
+      console.error('  cancel-retry        --lang ko --id <category:name>');
       process.exit(1);
     }
   }

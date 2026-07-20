@@ -43,6 +43,7 @@ HiPaGo is a cross-platform web application for browsing and managing hitomi.la g
 - **TypeScript**: Strict mode enabled. Path alias `@/*` maps to `src/`.
 - **Platform detection**: Code detects Tauri, Capacitor, or web platform at runtime via `window.__TAURI__` and `window.Capacitor`.
 - **Database**: Adapters provided for Tauri (native SQLite), Capacitor (native), and web (WASM SQLite + IndexedDB).
+- **Android release signing**: Agents and local builders without distribution-key access must sign Android release APKs with the Android debug key. Do not block on or request the private release keystore credentials unless the user explicitly provides them. `pnpm build:android:release`/`./gradlew assembleRelease` produce a debug-key-signed release APK when `HIPAGO_KEYSTORE_*` Gradle properties are absent.
 - **Tag translation workflows**: For tag translation or validation work, use the Codex-native files in `.codex/skills/translate-tags/SKILL.md`, `.codex/skills/validate-tags/SKILL.md`, `.codex/agents/tag-translator/tag-translator.md`, and `.codex/agents/tag-validator/tag-validator.md`.
 
 ### Database Architecture
@@ -188,6 +189,7 @@ const results = await searchGalleries(query);
 | `pnpm build:static` | Export static site (via `scripts/build-static.mjs`) |
 | `pnpm build:tauri` | Build Tauri desktop app |
 | `pnpm build:android` | Build and sync Capacitor Android |
+| `pnpm build:android:release` | Build Android release APK; uses distribution key when all `HIPAGO_KEYSTORE_*` Gradle properties are present, otherwise signs with the Android debug key |
 | `pnpm build:ios` | Build and sync Capacitor iOS |
 | `pnpm tauri:dev` | Dev Tauri desktop app |
 | `pnpm cap:sync` | Sync web build to Capacitor |
@@ -203,3 +205,13 @@ const results = await searchGalleries(query);
 - **Path alias**: `@/*` → `src/*`
 
 <!-- MANUAL: Add project-specific conventions, architectural decisions, or domain knowledge here. -->
+
+## Translation queue handoff rules
+
+- For Korean tag translation work, the authoritative live check is `npx tsx scripts/translate-tags.ts status --lang ko`. Do not infer progress from batch count alone or from old `analyze` output.
+- Report tag-item counts by summing `tagCount` across batch statuses. The top-level `translated` field is a batch count, not a tag-word count.
+- Keep `artist` and `group` out of Korean queue work unless explicitly requested. Verify the live batch list contains no `artist`/`group` batches before reporting totals.
+- Process one batch at a time when worker reliability is degraded. A batch is complete only when its live status is `validated` with matching translation and verdict counts.
+- Use the configured GPT-5.6 Luna Light alias available in the environment; if a literal model name is rejected, record and use the supported alias rather than repeatedly spawning failed workers.
+- Never let workers inspect old logs, memories, unrelated batch files, or spawn nested agents. If a worker only scans history, hits thread limits, or exits before CLI saves, stop it and retry the same batch after clearing stale CLI worker processes.
+- Translation-only commits should include only `src/lib/data/tags-i18n/ko.ai.json` and `src/lib/data/tags-i18n/ko.failed.json`. Keep generated temp payloads and run logs out of commits.

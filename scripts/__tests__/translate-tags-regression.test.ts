@@ -213,3 +213,136 @@ describe('runAnalyze category exclusion and --category filter', () => {
     expect(report.batches.every((b) => b.category !== 'artist' && b.category !== 'group')).toBe(true);
   });
 });
+
+describe('retry preserves failed attempt history', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanDir(tmpDir); });
+
+  it('rearchives a retried failure as attempt N+1 and reports it as re-tried', async () => {
+    const { retryFailed, runAnalyze, saveTranslations, saveVerdicts, applyVerdicts } = await getLogic();
+    const outputDir = path.join(tmpDir, 'output');
+    const key = 'tag:no-local-name';
+    writeJson(path.join(tmpDir, 'ko.json'), {});
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+    writeJson(path.join(tmpDir, 'ko.failed.json'), {
+      [key]: { tried: '2026-01-01', verdict: 'REJECT', attempts: 3, reason: 'first reason' },
+    });
+
+    expect(retryFailed({ lang: 'ko', id: key, i18nDir: tmpDir, outputDir })).toBe(true);
+    expect((readJson(path.join(tmpDir, 'ko.failed.json')) as Record<string, unknown>)[key]).toBeUndefined();
+
+    await runAnalyze({
+      lang: 'ko', i18nDir: tmpDir, outputDir, maxBatches: 1,
+      tags: [{ name: 'no-local-name', count: 1, type: 'tag' }],
+    });
+    const batch = readBatches(outputDir, 'ko')[0];
+    expect(batch.tags.map((tag) => tag.name)).toContain('no-local-name');
+    await saveTranslations({ lang: 'ko', batchId: batch.batchId, outputDir,
+      translations: [{ name: 'no-local-name', translation: '', confidence: 'none' }] });
+    await saveVerdicts({ lang: 'ko', batchId: batch.batchId, outputDir,
+      verdicts: [{ name: 'no-local-name', verdict: 'REJECT', reason: 'retried reason' }] });
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args.join(' ')); };
+    try { await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir }); }
+    finally { console.error = originalError; }
+
+    const failed = readJson(path.join(tmpDir, 'ko.failed.json')) as Record<string, { attempts: number; reason?: string }>;
+    expect(failed[key].attempts).toBe(4);
+    expect(failed[key].reason).toBe('retried reason');
+    expect(errors.some((line) => line.includes('0 new, 1 re-tried'))).toBe(true);
+  });
+
+  it('removes stale retry history after a retried tag passes', async () => {
+    const { retryFailed, runAnalyze, saveTranslations, saveVerdicts, applyVerdicts } = await getLogic();
+    const outputDir = path.join(tmpDir, 'output');
+    const key = 'tag:retry-success';
+    writeJson(path.join(tmpDir, 'ko.json'), {});
+    writeJson(path.join(tmpDir, 'ko.ai.json'), {});
+    writeJson(path.join(tmpDir, 'ko.failed.json'), {
+      [key]: { tried: '2026-01-01', verdict: 'REJECT', attempts: 2, reason: 'old failure' },
+    });
+
+    expect(retryFailed({ lang: 'ko', id: key, i18nDir: tmpDir, outputDir })).toBe(true);
+    await runAnalyze({
+      lang: 'ko', i18nDir: tmpDir, outputDir, maxBatches: 1,
+      tags: [{ name: 'retry-success', count: 1, type: 'tag' }],
+    });
+    const batch = readBatches(outputDir, 'ko')[0];
+    await saveTranslations({ lang: 'ko', batchId: batch.batchId, outputDir,
+      translations: [{ name: 'retry-success', translation: '재시도 성공', confidence: 'high' }] });
+    await saveVerdicts({ lang: 'ko', batchId: batch.batchId, outputDir,
+      verdicts: [{ name: 'retry-success', verdict: 'PASS' }] });
+
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+
+    expect(readJson(path.join(outputDir, 'ko', 'retry-history.json'))).toEqual({});
+  });
+
+  it('rearchives a retried PASS rejected as a duplicate with attempts N+1 and consumes history', async () => {
+    const { retryFailed, runAnalyze, saveTranslations, saveVerdicts, applyVerdicts } = await getLogic();
+    const outputDir = path.join(tmpDir, 'output');
+    const key = 'tag:retry-duplicate';
+    writeJson(path.join(tmpDir, 'ko.json'), {});
+    writeJson(path.join(tmpDir, 'ko.ai.json'), { tag: { owner: '중복 번역' } });
+    writeJson(path.join(tmpDir, 'ko.failed.json'), {
+      [key]: { tried: '2026-01-01', verdict: 'REJECT', attempts: 3, reason: 'old failure' },
+    });
+
+    expect(retryFailed({ lang: 'ko', id: key, i18nDir: tmpDir, outputDir })).toBe(true);
+    await runAnalyze({
+      lang: 'ko', i18nDir: tmpDir, outputDir, maxBatches: 1,
+      tags: [{ name: 'retry-duplicate', count: 1, type: 'tag' }],
+    });
+    const batch = readBatches(outputDir, 'ko')[0];
+    await saveTranslations({ lang: 'ko', batchId: batch.batchId, outputDir,
+      translations: [{ name: 'retry-duplicate', translation: '중복 번역', confidence: 'high' }] });
+    await saveVerdicts({ lang: 'ko', batchId: batch.batchId, outputDir,
+      verdicts: [{ name: 'retry-duplicate', verdict: 'PASS' }] });
+
+    await applyVerdicts({ lang: 'ko', i18nDir: tmpDir, outputDir });
+
+    const failed = readJson(path.join(tmpDir, 'ko.failed.json')) as Record<string, { attempts: number; reason?: string }>;
+    expect(failed[key].attempts).toBe(4);
+    expect(failed[key].reason).toContain('duplicate translation');
+    expect(readJson(path.join(outputDir, 'ko', 'retry-history.json'))).toEqual({});
+  });
+});
+
+describe('cancelRetry', () => {
+  let tmpDir: string;
+  beforeEach(() => { tmpDir = makeTempDir(); });
+  afterEach(() => { cleanDir(tmpDir); });
+
+  it('restores the exact retry-history record to failed and consumes history', async () => {
+    const { cancelRetry } = await getLogic();
+    const outputDir = path.join(tmpDir, 'output');
+    const key = 'character:stranded';
+    const record = {
+      tried: '2026-01-01', verdict: 'REJECT', attempts: 7,
+      reason: 'preserve all metadata', customMetadata: { source: 'legacy' },
+    };
+    writeJson(path.join(tmpDir, 'ko.failed.json'), {});
+    writeJson(path.join(outputDir, 'ko', 'retry-history.json'), { [key]: record });
+
+    expect(cancelRetry({ lang: 'ko', id: key, i18nDir: tmpDir, outputDir })).toBe(true);
+    expect((readJson(path.join(tmpDir, 'ko.failed.json')) as Record<string, unknown>)[key]).toEqual(record);
+    expect(readJson(path.join(outputDir, 'ko', 'retry-history.json'))).toEqual({});
+  });
+
+  it('refuses to overwrite an existing failed record and leaves both files unchanged', async () => {
+    const { cancelRetry } = await getLogic();
+    const outputDir = path.join(tmpDir, 'output');
+    const key = 'character:conflict';
+    const failedRecord = { tried: '2026-02-01', verdict: 'REJECT', attempts: 9, reason: 'newer' };
+    const historyRecord = { tried: '2026-01-01', verdict: 'REJECT', attempts: 2, reason: 'older' };
+    writeJson(path.join(tmpDir, 'ko.failed.json'), { [key]: failedRecord });
+    writeJson(path.join(outputDir, 'ko', 'retry-history.json'), { [key]: historyRecord });
+
+    expect(cancelRetry({ lang: 'ko', id: key, i18nDir: tmpDir, outputDir })).toBe(false);
+    expect(readJson(path.join(tmpDir, 'ko.failed.json'))).toEqual({ [key]: failedRecord });
+    expect(readJson(path.join(outputDir, 'ko', 'retry-history.json'))).toEqual({ [key]: historyRecord });
+  });
+});

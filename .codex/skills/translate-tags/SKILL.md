@@ -123,3 +123,24 @@ Failed batches: [list IDs if any]
 - Use `corepack pnpm` for project scripts when invoking package scripts, but the
   translation CLI examples use `npx tsx` because that is the established command
   in the pipeline.
+
+## Handoff and recovery rules
+
+- Treat `status --lang ko` as the live source of truth. `translated` and
+  `validated` at the top level are batch counts; tag-item totals must be summed
+  from each batch's `tagCount`.
+- Korean runs exclude `artist` and `group` by default. Confirm the batch list has
+  no such categories before reporting progress or completion.
+- Prefer serial processing for reliability. Do not start the next batch until the
+  current batch is `validated` and its `translationCount` and `verdictCount`
+  match `tagCount`.
+- Workers must stay scoped to one batch, must not inspect memories or old logs,
+  and must not spawn nested agents. If a worker prints history or exits before
+  `save-translations`/`save-verdicts`, terminate only that CLI worker, retry the
+  same batch, and verify live status before advancing.
+- Use the environment's supported GPT-5.6 Luna Light alias. A rejected literal
+  model name is a configuration issue; switch to the supported alias once and
+  record it in the run log.
+- Generated payloads, temporary files, and run logs are never translation
+  deliverables. For translation-only commits, stage only `<lang>.ai.json` and
+  `<lang>.failed.json`.
