@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-24T06:06:45.639Z",
+  "generatedAt": "2026-07-25T12:02:46.105Z",
   "counts": {
     "npm": 541,
     "cargo": 602
@@ -535,7 +535,7 @@
     },
     {
       "name": "@tauri-apps/cli-win32-x64-msvc",
-      "version": "2.10.0",
+      "version": "2.11.4",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/tauri-apps/tauri"
     },
