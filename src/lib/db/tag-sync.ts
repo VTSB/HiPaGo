@@ -1,7 +1,7 @@
 import { ensureDb, withTransaction } from './adapter';
 import { useDbStatusStore } from '@/lib/store/db-status';
-import { markTagSyncCompleted, markTagSyncLoading, SYNC_KEY_TAGS } from './init';
-import { setSyncStatus } from './sync-status';
+import { markTagSyncCompleted, markTagSyncLoading, parseSyncData, SYNC_KEY_TAGS } from './init';
+import { getSyncStatus, setSyncStatus } from './sync-status';
 import { TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
 import { createTagFetcher } from '@/lib/api/tag-fetcher';
@@ -46,7 +46,9 @@ async function reloadCurrentLocale(): Promise<void> {
 /**
  * Build a lookup map of existing tags for a given type byte.
  */
-async function buildExistingTagMap(typeByte: number): Promise<Map<string, { tagId: number; count: number }>> {
+async function buildExistingTagMap(
+  typeByte: number,
+): Promise<Map<string, { tagId: number; count: number }>> {
   const db = await ensureDb();
   const existing = await db.query<{ tagId: number; name: string; count: number }>(
     'SELECT tagId, name, count FROM tag WHERE type = ?',
@@ -62,11 +64,7 @@ async function buildExistingTagMap(typeByte: number): Promise<Map<string, { tagI
 /**
  * Upsert tags into DB for a single tag type.
  */
-async function upsertTagsForType(
-  typeByte: number,
-  tags: Array<[string, number]>,
-): Promise<number> {
-  const db = await ensureDb();
+async function upsertTagsForType(typeByte: number, tags: Array<[string, number]>): Promise<number> {
   const existingMap = await buildExistingTagMap(typeByte);
 
   const toInsert: Array<{ type: number; name: string; count: number }> = [];
@@ -89,10 +87,11 @@ async function upsertTagsForType(
 
   for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
     const batch = toInsert.slice(i, i + BATCH_SIZE);
-    await withTransaction(async () => {
+    await withTransaction(async (transactionDb) => {
       for (const { type, name, count } of batch) {
-        await db.execute(
-          'INSERT INTO tag (type, name, count) VALUES (?, ?, ?)',
+        await transactionDb.execute(
+          `INSERT INTO tag (type, name, count) VALUES (?, ?, ?)
+           ON CONFLICT(type, name) DO UPDATE SET count = excluded.count`,
           [type, name, count],
         );
       }
@@ -102,12 +101,9 @@ async function upsertTagsForType(
 
   for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
     const batch = toUpdate.slice(i, i + BATCH_SIZE);
-    await withTransaction(async () => {
+    await withTransaction(async (transactionDb) => {
       for (const { tagId, count } of batch) {
-        await db.execute(
-          'UPDATE tag SET count = ? WHERE tagId = ?',
-          [count, tagId],
-        );
+        await transactionDb.execute('UPDATE tag SET count = ? WHERE tagId = ?', [count, tagId]);
       }
     });
     await yieldToMain();
@@ -147,12 +143,19 @@ function updateProgress(completed: number, total: number): void {
 }
 
 /** Persist sync checkpoint so interrupted syncs can resume. */
-async function saveCheckpoint(typeIndex: number, letterIndex: number, tagCount: number): Promise<void> {
-  await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({
-    status: 'loading',
-    timestamp: Date.now(),
-    checkpoint: { typeIndex, letterIndex, tagCount },
-  }));
+async function saveCheckpoint(
+  typeIndex: number,
+  letterIndex: number,
+  tagCount: number,
+): Promise<void> {
+  await setSyncStatus(
+    SYNC_KEY_TAGS,
+    JSON.stringify({
+      status: 'loading',
+      timestamp: Date.now(),
+      checkpoint: { typeIndex, letterIndex, tagCount },
+    }),
+  );
 }
 
 /**
@@ -174,17 +177,45 @@ async function runRuntimeTagSync(): Promise<void> {
       const { urlType, defaultType } = TAG_TYPES[typeIdx];
       const firstUrl = `all${urlType}-a.html`;
 
-      // Fetch first page
+      // Fetch the first page separately because its navigation links define the
+      // rest of this type's catalog. A challenge page can be HTTP 200 while
+      // parsing to zero tags; retry it once, and never continue with missing
+      // navigation metadata.
       store.setSyncDetail(`${urlType} 태그 가져오는 중...`);
-      const firstHtml = await fetcher.fetchPage(firstUrl);
-      const firstTags = parseTagsFromHtml(firstHtml, defaultType);
+      let firstHtml: string | null = null;
+      let firstTags: ParsedTag[] = [];
+      let firstPageError: unknown = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const html = await fetcher.fetchPage(firstUrl);
+          const tags = parseTagsFromHtml(html, defaultType);
+          if (tags.length === 0) {
+            throw new Error(`No parseable tags returned for ${firstUrl}`);
+          }
+          firstHtml = html;
+          firstTags = tags;
+          break;
+        } catch (error) {
+          firstPageError = error;
+          if (attempt === 0) await sleep(PAGE_DELAY_MS * 2);
+        }
+      }
+      if (firstHtml === null) {
+        if (
+          firstPageError instanceof Error &&
+          !firstPageError.message.startsWith('No parseable tags returned for ')
+        ) {
+          throw firstPageError;
+        }
+        throw new Error(
+          `Required first tag page ${firstUrl} remained unavailable after retry: ${errorMessage(firstPageError)}`,
+        );
+      }
       const navUrls = parseNavUrls(firstHtml);
 
       // Insert first page tags
-      if (firstTags.length > 0) {
-        await insertParsedTags(firstTags);
-        totalTagCount += firstTags.length;
-      }
+      await insertParsedTags(firstTags);
+      totalTagCount += firstTags.length;
       pagesCompleted++;
       updateProgress(pagesCompleted, totalPagesEstimate);
 
@@ -194,10 +225,11 @@ async function runRuntimeTagSync(): Promise<void> {
         try {
           const html = await fetcher.fetchPage(navUrls[letterIdx]);
           const tags = parseTagsFromHtml(html, defaultType);
-          if (tags.length > 0) {
-            await insertParsedTags(tags);
-            totalTagCount += tags.length;
+          if (tags.length === 0) {
+            throw new Error(`No parseable tags returned for ${navUrls[letterIdx]}`);
           }
+          await insertParsedTags(tags);
+          totalTagCount += tags.length;
         } catch {
           failedPages.push({ url: navUrls[letterIdx], defaultType });
         }
@@ -212,6 +244,7 @@ async function runRuntimeTagSync(): Promise<void> {
     }
 
     // Pass 2: retry failed pages
+    const unresolvedPages: string[] = [];
     if (failedPages.length > 0) {
       store.setSyncDetail(`실패한 페이지 재시도 (${failedPages.length}개)...`);
       await sleep(5000); // cooldown
@@ -221,14 +254,25 @@ async function runRuntimeTagSync(): Promise<void> {
           await sleep(PAGE_DELAY_MS * 2);
           const html = await fetcher.fetchPage(url);
           const tags = parseTagsFromHtml(html, defaultType);
-          if (tags.length > 0) {
-            await insertParsedTags(tags);
-            totalTagCount += tags.length;
+          if (tags.length === 0) {
+            throw new Error(`No parseable tags returned for ${url}`);
           }
+          await insertParsedTags(tags);
+          totalTagCount += tags.length;
         } catch {
           console.warn(`[tag-sync] Failed to fetch ${url} after retry`);
+          unresolvedPages.push(url);
         }
       }
+    }
+
+    // A partial catalog must not be considered fresh for the full 14-day sync
+    // window. Already-written pages are idempotent upserts, so keep the status
+    // incomplete and let the next launch retry the entire catalog safely.
+    if (unresolvedPages.length > 0) {
+      throw new Error(
+        `Tag sync remained incomplete after retrying ${unresolvedPages.length} page(s): ${unresolvedPages.join(', ')}`,
+      );
     }
 
     // Never mark an empty sync as completed. A blocked/challenge response is an
@@ -245,8 +289,12 @@ async function runRuntimeTagSync(): Promise<void> {
 
     await markTagSyncCompleted(totalTagCount);
 
-    // Reload locale translations into the store (respects current user locale)
-    await reloadCurrentLocale();
+    // Tag localization is bundled UI data, not part of the DB sync itself. A
+    // locale reload failure after markTagSyncCompleted must not turn a completed
+    // sync into a false failure banner.
+    await reloadCurrentLocale().catch((error) => {
+      console.warn('[tag-sync] Failed to reload tag localization:', error);
+    });
   } finally {
     await fetcher.dispose();
   }
@@ -260,15 +308,39 @@ export async function runTagSync(): Promise<void> {
   const store = useDbStatusStore.getState();
   if (store.isSyncing) return;
 
-  await markTagSyncLoading();
-  useDbStatusStore.getState().setIsSyncing(true);
-  useDbStatusStore.getState().setSyncError(null);
+  const previousDbReady = store.dbReady;
+  const previousTagsStale = store.tagsStale;
+  let previousCompletedStatus: string | null = null;
+
+  // Claim the run synchronously. markTagSyncLoading performs an async DB write,
+  // so waiting for it before setting this flag allowed two startup triggers to
+  // enter together.
+  store.setIsSyncing(true);
+  store.setSyncError(null);
 
   try {
+    const previousStatus = await getSyncStatus(SYNC_KEY_TAGS);
+    if (parseSyncData(previousStatus)?.status === 'completed') {
+      previousCompletedStatus = previousStatus;
+    }
+    await markTagSyncLoading();
     useDbStatusStore.getState().setSyncProgress(5);
     await runRuntimeTagSync();
   } catch (error) {
     console.error('[tag-sync] Sync failed:', error);
+    // A stale catalog remains usable while a background refresh is in flight.
+    // If that refresh fails, restore its prior completed marker so the next app
+    // launch does not mistake the populated DB for an interrupted first sync.
+    // The old timestamp remains intact, so it stays stale and will be retried.
+    if (previousCompletedStatus !== null) {
+      try {
+        await setSyncStatus(SYNC_KEY_TAGS, previousCompletedStatus);
+        useDbStatusStore.getState().setDbReady(previousDbReady);
+        useDbStatusStore.getState().setTagsStale(previousTagsStale);
+      } catch (restoreError) {
+        console.warn('[tag-sync] Failed to restore the previous completed status:', restoreError);
+      }
+    }
     const message = errorMessage(error);
     useDbStatusStore.getState().setSyncError(message);
     useDbStatusStore.getState().setIsSyncing(false);

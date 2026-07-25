@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { setupTestDb, clearAllTables, teardownTestDb, queryAll, queryOne } from './test-db';
 import { TAG_TYPE_TO_BYTE, TagType } from '@/lib/utils/types';
 import { useDbStatusStore } from '@/lib/store/db-status';
-import { getSyncStatus } from '../sync-status';
-import { SYNC_KEY_TAGS } from '../init';
+import { getDb } from '../adapter';
+import { getSyncStatus, setSyncStatus } from '../sync-status';
+import { checkDbReady, SYNC_KEY_TAGS } from '../init';
 import { TAG_TYPES } from '@/lib/api/tag-parser';
 
 // ---------------------------------------------------------------------------
@@ -76,15 +77,28 @@ function makeTagPageHtml(
     .join('\n');
 
   const contentBlock = `<div class="content"><ul>${tagLis}</ul></div>`;
-  const navBlock = navLetters
-    ? `<div class="page-content"><ul>${navLis}</ul></div>`
-    : '';
+  const navBlock = navLetters ? `<div class="page-content"><ul>${navLis}</ul></div>` : '';
 
   return contentBlock + navBlock;
 }
 
 /** Empty page HTML — no content block, parser returns []. */
 const EMPTY_PAGE = '<html></html>';
+
+/** Valid one-tag first page for types that are not the focus of a test. */
+function makeRequiredFirstPage(url: string): string {
+  const route = url.startsWith('allartists-')
+    ? 'artist'
+    : url.startsWith('allseries-')
+      ? 'series'
+      : url.startsWith('allcharacters-')
+        ? 'character'
+        : url.startsWith('allgroups-')
+          ? 'group'
+          : 'tag';
+  const name = `fixture-${url.replace(/[^a-z0-9]+/gi, '-')}`;
+  return makeTagPageHtml([{ name, count: 1, href: `/${route}/${name}-all.html` }]);
+}
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
@@ -106,7 +120,9 @@ beforeEach(async () => {
   mockGlobalFetch.mockReset();
   mockLoadLocale.mockReset();
   mockLoadLocale.mockResolvedValue(undefined);
-  mockGlobalFetch.mockRejectedValue(new Error('global fetch should not be called in runtime path tests'));
+  mockGlobalFetch.mockRejectedValue(
+    new Error('global fetch should not be called in runtime path tests'),
+  );
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.useFakeTimers();
@@ -129,25 +145,27 @@ describe('runTagSync — runtime path', () => {
     // Return 1 tag per type's first (and only) page; no nav pages.
     mockFetchPage.mockImplementation((url: string) => {
       if (url.startsWith('allartists-'))
-        return Promise.resolve(makeTagPageHtml([
-          { name: 'artist-alpha', count: 100, href: '/artist/artist-alpha-all.html' },
-        ]));
+        return Promise.resolve(
+          makeTagPageHtml([
+            { name: 'artist-alpha', count: 100, href: '/artist/artist-alpha-all.html' },
+          ]),
+        );
       if (url.startsWith('allseries-'))
-        return Promise.resolve(makeTagPageHtml([
-          { name: 'series-a', count: 50, href: '/series/series-a-all.html' },
-        ]));
+        return Promise.resolve(
+          makeTagPageHtml([{ name: 'series-a', count: 50, href: '/series/series-a-all.html' }]),
+        );
       if (url.startsWith('allcharacters-'))
-        return Promise.resolve(makeTagPageHtml([
-          { name: 'char-one', count: 10, href: '/character/char-one-all.html' },
-        ]));
+        return Promise.resolve(
+          makeTagPageHtml([{ name: 'char-one', count: 10, href: '/character/char-one-all.html' }]),
+        );
       if (url.startsWith('allgroups-'))
-        return Promise.resolve(makeTagPageHtml([
-          { name: 'group-x', count: 300, href: '/group/group-x-all.html' },
-        ]));
+        return Promise.resolve(
+          makeTagPageHtml([{ name: 'group-x', count: 300, href: '/group/group-x-all.html' }]),
+        );
       if (url.startsWith('alltags-'))
-        return Promise.resolve(makeTagPageHtml([
-          { name: 'plain-tag', count: 999, href: '/tag/plain-tag-all.html' },
-        ]));
+        return Promise.resolve(
+          makeTagPageHtml([{ name: 'plain-tag', count: 999, href: '/tag/plain-tag-all.html' }]),
+        );
       return Promise.resolve(EMPTY_PAGE);
     });
 
@@ -162,31 +180,27 @@ describe('runTagSync — runtime path', () => {
     expect(artists.find((t) => t.name === 'artist-alpha')!.count).toBe(100);
 
     // Verify series
-    const series = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.SERIES]],
-    );
+    const series = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.SERIES],
+    ]);
     expect(series.map((t) => t.name)).toContain('series-a');
 
     // Verify characters
-    const chars = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.CHARACTER]],
-    );
+    const chars = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.CHARACTER],
+    ]);
     expect(chars.map((t) => t.name)).toContain('char-one');
 
     // Verify groups
-    const groups = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.GROUP]],
-    );
+    const groups = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.GROUP],
+    ]);
     expect(groups.map((t) => t.name)).toContain('group-x');
 
     // Verify plain tags
-    const plainTags = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.TAG]],
-    );
+    const plainTags = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+    ]);
     expect(plainTags.map((t) => t.name)).toContain('plain-tag');
 
     // Completed status
@@ -197,6 +211,56 @@ describe('runTagSync — runtime path', () => {
     const raw = await getSyncStatus(SYNC_KEY_TAGS);
     const statusData = JSON.parse(raw!);
     expect(statusData.status).toBe('completed');
+  });
+
+  it('upserts a tag inserted after the sync snapshot without aborting', async () => {
+    mockFetchPage.mockImplementation((url: string) => {
+      if (url === 'allartists-a.html') {
+        return Promise.resolve(
+          makeTagPageHtml([
+            { name: 'concurrent-artist', count: 42, href: '/artist/concurrent-artist-all.html' },
+          ]),
+        );
+      }
+      return Promise.resolve(makeRequiredFirstPage(url));
+    });
+
+    const db = getDb();
+    const originalQuery = db.query.bind(db);
+    let injected = false;
+    const querySpy = vi
+      .spyOn(db, 'query')
+      .mockImplementation(async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
+        const rows = await originalQuery<T>(sql, params);
+        if (
+          !injected &&
+          sql.startsWith('SELECT tagId, name, count FROM tag WHERE type = ?') &&
+          params?.[0] === TAG_TYPE_TO_BYTE[TagType.ARTIST]
+        ) {
+          injected = true;
+          await db.execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+            TAG_TYPE_TO_BYTE[TagType.ARTIST],
+            'concurrent-artist',
+            0,
+          ]);
+        }
+        return rows;
+      });
+
+    try {
+      await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+    } finally {
+      querySpy.mockRestore();
+    }
+
+    const rows = await queryAll<{ count: number }>(
+      'SELECT count FROM tag WHERE type = ? AND name = ?',
+      [TAG_TYPE_TO_BYTE[TagType.ARTIST], 'concurrent-artist'],
+    );
+    expect(injected).toBe(true);
+    expect(rows).toEqual([{ count: 42 }]);
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(useDbStatusStore.getState().syncError).toBeNull();
   });
 
   // -------------------------------------------------------------------------
@@ -216,9 +280,11 @@ describe('runTagSync — runtime path', () => {
       for (const [prefix, tagName] of Object.entries(tagsByType)) {
         if (url.startsWith(prefix + '-')) {
           const hrefPrefix = prefix.replace('all', '').replace(/s$/, ''); // rough
-          return Promise.resolve(makeTagPageHtml([
-            { name: tagName, count: 1, href: `/${hrefPrefix}/${tagName}-all.html` },
-          ]));
+          return Promise.resolve(
+            makeTagPageHtml([
+              { name: tagName, count: 1, href: `/${hrefPrefix}/${tagName}-all.html` },
+            ]),
+          );
         }
       }
       return Promise.resolve(EMPTY_PAGE);
@@ -253,7 +319,8 @@ describe('runTagSync — runtime path', () => {
   // 3. Female/male tag detection from HTML
   // -------------------------------------------------------------------------
   it('female/male tag detection: href-based gender detection stores correct types', async () => {
-    // Only the 'tags' type page will have content; others return empty.
+    // Only the 'tags' type page has assertions; other required first pages use
+    // minimal valid fixtures so the full catalog can complete.
     mockFetchPage.mockImplementation((url: string) => {
       if (url === 'alltags-a.html') {
         return Promise.resolve(
@@ -263,7 +330,7 @@ describe('runTagSync — runtime path', () => {
           ]),
         );
       }
-      return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(makeRequiredFirstPage(url));
     });
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
@@ -288,21 +355,20 @@ describe('runTagSync — runtime path', () => {
   // -------------------------------------------------------------------------
   it('multi-page fetch: nav URLs parsed from first page are fetched', async () => {
     // For 'artists', return nav letters b and c on the first page.
-    // Other types return empty pages.
+    // Other types use minimal valid first pages.
     mockFetchPage.mockImplementation((url: string) => {
       if (url === 'allartists-a.html') {
         return Promise.resolve(
           makeTagPageHtml(
             [{ name: 'artist-a', count: 10, href: '/artist/artist-a-all.html' }],
             ['b', 'c'],
-          ).replace(
-            // Nav links use 'allartists-' prefix, not 'alltags-'
-            /href="\/alltags-b\.html"/g,
-            'href="/allartists-b.html"',
-          ).replace(
-            /href="\/alltags-c\.html"/g,
-            'href="/allartists-c.html"',
-          ),
+          )
+            .replace(
+              // Nav links use 'allartists-' prefix, not 'alltags-'
+              /href="\/alltags-b\.html"/g,
+              'href="/allartists-b.html"',
+            )
+            .replace(/href="\/alltags-c\.html"/g, 'href="/allartists-c.html"'),
         );
       }
       if (url === 'allartists-b.html') {
@@ -315,7 +381,7 @@ describe('runTagSync — runtime path', () => {
           makeTagPageHtml([{ name: 'artist-c', count: 30, href: '/artist/artist-c-all.html' }]),
         );
       }
-      return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(makeRequiredFirstPage(url));
     });
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
@@ -327,17 +393,16 @@ describe('runTagSync — runtime path', () => {
     expect(calledUrls).toContain('allartists-c.html');
 
     // All 3 artist tags should be in DB
-    const artists = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.ARTIST]],
-    );
+    const artists = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+    ]);
     expect(artists.map((t) => t.name).sort()).toEqual(['artist-a', 'artist-b', 'artist-c']);
   });
 
   // -------------------------------------------------------------------------
-  // 5. Individual page failure continues
+  // 5. Individual page failure continues but does not mark a partial catalog complete
   // -------------------------------------------------------------------------
-  it('individual page failure does not abort sync: remaining pages still processed', async () => {
+  it('individual page failure processes remaining pages but leaves sync incomplete after retry', async () => {
     // 'artists' first page has nav letters b and c.
     // Fetching 'b' throws; 'c' succeeds.
     // The implementation collects failed pages for retry — 'b' tags won't appear
@@ -351,8 +416,9 @@ describe('runTagSync — runtime path', () => {
           makeTagPageHtml(
             [{ name: 'artist-page-a', count: 1, href: '/artist/artist-page-a-all.html' }],
             ['b', 'c'],
-          ).replace(/\/alltags-b\.html/g, '/allartists-b.html')
-           .replace(/\/alltags-c\.html/g, '/allartists-c.html'),
+          )
+            .replace(/\/alltags-b\.html/g, '/allartists-b.html')
+            .replace(/\/alltags-c\.html/g, '/allartists-c.html'),
         );
       }
       if (url === 'allartists-b.html') {
@@ -360,10 +426,12 @@ describe('runTagSync — runtime path', () => {
       }
       if (url === 'allartists-c.html') {
         return Promise.resolve(
-          makeTagPageHtml([{ name: 'artist-page-c', count: 3, href: '/artist/artist-page-c-all.html' }]),
+          makeTagPageHtml([
+            { name: 'artist-page-c', count: 3, href: '/artist/artist-page-c-all.html' },
+          ]),
         );
       }
-      return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(makeRequiredFirstPage(url));
     });
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
@@ -383,8 +451,87 @@ describe('runTagSync — runtime path', () => {
     );
     expect(artistC).toBeDefined();
 
-    // The sync should still complete
+    const state = useDbStatusStore.getState();
+    expect(state.dbReady).toBe(false);
+    expect(state.isSyncing).toBe(false);
+    expect(state.syncError).toContain('Tag sync remained incomplete after retrying 1 page');
+
+    const raw = await getSyncStatus(SYNC_KEY_TAGS);
+    expect(JSON.parse(raw!).status).not.toBe('completed');
+  });
+
+  it('treats a nav page with no parseable tags as incomplete after retry', async () => {
+    mockFetchPage.mockImplementation((url: string) => {
+      if (url === 'allartists-a.html') {
+        return Promise.resolve(
+          makeTagPageHtml(
+            [{ name: 'artist-valid-a', count: 1, href: '/artist/artist-valid-a-all.html' }],
+            ['b'],
+          ).replace(/\/alltags-b\.html/g, '/allartists-b.html'),
+        );
+      }
+      if (url === 'allartists-b.html') return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(makeRequiredFirstPage(url));
+    });
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    expect(mockFetchPage.mock.calls.filter(([url]) => url === 'allartists-b.html')).toHaveLength(2);
+    expect(useDbStatusStore.getState().dbReady).toBe(false);
+    expect(useDbStatusStore.getState().syncError).toContain('Tag sync remained incomplete');
+  });
+
+  it('does not complete when one required first page stays empty while other types are valid', async () => {
+    mockFetchPage.mockImplementation((url: string) => {
+      if (url === 'allartists-a.html') return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(
+        makeTagPageHtml([{ name: `valid-${url}`, count: 1, href: `/tag/valid-${url}-all.html` }]),
+      );
+    });
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    expect(mockFetchPage.mock.calls.filter(([url]) => url === 'allartists-a.html')).toHaveLength(2);
+    expect(useDbStatusStore.getState().dbReady).toBe(false);
+    expect(useDbStatusStore.getState().syncError).toContain(
+      'Required first tag page allartists-a.html remained unavailable after retry',
+    );
+    expect(JSON.parse((await getSyncStatus(SYNC_KEY_TAGS))!).status).not.toBe('completed');
+  });
+
+  it('uses navigation from a successful first-page retry', async () => {
+    let artistFirstPageAttempts = 0;
+    mockFetchPage.mockImplementation((url: string) => {
+      if (url === 'allartists-a.html') {
+        artistFirstPageAttempts++;
+        if (artistFirstPageAttempts === 1) return Promise.resolve(EMPTY_PAGE);
+        return Promise.resolve(
+          makeTagPageHtml(
+            [{ name: 'artist-recovered-a', count: 1, href: '/artist/artist-recovered-a-all.html' }],
+            ['b'],
+          ).replace(/\/alltags-b\.html/g, '/allartists-b.html'),
+        );
+      }
+      if (url === 'allartists-b.html') {
+        return Promise.resolve(
+          makeTagPageHtml([
+            { name: 'artist-recovered-b', count: 2, href: '/artist/artist-recovered-b-all.html' },
+          ]),
+        );
+      }
+      return Promise.resolve(makeTagPageHtml([{ name: `valid-${url}`, count: 1 }]));
+    });
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    expect(artistFirstPageAttempts).toBe(2);
+    expect(mockFetchPage).toHaveBeenCalledWith('allartists-b.html');
     expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(
+      await queryOne<{ name: string }>('SELECT name FROM tag WHERE name = ?', [
+        'artist-recovered-b',
+      ]),
+    ).toBeDefined();
   });
 
   // -------------------------------------------------------------------------
@@ -410,10 +557,12 @@ describe('runTagSync — runtime path', () => {
         }
         // Second attempt (pass 2 retry) succeeds
         return Promise.resolve(
-          makeTagPageHtml([{ name: 'artist-retry-b', count: 10, href: '/artist/artist-retry-b-all.html' }]),
+          makeTagPageHtml([
+            { name: 'artist-retry-b', count: 10, href: '/artist/artist-retry-b-all.html' },
+          ]),
         );
       }
-      return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(makeRequiredFirstPage(url));
     });
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
@@ -451,10 +600,12 @@ describe('runTagSync — runtime path', () => {
       }
       if (url === 'allartists-b.html') {
         return Promise.resolve(
-          makeTagPageHtml([{ name: 'chk-artist-b', count: 2, href: '/artist/chk-artist-b-all.html' }]),
+          makeTagPageHtml([
+            { name: 'chk-artist-b', count: 2, href: '/artist/chk-artist-b-all.html' },
+          ]),
         );
       }
-      return Promise.resolve(EMPTY_PAGE);
+      return Promise.resolve(makeRequiredFirstPage(url));
     });
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
@@ -491,7 +642,7 @@ describe('runTagSync — runtime path', () => {
       },
     });
 
-    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
+    mockFetchPage.mockImplementation((url: string) => Promise.resolve(makeRequiredFirstPage(url)));
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
 
@@ -515,7 +666,7 @@ describe('runTagSync — runtime path', () => {
       },
     });
 
-    mockFetchPage.mockResolvedValue(EMPTY_PAGE);
+    mockFetchPage.mockImplementation((url: string) => Promise.resolve(makeRequiredFirstPage(url)));
 
     await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
 
@@ -553,6 +704,32 @@ describe('runTagSync — runtime path', () => {
     expect(mockLoadLocale).toHaveBeenCalledOnce();
   });
 
+  it('keeps the completed sync state when locale reload fails', async () => {
+    mockFetchPage.mockResolvedValue(makeTagPageHtml([{ name: 'locale-failure-tag', count: 1 }]));
+    mockLoadLocale.mockRejectedValueOnce(new Error('locale bundle failed'));
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    const state = useDbStatusStore.getState();
+    expect(state.dbReady).toBe(true);
+    expect(state.isSyncing).toBe(false);
+    expect(state.syncError).toBeNull();
+
+    const raw = await getSyncStatus(SYNC_KEY_TAGS);
+    expect(JSON.parse(raw!).status).toBe('completed');
+  });
+
+  it('ignores a duplicate trigger while the first sync is claiming its DB status', async () => {
+    mockFetchPage.mockResolvedValue(makeTagPageHtml([{ name: 'single-run-tag', count: 1 }]));
+
+    await Promise.all([runTagSync(), runTagSync(), vi.runAllTimersAsync()]);
+
+    expect(mockFetchPage).toHaveBeenCalledTimes(TAG_TYPES.length);
+    expect(mockDispose).toHaveBeenCalledTimes(1);
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(useDbStatusStore.getState().syncError).toBeNull();
+  });
+
   // -------------------------------------------------------------------------
   // AC-004 — explicit sync-failure state
   // -------------------------------------------------------------------------
@@ -565,6 +742,32 @@ describe('runTagSync — runtime path', () => {
     expect(state.syncError).toBe('upstream returned 502');
     expect(state.isSyncing).toBe(false);
     expect(state.dbReady).toBe(false);
+  });
+
+  it('restores a previous completed status when a background refresh fails', async () => {
+    const previousStatus = JSON.stringify({
+      status: 'completed',
+      timestamp: 1,
+      count: 1,
+    });
+    await setSyncStatus(SYNC_KEY_TAGS, previousStatus);
+    await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'existing-catalog-tag',
+      1,
+    ]);
+    useDbStatusStore.setState({ dbReady: true, tagsStale: true });
+    mockFetchPage.mockRejectedValue(new Error('background refresh failed'));
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    expect(await getSyncStatus(SYNC_KEY_TAGS)).toBe(previousStatus);
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(useDbStatusStore.getState().tagsStale).toBe(true);
+    expect(useDbStatusStore.getState().syncError).toBe('background refresh failed');
+
+    resetStore();
+    expect(await checkDbReady()).toBe(true);
   });
 
   it('clears a stale syncError when a new sync starts', async () => {

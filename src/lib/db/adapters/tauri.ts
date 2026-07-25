@@ -13,6 +13,7 @@ export const TAURI_DB_PATH = 'sqlite:hipago.db';
  * calling them directly is less fragile.
  */
 export class TauriAdapter implements DbAdapter {
+  readonly supportsExplicitTransactions = false;
   private dbPath: string;
 
   static async create(path: string = TAURI_DB_PATH): Promise<TauriAdapter> {

@@ -1,7 +1,11 @@
-import { ensureDb } from './adapter';
+import { ensureDb, type DbAdapter } from './adapter';
 
-export async function saveGalleryRelated(galleryId: number, relatedIds: number[]): Promise<void> {
-  const db = await ensureDb();
+export async function saveGalleryRelated(
+  galleryId: number,
+  relatedIds: number[],
+  transactionDb?: DbAdapter,
+): Promise<void> {
+  const db = transactionDb ?? (await ensureDb());
   await db.execute('DELETE FROM gallery_relate WHERE id = ?', [galleryId]);
   if (relatedIds.length === 0) return;
   // Batch insert in chunks of 50

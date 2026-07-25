@@ -48,6 +48,7 @@ describe('TauriAdapter — direct tauri-plugin-sql invoke bridge', () => {
   it('executes, selects, and closes through plugin commands', async () => {
     const { TauriAdapter } = await import('../tauri');
     const adapter = await TauriAdapter.create('sqlite:test.db');
+    expect(adapter.supportsExplicitTransactions).toBe(false);
     vi.clearAllMocks();
 
     await expect(adapter.execute('INSERT INTO t VALUES (?)', [1])).resolves.toEqual({
@@ -73,7 +74,9 @@ describe('TauriAdapter — direct tauri-plugin-sql invoke bridge', () => {
   it('uses an app DB path covered by the packaged Tauri SQL capability', async () => {
     const { TAURI_DB_PATH } = await import('../tauri');
     const capability = await import('../../../../../src-tauri/capabilities/default.json');
-    const permissions = capability.default.permissions as Array<string | { identifier: string; allow?: Array<{ path?: string }> }>;
+    const permissions = capability.default.permissions as Array<
+      string | { identifier: string; allow?: Array<{ path?: string }> }
+    >;
 
     expect(TAURI_DB_PATH).toBe('sqlite:hipago.db');
     expect(permissions).toContain('sql:allow-load');

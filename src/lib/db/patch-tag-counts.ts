@@ -4,6 +4,7 @@ import { TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import type { TagType } from '@/lib/utils/types';
 import { apiClient } from '@/lib/api/client';
 import { resolveTagIndexUrl } from '@/lib/api/url-resolver';
+import { useDbStatusStore } from '@/lib/store/db-status';
 
 /**
  * Map TagType enum values to the tagindex API field name.
@@ -69,6 +70,9 @@ export async function patchNewTagCounts(
   tags: Array<{ type: TagType; name: string }>,
 ): Promise<void> {
   if (tags.length === 0) return;
+  // A full tag sync already supplies authoritative counts. Avoid launching
+  // gallery-triggered patch writes while that bulk operation owns the DB lane.
+  if (useDbStatusStore.getState().isSyncing) return;
 
   const db = await ensureDb();
 
@@ -92,10 +96,12 @@ export async function patchNewTagCounts(
 
   // Fetch and update counts for zero-count tags
   for (const { tagId, type, name } of zeroCountTags) {
+    if (useDbStatusStore.getState().isSyncing) return;
     const field = TAG_TYPE_TO_FIELD[type];
     if (!field) continue;
 
     const realCount = await fetchTagCount(field, name);
+    if (useDbStatusStore.getState().isSyncing) return;
     if (realCount !== null && realCount > 0) {
       await updateTagCount(tagId, realCount);
     }

@@ -11,6 +11,7 @@ import type { DbAdapter, QueryResult } from '../adapter';
 // ---------------------------------------------------------------------------
 
 class MigrationTestAdapter implements DbAdapter {
+  supportsExplicitTransactions: boolean | undefined;
   private db: SqlJsDatabase;
 
   constructor(db: SqlJsDatabase) {
@@ -21,8 +22,7 @@ class MigrationTestAdapter implements DbAdapter {
     this.db.run(sql, params);
     const changes = this.db.getRowsModified();
     const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const lastInsertRowId =
-      result.length > 0 ? (result[0].values[0][0] as number) : 0;
+    const lastInsertRowId = result.length > 0 ? (result[0].values[0][0] as number) : 0;
     return { changes, lastInsertRowId };
   }
 
@@ -63,7 +63,10 @@ CREATE TABLE IF NOT EXISTS gallery (
 );
 `;
 
-async function createAdapter(withSchema = false, withNewCols = false): Promise<MigrationTestAdapter> {
+async function createAdapter(
+  withSchema = false,
+  withNewCols = false,
+): Promise<MigrationTestAdapter> {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
   const adapter = new MigrationTestAdapter(db);
@@ -97,7 +100,7 @@ async function getUserVersion(adapter: DbAdapter): Promise<number> {
 
 async function getColumnNames(adapter: DbAdapter, table: string): Promise<string[]> {
   const cols = await adapter.query<{ name: string }>(`PRAGMA table_info(${table})`);
-  return cols.map(c => c.name);
+  return cols.map((c) => c.name);
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +162,7 @@ describe('runMigrations', () => {
       await runMigrations(adapter);
 
       // Should not have called BEGIN (no migrations ran)
-      const beginCalls = execCalls.filter(s => s.trim().toUpperCase() === 'BEGIN');
+      const beginCalls = execCalls.filter((s) => s.trim().toUpperCase() === 'BEGIN');
       expect(beginCalls).toHaveLength(0);
       // user_version unchanged
       const version = await getUserVersion(adapter);
@@ -179,6 +182,24 @@ describe('runMigrations', () => {
       // Version should remain at LATEST_VERSION since all migrations are already applied
       const versionAfter = await getUserVersion(adapter);
       expect(versionAfter).toBe(LATEST_VERSION);
+    });
+
+    it('uses auto-commit without raw BEGIN when explicit transactions are unsupported', async () => {
+      adapter = await createAdapter(true, false);
+      adapter.supportsExplicitTransactions = false;
+      const execCalls: string[] = [];
+      const origExec = adapter.exec.bind(adapter);
+      adapter.exec = async (sql: string) => {
+        execCalls.push(sql);
+        return origExec(sql);
+      };
+
+      await runMigrations(adapter);
+
+      expect(execCalls).not.toContain('BEGIN');
+      expect(execCalls).not.toContain('COMMIT');
+      expect(execCalls).not.toContain('ROLLBACK');
+      expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
     });
   });
 
@@ -240,7 +261,7 @@ describe('runMigrations', () => {
       expect(colsBefore).toContain('mediaType');
 
       // Running v1 migration directly should not throw
-      const v1 = MIGRATIONS.find(m => m.version === 1);
+      const v1 = MIGRATIONS.find((m) => m.version === 1);
       expect(v1).toBeDefined();
       await expect(v1!.up(adapter)).resolves.not.toThrow();
     });

@@ -1,12 +1,13 @@
-import { ensureDb } from './adapter';
+import { ensureDb, type DbAdapter } from './adapter';
 import { TAG_TYPE_TO_BYTE, BYTE_TO_TAG_TYPE } from '@/lib/utils/types';
 import type { TagType } from '@/lib/utils/types';
 
 export async function saveGalleryTags(
   galleryId: number,
   tags: Partial<Record<TagType, string[]>>,
+  transactionDb?: DbAdapter,
 ): Promise<void> {
-  const db = await ensureDb();
+  const db = transactionDb ?? (await ensureDb());
 
   // Delete existing junction entries
   await db.execute('DELETE FROM gallery_tag WHERE id = ?', [galleryId]);
@@ -25,10 +26,10 @@ export async function saveGalleryTags(
 
   // Ensure all tags exist (INSERT OR IGNORE) and fetch IDs in batch
   for (const { type, name } of allTags) {
-    await db.execute(
-      'INSERT OR IGNORE INTO tag (type, name, count) VALUES (?, ?, 0)',
-      [TAG_TYPE_TO_BYTE[type], name],
-    );
+    await db.execute('INSERT OR IGNORE INTO tag (type, name, count) VALUES (?, ?, 0)', [
+      TAG_TYPE_TO_BYTE[type],
+      name,
+    ]);
   }
   // Batch fetch tag IDs in chunks to stay within SQLite variable limits
   const QUERY_CHUNK = 50;
@@ -89,9 +90,8 @@ export async function deleteGalleryTags(galleryId: number): Promise<void> {
 
 export async function getGalleryIdsByTag(tagId: number): Promise<number[]> {
   const db = await ensureDb();
-  const rows = await db.query<{ id: number }>(
-    'SELECT id FROM gallery_tag WHERE tagId = ?',
-    [tagId],
-  );
+  const rows = await db.query<{ id: number }>('SELECT id FROM gallery_tag WHERE tagId = ?', [
+    tagId,
+  ]);
   return rows.map((r) => r.id);
 }
