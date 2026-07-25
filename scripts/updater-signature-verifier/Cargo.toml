@@ -1,0 +1,11 @@
+[package]
+name = "hipago-updater-signature-verifier"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+base64 = "=0.22.1"
+minisign-verify = "=0.2.5"
+
+[workspace]

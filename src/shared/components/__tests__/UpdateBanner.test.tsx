@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { UpdateBanner } from '../UpdateBanner';
@@ -24,10 +24,14 @@ function mockAvailable(result: Partial<CheckResult>) {
   });
 }
 
-describe('UpdateBanner Android install recovery', () => {
+describe('UpdateBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('recovers when Android sends the user to unknown-app settings', async () => {
@@ -58,5 +62,18 @@ describe('UpdateBanner Android install recovery', () => {
     });
     expect(screen.getByText('update.banner.installerStarted')).toBeInTheDocument();
     expect(screen.queryByText('update.banner.installing')).not.toBeInTheDocument();
+  });
+
+  it('observes automatic check failures without showing a disruptive banner', async () => {
+    const error = new Error('updater permission denied');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(UpdateService.checkForUpdate).mockRejectedValue(error);
+
+    render(<UpdateBanner />);
+
+    await waitFor(() => {
+      expect(warn).toHaveBeenCalledWith('[UpdateBanner] check failed', error);
+    });
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 });

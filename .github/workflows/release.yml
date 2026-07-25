@@ -7,10 +7,10 @@ on:
     branches:
       - release
 
-# Release jobs create GitHub Releases and upload assets — the default
-# GITHUB_TOKEN is read-only, so contents:write must be granted explicitly.
+# Build jobs use a read-only token. Only the final single-writer publish job
+# receives contents:write after all artifacts have passed validation.
 permissions:
-  contents: write
+  contents: read
 
 env:
   NODE_VERSION: '22'
@@ -23,19 +23,57 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  # All production tags share one lane so an older, slower tag cannot publish
+  # after a newer tag and replace the updater's latest release. Branch
+  # rehearsals retain the normal cancel-on-new-push behavior.
+  group: ${{ startsWith(github.ref, 'refs/tags/v') && 'production-release' || format('release-{0}', github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6
+      - name: Require canonical reviewed source for production tags
+        if: env.IS_RELEASE == 'true'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY,,}" = 'vtsb/hipago' || {
+            echo "Production releases must run in VTSB/HiPaGo, not $GITHUB_REPOSITORY." >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo "Production release tag must match vX.Y.Z: $GITHUB_REF_NAME" >&2
+            exit 1
+          }
+          git fetch --no-tags origin \
+            "refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          tag_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          git merge-base --is-ancestor "$tag_commit" "refs/remotes/origin/${DEFAULT_BRANCH}" || {
+            echo "Release tag commit $tag_commit is not on protected branch $DEFAULT_BRANCH." >&2
+            exit 1
+          }
+          latest_tag="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          if [[ -n "$latest_tag" ]]; then
+            git fetch --no-tags origin "refs/tags/${latest_tag}:refs/tags/${latest_tag}"
+            latest_commit="$(git rev-parse "${latest_tag}^{commit}")"
+            git merge-base --is-ancestor "$latest_commit" "$tag_commit" || {
+              echo "Release tag commit $tag_commit predates published release $latest_tag ($latest_commit)." >&2
+              exit 1
+            }
+          fi
 
-      - uses: actions/setup-node@v5
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -45,13 +83,15 @@ jobs:
       - run: pnpm lint
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.96.0
+        with:
+          toolchain: 1.96.0
 
       - name: Install native deps for boring-sys2
         uses: ./.github/actions/setup-rust-deps
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: '. -> target'
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
@@ -67,8 +107,9 @@ jobs:
   build-desktop:
     name: Desktop (${{ matrix.platform }})
     needs: test
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'release-build-test' }}
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -84,7 +125,7 @@ jobs:
             target: macos
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # Tag pushes: derive the build version from the tag and patch
       # tauri.conf.json + package.json + android/app/build.gradle in
@@ -94,21 +135,23 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: ./.github/actions/derive-version
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.96.0
+        with:
+          toolchain: 1.96.0
 
       - name: Install native deps for boring-sys2
         uses: ./.github/actions/setup-rust-deps
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: |
             . -> target
@@ -125,18 +168,135 @@ jobs:
       # a cache miss, so first-run behaviour is unchanged.
       - name: Install Linux dependencies
         if: matrix.target == 'linux'
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        uses: awalsh128/cache-apt-pkgs-action@553a35bb8ebd9fcabcb1c9451aa4c98e1b4ca8a9 # v1
         with:
           packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
           version: 1.0
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Require updater signing secrets
+        if: env.IS_RELEASE == 'true' && matrix.target != 'macos'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo 'TAURI_SIGNING_PRIVATE_KEY is missing from the production environment.' >&2; exit 1; }
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" || { echo 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD is missing from the production environment.' >&2; exit 1; }
+
+      - name: Select Windows Authenticode provider
+        id: windows-signing-provider
+        if: env.IS_RELEASE == 'true' && matrix.target == 'windows'
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PROVIDER: ${{ vars.WINDOWS_SIGNING_PROVIDER }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_EXPECTED_SIGNER_SUBJECT: ${{ vars.WINDOWS_EXPECTED_SIGNER_SUBJECT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $provider = $env:WINDOWS_SIGNING_PROVIDER
+          if ([string]::IsNullOrWhiteSpace($provider)) {
+            $provider = 'certificate-store'
+          }
+          $provider = $provider.Trim().ToLowerInvariant()
+          if ($provider -notin @('certificate-store', 'azure-artifact-signing')) {
+            throw "Unsupported WINDOWS_SIGNING_PROVIDER '$provider'."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_EXPECTED_SIGNER_SUBJECT)) {
+            throw 'WINDOWS_EXPECTED_SIGNER_SUBJECT is required and must exactly match the production certificate subject.'
+          }
+          "provider=$provider" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "HIPAGO_WINDOWS_SIGNING_PROVIDER=$provider" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_TIMESTAMP_URL)) {
+            "HIPAGO_WINDOWS_TIMESTAMP_URL=$($env:WINDOWS_TIMESTAMP_URL)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          "HIPAGO_WINDOWS_EXPECTED_SIGNER_SUBJECT=$($env:WINDOWS_EXPECTED_SIGNER_SUBJECT)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install pinned Azure Artifact Signing CLI
+        if: steps.windows-signing-provider.outputs.provider == 'azure-artifact-signing'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($null -eq (Get-Command artifact-signing-cli -ErrorAction SilentlyContinue)) {
+            cargo install artifact-signing-cli --version 0.11.0 --locked
+            if ($LASTEXITCODE -ne 0) { throw 'artifact-signing-cli installation failed.' }
+          }
+          $version = artifact-signing-cli --version
+          if ($version -notmatch '\b0\.11\.0\b') {
+            throw "Expected artifact-signing-cli 0.11.0, got: $version"
+          }
+
+      - name: Configure certificate-store signing
+        if: steps.windows-signing-provider.outputs.provider == 'certificate-store'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ vars.WINDOWS_CERTIFICATE_THUMBPRINT }}
+          WINDOWS_CODE_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGNING_PFX_BASE64 }}
+          WINDOWS_CODE_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $thumbprint = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+          if ($thumbprint.Length -ne 40) {
+            throw 'WINDOWS_CERTIFICATE_THUMBPRINT must contain the independently configured 40-character production certificate thumbprint.'
+          }
+          $hasPfx = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_PFX_BASE64)
+          $hasPassword = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_PFX_PASSWORD)
+          if (-not $hasPfx -or -not $hasPassword) {
+            throw 'WINDOWS_CODE_SIGNING_PFX_BASE64 and WINDOWS_CODE_SIGNING_PFX_PASSWORD are both required on the GitHub-hosted certificate-store runner.'
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'hipago-code-signing.pfx'
+          $existingThumbprints = @(Get-ChildItem 'Cert:\CurrentUser\My' | ForEach-Object { $_.Thumbprint.ToUpperInvariant() })
+          try {
+            [System.IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODE_SIGNING_PFX_BASE64))
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CODE_SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $certificates = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\CurrentUser\My' -Password $password)
+            $certificate = $certificates | Where-Object { $_.HasPrivateKey -and $_.Thumbprint.ToUpperInvariant() -eq $thumbprint } | Select-Object -First 1
+            if ($null -eq $certificate) {
+              throw "The imported PFX does not contain the independently configured signer $thumbprint with an accessible private key."
+            }
+            $newThumbprints = @($certificates | ForEach-Object { $_.Thumbprint.ToUpperInvariant() } | Sort-Object -Unique | Where-Object { $existingThumbprints -notcontains $_ })
+            "HIPAGO_WINDOWS_IMPORTED_CERTIFICATES=$($newThumbprints -join ',')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+          "HIPAGO_WINDOWS_CERTIFICATE_THUMBPRINT=$thumbprint" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & .\scripts\sign-windows.ps1 -CheckOnly
+
+      - name: Configure Azure Artifact Signing
+        if: steps.windows-signing-provider.outputs.provider == 'azure-artifact-signing'
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_TENANT_ID', 'AZURE_ARTIFACT_SIGNING_ENDPOINT', 'AZURE_ARTIFACT_SIGNING_ACCOUNT', 'AZURE_ARTIFACT_SIGNING_PROFILE')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "$name is required for Azure Artifact Signing."
+            }
+          }
+          if ($null -eq (Get-Command artifact-signing-cli -ErrorAction SilentlyContinue)) { throw 'artifact-signing-cli is not installed.' }
+          if ($null -eq (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI is required for Azure Artifact Signing.' }
+          dotnet --version
+          az version
+          "HIPAGO_AZURE_ARTIFACT_SIGNING_ENDPOINT=$($env:AZURE_ARTIFACT_SIGNING_ENDPOINT)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HIPAGO_AZURE_ARTIFACT_SIGNING_ACCOUNT=$($env:AZURE_ARTIFACT_SIGNING_ACCOUNT)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "HIPAGO_AZURE_ARTIFACT_SIGNING_PROFILE=$($env:AZURE_ARTIFACT_SIGNING_PROFILE)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          & .\scripts\sign-windows.ps1 -CheckOnly
+
       # Tauri's beforeBuildCommand runs `next build`; persist its webpack/SWC
       # compile cache so the frontend half of the desktop build warms across
       # runs. Keyed per-OS (matrix), restore-keys for incremental warm starts.
       - name: Cache Next.js build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ hashFiles('src/**/*.[jt]s', 'src/**/*.[jt]sx', 'next.config.*') }}
@@ -144,30 +304,74 @@ jobs:
             nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
             nextjs-${{ runner.os }}-
 
-      # Build with Tauri — no release flags. The matrix runs three jobs
-      # (linux/windows/macos) in parallel; letting tauri-action create
-      # the GitHub Release races at `POST /repos/.../releases` and the
-      # late job (macOS, slower bundler) consistently loses with a
-      # misleading "403 Resource not accessible by integration" instead
-      # of the expected "422 tag already exists". We split build from
-      # release upload to sidestep this entirely.
-      - name: Build with Tauri
-        uses: tauri-apps/tauri-action@v0
+      - name: Clean stale desktop bundle outputs
+        run: node scripts/clean-tauri-bundle.mjs
+
+      # Matrix jobs build and stage artifacts only. A single downstream job
+      # validates and publishes the complete release set.
+      - name: Build signed Linux release with Tauri
+        if: env.IS_RELEASE == 'true' && matrix.target == 'linux'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
-          # Updater signing — secrets injected by repo owner per
+          # Updater signing secrets are injected by the protected production
+          # environment per
           # doc/release/GUIDE__updater-keys.md. tauri-action picks these up
-          # automatically and emits one `.sig` per bundle the updater
-          # endpoint type recognizes (.app.tar.gz, .AppImage, .nsis.zip,
-          # .msi.zip in Tauri 2). Missing secrets → bundles ship unsigned
-          # and the runtime updater rejects them at check() time.
+          # automatically and emits one `.sig` per published updater bundle
+          # (.AppImage, setup.exe, and .msi). The preflight makes missing
+          # secrets a hard release failure.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: pnpm tauri
           args: --verbose
 
+      # Apple Developer ID signing and notarization are intentionally not
+      # represented by updater minisign keys. Keep macOS as a compile/bundle
+      # gate, but never stage this local-only bundle for a public release.
+      - name: Build non-distributable macOS validation bundle
+        if: env.IS_RELEASE == 'true' && matrix.target == 'macos'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        with:
+          tauriScript: pnpm tauri
+          args: --verbose --config src-tauri/tauri.local-only.conf.json
+
+      - name: Build signed Windows release with certificate store
+        if: steps.windows-signing-provider.outputs.provider == 'certificate-store'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tauriScript: pnpm tauri
+          args: --verbose
+
+      - name: Build signed Windows release with Azure Artifact Signing
+        if: steps.windows-signing-provider.outputs.provider == 'azure-artifact-signing'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        with:
+          tauriScript: pnpm tauri
+          args: --verbose
+
+      - name: Build non-distributable branch bundle
+        if: env.IS_RELEASE != 'true'
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        with:
+          tauriScript: pnpm tauri
+          args: --verbose --config src-tauri/tauri.local-only.conf.json
+
+      - name: Verify Windows release signatures
+        if: env.IS_RELEASE == 'true' && matrix.target == 'windows'
+        shell: pwsh
+        run: '& .\scripts\verify-windows-release.ps1 -NoChecksums'
+
       - name: Stage desktop release assets
-        if: env.IS_RELEASE == 'true'
+        if: env.IS_RELEASE == 'true' && matrix.target != 'macos'
         shell: bash
         run: |
           set -euo pipefail
@@ -189,66 +393,80 @@ jobs:
               for f in src-tauri/target/release/bundle/appimage/*.AppImage.sig; do copy_one "$f" "HiPaGo_${version}_linux_x86_64.AppImage.sig"; done
               for f in src-tauri/target/release/bundle/deb/*.deb; do copy_one "$f" "HiPaGo_${version}_linux_x86_64.deb"; done
               for f in src-tauri/target/release/bundle/rpm/*.rpm; do copy_one "$f" "HiPaGo_${version}_linux_x86_64.rpm"; done
-              ;;
-            macos)
-              for f in src-tauri/target/release/bundle/dmg/*.dmg; do copy_one "$f" "HiPaGo_${version}_macos_aarch64.dmg"; done
-              for f in src-tauri/target/release/bundle/macos/*.app.tar.gz; do copy_one "$f" "HiPaGo_${version}_macos_aarch64.app.tar.gz"; done
-              for f in src-tauri/target/release/bundle/macos/*.app.tar.gz.sig; do copy_one "$f" "HiPaGo_${version}_macos_aarch64.app.tar.gz.sig"; done
+              test -s "$out/HiPaGo_${version}_linux_x86_64.AppImage"
+              test -s "$out/HiPaGo_${version}_linux_x86_64.AppImage.sig"
               ;;
             windows)
               for f in src-tauri/target/release/bundle/nsis/*-setup.exe; do copy_one "$f" "HiPaGo_${version}_windows_x86_64-setup.exe"; done
-              for f in src-tauri/target/release/bundle/nsis/*.nsis.zip; do copy_one "$f" "HiPaGo_${version}_windows_x86_64.nsis.zip"; done
-              for f in src-tauri/target/release/bundle/nsis/*.nsis.zip.sig; do copy_one "$f" "HiPaGo_${version}_windows_x86_64.nsis.zip.sig"; done
+              for f in src-tauri/target/release/bundle/nsis/*-setup.exe.sig; do copy_one "$f" "HiPaGo_${version}_windows_x86_64-setup.exe.sig"; done
               for f in src-tauri/target/release/bundle/msi/*.msi; do copy_one "$f" "HiPaGo_${version}_windows_x86_64.msi"; done
-              for f in src-tauri/target/release/bundle/msi/*.msi.zip; do copy_one "$f" "HiPaGo_${version}_windows_x86_64.msi.zip"; done
-              for f in src-tauri/target/release/bundle/msi/*.msi.zip.sig; do copy_one "$f" "HiPaGo_${version}_windows_x86_64.msi.zip.sig"; done
+              for f in src-tauri/target/release/bundle/msi/*.msi.sig; do copy_one "$f" "HiPaGo_${version}_windows_x86_64.msi.sig"; done
+              test -s "$out/HiPaGo_${version}_windows_x86_64-setup.exe"
+              test -s "$out/HiPaGo_${version}_windows_x86_64-setup.exe.sig"
+              test -s "$out/HiPaGo_${version}_windows_x86_64.msi"
+              test -s "$out/HiPaGo_${version}_windows_x86_64.msi.sig"
+              (cd "$out" && sha256sum HiPaGo_${version}_windows_x86_64* > SHA256SUMS-windows.txt)
               ;;
           esac
 
           test "$(find "$out" -maxdepth 1 -type f | wc -l)" -gt 0
           find "$out" -maxdepth 1 -type f -print | sort
 
-      - name: Upload desktop artifacts to release
-        if: env.IS_RELEASE == 'true'
-        uses: softprops/action-gh-release@v3
+      - name: Upload staged desktop release assets
+        if: env.IS_RELEASE == 'true' && matrix.target != 'macos'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          draft: true
-          tag_name: ${{ github.ref_name }}
-          name: 'HiPaGo ${{ github.ref_name }}'
-          body: 'See the assets below for platform-specific downloads.'
-          files: release-assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: release-assets-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+
+      - name: Upload non-distributable macOS validation bundle
+        if: env.IS_RELEASE == 'true' && matrix.target == 'macos'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-macos-validation
+          path: src-tauri/target/release/bundle/**/*
+          if-no-files-found: error
 
       - name: Upload desktop build as artifact (test)
         if: env.IS_RELEASE != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: desktop-${{ matrix.target }}
           path: |
             src-tauri/target/release/bundle/**/*
 
+      - name: Remove imported Windows certificate
+        if: always() && env.IS_RELEASE == 'true' && matrix.target == 'windows'
+        shell: pwsh
+        run: |
+          $thumbprints = @($env:HIPAGO_WINDOWS_IMPORTED_CERTIFICATES -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          foreach ($thumbprint in $thumbprints) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force -ErrorAction SilentlyContinue
+          }
+
   build-android:
     name: Android
     needs: test
     runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'production' || 'release-build-test' }}
     permissions:
-      contents: write
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Derive version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: ./.github/actions/derive-version
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: corretto
           java-version: '21'
@@ -256,7 +474,7 @@ jobs:
       - name: Setup Android SDK
         # v4 runs on node24 (v3 was the last Node 20 release — deprecated
         # June 2 2026, removed Sep 16 2026).
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
         with:
           # Avoid the default obsolete `tools` package, which pulls the
           # Android Emulator package even though release builds do not need it.
@@ -266,7 +484,7 @@ jobs:
       # with built-in cache cleanup to avoid unbounded growth. Big Android win:
       # without it Gradle re-downloads + recompiles every run.
       - name: Setup Gradle (dependency + build cache)
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           # Default is read-only off the repo's default branch; releases run on
           # tags / the release branch, so write the cache there too — otherwise
@@ -274,15 +492,16 @@ jobs:
           cache-read-only: false
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.96.0
         with:
+          toolchain: 1.96.0
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
       - name: Install native deps for boring-sys2
         uses: ./.github/actions/setup-rust-deps
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: '. -> target'
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
@@ -293,7 +512,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install cargo-ndk
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@7572810d7dd469b651bb7793945692cf78da5dd7 # v2
         with:
           tool: cargo-ndk
 
@@ -326,13 +545,14 @@ jobs:
       - name: Materialize Android release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        if: env.IS_RELEASE == 'true' && env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/hipago-release.jks
           test -s android/app/hipago-release.jks
           echo "Keystore materialized: $(wc -c < android/app/hipago-release.jks) bytes"
 
-      - name: Build APK
+      - name: Build signed release APK
+        if: env.IS_RELEASE == 'true'
         working-directory: android
         env:
           # Gradle reads ORG_GRADLE_PROJECT_X env vars as -PX. The app
@@ -343,6 +563,11 @@ jobs:
           ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_HIPAGO_KEY_ALIAS_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
           HIPAGO_REQUIRE_SIGNED_RELEASE: 'true'
+        run: ./gradlew assembleRelease --build-cache
+
+      - name: Build non-distributable branch APK
+        if: env.IS_RELEASE != 'true'
+        working-directory: android
         run: ./gradlew assembleRelease --build-cache
 
       - name: Verify APK is installable
@@ -364,53 +589,56 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "release-assets/HiPaGo_${version}_android_universal.apk"
           ls -la release-assets
 
-      - name: Upload APK to release
+      - name: Upload staged Android release asset
         if: env.IS_RELEASE == 'true'
-        uses: softprops/action-gh-release@v3
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          draft: true
-          tag_name: ${{ github.ref_name }}
-          files: release-assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: release-assets-android
+          path: release-assets/*
+          if-no-files-found: error
 
       - name: Upload APK as artifact (test)
         if: env.IS_RELEASE != 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: android-apk
           path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Remove materialized Android keystore
+        if: always() && env.IS_RELEASE == 'true'
+        run: rm -f android/app/hipago-release.jks
 
   build-ios:
     name: iOS
     needs: test
     runs-on: macos-latest
     permissions:
-      contents: write
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Derive version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: ./.github/actions/derive-version
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.96.0
         with:
+          toolchain: 1.96.0
           targets: aarch64-apple-ios
 
       - name: Install native deps for boring-sys2
         uses: ./.github/actions/setup-rust-deps
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: '. -> target'
           save-if: ${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
@@ -437,7 +665,7 @@ jobs:
       # Reuse downloaded pods + the local CocoaPods spec cache across runs so
       # `cap sync ios` (which runs `pod install`) doesn't re-fetch every time.
       - name: Cache CocoaPods
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/Library/Caches/CocoaPods
@@ -486,104 +714,176 @@ jobs:
           cd ios/App/build
           zip -r -y App.xcarchive.zip App.xcarchive
 
-      - name: Stage iOS release asset
-        if: env.IS_RELEASE == 'true'
+      # This archive proves that the iOS project compiles. It is deliberately
+      # unsigned and must never match the release-assets-* publication pattern.
+      - name: Upload unsigned iOS validation archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ios-archive-validation
+          path: ios/App/build/App.xcarchive.zip
+          if-no-files-found: error
+
+  # Single-writer job: collect only distributable artifacts, require the exact
+  # approved platform set, generate latest.json and checksums, then publish.
+  # macOS/iOS validation artifacts intentionally use different artifact names.
+  publish-release:
+    name: Publish verified release
+    needs:
+      - build-desktop
+      - build-android
+      - build-ios
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download staged release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Derive version from tag
+        id: ver
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG"          >> "$GITHUB_OUTPUT"
+
+      - name: Reject a release older than the current public version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          mkdir -p release-assets
-          cp ios/App/build/App.xcarchive.zip "release-assets/HiPaGo_${version}_ios_unsigned.xcarchive.zip"
-          ls -la release-assets
+          gh release list --limit 1000 --json tagName,isDraft > published-releases.json
+          node scripts/assert-release-version.mjs "${{ steps.ver.outputs.version }}" published-releases.json
 
-      - name: Upload archive to release
-        if: env.IS_RELEASE == 'true'
-        uses: softprops/action-gh-release@v3
+      - name: Build latest.json
+        env:
+          RELEASE_NOTES_TAG: ${{ github.ref_name }}
+          RELEASE_OWNER: ${{ github.repository_owner }}
+          RELEASE_REPO: ${{ github.event.repository.name }}
+          RELEASE_TAG: ${{ steps.ver.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          node scripts/build-latest-json.mjs \
+            --sig-dir release-assets \
+            --version "$RELEASE_VERSION" \
+            --tag "$RELEASE_TAG" \
+            --owner "$RELEASE_OWNER" \
+            --repo "$RELEASE_REPO" \
+            --notes "Release $RELEASE_NOTES_TAG — see assets for downloads." \
+            --out latest.json
+          cat latest.json
+
+      - name: Validate complete release and create checksums
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          required=(
+            "HiPaGo_${version}_linux_x86_64.AppImage"
+            "HiPaGo_${version}_linux_x86_64.AppImage.sig"
+            "HiPaGo_${version}_linux_x86_64.deb"
+            "HiPaGo_${version}_linux_x86_64.rpm"
+            "HiPaGo_${version}_windows_x86_64-setup.exe"
+            "HiPaGo_${version}_windows_x86_64-setup.exe.sig"
+            "HiPaGo_${version}_windows_x86_64.msi"
+            "HiPaGo_${version}_windows_x86_64.msi.sig"
+            "SHA256SUMS-windows.txt"
+            "HiPaGo_${version}_android_universal.apk"
+          )
+          for file in "${required[@]}"; do
+            test -s "release-assets/$file" || { echo "Missing required release asset: $file" >&2; exit 1; }
+          done
+          printf '%s\n' "${required[@]}" | sort > expected-release-files.txt
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort > actual-release-files.txt
+          if ! diff -u expected-release-files.txt actual-release-files.txt; then
+            echo 'Release assets do not exactly match the approved filename allowlist.' >&2
+            exit 1
+          fi
+          mv latest.json release-assets/latest.json
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\0' |
+              sort -z |
+              xargs -0 sha256sum
+          ) > release-assets/SHA256SUMS.txt
+          test -s release-assets/SHA256SUMS.txt
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Install Rust stable for updater signature verification
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # 1.96.0
+        with:
+          toolchain: 1.96.0
+
+      - name: Cryptographically verify every updater payload
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          public_key="$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")"
+          cargo build \
+            --locked \
+            --release \
+            --manifest-path scripts/updater-signature-verifier/Cargo.toml
+          verifier="scripts/updater-signature-verifier/target/release/hipago-updater-signature-verifier"
+          "$verifier" \
+            "release-assets/HiPaGo_${version}_linux_x86_64.AppImage" \
+            "release-assets/HiPaGo_${version}_linux_x86_64.AppImage.sig" \
+            "$public_key"
+          "$verifier" \
+            "release-assets/HiPaGo_${version}_windows_x86_64-setup.exe" \
+            "release-assets/HiPaGo_${version}_windows_x86_64-setup.exe.sig" \
+            "$public_key"
+          "$verifier" \
+            "release-assets/HiPaGo_${version}_windows_x86_64.msi" \
+            "release-assets/HiPaGo_${version}_windows_x86_64.msi.sig" \
+            "$public_key"
+
+      - name: Upload complete release as a private draft
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           draft: true
           tag_name: ${{ github.ref_name }}
+          name: 'HiPaGo ${{ github.ref_name }}'
+          body: 'Verified platform artifacts, updater manifest, and SHA-256 checksums are attached.'
+          make_latest: false
+          fail_on_unmatched_files: true
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload archive as artifact (test)
-        if: env.IS_RELEASE != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ios-archive
-          path: ios/App/build/App.xcarchive.zip
-
-  # Single-writer job that stitches the per-platform .sig files into the
-  # Tauri updater manifest (`latest.json`) and uploads it to the same
-  # draft release. Runs once, only on tag pushes, only after the desktop
-  # matrix has finished uploading. Reads sigs back from the release via
-  # `gh release download` so we never have to pass artifacts between jobs.
-  publish-latest-json:
-    name: Publish latest.json
-    needs: build-desktop
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download .sig assets from the draft release
-        run: |
-          mkdir -p release-sigs
-          # gh release download fetches assets from draft releases when the
-          # token has contents:write. --pattern selects only signature files.
-          gh release download "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --pattern '*.sig' \
-            --dir release-sigs
-          ls -la release-sigs
+      - name: Verify the uploaded draft and publish it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Derive version from tag
-        id: ver
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          tag="${{ github.ref_name }}"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag"          >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
 
-      - name: Build latest.json
-        run: |
-          node scripts/build-latest-json.mjs \
-            --sig-dir release-sigs \
-            --version "${{ steps.ver.outputs.version }}" \
-            --tag "${{ steps.ver.outputs.tag }}" \
-            --owner "${{ github.repository_owner }}" \
-            --repo "${{ github.event.repository.name }}" \
-            --notes "Release ${{ github.ref_name }} — see assets for downloads." \
-            --out latest.json
-          cat latest.json
+          mkdir -p remote-release-assets
+          gh release download "$RELEASE_TAG" --dir remote-release-assets
 
-      - name: Upload latest.json to the draft release
-        uses: softprops/action-gh-release@v3
-        with:
-          draft: true
-          tag_name: ${{ github.ref_name }}
-          files: latest.json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          find release-assets -maxdepth 1 -type f -printf '%f\n' | sort > expected-assets.txt
+          find remote-release-assets -maxdepth 1 -type f -printf '%f\n' | sort > uploaded-assets.txt
+          diff -u expected-assets.txt uploaded-assets.txt
+          cmp release-assets/SHA256SUMS.txt remote-release-assets/SHA256SUMS.txt
+          (cd remote-release-assets && sha256sum -c ../release-assets/SHA256SUMS.txt)
 
-  publish-release:
-    name: Publish release
-    needs:
-      - build-android
-      - build-ios
-      - publish-latest-json
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publish completed draft release
-        run: |
-          gh release edit "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --draft=false \
-            --latest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          gh release list --limit 1000 --json tagName,isDraft > published-releases-before-publish.json
+          node scripts/assert-release-version.mjs "$RELEASE_VERSION" published-releases-before-publish.json
+
+          gh release edit "$RELEASE_TAG" --draft=false --latest

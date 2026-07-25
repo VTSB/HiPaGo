@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "HiPaGo",
-  "version": "0.0.67",
+  "version": "9.9.9",
   "identifier": "com.hipago.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -20,10 +20,30 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "connect-src": "ipc: http://ipc.localhost https://api.github.com https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
+        "font-src": "'self' data: https://cdn.jsdelivr.net",
+        "img-src": "'self' asset: http://asset.localhost blob: data: https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
+        "style-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "script-src": "'self'"
+      },
+      "devCsp": {
+        "default-src": "'self' customprotocol: asset: http://localhost:*",
+        "connect-src": "ipc: http://ipc.localhost http://localhost:* ws://localhost:* https://api.github.com https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
+        "font-src": "'self' data: https://cdn.jsdelivr.net",
+        "img-src": "'self' asset: http://asset.localhost blob: data: http://localhost:* https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
+        "style-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "script-src": "'self' 'unsafe-eval' http://localhost:*"
+      },
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPCACHE/**", "$APPDATA/**"]
+        "scope": [
+          "$APPCACHE/image-cache",
+          "$APPCACHE/image-cache/**",
+          "$APPDATA/downloads",
+          "$APPDATA/downloads/**"
+        ]
       }
     }
   },
@@ -31,20 +51,47 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "publisher": "VTSB",
+    "homepage": "https://github.com/VTSB/HiPaGo",
+    "copyright": "Copyright © 2026 VTSB",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "category": "Utility",
+    "shortDescription": "Cross-platform gallery browser and offline library manager.",
+    "longDescription": "HiPaGo is a cross-platform gallery browser with offline search, downloads, and library management.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "signCommand": {
+        "cmd": "powershell.exe",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "../scripts/sign-windows.ps1",
+          "%1"
+        ]
+      }
+    }
   },
   "plugins": {
     "updater": {
-      "endpoints": [
-        "https://github.com/VTSB/HiPaGo/releases/latest/download/latest.json"
-      ],
+      "endpoints": ["https://github.com/VTSB/HiPaGo/releases/latest/download/latest.json"],
       "dialog": false,
+      "windows": {
+        "installMode": "passive"
+      },
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJDQUE3NUFBOEY4RDEzNzcKUldSM0U0MlBxbldxTEFaUDRENjJRWGhaOHkrVENncHdVWG1CZ1pqTWE3a28wMC9Za0hrR2VwWVAK"
     }
   }

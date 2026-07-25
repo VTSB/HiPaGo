@@ -1,8 +1,12 @@
 [package]
 name = "hipago"
-version = "0.1.0"
+version = "9.9.9"
 description = "HiPaGo - Cross-platform gallery viewer"
 edition = "2021"
+authors = ["VTSB"]
+license = "MIT"
+repository = "https://github.com/VTSB/HiPaGo"
+homepage = "https://github.com/VTSB/HiPaGo"
 
 [lib]
 name = "hipago_lib"
@@ -19,5 +23,6 @@ tauri-plugin-updater = "2"
 bypass-core = { path = "../crates/bypass-core" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 base64 = "0.22"
+url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

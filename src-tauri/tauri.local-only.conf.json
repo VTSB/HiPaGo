@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "signCommand": null
+    }
+  }
+}

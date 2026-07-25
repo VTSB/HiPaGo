@@ -29,6 +29,14 @@
 .DS_Store
 *.pem
 
+# release signing material (public certificates may be committed separately)
+*.pfx
+*.p12
+*.key
+*.jks
+*.keystore
+/release-secrets/
+
 # IDE local state
 /.idea/caches/
 /android/.idea/caches/
@@ -53,6 +61,7 @@ next-env.d.ts
 
 # tauri
 /src-tauri/target/
+/scripts/updater-signature-verifier/target/
 
 # rust workspace + crate build artifacts
 /target/

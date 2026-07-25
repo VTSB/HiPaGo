@@ -39,14 +39,20 @@ export function UpdateBanner() {
 
   useEffect(() => {
     let cancelled = false;
-    UpdateService.checkForUpdate().then((r) => {
-      if (cancelled) return;
-      if (r.available && r.version) {
-        const last = sessionStorage.getItem(DISMISS_KEY);
-        if (last === r.version) setDismissed(true);
-      }
-      setResult(r);
-    });
+    UpdateService.checkForUpdate()
+      .then((r) => {
+        if (cancelled) return;
+        if (r.available && r.version) {
+          const last = sessionStorage.getItem(DISMISS_KEY);
+          if (last === r.version) setDismissed(true);
+        }
+        setResult(r);
+      })
+      .catch((err) => {
+        // Automatic checks stay unobtrusive, but the rejection must be
+        // observed. Manual checks surface their own visible failure state.
+        console.warn('[UpdateBanner] check failed', err);
+      });
     return () => {
       cancelled = true;
     };

@@ -38,9 +38,9 @@ import java.net.URL;
  *   check({owner, repo}) → {available, version?, notes?, apkUrl?}
  *     Queries https://api.github.com/repos/{owner}/{repo}/releases/latest,
  *     compares the tag (e.g. "v0.0.7") against the installed app version,
- *     finds the first `.apk` asset, returns the download URL. Resolves
- *     {available:false} on any network or parse error (UI prefers silent
- *     no-op over a broken banner).
+ *     finds the first `.apk` asset, returns the download URL. Network,
+ *     response, and parse failures return error metadata so the JS service can
+ *     distinguish a failed check from a successful no-update result.
  *
  *   install({apkUrl}) → {status}
  *     Downloads via DownloadManager into the app's external-files Downloads
@@ -80,6 +80,7 @@ public class UpdaterPlugin extends Plugin {
                 if (code != 200) {
                     JSObject ret = new JSObject();
                     ret.put("available", false);
+                    ret.put("error", "GitHub release check failed with HTTP " + code);
                     call.resolve(ret);
                     return;
                 }
@@ -96,7 +97,14 @@ public class UpdaterPlugin extends Plugin {
                 String tag = json.optString("tag_name", "");
                 String remoteVer = tag.startsWith("v") ? tag.substring(1) : tag;
                 String currentVer = getCurrentVersion();
-                if (remoteVer.isEmpty() || !isNewer(remoteVer, currentVer)) {
+                if (remoteVer.isEmpty()) {
+                    JSObject ret = new JSObject();
+                    ret.put("available", false);
+                    ret.put("error", "GitHub release response is missing tag_name");
+                    call.resolve(ret);
+                    return;
+                }
+                if (!isNewer(remoteVer, currentVer)) {
                     JSObject ret = new JSObject();
                     ret.put("available", false);
                     call.resolve(ret);
