@@ -41,6 +41,11 @@ vi.mock('@/lib/storage/migrate-downloads', () => ({
     boot.calls.push('migrate');
     return boot.migrate();
   }),
+  restoreDownloadsFromPublicFolder: vi.fn(async () => ({
+    imported: 0,
+    skipped: 0,
+    failed: 0,
+  })),
 }));
 
 vi.mock('@/lib/store/reconcile-queue', () => ({

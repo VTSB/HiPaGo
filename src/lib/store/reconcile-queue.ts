@@ -20,11 +20,7 @@ import { listDueAutoRetries } from '@/lib/db/download-retry';
 import { deserializeTags, getDownload } from '@/lib/db/download';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
 import { isAndroid, isIos } from '@/lib/utils/platform';
-import {
-  processQueue,
-  armAutoRetryTimer,
-  finalizeNativeDownloadIfComplete,
-} from './download-progress';
+import { processQueue, armAutoRetryTimer, finalizeDownloadIfComplete } from './download-progress';
 
 let started = false;
 
@@ -70,7 +66,7 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
     try {
       // ONE completion rule, shared with the Android in-app poller: a
       // 'downloading' row whose manifest now covers all pages → 'complete'.
-      if (await finalizeNativeDownloadIfComplete(row.galleryId)) completed++;
+      if (await finalizeDownloadIfComplete(row.galleryId)) completed++;
     } catch {
       // Leave the row as-is; the zombie re-enqueue path will resume it.
     }

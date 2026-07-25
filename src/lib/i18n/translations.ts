@@ -286,19 +286,10 @@ const translations = {
     ko: '백업을 복원하지 못했습니다. HiPaGo 폴더가 들어 있는 상위 폴더를 선택했는지 확인하세요.',
   },
   'settings.downloadLocation.clear': { en: 'Clear', ko: '해제' },
-  'settings.downloadLocation.restore': { en: 'Scan existing downloads', ko: '기존 다운로드 스캔' },
   'settings.downloadLocation.scanning': { en: 'Scanning...', ko: '스캔 중...' },
-  'settings.downloadLocation.restoreDone': {
-    en: 'Restored {count} downloads from this folder.',
-    ko: '이 폴더에서 다운로드 {count}개를 복원했습니다.',
-  },
   'settings.downloadLocation.restoreNone': {
     en: 'No complete downloads were found to restore.',
     ko: '복원할 수 있는 완료된 다운로드가 없습니다.',
-  },
-  'settings.downloadLocation.restoreFailed': {
-    en: 'Could not scan this folder.',
-    ko: '이 폴더를 스캔할 수 없습니다.',
   },
   'settings.downloadLocation.hint': {
     en: 'If not set, you will be asked to pick a folder on your first download.',
