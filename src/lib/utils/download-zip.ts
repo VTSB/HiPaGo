@@ -88,9 +88,7 @@ const ZIP_EXPORT_READ_CONCURRENCY = 8;
 
 function shouldWriteDownloadCheckpoint(pageCount: number, total: number): boolean {
   return (
-    pageCount === 1 ||
-    pageCount >= total ||
-    pageCount % DOWNLOAD_CHECKPOINT_PAGE_INTERVAL === 0
+    pageCount === 1 || pageCount >= total || pageCount % DOWNLOAD_CHECKPOINT_PAGE_INTERVAL === 0
   );
 }
 
@@ -105,9 +103,7 @@ async function storedPageSize(
   ext: string,
   options: DownloadStoreLookupOptions,
 ): Promise<number> {
-  const size = store.imageSize
-    ? await store.imageSize(galleryId, index, ext, options)
-    : null;
+  const size = store.imageSize ? await store.imageSize(galleryId, index, ext, options) : null;
   if (size !== null) return size;
   const bytes = await store.getImage(galleryId, index, ext, options).catch(() => null);
   return bytes?.byteLength ?? 0;
@@ -318,6 +314,10 @@ export async function hasCompleteDownloadedGallery(
   if (exts.length === 0) return false;
   if (expectedPageCount > 0 && exts.length !== expectedPageCount) return false;
 
+  if (store.allImagesExist) {
+    return store.allImagesExist(galleryId, exts, options);
+  }
+
   for (let i = 0; i < exts.length; i++) {
     const ext = exts[i];
     const exists = store.imageExists
@@ -419,12 +419,7 @@ export async function downloadGalleryToLibrary(
   let manifestExts: string[] = [];
   if (opts?.resume) {
     try {
-      const manifestBytes = await store.getImage(
-        galleryId,
-        MANIFEST_INDEX,
-        MANIFEST_EXT,
-        lookup,
-      );
+      const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, lookup);
       if (manifestBytes) manifestExts = decodeManifest(manifestBytes);
     } catch {
       // No manifest / unreadable — manifestExts stays empty (full re-download).
@@ -653,12 +648,7 @@ export async function exportGalleryZip(galleryId: number, title: string): Promis
   const options: DownloadStoreLookupOptions = { folderName: row?.folderName ?? null };
 
   // Load the manifest to know how many pages and their exts.
-  const manifestBytes = await store.getImage(
-    galleryId,
-    MANIFEST_INDEX,
-    MANIFEST_EXT,
-    options,
-  );
+  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
   if (!manifestBytes) {
     throw new Error(`No manifest found for gallery ${galleryId}. Is it fully downloaded?`);
   }

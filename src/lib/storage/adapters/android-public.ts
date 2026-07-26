@@ -248,6 +248,26 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     }
   }
 
+  async allImagesExist(
+    galleryId: number,
+    extensions: readonly string[],
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean> {
+    if (extensions.length === 0) return false;
+    const folder = await this.resolveFolder(galleryId, options);
+    if (!folder) return false;
+    const libDir = await resolveLibraryDir();
+    try {
+      const { files } = await PublicLibrary.readdir({ path: `${libDir}/${folder}` });
+      const nonEmptyFiles = new Set(
+        files.filter((entry) => entry.size > 0).map((entry) => entry.name),
+      );
+      return extensions.every((ext, index) => nonEmptyFiles.has(imageFileName(index, ext)));
+    } catch {
+      return false;
+    }
+  }
+
   async imageSize(
     galleryId: number,
     index: number,
@@ -357,14 +377,57 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── deleteGallery ──────────────────────────────────────────────────────────
 
-  async deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void> {
-    const folder = await this.resolveFolder(galleryId, options);
-    if (!folder) return; // Already gone — treat as success.
+  /**
+   * Resolve every app-owned folder for destructive operations without collapsing native I/O
+   * failures into "not found". Read paths are intentionally best-effort, but a
+   * delete caller must distinguish absent folders from a revoked permission
+   * or provider failure so it does not drop the DB row while files remain.
+   */
+  private async resolveFoldersForDelete(
+    galleryId: number,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<string[]> {
     const libDir = await resolveLibraryDir();
-    try {
-      await PublicLibrary.deleteDir({ path: `${libDir}/${folder}` });
-    } catch {
-      // Already gone — treat as success.
+    const preferred = options?.folderName?.trim();
+    if (preferred) {
+      if (!this.isSafeFolderName(preferred)) {
+        throw new Error(`Unsafe download folder name: ${preferred}`);
+      }
+    }
+
+    // A missing library root means the gallery is already absent. Stat/readdir
+    // rejection is a real storage failure and deliberately propagates.
+    const { exists: libraryExists } = await PublicLibrary.stat({ path: libDir });
+    if (!libraryExists) return [];
+
+    const { files } = await PublicLibrary.readdir({ path: libDir });
+    const idStr = String(galleryId);
+    const matches = files
+      .map((entry) => entry.name)
+      .filter((name) => name === idStr || name.startsWith(idStr + ' '));
+    if (preferred && matches.includes(preferred)) {
+      // Delete stale aliases first and the DB-referenced preferred folder last,
+      // so a mid-sweep failure on an alias leaves the preferred folder (and the
+      // still-readable gallery) intact instead of orphaning the DB row.
+      return [...matches.filter((name) => name !== preferred), preferred];
+    }
+    return matches;
+  }
+
+  async deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void> {
+    const folders = await this.resolveFoldersForDelete(galleryId, options);
+    if (folders.length === 0) return;
+    const libDir = await resolveLibraryDir();
+    for (const folder of folders) {
+      const path = `${libDir}/${folder}`;
+      await PublicLibrary.deleteDir({ path });
+
+      // Verify the provider actually removed the tree. Older native builds ignored
+      // DocumentFile.delete() returning false, and providers can fail silently.
+      const { exists } = await PublicLibrary.stat({ path });
+      if (exists) {
+        throw new Error(`Failed to delete download folder: ${folder}`);
+      }
     }
     this.folderCache.delete(galleryId);
   }

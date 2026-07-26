@@ -22,6 +22,7 @@ vi.mock('@/lib/plugins/secureScreen', () => ({
 
 vi.mock('@/lib/store/settings', () => ({
   initLocaleOnce: vi.fn(),
+  initializeSettingsPersistence: vi.fn(async () => {}),
   useSettingsStore: (
     sel: (s: { locale: string; theme: string; secureScreen: boolean }) => unknown,
   ) => sel({ locale: 'en', theme: 'light', secureScreen: false }),

@@ -274,6 +274,32 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
     await expect(store.imageSize(101, 0, 'webp')).rejects.toThrow('temporary page stat failure');
   });
 
+  it('allImagesExist validates every manifest page with one directory listing', async () => {
+    await store.putImage(110, 0, makeBytes(8), 'webp');
+    await store.putImage(110, 1, makeBytes(8), 'jpg');
+    const readdir = vi.spyOn(fakeLib, 'readdir');
+
+    await expect(store.allImagesExist(110, ['webp', 'jpg'], { folderName: '110' })).resolves.toBe(
+      true,
+    );
+    expect(readdir).toHaveBeenCalledOnce();
+  });
+
+  it('allImagesExist rejects a missing or wrongly-extended expected page', async () => {
+    await store.putImage(111, 0, makeBytes(8), 'webp');
+
+    await expect(store.allImagesExist(111, ['webp', 'jpg'])).resolves.toBe(false);
+    await store.putImage(111, 1, makeBytes(8), 'webp');
+    await expect(store.allImagesExist(111, ['webp', 'jpg'])).resolves.toBe(false);
+  });
+
+  it('allImagesExist treats a zero-byte expected page as missing', async () => {
+    await store.putImage(112, 0, makeBytes(8), 'webp');
+    await store.putImage(112, 1, makeBytes(0), 'jpg');
+
+    await expect(store.allImagesExist(112, ['webp', 'jpg'])).resolves.toBe(false);
+  });
+
   it('putImage overwrites an existing file', async () => {
     const original = makeBytes(8, 0x01);
     const updated = makeBytes(8, 0x02);
@@ -351,6 +377,63 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
 
   it('deleteGallery on a non-existent gallery does not throw', async () => {
     await expect(store.deleteGallery(99999)).resolves.not.toThrow();
+  });
+
+  it('deleteGallery removes the exact folder and stale aliases for the same gallery id', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/450 Old Title`);
+    fakeLib.dirs.add(`${LIB}/450 Current Title`);
+    fakeLib.files.set(`${LIB}/450 Old Title/0001.webp`, toBase64(makeBytes(4, 0x11)));
+    fakeLib.files.set(`${LIB}/450 Current Title/0001.webp`, toBase64(makeBytes(4, 0x22)));
+
+    await store.deleteGallery(450, { folderName: '450 Current Title' });
+
+    expect(fakeLib.dirs.has(`${LIB}/450 Current Title`)).toBe(false);
+    expect(fakeLib.files.has(`${LIB}/450 Current Title/0001.webp`)).toBe(false);
+    expect(fakeLib.dirs.has(`${LIB}/450 Old Title`)).toBe(false);
+    expect(fakeLib.files.has(`${LIB}/450 Old Title/0001.webp`)).toBe(false);
+  });
+
+  it('keeps the DB-referenced folder when a stale-alias delete fails mid-sweep', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/450 Current Title`);
+    fakeLib.dirs.add(`${LIB}/450 Old Title`);
+    fakeLib.files.set(`${LIB}/450 Current Title/0001.webp`, toBase64(makeBytes(4, 0x11)));
+    fakeLib.files.set(`${LIB}/450 Old Title/0001.webp`, toBase64(makeBytes(4, 0x22)));
+
+    // The stale alias is now deleted first; make that deletion fail so the
+    // sweep aborts before touching the DB-referenced preferred folder.
+    vi.spyOn(fakeLib, 'deleteDir').mockRejectedValueOnce(new Error('provider denied alias'));
+
+    await expect(
+      store.deleteGallery(450, { folderName: '450 Current Title' }),
+    ).rejects.toThrow('provider denied alias');
+
+    // The DB-referenced preferred folder must survive the mid-sweep failure.
+    expect(fakeLib.dirs.has(`${LIB}/450 Current Title`)).toBe(true);
+    expect(fakeLib.files.has(`${LIB}/450 Current Title/0001.webp`)).toBe(true);
+  });
+
+  it('deleteGallery propagates native delete errors and keeps the folder tracked', async () => {
+    await store.ensureGallery(451, 'Provider Failure');
+    await store.putImage(451, 0, makeBytes(4), 'webp');
+    vi.spyOn(fakeLib, 'deleteDir').mockRejectedValueOnce(new Error('provider denied delete'));
+
+    await expect(store.deleteGallery(451, { folderName: '451 Provider Failure' })).rejects.toThrow(
+      'provider denied delete',
+    );
+    expect(fakeLib.dirs.has(`${LIB}/451 Provider Failure`)).toBe(true);
+  });
+
+  it('deleteGallery rejects a false-positive native success when the folder still exists', async () => {
+    await store.ensureGallery(452, 'Silent Failure');
+    await store.putImage(452, 0, makeBytes(4), 'webp');
+    vi.spyOn(fakeLib, 'deleteDir').mockResolvedValueOnce(undefined);
+
+    await expect(store.deleteGallery(452, { folderName: '452 Silent Failure' })).rejects.toThrow(
+      'Failed to delete download folder: 452 Silent Failure',
+    );
+    expect(fakeLib.dirs.has(`${LIB}/452 Silent Failure`)).toBe(true);
   });
 
   // gallerySize / usage

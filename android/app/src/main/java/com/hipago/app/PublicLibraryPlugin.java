@@ -323,7 +323,7 @@ public class PublicLibraryPlugin extends Plugin {
         io.execute(() -> {
             try {
                 if (!saf().hasTree()) { call.reject("NO_TREE"); return; }
-                saf().deleteDir(path);
+                if (!saf().deleteDir(path)) { call.reject("deleteDir failed: " + path); return; }
                 call.resolve();
             } catch (SecurityException e) {
                 call.reject(e.getMessage());

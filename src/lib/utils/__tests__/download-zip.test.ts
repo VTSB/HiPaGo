@@ -724,10 +724,12 @@ describe('downloadGalleryToLibrary', () => {
 
   it('(d) abort after page storage skips manifest and DB progress writes', async () => {
     const controller = new AbortController();
-    const putImage = vi.spyOn(memStore, 'putImage').mockImplementation(async (galleryId, index, bytes, ext) => {
-      memStore.store.set(`${galleryId}/${String(index + 1).padStart(4, '0')}.${ext}`, bytes);
-      controller.abort();
-    });
+    const putImage = vi
+      .spyOn(memStore, 'putImage')
+      .mockImplementation(async (galleryId, index, bytes, ext) => {
+        memStore.store.set(`${galleryId}/${String(index + 1).padStart(4, '0')}.${ext}`, bytes);
+        controller.abort();
+      });
 
     await expect(
       downloadGalleryToLibrary(
@@ -1368,6 +1370,28 @@ describe('hasCompleteDownloadedGallery', () => {
     await memStore.putImage(31, 1, new Uint8Array([2]), 'jpg');
 
     await expect(hasCompleteDownloadedGallery(31, 2)).resolves.toBe(true);
+  });
+
+  it('uses an adapter batch existence check instead of probing pages one by one', async () => {
+    await memStore.putImage(
+      35,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    const allImagesExist = vi.fn(async () => true);
+    const imageExists = vi.fn(async () => {
+      throw new Error('per-page probe should not run');
+    });
+    vi.mocked(createDownloadStore).mockResolvedValue({
+      ...memStore,
+      allImagesExist,
+      imageExists,
+    });
+
+    await expect(hasCompleteDownloadedGallery(35, 2)).resolves.toBe(true);
+    expect(allImagesExist).toHaveBeenCalledWith(35, ['webp', 'jpg'], undefined);
+    expect(imageExists).not.toHaveBeenCalled();
   });
 
   it('returns false when manifest covers pageCount but a page file is missing', async () => {

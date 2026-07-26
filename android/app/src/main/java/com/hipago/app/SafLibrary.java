@@ -395,15 +395,28 @@ public class SafLibrary {
         return true;
     }
 
-    /** Recursively delete a relative directory and drop any cached handles under it. */
-    public void deleteDir(String relPath) {
+    /**
+     * Delete a resolved directory. A missing document is already deleted;
+     * existing non-directories and provider delete failures are not success.
+     * Package-private for the JVM contract test.
+     */
+    static boolean deleteResolvedDirectory(DocumentFile dir) {
+        if (dir == null || !dir.exists()) return true;
+        return dir.isDirectory() && dir.delete();
+    }
+
+    /**
+     * Recursively delete a relative directory and drop cached handles only when
+     * it is confirmed absent/deleted. Runtime provider/I/O errors deliberately
+     * propagate to the plugin caller.
+     */
+    public boolean deleteDir(String relPath) {
         assertSafe(relPath);
-        if (rootDir() == null) return;
-        DocumentFile dir = resolveDir(relPath, false);
-        if (dir != null && dir.exists() && dir.isDirectory()) {
-            dir.delete(); // DocumentFile.delete removes the subtree.
-        }
+        if (rootDir() == null) return false;
+        DocumentFile dir = resolveFile(relPath);
+        if (!deleteResolvedDirectory(dir)) return false;
         dirCache.keySet().removeIf(k -> k.equals(relPath) || k.startsWith(relPath + "/"));
+        return true;
     }
 
     /**

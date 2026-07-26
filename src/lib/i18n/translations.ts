@@ -124,6 +124,10 @@ const translations = {
     ko: 'ZIP을 내보낼 수 없습니다. 일부 다운로드 파일이 없을 수 있습니다.',
   },
   'library.confirmDelete': { en: 'Delete this download?', ko: '이 다운로드를 삭제하시겠습니까?' },
+  'library.deleteFailed': {
+    en: 'Could not delete the downloaded files. Check the download folder permission and try again.',
+    ko: '다운로드 파일을 삭제하지 못했습니다. 다운로드 폴더 권한을 확인한 뒤 다시 시도해 주세요.',
+  },
   'library.retry': { en: 'Retry', ko: '재시도' },
   'library.retrying': { en: 'Retrying', ko: '재시도 중' },
   // Staged auto-restart of failed downloads (Task E). `{time}`/`{k}`/`{max}` are

@@ -197,9 +197,16 @@ export async function migrateDownloadsToPublic(): Promise<{
 }
 
 /**
- * Rebuild missing download DB rows from complete gallery folders in the
- * user-selected Android public library. This is the metadata-backup fallback:
- * titles come from "<id> <title>" folder names when downloads.json is absent.
+ * Restore DB download rows from the user-selected Android public download
+ * folder after app data loss/reinstall.
+ *
+ * Source of truth is the app's manifest file in each gallery folder:
+ *   <picked tree>/HiPaGo/<galleryId> <title>/0000.json
+ *
+ * Complete folders are restored as complete. Partial/torn folders are restored
+ * as failed rows so their valid pages remain visible and the normal manual retry
+ * path can resolve fresh gallery metadata and resume them. Metadata that is not
+ * present on disk (thumbnail/tags) is restored conservatively as empty.
  */
 export async function restoreDownloadsFromPublicFolder(
   store?: DownloadStore,
@@ -235,16 +242,12 @@ export async function restoreDownloadsFromPublicFolder(
         const size = await storedPageSize(publicStore, galleryId, i, exts[i], lookup);
         if (size === null) {
           complete = false;
-          break;
+          continue;
         }
         totalBytes += size;
       }
-      if (!complete) {
-        failed++;
-        continue;
-      }
 
-      const existing = await getDownload(galleryId);
+      const existing = await getDownload(galleryId).catch(() => null);
       // A catalog-restored partial row may know a larger target than an older
       // short manifest. Preserve that failed/partial state instead of shrinking
       // the target and falsely declaring the folder complete.
@@ -252,6 +255,10 @@ export async function restoreDownloadsFromPublicFolder(
         skipped++;
         continue;
       }
+      // Preserve an already-complete DB row even when the on-disk scan reported
+      // a missing page. A transient SAF stat failure (or a genuinely torn folder
+      // the user can retry) must not downgrade a complete row on the boot path;
+      // the explicit download-integrity check surfaces real incompleteness.
       if (
         existing?.status === 'complete' &&
         existing.pageCount === exts.length &&
@@ -269,10 +276,10 @@ export async function restoreDownloadsFromPublicFolder(
         pageCount: exts.length,
         totalBytes,
         downloadedAt: existing?.downloadedAt ?? restoredAt,
-        status: 'complete',
+        status: complete ? 'complete' : 'failed',
         folderName,
         migratedAt: existing?.migratedAt ?? restoredAt,
-        lastError: null,
+        lastError: complete ? null : 'Recovered partial download',
         queuePosition: null,
         retryCount: 0,
         nextRetryAt: null,
