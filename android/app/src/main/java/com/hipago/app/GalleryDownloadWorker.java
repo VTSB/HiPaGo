@@ -293,62 +293,68 @@ public class GalleryDownloadWorker extends Worker {
 
             exts[i] = ext;
 
-            updateNotification(title, i + 1, total, locale);
-            // Publish live progress (throttled) so the in-app poller can show
-            // current/total while the app is foreground. Best-effort; an IO failure
-            // here must never fail the download.
-            lastProgressWrite = maybeWriteProgress(galleryId, i + 1, total, lastProgressWrite);
-
             // Resume: only skip a page if a prior manifest write committed it.
             // Non-manifest partial files are overwritten below.
-            if (shouldSkipExistingPage(i, manifestCount, saf.size(relPath))) {
-                continue;
-            }
+            boolean alreadyCommitted = shouldSkipExistingPage(i, manifestCount, saf.size(relPath));
+            if (!alreadyCommitted) {
+                // Download to a temp file in the cache dir via the Rust core, then copy
+                // into the SAF tree and delete the temp. The image never enters the JS
+                // heap (this is native code).
+                File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
+                try {
+                    BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
+                    if (isStopped() || !orderFile.exists()) {
+                        deleteProgress(galleryId);
+                        return GalleryResult.CANCELED;
+                    }
+                    long sourceSize = temp.length();
+                    long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
+                    long storedSize = saf.size(relPath);
+                    if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
+                        saf.delete(relPath);
+                        throw new Exception("incomplete SAF write");
+                    }
+                } catch (Throwable t) {
+                    // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
+                    // gallery partial; TS re-resolves / reconciles on next open. Publish
+                    // an explicit failure sentinel so a foreground app can fail/retry the
+                    // DB row without waiting for relaunch.
+                    writeProgressFailure(galleryId, "Background download failed");
+                    return GalleryResult.RETRYABLE_FAILURE;
+                } finally {
+                    if (temp.exists()) {
+                        // Best-effort temp cleanup; a stale temp is harmless (cache dir).
+                        //noinspection ResultOfMethodCallIgnored
+                        temp.delete();
+                    }
+                }
 
-            // Download to a temp file in the cache dir via the Rust core, then copy
-            // into the SAF tree and delete the temp. The image never enters the JS
-            // heap (this is native code).
-            File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
-            try {
-                BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
+                // Write/update the 0000.json manifest incrementally (JSON array of
+                // exts) so the reader/reconcile sees the gallery growing. The manifest
+                // path is the gallery folder + 0000.json, derived from the page relPath.
                 if (isStopped() || !orderFile.exists()) {
                     deleteProgress(galleryId);
                     return GalleryResult.CANCELED;
                 }
-                long sourceSize = temp.length();
-                long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
-                long storedSize = saf.size(relPath);
-                if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
-                    saf.delete(relPath);
-                    throw new Exception("incomplete SAF write");
+                if (!writeManifest(relPath, exts, i + 1)) {
+                    writeProgressFailure(galleryId, "Background download failed");
+                    return GalleryResult.RETRYABLE_FAILURE;
                 }
-            } catch (Throwable t) {
-                // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
-                // gallery partial; TS re-resolves / reconciles on next open. Publish
-                // an explicit failure sentinel so a foreground app can fail/retry the
-                // DB row without waiting for relaunch.
-                writeProgressFailure(galleryId, "Background download failed");
-                return GalleryResult.RETRYABLE_FAILURE;
-            } finally {
-                if (temp.exists()) {
-                    // Best-effort temp cleanup; a stale temp is harmless (cache dir).
-                    //noinspection ResultOfMethodCallIgnored
-                    temp.delete();
-                }
+                manifestCount = Math.max(manifestCount, i + 1);
             }
 
-            // Write/update the 0000.json manifest incrementally (JSON array of
-            // exts) so the reader/reconcile sees the gallery growing. The manifest
-            // path is the gallery folder + 0000.json, derived from the page relPath.
-            if (isStopped() || !orderFile.exists()) {
-                deleteProgress(galleryId);
-                return GalleryResult.CANCELED;
-            }
-            if (!writeManifest(relPath, exts, i + 1)) {
-                writeProgressFailure(galleryId, "Background download failed");
-                return GalleryResult.RETRYABLE_FAILURE;
-            }
-            manifestCount = Math.max(manifestCount, i + 1);
+            // `current` means pages durably committed, not pages merely started.
+            // Fresh pages reach here only after both the non-empty SAF copy and the
+            // incremental manifest write succeeded. Resume skips reach here only
+            // when the manifest already covers the page and its file is non-empty.
+            // Use the committed count (>= i+1 on resume skips, == i+1 for fresh
+            // pages) so the bar never regresses below what is durably on disk.
+            int committed = Math.max(i + 1, manifestCount);
+            updateNotification(title, committed, total, locale);
+            // Publish live progress (throttled) so the in-app poller can show
+            // current/total while the app is foreground. Best-effort; an IO failure
+            // here must never fail the download.
+            lastProgressWrite = maybeWriteProgress(galleryId, committed, total, lastProgressWrite);
         }
 
         // All pages present → write the final, full manifest once more (defensive)
@@ -389,10 +395,12 @@ public class GalleryDownloadWorker extends Worker {
 
     /**
      * Write {@code dl-progress/<galleryId>.json = {"current":N,"total":M}} at most
-     * once per {@link #PROGRESS_WRITE_THROTTLE_MS}. The first page (lastWrite == 0)
-     * and the final page always write so the bar starts and lands exactly. Returns
-     * the timestamp of the most recent write so the caller can carry the throttle
-     * clock. Best-effort: any failure is swallowed (never fails the download).
+     * once per {@link #PROGRESS_WRITE_THROTTLE_MS}. {@code current} is the number
+     * of pages whose non-empty files are covered by the manifest. The first page
+     * (lastWrite == 0) and the final page always write so the bar starts and lands
+     * exactly. Returns the timestamp of the most recent write so the caller can
+     * carry the throttle clock. Best-effort: any failure is swallowed (never fails
+     * the download).
      */
     private long maybeWriteProgress(String galleryId, int current, int total, long lastWrite) {
         if (galleryId == null || galleryId.isEmpty()) return lastWrite;

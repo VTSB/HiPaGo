@@ -818,6 +818,35 @@ describe('Android worker handoff (Task C, AC-005)', () => {
 
 // ── Android in-app live-progress poller (in-app progress bridge, AC-003) ──────
 describe('Android live-progress poller (AC-003)', () => {
+  it('does not overlap a slow completion check for the same gallery', async () => {
+    vi.useFakeTimers();
+    let releaseCompletion!: (value: boolean) => void;
+    const completionGate = new Promise<boolean>((resolve) => {
+      releaseCompletion = resolve;
+    });
+    try {
+      androidFlag = true;
+      downloadRows.set(499, { status: 'downloading', pageCount: 2 });
+      useDownloadProgressStore.setState({
+        entries: { 499: { progress: { current: 1, total: 2 }, error: null } },
+      });
+      workerProgress.value = { current: 2, total: 2 };
+      vi.mocked(hasCompleteDownloadedGallery).mockReturnValueOnce(completionGate);
+
+      startAndroidProgressPoll(499);
+      await vi.waitFor(() => expect(hasCompleteDownloadedGallery).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(DownloadWorker.getProgress).toHaveBeenCalledTimes(1);
+      expect(hasCompleteDownloadedGallery).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseCompletion(false);
+      await Promise.resolve();
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
   it('updates entries[id].progress over poll ticks from getProgress', async () => {
     vi.useFakeTimers();
     try {
@@ -886,6 +915,11 @@ describe('Android live-progress poller (AC-003)', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       workerProgress.value = { current: null };
+      // A missing/torn progress read can be transient while native IO settles.
+      // Keep the row alive through the grace window, then fail on the third
+      // consecutive missing tick when the manifest is still incomplete.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(errorRows).toEqual([]);
       await vi.advanceTimersByTimeAsync(1000);
 
       expect(errorRows).toContainEqual({

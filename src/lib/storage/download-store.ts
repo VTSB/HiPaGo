@@ -100,6 +100,18 @@ export interface DownloadStore {
   ): Promise<boolean>;
 
   /**
+   * Batch existence check for every page listed by a gallery manifest. Returns
+   * true only when each expected page filename exists and has non-zero size.
+   * Optional: directory-backed adapters can implement this with one directory
+   * listing; callers fall back to per-page `imageExists`/`getImage` probes.
+   */
+  allImagesExist?(
+    galleryId: number,
+    extensions: readonly string[],
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean>;
+
+  /**
    * Cheap size lookup for a stored page. Optional: adapters that omit it force
    * callers to fall back to reading the image bytes.
    */

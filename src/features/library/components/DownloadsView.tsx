@@ -485,6 +485,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_COUNT);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const exportingIdsRef = useRef<Set<number>>(new Set());
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
@@ -507,7 +508,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   );
 
   useEffect(() => {
-    const onLibraryChanged = () => {
+    const onLibraryChanged = (event: Event) => {
+      const structural = event instanceof CustomEvent ? event.detail?.structural === true : true;
+      if (!structural) return;
       void queryClient.invalidateQueries({ queryKey: ['library-list'] });
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
       void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
@@ -554,12 +557,21 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const hasMoreRenderedItems = renderLimit < totalCount;
 
   const { data: coverUrls = {} } = useQuery({
-    queryKey: ['download-covers', visibleGalleryIds],
+    queryKey: [
+      'download-covers',
+      visibleItems.map((item) => `${item.galleryId}:${item.folderName ?? ''}`).join('|'),
+    ],
     queryFn: async () => {
       const store = await createDownloadStore();
       if (!store.coverUrl) return {};
       const pairs = await Promise.all(
-        visibleGalleryIds.map(async (id) => [id, await store.coverUrl?.(id)] as const),
+        visibleItems.map(
+          async (item) =>
+            [
+              item.galleryId,
+              await store.coverUrl?.(item.galleryId, { folderName: item.folderName ?? null }),
+            ] as const,
+        ),
       );
       return Object.fromEntries(pairs.filter(([, url]) => !!url)) as Record<number, string>;
     },
@@ -572,7 +584,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     [visibleItems],
   );
   const completeIntegrityKey = useMemo(
-    () => completeVisibleItems.map((item) => `${item.galleryId}:${item.pageCount}`).join('|'),
+    () =>
+      completeVisibleItems
+        .map((item) => `${item.galleryId}:${item.folderName ?? ''}:${item.pageCount}`)
+        .join('|'),
     [completeVisibleItems],
   );
 
@@ -583,9 +598,9 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         completeVisibleItems.map(async (item) => {
           const ok =
             (item.pageCount ?? 0) > 0
-              ? await hasCompleteDownloadedGallery(item.galleryId, item.pageCount).catch(
-                  () => false,
-                )
+              ? await hasCompleteDownloadedGallery(item.galleryId, item.pageCount, {
+                  folderName: item.folderName ?? null,
+                }).catch(() => false)
               : false;
           return [item.galleryId, ok] as const;
         }),
@@ -621,6 +636,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     async (item: DBDownload) => {
       if (!window.confirm(t('library.confirmDelete'))) return;
       const galleryId = item.galleryId;
+      setDeleteError(null);
       try {
         const liveEntry = useDownloadProgressStore.getState().entries[galleryId];
         if (item.status === 'downloading' || !!liveEntry?.progress) {
@@ -630,18 +646,20 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           await clearAutoRetry(galleryId).catch(() => {});
           useDownloadProgressStore.getState().clearRetryPending(galleryId);
         }
+        // Keep the DB row until the physical folder has been removed.
+        const store = await createDownloadStore();
+        await store.deleteGallery(galleryId, { folderName: item.folderName ?? null });
         await deleteDownload(galleryId);
-        try {
-          const store = await createDownloadStore();
-          await store.deleteGallery(galleryId);
-        } catch {
-          // Storage adapter may not be present or files already gone — DB row is still removed
-        }
-      } catch {
-        // DB delete failed — nothing to do
+        await useDownloadProgressStore.getState().refreshQueue();
+      } catch (e) {
+        console.error('Delete download failed:', e);
+        setDeleteError(t('library.deleteFailed'));
+        return;
       }
-      queryClient.invalidateQueries({ queryKey: ['library-list'] });
-      queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      void queryClient.invalidateQueries({ queryKey: ['library-list'] });
+      void queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
+      void queryClient.invalidateQueries({ queryKey: ['download-covers'] });
     },
     [t, queryClient],
   );
@@ -729,6 +747,15 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           list. Hidden (renders null) when nothing is active or queued. */}
       <DownloadQueueView />
 
+      {deleteError && (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+        >
+          {deleteError}
+        </div>
+      )}
+
       {exportError && (
         <div
           role="alert"
@@ -789,8 +816,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
             const progress = entry?.progress ?? null;
             const activeRedownload =
               item.status === 'complete' && downloadedFlags[item.galleryId] === false;
-            const staleCompleteProgress =
-              item.status === 'complete' && !activeRedownload;
+            const staleCompleteProgress = item.status === 'complete' && !activeRedownload;
             const isRetrying = !!progress && !staleCompleteProgress;
             return (
               <LibraryCard

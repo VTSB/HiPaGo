@@ -248,8 +248,11 @@ export async function restoreDownloadsFromPublicFolder(
       }
 
       const existing = await getDownload(galleryId).catch(() => null);
+      // Preserve an already-complete DB row even when the on-disk scan reported
+      // a missing page. A transient SAF stat failure (or a genuinely torn folder
+      // the user can retry) must not downgrade a complete row on the boot path;
+      // the explicit download-integrity check surfaces real incompleteness.
       if (
-        complete &&
         existing?.status === 'complete' &&
         existing.pageCount === exts.length &&
         existing.folderName === folderName
