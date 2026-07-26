@@ -16,6 +16,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PublicLibraryPlugin.class);
         registerPlugin(DownloadWorkerPlugin.class);
         registerPlugin(SecureScreenPlugin.class);
+        registerPlugin(SettingsBackupPlugin.class);
         super.onCreate(savedInstanceState);
         installBackButtonHandler();
         installBypassInterceptor();

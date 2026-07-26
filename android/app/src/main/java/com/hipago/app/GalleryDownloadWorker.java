@@ -344,10 +344,12 @@ public class GalleryDownloadWorker extends Worker {
                 manifestCount = Math.max(manifestCount, i + 1);
             }
 
-            // Progress means "pages durably committed", not "page started". In
-            // particular, never publish 100% here: the defensive final manifest
-            // write below must also succeed before the worker reports completion.
-            int committed = committedProgressCount(i, manifestCount);
+            // Progress means "pages durably committed", not "page started". On
+            // resume the manifest already covers skipped pages, so publish the
+            // larger of the loop index and the manifest count — never regress the
+            // bar below what is already on disk. Never publish 100% here: the
+            // defensive final manifest write below must also succeed first.
+            int committed = Math.max(i + 1, manifestCount);
             if (committed < total) {
                 updateNotification(title, committed, total, locale);
                 // Best-effort; an IO failure here must never fail the download.
@@ -403,10 +405,12 @@ public class GalleryDownloadWorker extends Worker {
 
     /**
      * Write {@code dl-progress/<galleryId>.json = {"current":N,"total":M}} at most
-     * once per {@link #PROGRESS_WRITE_THROTTLE_MS}. The first page (lastWrite == 0)
-     * and the final page always write so the bar starts and lands exactly. Returns
-     * the timestamp of the most recent write so the caller can carry the throttle
-     * clock. Best-effort: any failure is swallowed (never fails the download).
+     * once per {@link #PROGRESS_WRITE_THROTTLE_MS}. {@code current} is the number
+     * of pages whose non-empty files are covered by the manifest. The first page
+     * (lastWrite == 0) and the final page always write so the bar starts and lands
+     * exactly. Returns the timestamp of the most recent write so the caller can
+     * carry the throttle clock. Best-effort: any failure is swallowed (never fails
+     * the download).
      */
     private long maybeWriteProgress(String galleryId, int current, int total, long lastWrite) {
         if (galleryId == null || galleryId.isEmpty()) return lastWrite;

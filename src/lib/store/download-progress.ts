@@ -337,7 +337,6 @@ export async function fireDueAutoRetries(): Promise<void> {
 // when no Android download is active, or when the document is hidden
 // (backgrounded); it resumes on 'visible' if any handoff is still active.
 const PROGRESS_POLL_INTERVAL_MS = 1000;
-const PROGRESS_MISSING_GRACE_POLLS = 3;
 const LIBRARY_CHANGE_THROTTLE_MS = 750;
 
 export const DOWNLOAD_LIBRARY_CHANGED_EVENT = 'hipago:download-library-changed';
@@ -349,7 +348,11 @@ export function notifyDownloadLibraryChanged(force = false): void {
   const now = Date.now();
   if (!force && now - lastLibraryChangeEventAt < LIBRARY_CHANGE_THROTTLE_MS) return;
   lastLibraryChangeEventAt = now;
-  window.dispatchEvent(new CustomEvent(DOWNLOAD_LIBRARY_CHANGED_EVENT));
+  window.dispatchEvent(
+    new CustomEvent(DOWNLOAD_LIBRARY_CHANGED_EVENT, {
+      detail: { structural: force },
+    }),
+  );
 }
 
 let progressPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -357,13 +360,20 @@ let progressPollTimer: ReturnType<typeof setInterval> | null = null;
 // galleries sequentially, but multiple rows can be handed off quickly; polling
 // all active ids avoids locking the in-app % display onto the last handed-off id.
 const progressPollGalleryIds = new Set<number>();
-// Prevent an expensive SAF manifest verification from overlapping the next
-// interval tick for the same gallery.
+// PublicLibrary serializes native IO. Do not let a slow completion check for one
+// gallery enqueue another copy of itself on every one-second timer tick.
 const progressPollInFlightIds = new Set<number>();
-// A missing progress file can briefly race worker cleanup / SAF visibility.
-// Require several consecutive misses before treating an incomplete manifest as
-// a stopped worker.
-const progressPollMissingCounts = new Map<number, number>();
+const missingProgressAfterStartCount = new Map<number, number>();
+// A fresh JS session cannot know whether a persisted Android `downloading` row
+// had already made progress before the WebView was recreated. Track rows that
+// were rehydrated from DB so an absent native progress file can be treated as a
+// stopped worker after the normal grace period instead of leaving the UI stuck
+// at 0/N forever. Fresh handoffs are intentionally excluded because WorkManager
+// may legitimately take a while to start them.
+const rehydratedAndroidPollIds = new Set<number>();
+const MISSING_PROGRESS_FAILURE_GRACE_TICKS = 3;
+const REHYDRATED_MISSING_PROGRESS_FAILURE_GRACE_TICKS = 15;
+const nativeFinalizationRuns = new Map<number, Promise<boolean>>();
 
 /** Clear the single poll interval (does NOT forget which gallery was active). */
 function clearProgressPollTimer(): void {
@@ -423,7 +433,7 @@ export async function finalizeDownloadIfComplete(galleryId: number): Promise<boo
  * shows downloading" bug. No-op when not actually complete (e.g. the progress
  * file is merely absent because the worker has not started yet).
  */
-async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
+async function runNativeFinalization(id: number): Promise<boolean> {
   let done = false;
   try {
     done = await finalizeDownloadIfComplete(id);
@@ -437,6 +447,23 @@ async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
   notifyDownloadLibraryChanged(true);
   stopAndroidProgressPoll(id);
   return true;
+}
+
+export async function finalizeNativeDownloadIfComplete(id: number): Promise<boolean> {
+  const existing = nativeFinalizationRuns.get(id);
+  if (existing) return existing;
+
+  const run = runNativeFinalization(id);
+  nativeFinalizationRuns.set(id, run);
+  try {
+    return await run;
+  } finally {
+    if (nativeFinalizationRuns.get(id) === run) nativeFinalizationRuns.delete(id);
+  }
+}
+
+async function finalizeAndroidDownloadIfComplete(id: number): Promise<boolean> {
+  return finalizeNativeDownloadIfComplete(id);
 }
 
 async function failAndroidDownloadIfWorkerStopped(id: number, message: string): Promise<void> {
@@ -509,59 +536,76 @@ async function cancelAndroidNativeWork(id: number): Promise<boolean> {
 
 /** One poll tick: read the worker's progress file and push it into the store. */
 async function pollAndroidProgressOnce(id: number): Promise<void> {
-  // The gallery is done/cancelled when its store entry is gone — stop polling.
-  if (storeApi === null || !storeApi.hasEntry(id)) {
-    stopAndroidProgressPoll(id);
-    return;
-  }
-  let res: Awaited<ReturnType<typeof DownloadWorker.getProgress>> | null;
+  // In-flight dedup is owned by scheduleAndroidProgressPoll; this tick just does
+  // the work. (Called directly only by tests.)
   try {
-    res = await DownloadWorker.getProgress({ galleryId: String(id) });
-  } catch {
-    // The bridge can reject even though native work completed. Reconcile from
-    // the authoritative manifest so the last visible progress cannot stick.
-    await finalizeAndroidDownloadIfComplete(id);
-    return;
-  }
-  // A still-active poller may have been stopped for this id while we awaited.
-  if (!progressPollGalleryIds.has(id)) return;
-  if (res && 'error' in res && res.error) {
-    await failAndroidDownloadIfWorkerStopped(id, res.error);
-    return;
-  }
-  if (res && typeof (res as { current: number | null }).current === 'number') {
-    const { current, total } = res as { current: number; total: number };
-    progressPollMissingCounts.delete(id);
-    storeApi?.setEntry(id, {
-      progress: { current, total },
-      error: null,
-      queued: false,
-      position: null,
-    });
-    storeApi?.refreshQueue();
-    // Worker reported every page done — confirm via the manifest and finalize
-    // the row in-app so it leaves "downloading" without waiting for a relaunch.
-    if (total > 0 && current >= total) {
+    // The gallery is done/cancelled when its store entry is gone — stop polling.
+    if (storeApi === null || !storeApi.hasEntry(id)) {
+      stopAndroidProgressPoll(id);
+      return;
+    }
+    let res: Awaited<ReturnType<typeof DownloadWorker.getProgress>> | null;
+    try {
+      res = await DownloadWorker.getProgress({ galleryId: String(id) });
+    } catch {
+      // The bridge can reject even though native work completed. Reconcile from
+      // the authoritative manifest so the last visible progress cannot stick.
       await finalizeAndroidDownloadIfComplete(id);
+      return;
     }
-    return;
-  }
-  // current === null → no progress file: the worker has not started yet, failed,
-  // or completed (it deletes the file when done). Disambiguate via the on-disk
-  // manifest first. If the manifest is still incomplete after we had observed
-  // native progress, treat it as a stopped/failed worker instead of leaving the
-  // row stuck as "downloading" until next app launch.
-  if (await finalizeAndroidDownloadIfComplete(id)) return;
-  if (!progressPollGalleryIds.has(id)) return;
-  const lastProgress = useDownloadProgressStore.getState().entries[id]?.progress;
-  if (lastProgress && lastProgress.current > 0) {
-    const misses = (progressPollMissingCounts.get(id) ?? 0) + 1;
-    progressPollMissingCounts.set(id, misses);
-    if (misses >= PROGRESS_MISSING_GRACE_POLLS) {
-      await failAndroidDownloadIfWorkerStopped(id, 'Background download stopped before completion');
+    // A still-active poller may have been stopped for this id while we awaited.
+    if (!progressPollGalleryIds.has(id)) return;
+    if (res && 'error' in res && res.error) {
+      await failAndroidDownloadIfWorkerStopped(id, res.error);
+      return;
     }
-  } else {
-    progressPollMissingCounts.delete(id);
+    if (res && typeof (res as { current: number | null }).current === 'number') {
+      const { current, total } = res as { current: number; total: number };
+      const previous = useDownloadProgressStore.getState().entries[id]?.progress;
+      missingProgressAfterStartCount.delete(id);
+      rehydratedAndroidPollIds.delete(id);
+      storeApi?.setEntry(id, {
+        progress: { current, total },
+        error: null,
+        queued: false,
+        position: null,
+      });
+      storeApi?.refreshQueue();
+      // Worker reported every page done — confirm via the manifest and finalize
+      // the row in-app so it leaves "downloading" without waiting for a relaunch.
+      const previouslyReachedTotal =
+        previous !== null &&
+        previous !== undefined &&
+        previous.total > 0 &&
+        previous.current >= previous.total;
+      if (total > 0 && current >= total && !previouslyReachedTotal) {
+        await finalizeAndroidDownloadIfComplete(id);
+      }
+      return;
+    }
+    // current === null → no progress file: the worker has not started yet, failed,
+    // or completed (it deletes the file when done). Disambiguate via the on-disk
+    // manifest first. If the manifest is still incomplete after we had observed
+    // native progress, treat it as a stopped/failed worker instead of leaving the
+    // row stuck as "downloading" until next app launch.
+    if (await finalizeAndroidDownloadIfComplete(id)) return;
+    if (!progressPollGalleryIds.has(id)) return;
+    const lastProgress = useDownloadProgressStore.getState().entries[id]?.progress;
+    if (lastProgress && (lastProgress.current > 0 || rehydratedAndroidPollIds.has(id))) {
+      const missingCount = (missingProgressAfterStartCount.get(id) ?? 0) + 1;
+      missingProgressAfterStartCount.set(id, missingCount);
+      const graceTicks = rehydratedAndroidPollIds.has(id)
+        ? REHYDRATED_MISSING_PROGRESS_FAILURE_GRACE_TICKS
+        : MISSING_PROGRESS_FAILURE_GRACE_TICKS;
+      if (missingCount >= graceTicks) {
+        await failAndroidDownloadIfWorkerStopped(
+          id,
+          'Background download stopped before completion',
+        );
+      }
+    }
+  } finally {
+    progressPollInFlightIds.delete(id);
   }
 }
 
@@ -578,9 +622,13 @@ function scheduleAndroidProgressPoll(id: number): void {
  * same id; retargets (clear + rearm) for a different id. No-op off Android, when
  * the document is hidden, or with no DOM. Called from the Android handoff branch.
  */
-export function startAndroidProgressPoll(id: number): void {
+export function startAndroidProgressPoll(
+  id: number,
+  options: { rehydrated?: boolean } = {},
+): void {
   if (!isAndroid()) return;
   progressPollGalleryIds.add(id);
+  if (options.rehydrated) rehydratedAndroidPollIds.add(id);
   // Don't poll while backgrounded (the notification carries progress there); the
   // visibilitychange listener resumes it on foreground.
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
@@ -609,10 +657,12 @@ export function startAndroidProgressPoll(id: number): void {
 export function stopAndroidProgressPoll(id?: number): void {
   if (id === undefined) {
     progressPollGalleryIds.clear();
-    progressPollMissingCounts.clear();
+    missingProgressAfterStartCount.clear();
+    rehydratedAndroidPollIds.clear();
   } else {
     progressPollGalleryIds.delete(id);
-    progressPollMissingCounts.delete(id);
+    missingProgressAfterStartCount.delete(id);
+    rehydratedAndroidPollIds.delete(id);
   }
   if (progressPollGalleryIds.size === 0) clearProgressPollTimer();
 }
@@ -997,6 +1047,7 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           }
           storeApi?.markNotDownloaded(id);
           storeApi?.setEntry(id, null);
+          notifyDownloadLibraryChanged(true);
         } else {
           // Genuine failure: download-zip left the row 'failed' WITH lastError.
           // Drop it from the queue (it surfaces in the library as failed) and
@@ -1192,7 +1243,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
             title: row.title,
             thumbnail: row.thumbnail,
           });
-          startAndroidProgressPoll(id);
+          startAndroidProgressPoll(id, { rehydrated: true });
           void refreshQueue();
         }
       } catch {
@@ -1287,7 +1338,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         // Android handoffs.
         stopAndroidProgressPoll(id);
         notifyDownloadLibraryChanged(true);
-        void refreshQueue();
+        await refreshQueue();
       } else {
         // Queued/paused but not yet started → drop it from the queue.
         if (isAndroid()) {
@@ -1301,9 +1352,10 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           await setDownloadError(id, 'failed', 'Cancelled').catch(() => {});
         }
         await removeFromQueue(id).catch(() => {});
-        void refreshQueue();
         fileCache.delete(id);
         setEntry(id, null);
+        notifyDownloadLibraryChanged(true);
+        await refreshQueue();
       }
     },
     pause: async (id) => {

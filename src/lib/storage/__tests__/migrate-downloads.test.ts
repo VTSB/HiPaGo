@@ -515,15 +515,27 @@ describe('restoreDownloadsFromPublicFolder', () => {
     });
   });
 
-  it('does not restore a folder when a page listed by the manifest is missing', async () => {
-    mockNewStore.setGalleryFolder(1300, '1300 Incomplete', 'Incomplete');
-    await mockNewStore.putImage(1300, -1, makeManifest(['webp', 'webp']), 'json');
-    await mockNewStore.putImage(1300, 0, makeBytes(9), 'webp');
+  it('restores a folder with a missing page as a resumable failed download', async () => {
+    mockNewStore.setGalleryFolder(1300, '1300 Partial', 'Partial');
+    await mockNewStore.putImage(1300, -1, makeManifest(['webp', 'jpg']), 'json');
+    await mockNewStore.putImage(1300, 0, makeBytes(10), 'webp');
 
     const result = await restoreDownloadsFromPublicFolder(mockNewStore);
 
-    expect(result).toEqual({ imported: 0, skipped: 0, failed: 1 });
-    expect(upsertedRows).toHaveLength(0);
+    expect(result).toEqual({ imported: 1, skipped: 0, failed: 0 });
+    expect(upsertedRows).toHaveLength(1);
+    expect(upsertedRows[0]).toMatchObject({
+      galleryId: 1300,
+      title: 'Partial',
+      pageCount: 2,
+      totalBytes: 10,
+      status: 'failed',
+      folderName: '1300 Partial',
+      lastError: 'Recovered partial download',
+      queuePosition: null,
+      retryCount: 0,
+      nextRetryAt: null,
+    });
   });
 
   it('does not shrink a catalog-restored partial target into a false completion', async () => {
@@ -546,5 +558,42 @@ describe('restoreDownloadsFromPublicFolder', () => {
     expect(result).toEqual({ imported: 0, skipped: 1, failed: 0 });
     expect(upsertedRows).toHaveLength(0);
     expect(mockRows[0]).toMatchObject({ status: 'failed', pageCount: 3 });
+  });
+
+  it('preserves an already-complete DB row when the on-disk folder is momentarily incomplete', async () => {
+    // The DB says the gallery is complete and points at this folder, but the
+    // scan sees a missing page (e.g. a transient SAF stat failure on boot).
+    // The complete row must not be downgraded to failed by the boot-time scan.
+    mockRows = [
+      makeRow({
+        galleryId: 1450,
+        title: 'Complete On Disk Once',
+        pageCount: 2,
+        status: 'complete',
+        folderName: '1450 Complete On Disk Once',
+        migratedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ];
+    mockNewStore.setGalleryFolder(1450, '1450 Complete On Disk Once', 'Complete On Disk Once');
+    await mockNewStore.putImage(1450, -1, makeManifest(['webp', 'jpg']), 'json');
+    await mockNewStore.putImage(1450, 0, makeBytes(10), 'webp');
+    // page 1 (jpg) is missing on disk → complete would be false.
+
+    const result = await restoreDownloadsFromPublicFolder(mockNewStore);
+
+    expect(result).toEqual({ imported: 0, skipped: 1, failed: 0 });
+    expect(upsertedRows).toHaveLength(0);
+  });
+
+  it('is a no-op on non-Android', async () => {
+    mockIsAndroid = false;
+    mockNewStore.setGalleryFolder(1500, '1500 Ignored', 'Ignored');
+    await mockNewStore.putImage(1500, -1, makeManifest(['webp']), 'json');
+    await mockNewStore.putImage(1500, 0, makeBytes(10), 'webp');
+
+    const result = await restoreDownloadsFromPublicFolder(mockNewStore);
+
+    expect(result).toEqual({ imported: 0, skipped: 0, failed: 0 });
+    expect(upsertedRows).toHaveLength(0);
   });
 });

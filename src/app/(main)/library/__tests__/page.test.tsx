@@ -78,7 +78,13 @@ const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
 const mockCreateDownloadStore = vi.fn();
 const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
 const mockHasCompleteDownloadedGallery =
-  vi.fn<(galleryId: number, expectedPageCount: number) => Promise<boolean>>();
+  vi.fn<
+    (
+      galleryId: number,
+      expectedPageCount: number,
+      options?: { folderName?: string | null },
+    ) => Promise<boolean>
+  >();
 const mockProcessQueue = vi
   .fn<(opts?: { onlyGalleryId?: number }) => Promise<void>>()
   .mockResolvedValue(undefined);
@@ -142,8 +148,11 @@ vi.mock('@/lib/storage/download-store', () => ({
 
 vi.mock('@/lib/utils/download-zip', () => ({
   exportGalleryZip: (galleryId: number, title: string) => mockExportGalleryZip(galleryId, title),
-  hasCompleteDownloadedGallery: (galleryId: number, expectedPageCount: number) =>
-    mockHasCompleteDownloadedGallery(galleryId, expectedPageCount),
+  hasCompleteDownloadedGallery: (
+    galleryId: number,
+    expectedPageCount: number,
+    options?: { folderName?: string | null },
+  ) => mockHasCompleteDownloadedGallery(galleryId, expectedPageCount, options),
 }));
 
 // Mock next/link as a plain anchor
@@ -560,8 +569,38 @@ describe('LibraryPage', () => {
     });
 
     expect(mockDeleteDownload).toHaveBeenCalledWith(2001);
-    expect(mockDeleteGallery).toHaveBeenCalledWith(2001);
+    expect(mockDeleteGallery).toHaveBeenCalledWith(2001, { folderName: null });
+    expect(mockDeleteGallery.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDeleteDownload.mock.invocationCallOrder[0],
+    );
     expect(mockDownloadProgressState.cancel).not.toHaveBeenCalled();
+  });
+
+  it('keeps the DB row and shows an error when physical folder deletion fails', async () => {
+    const item = makeItem({ galleryId: 2005, folderName: '2005 Exact Folder' });
+    mockListDownloads.mockResolvedValue([item]);
+    const mockDeleteGallery = vi.fn().mockRejectedValue(new Error('provider denied delete'));
+    mockCreateDownloadStore.mockResolvedValue({
+      usage: vi.fn().mockResolvedValue(0),
+      deleteGallery: mockDeleteGallery,
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await screen.findByText('Test Gallery');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
+    });
+
+    await screen.findByText('library.deleteFailed');
+    expect(mockDeleteGallery).toHaveBeenCalledWith(2005, { folderName: '2005 Exact Folder' });
+    expect(mockDeleteDownload).not.toHaveBeenCalled();
   });
 
   it('cancels native/in-flight work before deleting a downloading row', async () => {
@@ -700,7 +739,11 @@ describe('LibraryPage', () => {
       ({ qc } = await renderPage());
     });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-    await waitFor(() => expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(4003, 20));
+    await waitFor(() =>
+      expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(4003, 20, {
+        folderName: null,
+      }),
+    );
     const invalidate = vi.spyOn(qc!, 'invalidateQueries');
 
     expect(screen.getByText('library.status.failed')).toBeTruthy();

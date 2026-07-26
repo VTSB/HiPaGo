@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_IMAGE_CACHE_MAX_BYTES } from '@/lib/cache/image-cache-store';
+import { SettingsBackup } from '@/lib/plugins/settingsBackup';
+import { isAndroid } from '@/lib/utils/platform';
+
+const SETTINGS_STORAGE_KEY = 'hipago-settings';
 
 export type Locale = 'en' | 'ko';
 export type LibraryInitialTab = 'favorites' | 'history' | 'downloads';
@@ -202,16 +206,82 @@ export const useSettingsStore = create<SettingsStoreState>()(
             : [...s.favoriteTags, tag],
         })),
     }),
-    { name: 'hipago-settings', version: 8, migrate: migrateSettings },
+    { name: SETTINGS_STORAGE_KEY, version: 8, migrate: migrateSettings },
   ),
 );
+
+let settingsPersistenceInit: Promise<void> | null = null;
+let nativeBackupTimer: ReturnType<typeof setTimeout> | null = null;
+
+function validPersistedSettings(raw: string | null): raw is string {
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw) as { state?: unknown; version?: unknown };
+    return (
+      !!parsed &&
+      typeof parsed === 'object' &&
+      !!parsed.state &&
+      typeof parsed.state === 'object' &&
+      (parsed.version === undefined || typeof parsed.version === 'number')
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function mirrorSettingsToNative(): Promise<void> {
+  if (!isAndroid() || typeof localStorage === 'undefined') return;
+  const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+  if (!validPersistedSettings(raw)) return;
+  await SettingsBackup.set({ value: raw });
+}
+
+/**
+ * Restore settings after Android WebView storage loss, then mirror future
+ * Zustand changes into native SharedPreferences. Local storage wins when both
+ * copies exist because it contains the newest synchronous write.
+ */
+export function initializeSettingsPersistence(): Promise<void> {
+  if (settingsPersistenceInit) return settingsPersistenceInit;
+  settingsPersistenceInit = (async () => {
+    if (!isAndroid() || typeof localStorage === 'undefined') return;
+
+    let local = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (local && !validPersistedSettings(local)) {
+      localStorage.removeItem(SETTINGS_STORAGE_KEY);
+      local = null;
+    }
+
+    if (!local) {
+      const native = await SettingsBackup.get().catch(() => ({ value: null }));
+      if (validPersistedSettings(native.value)) {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, native.value);
+        await useSettingsStore.persist.rehydrate();
+        local = native.value;
+      } else if (native.value) {
+        await SettingsBackup.clear().catch(() => {});
+      }
+    }
+
+    if (local) await SettingsBackup.set({ value: local }).catch(() => {});
+
+    useSettingsStore.subscribe(() => {
+      if (nativeBackupTimer) clearTimeout(nativeBackupTimer);
+      nativeBackupTimer = setTimeout(() => {
+        nativeBackupTimer = null;
+        void mirrorSettingsToNative().catch(() => {});
+      }, 250);
+    });
+  })();
+  return settingsPersistenceInit;
+}
 
 /** Detect browser locale and apply if this is the first visit (no persisted setting).
  *  Waits for Zustand persist hydration to avoid reading stale defaults. */
 export function initLocaleOnce() {
   function applyAutoLocale() {
     const raw =
-      typeof localStorage !== 'undefined' ? localStorage.getItem('hipago-settings') : null;
+      typeof localStorage !== 'undefined' ? localStorage.getItem(SETTINGS_STORAGE_KEY) : null;
     if (!raw && typeof navigator !== 'undefined' && navigator.language.startsWith('ko')) {
       useSettingsStore.getState().setLocale('ko');
     }
