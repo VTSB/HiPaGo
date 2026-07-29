@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { DBDownload } from '@/lib/db/schema';
 import type { QueueItem } from '@/lib/store/download-progress';
+import { useZipExportStore } from '@/lib/store/zip-export';
 import { toFavoriteTagKey } from '@/lib/utils/tag-favorites';
 import { TagType } from '@/lib/utils/types';
 
@@ -76,7 +77,14 @@ const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
 const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
 const mockCreateDownloadStore = vi.fn();
-const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
+const mockExportGalleryZip =
+  vi.fn<
+    (
+      galleryId: number,
+      title: string,
+      onProgress?: (progress: { current: number; total: number }) => void,
+    ) => Promise<'saved' | 'started' | 'cancelled'>
+  >();
 const mockHasCompleteDownloadedGallery =
   vi.fn<
     (
@@ -147,7 +155,11 @@ vi.mock('@/lib/storage/download-store', () => ({
 }));
 
 vi.mock('@/lib/utils/download-zip', () => ({
-  exportGalleryZip: (galleryId: number, title: string) => mockExportGalleryZip(galleryId, title),
+  exportGalleryZip: (
+    galleryId: number,
+    title: string,
+    onProgress?: (progress: { current: number; total: number }) => void,
+  ) => mockExportGalleryZip(galleryId, title, onProgress),
   hasCompleteDownloadedGallery: (
     galleryId: number,
     expectedPageCount: number,
@@ -255,13 +267,14 @@ describe('LibraryPage', () => {
     mockDownloadProgressState.downloaded = {};
     mockDownloadProgressState.queue = [];
     mockDownloadProgressState.globalPaused = false;
+    useZipExportStore.getState().reset();
     window.history.replaceState({}, '', '/library');
     sessionStorage.clear();
     mockCreateDownloadStore.mockResolvedValue({
       usage: vi.fn().mockResolvedValue(0),
       deleteGallery: vi.fn().mockResolvedValue(undefined),
     });
-    mockExportGalleryZip.mockResolvedValue(undefined);
+    mockExportGalleryZip.mockResolvedValue('saved');
     mockHasCompleteDownloadedGallery.mockResolvedValue(true);
   });
 
@@ -601,6 +614,50 @@ describe('LibraryPage', () => {
     await screen.findByText('library.deleteFailed');
     expect(mockDeleteGallery).toHaveBeenCalledWith(2005, { folderName: '2005 Exact Folder' });
     expect(mockDeleteDownload).not.toHaveBeenCalled();
+    expect(useZipExportStore.getState().deletingGalleryIds.has(2005)).toBe(false);
+    expect(screen.getByRole('button', { name: 'library.more' })).toBeTruthy();
+  });
+
+  it('keeps delete claimed across a remount and releases it after completion', async () => {
+    const item = makeItem({ galleryId: 2006, title: 'Deleting Gallery' });
+    mockListDownloads.mockResolvedValue([item]);
+    let finishDelete!: () => void;
+    const mockDeleteGallery = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDelete = resolve;
+        }),
+    );
+    mockCreateDownloadStore.mockResolvedValue({
+      usage: vi.fn().mockResolvedValue(0),
+      deleteGallery: mockDeleteGallery,
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    let firstRender!: Awaited<ReturnType<typeof renderPage>>;
+    await act(async () => {
+      firstRender = await renderPage();
+    });
+    await screen.findByText('Deleting Gallery');
+    fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
+    await waitFor(() => expect(mockDeleteGallery).toHaveBeenCalledTimes(1));
+    expect(useZipExportStore.getState().deletingGalleryIds.has(2006)).toBe(true);
+
+    firstRender.unmount();
+    await act(async () => {
+      await renderPage();
+    });
+    await screen.findByText('Deleting Gallery');
+    expect(screen.queryByRole('button', { name: 'library.more' })).toBeNull();
+    expect(useZipExportStore.getState().begin(2006, 'Deleting Gallery')).toBeNull();
+    expect(mockExportGalleryZip).not.toHaveBeenCalled();
+
+    await act(async () => finishDelete());
+    await waitFor(() =>
+      expect(useZipExportStore.getState().deletingGalleryIds.has(2006)).toBe(false),
+    );
+    expect(screen.getByRole('button', { name: 'library.more' })).toBeTruthy();
   });
 
   it('cancels native/in-flight work before deleting a downloading row', async () => {
@@ -711,7 +768,9 @@ describe('LibraryPage', () => {
 
   it('shows an export error when stored files are missing', async () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4001, title: 'Broken Export' })]);
-    mockExportGalleryZip.mockRejectedValue(new Error('Missing downloaded page 2'));
+    const sourceError = new Error('Missing downloaded page 2');
+    sourceError.name = 'ZipExportSourceError';
+    mockExportGalleryZip.mockRejectedValue(sourceError);
 
     await act(async () => {
       await renderPage();
@@ -726,8 +785,24 @@ describe('LibraryPage', () => {
     });
 
     const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('library.exportSourceFailed');
+    expect(mockExportGalleryZip).toHaveBeenCalledWith(4001, 'Broken Export', expect.any(Function));
+  });
+
+  it('shows a storage-specific export error when saving the ZIP fails', async () => {
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4006, title: 'Disk Full' })]);
+    mockExportGalleryZip.mockRejectedValue(new Error('disk full'));
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+
+    const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('library.exportFailed');
-    expect(mockExportGalleryZip).toHaveBeenCalledWith(4001, 'Broken Export');
   });
 
   it('shows a failed badge and hides export when a complete DB row is missing files', async () => {
@@ -839,7 +914,130 @@ describe('LibraryPage', () => {
     expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
   });
 
-  it('does not start a duplicate export while one is already pending', async () => {
+  it('shows ZIP export progress while a large export is pending', async () => {
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4005, title: 'Large Export' })]);
+    let finishExport!: () => void;
+    mockExportGalleryZip.mockImplementation((_galleryId, _title, onProgress) => {
+      onProgress?.({ current: 3, total: 20 });
+      return new Promise<'saved'>((resolve) => {
+        finishExport = () => resolve('saved');
+      });
+    });
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+    });
+
+    const status = await screen.findByRole('status');
+    expect(status.textContent).toContain('library.exportingZip');
+    expect(status.textContent).toContain('(3/20)');
+    expect(status.textContent).toContain('Large Export');
+
+    await act(async () => finishExport());
+    const success = await screen.findByRole('status');
+    expect(success.textContent).toContain('library.exportSucceeded');
+    expect(success.textContent).toContain('Large Export');
+  });
+
+  it('reports a browser download as started instead of claiming it was saved', async () => {
+    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4007, title: 'Web Export' })]);
+    mockExportGalleryZip.mockResolvedValue('started');
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toContain('library.exportStarted'),
+    );
+    const status = screen.getByRole('status');
+    expect(status.textContent).not.toContain('library.exportSucceeded');
+    expect(status.textContent).toContain('Web Export');
+  });
+
+  it('restores ZIP progress and the source-card lock after a remount', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 4008, title: 'Persistent Export' }),
+    ]);
+    let finishExport!: () => void;
+    mockExportGalleryZip.mockImplementation((_galleryId, _title, onProgress) => {
+      onProgress?.({ current: 4, total: 20 });
+      return new Promise<'saved'>((resolve) => {
+        finishExport = () => resolve('saved');
+      });
+    });
+
+    let firstRender!: Awaited<ReturnType<typeof renderPage>>;
+    await act(async () => {
+      firstRender = await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+    expect((await screen.findByRole('status')).textContent).toContain('(4/20)');
+
+    firstRender.unmount();
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    const restored = await screen.findByRole('status');
+    expect(restored.textContent).toContain('(4/20)');
+    expect(restored.textContent).toContain('Persistent Export');
+    expect(screen.queryByRole('button', { name: 'library.more' })).toBeNull();
+
+    await act(async () => finishExport());
+    expect((await screen.findByRole('status')).textContent).toContain('library.exportSucceeded');
+    expect(screen.getByRole('button', { name: 'library.more' })).toBeTruthy();
+  });
+
+  it('keeps unrelated card actions but globally single-flights ZIP export', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 4009, title: 'Active Export' }),
+      makeItem({ galleryId: 4010, title: 'Other Gallery' }),
+    ]);
+    let finishExport!: () => void;
+    mockExportGalleryZip.mockImplementation(
+      () =>
+        new Promise<'saved'>((resolve) => {
+          finishExport = () => resolve('saved');
+        }),
+    );
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'library.more' })[0]);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
+    await waitFor(() => expect(mockExportGalleryZip).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'library.more' })).toHaveLength(1),
+    );
+    const remainingMenu = screen.getByRole('button', { name: 'library.more' });
+    fireEvent.click(remainingMenu);
+    expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
+
+    await act(async () => finishExport());
+  });
+
+  it('hides card actions while an export is pending', async () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4002, title: 'Slow Export' })]);
     mockExportGalleryZip.mockReturnValue(new Promise(() => {}));
 
@@ -854,15 +1052,10 @@ describe('LibraryPage', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
-    });
-
     expect(mockExportGalleryZip).toHaveBeenCalledTimes(1);
-    expect(mockExportGalleryZip).toHaveBeenCalledWith(4002, 'Slow Export');
+    expect(mockExportGalleryZip).toHaveBeenCalledWith(4002, 'Slow Export', expect.any(Function));
+    expect(screen.queryByRole('button', { name: 'library.more' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'library.delete' })).toBeNull();
   });
 
   // ── AC-006: search filters the list ──────────────────────────────────────

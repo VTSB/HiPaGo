@@ -1,4 +1,4 @@
-import { zipSync } from 'fflate';
+import { Zip, ZipPassThrough, zipSync } from 'fflate';
 import { getImageUrl } from './image-url';
 import { resolveWorkOrder } from './work-order';
 import { apiClient, ApiError } from '@/lib/api/client';
@@ -19,6 +19,7 @@ import {
 } from '@/lib/db/download';
 import { parseRetryAfter } from '@/lib/api/tag-fetcher';
 import { galleryFolderName } from '@/lib/storage/base-path-resolver';
+import { isTauri } from './platform';
 
 /** Sanitize a string for use as a filename/folder component. */
 export function sanitizeFilename(name: string): string {
@@ -33,6 +34,15 @@ function padIndex(idx: number, total: number): string {
 export interface DownloadProgress {
   current: number;
   total: number;
+}
+
+export type ZipExportResult = 'saved' | 'started' | 'cancelled';
+
+export class ZipExportSourceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ZipExportSourceError';
+  }
 }
 
 /**
@@ -85,6 +95,110 @@ function decodeManifest(bytes: Uint8Array): string[] {
 
 const DOWNLOAD_CHECKPOINT_PAGE_INTERVAL = 10;
 const ZIP_EXPORT_READ_CONCURRENCY = 8;
+
+type ZipWritableFile = {
+  write(data: Uint8Array): Promise<number>;
+};
+
+async function writeEntireChunk(file: ZipWritableFile, chunk: Uint8Array): Promise<void> {
+  let offset = 0;
+  while (offset < chunk.byteLength) {
+    const written = await file.write(chunk.subarray(offset));
+    if (written <= 0) throw new Error('Could not write the ZIP export');
+    offset += written;
+  }
+}
+
+async function streamStoredGalleryZipToTauri(
+  store: Awaited<ReturnType<typeof createDownloadStore>>,
+  galleryId: number,
+  exts: string[],
+  options: DownloadStoreLookupOptions,
+  destination: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<void> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const exportId = await invoke<number>('begin_zip_export', { destination });
+  const output: ZipWritableFile = {
+    write: (data) => invoke<number>('write_zip_export', { exportId, data }),
+  };
+  let committed = false;
+
+  try {
+    let writeChain = Promise.resolve();
+    let zipError: Error | null = null;
+    let finalChunkSeen = false;
+    const zip = new Zip((error, chunk, final) => {
+      if (error) {
+        zipError = error;
+        return;
+      }
+      writeChain = writeChain.then(() => writeEntireChunk(output, chunk));
+      if (final) finalChunkSeen = true;
+    });
+
+    try {
+      for (let i = 0; i < exts.length; i++) {
+        const ext = exts[i];
+        const bytes = await store.getImage(galleryId, i, ext, options);
+        if (!bytes || bytes.byteLength === 0) {
+          throw new ZipExportSourceError(
+            `Missing downloaded page ${i + 1} for gallery ${galleryId}`,
+          );
+        }
+
+        const name = String(i + 1).padStart(4, '0') + '.' + ext;
+        const entry = new ZipPassThrough(name);
+        zip.add(entry);
+        entry.push(bytes, true);
+
+        // Bound memory to roughly one page plus pending ZIP output. Waiting for
+        // native writes here prevents a large gallery from filling the WebView heap.
+        await writeChain;
+        if (zipError) throw zipError;
+        onProgress?.({ current: i + 1, total: exts.length });
+      }
+
+      zip.end();
+      await writeChain;
+      if (zipError) throw zipError;
+      if (!finalChunkSeen) throw new Error('ZIP export ended before the archive was finalized');
+    } catch (error) {
+      zip.terminate();
+      throw error;
+    }
+
+    await invoke('commit_zip_export', { exportId });
+    committed = true;
+  } finally {
+    if (!committed) await invoke('abort_zip_export', { exportId }).catch(() => {});
+  }
+}
+
+async function triggerBrowserZipDownload(bytes: Uint8Array, fileName: string): Promise<void> {
+  const blobBytes =
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength &&
+    bytes.buffer instanceof ArrayBuffer
+      ? bytes.buffer
+      : (bytes.slice().buffer as ArrayBuffer);
+  const blob = new Blob([blobBytes], { type: 'application/zip' });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+
+  try {
+    anchor.click();
+    // WebView/browser download handling is asynchronous. Give it a task turn
+    // before releasing the Blob URL instead of revoking it during the click.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+    anchor.remove();
+  }
+}
 
 function shouldWriteDownloadCheckpoint(pageCount: number, total: number): boolean {
   return (
@@ -637,12 +751,17 @@ export async function downloadGalleryToLibrary(
  *
  * Reads pages via the stored manifest so it knows each page's ext, then
  * builds a zip with fflate (level 0 — images are already compressed) and
- * triggers the browser `<a download>` to the OS downloads folder.
+ * streams the archive to a native save-dialog path on Tauri. Web and mobile
+ * keep the browser download fallback.
  *
  * This preserves the original downloadGalleryAsZip behaviour as a secondary
  * action on a library item (AC-004 wires the button).
  */
-export async function exportGalleryZip(galleryId: number, title: string): Promise<void> {
+export async function exportGalleryZip(
+  galleryId: number,
+  title: string,
+  onProgress?: (progress: DownloadProgress) => void,
+): Promise<ZipExportResult> {
   const store = await createDownloadStore();
   const row = await getDownload(galleryId).catch(() => null);
   const options: DownloadStoreLookupOptions = { folderName: row?.folderName ?? null };
@@ -650,18 +769,40 @@ export async function exportGalleryZip(galleryId: number, title: string): Promis
   // Load the manifest to know how many pages and their exts.
   const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
   if (!manifestBytes) {
-    throw new Error(`No manifest found for gallery ${galleryId}. Is it fully downloaded?`);
+    throw new ZipExportSourceError(
+      `No manifest found for gallery ${galleryId}. Is it fully downloaded?`,
+    );
   }
   const exts = decodeManifest(manifestBytes);
   if (exts.length === 0) {
-    throw new Error(`Downloaded manifest for gallery ${galleryId} is empty or corrupt`);
+    throw new ZipExportSourceError(
+      `Downloaded manifest for gallery ${galleryId} is empty or corrupt`,
+    );
   }
 
+  const safeName = sanitizeFilename(title);
+  const fileName = `${galleryId} ${safeName}.zip`;
+
+  if (isTauri()) {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const destination = await save({
+      defaultPath: fileName,
+      filters: [{ name: 'ZIP archive', extensions: ['zip'] }],
+    });
+    if (!destination) return 'cancelled';
+
+    await streamStoredGalleryZipToTauri(store, galleryId, exts, options, destination, onProgress);
+    return 'saved';
+  }
+
+  let completedReads = 0;
   const pages = await mapWithConcurrency(exts, ZIP_EXPORT_READ_CONCURRENCY, async (ext, i) => {
     const bytes = await store.getImage(galleryId, i, ext, options);
     if (!bytes || bytes.byteLength === 0) {
-      throw new Error(`Missing downloaded page ${i + 1} for gallery ${galleryId}`);
+      throw new ZipExportSourceError(`Missing downloaded page ${i + 1} for gallery ${galleryId}`);
     }
+    completedReads += 1;
+    onProgress?.({ current: completedReads, total: exts.length });
     return { index: i, ext, bytes };
   });
 
@@ -673,13 +814,8 @@ export async function exportGalleryZip(galleryId: number, title: string): Promis
   }
 
   const zipped = zipSync(entries, { level: 0 });
-  const safeName = sanitizeFilename(title);
-  const blob = new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${galleryId} ${safeName}.zip`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  await triggerBrowserZipDownload(zipped, fileName);
+  return 'started';
 }
 
 // ── Legacy: OS-folder zip download (kept for fallback / older callsites) ───────
@@ -719,10 +855,5 @@ export async function downloadGalleryAsZip(
   const zipped = zipSync(entries, { level: 0 }); // no compression, images are already compressed
 
   const safeName = sanitizeFilename(title);
-  const blob = new Blob([zipped.buffer as ArrayBuffer], { type: 'application/zip' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${galleryId} ${safeName}.zip`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  await triggerBrowserZipDownload(zipped, `${galleryId} ${safeName}.zip`);
 }

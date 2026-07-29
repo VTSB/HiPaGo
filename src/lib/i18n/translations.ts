@@ -119,9 +119,16 @@ const translations = {
   'library.open': { en: 'Open', ko: '열기' },
   'library.delete': { en: 'Delete', ko: '삭제' },
   'library.exportZip': { en: 'Export ZIP', ko: 'ZIP 내보내기' },
+  'library.exportingZip': { en: 'Exporting ZIP', ko: 'ZIP 내보내는 중' },
+  'library.exportSucceeded': { en: 'ZIP saved', ko: 'ZIP 저장 완료' },
+  'library.exportStarted': { en: 'ZIP download started', ko: 'ZIP 다운로드 시작됨' },
+  'library.exportSourceFailed': {
+    en: 'Could not export ZIP. Some downloaded files are missing or damaged.',
+    ko: 'ZIP을 내보낼 수 없습니다. 다운로드 파일이 일부 없거나 손상되었습니다.',
+  },
   'library.exportFailed': {
-    en: 'Could not export ZIP. Some downloaded files may be missing.',
-    ko: 'ZIP을 내보낼 수 없습니다. 일부 다운로드 파일이 없을 수 있습니다.',
+    en: 'Could not save ZIP. Check the destination permission and available disk space.',
+    ko: 'ZIP을 저장할 수 없습니다. 저장 위치의 권한과 남은 공간을 확인해 주세요.',
   },
   'library.confirmDelete': { en: 'Delete this download?', ko: '이 다운로드를 삭제하시겠습니까?' },
   'library.deleteFailed': {

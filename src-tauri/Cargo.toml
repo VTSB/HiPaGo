@@ -17,7 +17,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
-tauri-plugin-fs = "=2.4.1"
+tauri-plugin-dialog = "=2.7.2"
+tauri-plugin-fs = "=2.5.1"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-updater = "2"
 bypass-core = { path = "../crates/bypass-core" }
@@ -26,3 +27,4 @@ base64 = "0.22"
 url = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"

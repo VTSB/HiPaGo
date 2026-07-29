@@ -4,10 +4,22 @@ import type { GalleryFile, GgConfig } from '../types';
 import type { DownloadStore } from '@/lib/storage/download-store';
 
 // Mock fflate before importing the module under test
-vi.mock('fflate', () => ({
-  zipSync: vi.fn(() => new Uint8Array([1, 2, 3])),
-  strToU8: vi.fn((s: string) => new TextEncoder().encode(s)),
+vi.mock('fflate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fflate')>();
+  return {
+    ...actual,
+    zipSync: vi.fn(() => new Uint8Array([1, 2, 3])),
+    strToU8: vi.fn((s: string) => new TextEncoder().encode(s)),
+  };
+});
+
+const nativeZip = vi.hoisted(() => ({
+  save: vi.fn(),
+  invoke: vi.fn(),
 }));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ save: nativeZip.save }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeZip.invoke }));
 
 // Mock image-url module
 vi.mock('../image-url', () => ({
@@ -81,8 +93,9 @@ import {
   getDownloadedGalleryPages,
   getDownloadedImage,
   hasCompleteDownloadedGallery,
+  type DownloadProgress,
 } from '../download-zip';
-import { zipSync } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import { getImageUrl } from '../image-url';
 import { apiClient, ApiError } from '@/lib/api/client';
 import {
@@ -183,13 +196,21 @@ function makeMemoryStoreWithCopy() {
 // ── downloadGalleryAsZip (legacy behaviour unchanged) ─────────────────────────
 
 describe('downloadGalleryAsZip', () => {
-  let anchorEl: { href: string; download: string; click: ReturnType<typeof vi.fn> };
+  let anchorEl: {
+    href: string;
+    download: string;
+    click: ReturnType<typeof vi.fn>;
+    remove: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    anchorEl = { href: '', download: '', click: vi.fn() };
+    anchorEl = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
 
-    vi.stubGlobal('document', { createElement: vi.fn(() => anchorEl) });
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchorEl),
+      body: { appendChild: vi.fn() },
+    });
     vi.stubGlobal(
       'Blob',
       class MockBlob {
@@ -377,6 +398,7 @@ describe('downloadGalleryAsZip', () => {
       expect(anchorEl.download).toBe('5 Gallery.zip');
       expect(anchorEl.click).toHaveBeenCalledOnce();
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:fake-url');
+      expect(anchorEl.remove).toHaveBeenCalledOnce();
     });
 
     it('passes level:0 to zipSync', async () => {
@@ -1488,7 +1510,34 @@ describe('hasCompleteDownloadedGallery', () => {
 
 describe('exportGalleryZip', () => {
   let memStore: ReturnType<typeof makeMemoryStore>;
-  let anchorEl: { href: string; download: string; click: ReturnType<typeof vi.fn> };
+  let anchorEl: {
+    href: string;
+    download: string;
+    click: ReturnType<typeof vi.fn>;
+    remove: ReturnType<typeof vi.fn>;
+  };
+  let nativeChunks: Uint8Array[];
+  let blobParts: unknown[];
+
+  function configureNativeInvoke(options?: { writeError?: Error; commitError?: Error }) {
+    nativeZip.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
+        if (command === 'begin_zip_export') return 73;
+        if (command === 'write_zip_export') {
+          if (options?.writeError) throw options.writeError;
+          const data = args?.data as Uint8Array;
+          nativeChunks.push(data.slice());
+          return data.byteLength;
+        }
+        if (command === 'commit_zip_export') {
+          if (options?.commitError) throw options.commitError;
+          return undefined;
+        }
+        if (command === 'abort_zip_export') return undefined;
+        throw new Error(`Unexpected native command: ${command}`);
+      },
+    );
+  }
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1496,15 +1545,24 @@ describe('exportGalleryZip', () => {
     vi.mocked(createDownloadStore).mockResolvedValue(memStore);
     vi.mocked(zipSync).mockReturnValue(new Uint8Array([1, 2, 3]));
 
-    anchorEl = { href: '', download: '', click: vi.fn() };
-    vi.stubGlobal('document', { createElement: vi.fn(() => anchorEl) });
+    anchorEl = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchorEl),
+      body: { appendChild: vi.fn() },
+    });
+    nativeChunks = [];
+    blobParts = [];
+    nativeZip.save.mockResolvedValue('C:\\Exports\\gallery.zip');
+    configureNativeInvoke();
     vi.stubGlobal(
       'Blob',
       class MockBlob {
         constructor(
           public parts: unknown[],
           public options: unknown,
-        ) {}
+        ) {
+          blobParts = parts;
+        }
       },
     );
     const origURL = globalThis.URL;
@@ -1565,7 +1623,7 @@ describe('exportGalleryZip', () => {
     await memStore.putImage(42, 0, new Uint8Array([1, 2]), 'webp');
     await memStore.putImage(42, 1, new Uint8Array([3, 4, 5]), 'jpg');
 
-    await exportGalleryZip(42, 'My Gallery');
+    await expect(exportGalleryZip(42, 'My Gallery')).resolves.toBe('started');
 
     // zipSync should have been called with both pages
     expect(zipSync).toHaveBeenCalledOnce();
@@ -1578,6 +1636,87 @@ describe('exportGalleryZip', () => {
     expect(anchorEl.download).toBe('42 My Gallery.zip');
     expect(anchorEl.click).toHaveBeenCalledOnce();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:fake-url');
+    expect(anchorEl.remove).toHaveBeenCalledOnce();
+    expect(blobParts[0]).toBe(vi.mocked(zipSync).mock.results[0].value.buffer);
+  });
+
+  it('streams a valid ZIP to a native save-dialog path on Tauri', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    const exts = ['webp', 'jpg'];
+    await memStore.putImage(42, -1, new TextEncoder().encode(JSON.stringify(exts)), 'json');
+    await memStore.putImage(42, 0, new Uint8Array([1, 2]), 'webp');
+    await memStore.putImage(42, 1, new Uint8Array([3, 4, 5]), 'jpg');
+    const progress: DownloadProgress[] = [];
+
+    await expect(exportGalleryZip(42, 'My Gallery', (value) => progress.push(value))).resolves.toBe(
+      'saved',
+    );
+
+    expect(nativeZip.save).toHaveBeenCalledWith({
+      defaultPath: '42 My Gallery.zip',
+      filters: [{ name: 'ZIP archive', extensions: ['zip'] }],
+    });
+    expect(nativeZip.invoke).toHaveBeenCalledWith('begin_zip_export', {
+      destination: 'C:\\Exports\\gallery.zip',
+    });
+    expect(nativeZip.invoke).toHaveBeenCalledWith('commit_zip_export', {
+      exportId: 73,
+    });
+    expect(nativeZip.invoke).not.toHaveBeenCalledWith('abort_zip_export', expect.anything());
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(document.createElement).not.toHaveBeenCalled();
+    expect(progress).toEqual([
+      { current: 1, total: 2 },
+      { current: 2, total: 2 },
+    ]);
+
+    const archiveLength = nativeChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const archive = new Uint8Array(archiveLength);
+    let offset = 0;
+    for (const chunk of nativeChunks) {
+      archive.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const files = unzipSync(archive);
+    expect(files['0001.webp']).toEqual(new Uint8Array([1, 2]));
+    expect(files['0002.jpg']).toEqual(new Uint8Array([3, 4, 5]));
+  });
+
+  it('treats cancelling the Tauri save dialog as a no-op', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    nativeZip.save.mockResolvedValue(null);
+    await memStore.putImage(7, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(7, 0, new Uint8Array([1]), 'webp');
+
+    await expect(exportGalleryZip(7, 'Cancelled')).resolves.toBe('cancelled');
+
+    expect(nativeZip.invoke).not.toHaveBeenCalled();
+    expect(document.createElement).not.toHaveBeenCalled();
+  });
+
+  it('propagates native ZIP write failures and aborts the staged file', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    configureNativeInvoke({ writeError: new Error('disk full') });
+    await memStore.putImage(8, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(8, 0, new Uint8Array([1]), 'webp');
+
+    await expect(exportGalleryZip(8, 'Write Failure')).rejects.toThrow('disk full');
+
+    expect(nativeZip.invoke).not.toHaveBeenCalledWith('commit_zip_export', expect.anything());
+    expect(nativeZip.invoke).toHaveBeenCalledWith('abort_zip_export', { exportId: 73 });
+    expect(document.createElement).not.toHaveBeenCalled();
+  });
+
+  it('aborts the staged file when the atomic commit fails', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    configureNativeInvoke({ commitError: new Error('permission denied') });
+    await memStore.putImage(9, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(9, 0, new Uint8Array([1]), 'webp');
+
+    await expect(exportGalleryZip(9, 'Commit Failure')).rejects.toThrow('permission denied');
+
+    expect(nativeZip.invoke).toHaveBeenCalledWith('commit_zip_export', { exportId: 73 });
+    expect(nativeZip.invoke).toHaveBeenCalledWith('abort_zip_export', { exportId: 73 });
   });
 
   it('uses level:0 compression (images already compressed)', async () => {

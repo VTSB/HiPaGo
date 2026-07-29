@@ -1,10 +1,27 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 use tauri::Manager;
+use tauri_plugin_fs::FsExt;
 use tokio::sync::OnceCell;
 use url::Url;
 
 static CLIENT: OnceCell<bypass_core::BypassClient> = OnceCell::const_new();
+
+struct PendingZipExport {
+    staged: tempfile::NamedTempFile,
+    destination: PathBuf,
+}
+
+#[derive(Default)]
+struct ZipExportState {
+    next_id: AtomicU64,
+    pending: Mutex<HashMap<u64, PendingZipExport>>,
+}
 
 const ALLOWED_HEADERS: &[&str] = &[
     "accept",
@@ -123,6 +140,27 @@ fn image_cache_path(app: &tauri::AppHandle, cache_key: &str) -> Result<PathBuf, 
     Ok(root.join(cache_key))
 }
 
+fn commit_staged_zip(staged: tempfile::NamedTempFile, destination: &Path) -> Result<(), String> {
+    staged
+        .as_file()
+        .sync_all()
+        .map_err(|e| format!("Failed to flush ZIP export: {e}"))?;
+    staged
+        .persist(destination)
+        .map_err(|e| format!("Failed to replace ZIP export destination: {}", e.error))?;
+    Ok(())
+}
+
+async fn run_zip_io<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("ZIP export worker failed: {error}"))?
+}
+
 async fn get_client() -> Result<&'static bypass_core::BypassClient, String> {
     CLIENT
         .get_or_try_init(|| async {
@@ -180,10 +218,103 @@ async fn bypass_download_to_file(
         .map_err(|e| format!("Bypass download failed: {e}"))
 }
 
+#[tauri::command]
+async fn begin_zip_export(app: tauri::AppHandle, destination: String) -> Result<u64, String> {
+    run_zip_io(move || {
+        let destination = PathBuf::from(destination);
+        if !app.fs_scope().is_allowed(&destination) {
+            return Err("ZIP export destination is outside the approved file scope.".into());
+        }
+        let parent = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or_else(|| "ZIP export destination has no parent directory.".to_string())?;
+        let staged = tempfile::Builder::new()
+            .prefix(".hipago-zip-")
+            .suffix(".tmp")
+            .tempfile_in(parent)
+            .map_err(|e| format!("Failed to create ZIP export temporary file: {e}"))?;
+        let state = app.state::<ZipExportState>();
+        let export_id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        state
+            .pending
+            .lock()
+            .map_err(|_| "ZIP export state lock is poisoned.".to_string())?
+            .insert(
+                export_id,
+                PendingZipExport {
+                    staged,
+                    destination,
+                },
+            );
+        Ok(export_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn write_zip_export(
+    app: tauri::AppHandle,
+    export_id: u64,
+    data: Vec<u8>,
+) -> Result<usize, String> {
+    run_zip_io(move || {
+        let state = app.state::<ZipExportState>();
+        let mut pending = state
+            .pending
+            .lock()
+            .map_err(|_| "ZIP export state lock is poisoned.".to_string())?;
+        let export = pending
+            .get_mut(&export_id)
+            .ok_or_else(|| "ZIP export is no longer active.".to_string())?;
+        export
+            .staged
+            .as_file_mut()
+            .write_all(&data)
+            .map_err(|e| format!("Failed to write ZIP export: {e}"))?;
+        Ok(data.len())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn commit_zip_export(app: tauri::AppHandle, export_id: u64) -> Result<(), String> {
+    run_zip_io(move || {
+        let state = app.state::<ZipExportState>();
+        let export = state
+            .pending
+            .lock()
+            .map_err(|_| "ZIP export state lock is poisoned.".to_string())?
+            .remove(&export_id)
+            .ok_or_else(|| "ZIP export is no longer active.".to_string())?;
+        commit_staged_zip(export.staged, &export.destination)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn abort_zip_export(app: tauri::AppHandle, export_id: u64) -> Result<(), String> {
+    run_zip_io(move || {
+        let state = app.state::<ZipExportState>();
+        state
+            .pending
+            .lock()
+            .map_err(|_| "ZIP export state lock is poisoned.".to_string())?
+            .remove(&export_id);
+        Ok(())
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_byte_range, validate_bypass_url, validate_cache_key, validate_headers};
+    use super::{
+        commit_staged_zip, is_valid_byte_range, validate_bypass_url, validate_cache_key,
+        validate_headers,
+    };
     use std::collections::HashMap;
+    use std::fs;
+    use std::io::Write;
 
     #[test]
     fn bypass_url_allows_only_production_hosts_over_https() {
@@ -262,12 +393,30 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn zip_export_commit_atomically_replaces_an_existing_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("gallery.zip");
+        fs::write(&destination, b"old archive").unwrap();
+        let mut staged = tempfile::Builder::new()
+            .prefix(".hipago-zip-")
+            .suffix(".tmp")
+            .tempfile_in(dir.path())
+            .unwrap();
+        staged.write_all(b"new archive").unwrap();
+
+        commit_staged_zip(staged, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"new archive");
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ZipExportState::default())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::new().build())
         // Auto-update from GitHub Releases. Endpoint + pubkey live in
         // tauri.conf.json's plugins.updater block. Signature verification
@@ -275,7 +424,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             bypass_fetch,
-            bypass_download_to_file
+            bypass_download_to_file,
+            begin_zip_export,
+            write_zip_export,
+            commit_zip_export,
+            abort_zip_export
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

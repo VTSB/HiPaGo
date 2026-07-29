@@ -22,6 +22,7 @@ import {
   processQueue,
   useDownloadProgressStore,
 } from '@/lib/store/download-progress';
+import { useZipExportStore } from '@/lib/store/zip-export';
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
@@ -155,6 +156,8 @@ interface LibraryCardProps {
   onExport: (galleryId: number, title: string) => void;
   onRetry: (item: DBDownload) => void;
   isRetrying: boolean;
+  isExporting: boolean;
+  isDeleting: boolean;
   retryProgress: DownloadProgress | null;
   /** Live "auto-retry pending" state from the store, fresher than the DB row on
    *  a just-failed item (the library-list query may not have refetched yet). */
@@ -246,6 +249,8 @@ function LibraryCard({
   onExport,
   onRetry,
   isRetrying,
+  isExporting,
+  isDeleting,
   retryProgress,
   retryOverride,
   isMissingFiles = false,
@@ -389,7 +394,7 @@ function LibraryCard({
       </Link>
 
       {/* Overflow menu — sibling of the Link so taps don't navigate. Hidden mid-retry. */}
-      {!isRetrying && (
+      {!isRetrying && !isExporting && !isDeleting && (
         <div className="absolute right-1.5 top-1.5">
           <OverflowMenu label={t('library.more')} items={menuItems} />
         </div>
@@ -483,9 +488,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_COUNT);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const exportingIdsRef = useRef<Set<number>>(new Set());
+  const activeZipExport = useZipExportStore((state) => state.active);
+  const zipExportNotice = useZipExportStore((state) => state.notice);
+  const deletingGalleryIds = useZipExportStore((state) => state.deletingGalleryIds);
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
   const storeEntries = useDownloadProgressStore((s) => s.entries);
@@ -633,8 +639,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   // Delete handler: remove DB row + DownloadStore files, then invalidate queries
   const handleDelete = useCallback(
     async (item: DBDownload) => {
+      if (useZipExportStore.getState().active?.galleryId === item.galleryId) return;
       if (!window.confirm(t('library.confirmDelete'))) return;
       const galleryId = item.galleryId;
+      if (!useZipExportStore.getState().claimDelete(galleryId)) return;
       setDeleteError(null);
       try {
         const liveEntry = useDownloadProgressStore.getState().entries[galleryId];
@@ -650,10 +658,14 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         await store.deleteGallery(galleryId, { folderName: item.folderName ?? null });
         await deleteDownload(galleryId);
         await useDownloadProgressStore.getState().refreshQueue();
+        const zipExportState = useZipExportStore.getState();
+        if (zipExportState.notice?.galleryId === galleryId) zipExportState.clearNotice();
       } catch (e) {
         console.error('Delete download failed:', e);
         setDeleteError(t('library.deleteFailed'));
         return;
+      } finally {
+        useZipExportStore.getState().releaseDelete(galleryId);
       }
       void queryClient.invalidateQueries({ queryKey: ['library-list'] });
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
@@ -666,22 +678,29 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   // Export a downloaded gallery's stored images back out as a ZIP.
   const handleExport = useCallback(
     async (galleryId: number, title: string) => {
-      if (exportingIdsRef.current.has(galleryId)) return;
-      exportingIdsRef.current.add(galleryId);
-      setExportError(null);
+      const token = useZipExportStore.getState().begin(galleryId, title);
+      if (token === null) return;
       try {
         const { exportGalleryZip } = await import('@/lib/utils/download-zip');
-        await exportGalleryZip(galleryId, title);
+        const result = await exportGalleryZip(galleryId, title, (progress) => {
+          useZipExportStore.getState().updateProgress(token, progress);
+        });
+        const zipExportState = useZipExportStore.getState();
+        if (result === 'cancelled') zipExportState.cancel(token);
+        else zipExportState.finish(token, result);
       } catch (e) {
         console.error('Export failed:', e);
-        setExportError(t('library.exportFailed'));
+        useZipExportStore
+          .getState()
+          .fail(
+            token,
+            e instanceof Error && e.name === 'ZipExportSourceError' ? 'source' : 'storage',
+          );
         void queryClient.invalidateQueries({ queryKey: ['library-list'] });
         void queryClient.invalidateQueries({ queryKey: ['library-search'] });
-      } finally {
-        exportingIdsRef.current.delete(galleryId);
       }
     },
-    [t, queryClient],
+    [queryClient],
   );
 
   // Retry a failed download by RESUMING it THROUGH THE QUEUE: enqueue the row
@@ -755,12 +774,47 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
-      {exportError && (
+      {zipExportNotice?.kind === 'error' && (
         <div
           role="alert"
           className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
         >
-          {exportError}
+          {zipExportNotice.reason === 'source'
+            ? t('library.exportSourceFailed')
+            : t('library.exportFailed')}
+          : {zipExportNotice.title}
+        </div>
+      )}
+
+      {zipExportNotice && zipExportNotice.kind !== 'error' && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+        >
+          {zipExportNotice.kind === 'saved'
+            ? t('library.exportSucceeded')
+            : t('library.exportStarted')}
+          : {zipExportNotice.title}
+        </div>
+      )}
+
+      {activeZipExport && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-4 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300"
+        >
+          <span
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700 dark:border-blue-800 dark:border-t-blue-300"
+          />
+          <span className="min-w-0 truncate">
+            {t('library.exportingZip')}
+            {activeZipExport.total > 0
+              ? ` (${activeZipExport.current}/${activeZipExport.total})`
+              : ''}
+            : {activeZipExport.title}
+          </span>
         </div>
       )}
 
@@ -826,6 +880,8 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 onExport={handleExport}
                 onRetry={handleRetry}
                 isRetrying={isRetrying}
+                isExporting={activeZipExport?.galleryId === item.galleryId}
+                isDeleting={deletingGalleryIds.has(item.galleryId)}
                 retryProgress={isRetrying ? progress : null}
                 retryOverride={
                   entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
@@ -833,7 +889,12 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 isMissingFiles={
                   item.status === 'complete' && completeIntegrity[item.galleryId] === false
                 }
-                canExport={item.status === 'complete' && completeIntegrity[item.galleryId] === true}
+                canExport={
+                  !activeZipExport &&
+                  !deletingGalleryIds.has(item.galleryId) &&
+                  item.status === 'complete' &&
+                  completeIntegrity[item.galleryId] === true
+                }
               />
             );
           })}
