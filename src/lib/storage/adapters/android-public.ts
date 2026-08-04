@@ -238,14 +238,11 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     if (!folder) return false;
     const libDir = await resolveLibraryDir();
     const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
-    try {
-      // stat reports existence + size in one call; a present file with size 0
-      // is a torn write and is reported as missing.
-      const { exists, size } = await PublicLibrary.stat({ path: filePath });
-      return exists && (size ?? 0) > 0;
-    } catch {
-      return false;
-    }
+    // stat reports confirmed absence as `exists: false`. Transport/provider
+    // failures reject and must stay distinguishable from a missing page;
+    // callers use that distinction to avoid destructive repair decisions.
+    const { exists, size } = await PublicLibrary.stat({ path: filePath });
+    return exists && (size ?? 0) > 0;
   }
 
   async allImagesExist(
@@ -257,15 +254,13 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return false;
     const libDir = await resolveLibraryDir();
-    try {
-      const { files } = await PublicLibrary.readdir({ path: `${libDir}/${folder}` });
-      const nonEmptyFiles = new Set(
-        files.filter((entry) => entry.size > 0).map((entry) => entry.name),
-      );
-      return extensions.every((ext, index) => nonEmptyFiles.has(imageFileName(index, ext)));
-    } catch {
-      return false;
-    }
+    // As with imageExists(), a rejected directory read is an indeterminate
+    // storage failure, not proof that every expected page is absent.
+    const { files } = await PublicLibrary.readdir({ path: `${libDir}/${folder}` });
+    const nonEmptyFiles = new Set(
+      files.filter((entry) => entry.size > 0).map((entry) => entry.name),
+    );
+    return extensions.every((ext, index) => nonEmptyFiles.has(imageFileName(index, ext)));
   }
 
   async imageSize(

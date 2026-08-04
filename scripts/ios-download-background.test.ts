@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 const projectFile = resolve('ios/App/App.xcodeproj/project.pbxproj');
 const backgroundTaskFile = resolve('ios/App/App/DownloadBackgroundTask.swift');
+const bypassPluginFile = resolve('ios/App/App/BypassPlugin.swift');
 const downloadWorkerPluginFile = resolve('ios/App/App/DownloadWorkerPlugin.swift');
 const appDelegateFile = resolve('ios/App/App/AppDelegate.swift');
 const infoPlistFile = resolve('ios/App/App/Info.plist');
@@ -45,23 +46,43 @@ describe('iOS native background downloads', () => {
     }
   });
 
-  it('backs off failed background runs before rescheduling', () => {
+  it('backs off failed runs and reports synchronous scheduling failures', () => {
     const source = readFileSync(backgroundTaskFile, 'utf8');
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+    const plist = readFileSync(infoPlistFile, 'utf8');
+    const start = source.indexOf('func scheduleProcessingTask(');
+    const end = source.indexOf('func cancelPendingTask()', start);
+    const scheduler = source.slice(start, end);
 
-    expect(source).toContain(
-      'BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)',
-    );
     expect(source).toContain('scheduleProcessingTask(after: 5 * 60)');
     expect(source).toContain('request.earliestBeginDate = Date(timeIntervalSinceNow: delay)');
+    expect(scheduler).toContain(') -> Bool {');
+    expect(scheduler).toContain('try BGTaskScheduler.shared.submit(request)');
+    expect(scheduler).toContain('isCoalescedPendingRequestError(error)');
+    expect(scheduler).toContain('BGTaskScheduler.Error.Code.tooManyPendingTaskRequests.rawValue');
+    expect(scheduler).toContain('nsError.domain == BGTaskScheduler.errorDomain');
+    expect((scheduler.match(/enqueueGeneration &\+= 1/g) ?? []).length).toBe(2);
+    expect(scheduler).toContain('return false');
+    expect(scheduler).not.toContain('BGTaskScheduler.shared.cancel(');
+    expect(plugin).toContain('call.reject("background task scheduling failed")');
+    const permitted = plist.match(
+      /<key>BGTaskSchedulerPermittedIdentifiers<\/key>\s*<array>([\s\S]*?)<\/array>/,
+    )?.[1];
+    expect(permitted).toContain('<string>com.hipago.app.download</string>');
+    expect(permitted?.match(/<string>/g)).toHaveLength(1);
   });
 
-  it('refreshes the manifest when background resume skips an existing page', () => {
+  it('resume-skips only pages committed by an exact manifest prefix', () => {
     const source = readFileSync(backgroundTaskFile, 'utf8');
 
-    expect(source).toContain('if isNonEmptyFile(dest) {');
-    expect(source).toContain(
-      'writeManifest(galleryDir: galleryDir, exts: Array(exts.prefix(i + 1)))',
-    );
+    expect(source).toContain('switch readCommittedManifest(');
+    expect(source).toContain('if i < committedCount && isNonEmptyFile(dest) {');
+    expect(source).toContain('manifest.count <= pages.count');
+    expect(source).toContain('ext == pages[index].ext');
+    expect(source).not.toContain('if isNonEmptyFile(dest) {');
+    expect(source).toContain('let manifest = writeManifest(');
+    expect(source).toContain('run: order.run,');
+    expect(source).toContain('exts: Array(exts.prefix(i + 1))');
   });
 
   it('keeps the BGProcessingTask identifier aligned across Swift and Info.plist', () => {
@@ -97,13 +118,210 @@ describe('iOS native background downloads', () => {
     const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
 
     expect(plugin).toContain('public let jsName = "DownloadWorker"');
-    for (const method of ['writeWorkOrder', 'enqueue', 'cancel']) {
+    for (const method of ['writeWorkOrder', 'enqueue', 'cancel', 'getProgress', 'getCurrentRun']) {
       expect(plugin).toContain(`CAPPluginMethod(name: "${method}"`);
       expect(plugin).toContain(`@objc func ${method}`);
     }
     expect(plugin).toContain('DownloadBackgroundTask.shared.handoffDir()');
-    expect(plugin).toContain('DownloadBackgroundTask.shared.scheduleProcessingTask()');
+    expect(plugin).toContain('DownloadBackgroundTask.shared.scheduleProcessingTask(');
+    expect(plugin).toContain('recordingPluginEnqueue: true');
     expect(plugin).toContain('DownloadBackgroundTask.shared.cancelPendingTask()');
-    expect(plugin).toContain('work-order galleryId does not match filename');
+    expect(plugin).toContain('work-order payload is invalid or does not match request');
+  });
+
+  it('fails closed across every runId mutation, cleanup, and polling boundary', () => {
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+
+    expect(plugin).toContain('let runId = call.getString("runId")');
+    expect(plugin).toContain('validateWorkOrderPayload(');
+    expect(plugin).toContain('case .malformed, .unreadable(_):');
+    expect(plugin).toContain('"cancelled": cancelled');
+    expect(plugin).toContain('"stale": stale');
+    expect(plugin).toContain('if resolution.conflict { payload["conflict"] = true }');
+    expect(plugin).toContain('if resolution.unknown { payload["unknown"] = true }');
+    expect(plugin).toContain('private func pendingOrderCount() throws -> Int');
+
+    expect(task).toContain('let run: NativeDownloadRunIdentity');
+    expect(task).toContain('private func publishPermission(');
+    expect(task).toContain('private func publishPage(');
+    expect(task).toContain('private func writeManifest(');
+    expect(task).toContain('private func finishRunIfCurrent(');
+    expect(task).toContain('switch NativeDownloadRunIdentity.progressFileState(at: progress)');
+    expect(task).not.toContain('private func deleteMalformedOrderIfStillMalformed(');
+  });
+
+  it('validates and compare-and-sets work orders before touching native state', () => {
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+    const start = plugin.indexOf('@objc func writeWorkOrder');
+    const end = plugin.indexOf('@objc func enqueue', start);
+    const method = plugin.slice(start, end);
+    const payloadValidation = method.indexOf('validateWorkOrderPayload(');
+    const stateRead = method.indexOf('switch readNativeJSONDocument(order)');
+    const byteCheck = method.indexOf('existing.data == data');
+    const legacyCheck = method.indexOf('isLegacyOrderDocument(');
+    const progressRemoval = method.indexOf('removeReadableProgressForNewRun(at: progress)');
+    const orderWrite = method.indexOf('try data.write(to: order, options: .atomic)');
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(method).toContain(
+      'let publication = try runs.withLock { () throws -> WorkOrderPublication in',
+    );
+    expect(payloadValidation).toBeGreaterThanOrEqual(0);
+    expect(stateRead).toBeGreaterThan(payloadValidation);
+    expect(byteCheck).toBeGreaterThan(stateRead);
+    expect(legacyCheck).toBeGreaterThan(stateRead);
+    expect(method).toContain('call.reject("stale runId")');
+    expect(method).toContain('case .malformed, .unreadable(_):');
+    expect(method).toContain('case .legacyReplace:');
+    expect(progressRemoval).toBeGreaterThan(byteCheck);
+    expect(orderWrite).toBeGreaterThan(progressRemoval);
+  });
+
+  it('enforces the native URL, header, extension, index, and relPath policy', () => {
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+
+    for (const host of ['hitomi.la', 'tagindex.hitomi.la', '.gold-usergeneratedcontent.net']) {
+      expect(task).toContain(host);
+    }
+    expect(task).toContain('components.scheme?.lowercased() == "https"');
+    expect(task).toContain('components.user == nil');
+    expect(task).toContain('components.password == nil');
+    expect(task).toContain('components.fragment == nil');
+    expect(task).toContain('(components.port == nil || components.port == 443)');
+    expect(task).toContain('allowedHeaders.contains(lowerName)');
+    expect(task).toContain('value.utf8.count <= maximumHeaderValueLength');
+    expect(task).toContain('bounds.allSatisfy({ bound in');
+    expect(task).toContain('(48...57).contains($0.value)');
+    expect(task).toContain('exactPageIndex(rawPage["index"], expected: expectedIndex)');
+    expect(task).toContain('NativeDownloadRequestPolicy.isAllowedBypassURL(url)');
+    expect(task).toContain('NativeDownloadRequestPolicy.isValidExtension(ext)');
+    expect(task).toContain('relPath == NativeDownloadRequestPolicy.expectedRelPath(');
+    expect(task).toContain('NativeDownloadRequestPolicy.validateHeaders(rawPage["headers"])');
+    expect(task).not.toContain('rawPages.compactMap');
+  });
+
+  it('gates every public iOS bypass sink behind the shared native request policy', () => {
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+    const plugin = readFileSync(bypassPluginFile, 'utf8');
+    const fetchStart = plugin.indexOf('@objc func fetch');
+    const downloadStart = plugin.indexOf('@objc func downloadToFile');
+    const fetchMethod = plugin.slice(fetchStart, downloadStart);
+    const downloadMethod = plugin.slice(downloadStart);
+
+    expect(fetchStart).toBeGreaterThanOrEqual(0);
+    expect(downloadStart).toBeGreaterThan(fetchStart);
+    const fetchURLGate = fetchMethod.indexOf('NativeDownloadRequestPolicy.isAllowedBypassURL(url)');
+    const fetchHeaderGate = fetchMethod.indexOf('NativeDownloadRequestPolicy.validateHeaders(');
+    const fetchSink = fetchMethod.indexOf('bypassFetch(url: url');
+    const downloadPathGate = downloadMethod.indexOf(
+      'NativeDownloadRequestPolicy.resolveImageCacheDestination(path)',
+    );
+    const downloadSink = downloadMethod.indexOf('bypassDownloadToFile(');
+    expect(fetchURLGate).toBeGreaterThanOrEqual(0);
+    expect(fetchHeaderGate).toBeGreaterThanOrEqual(0);
+    expect(fetchSink).toBeGreaterThan(fetchURLGate);
+    expect(fetchSink).toBeGreaterThan(fetchHeaderGate);
+    expect(downloadPathGate).toBeGreaterThanOrEqual(0);
+    expect(downloadSink).toBeGreaterThan(downloadPathGate);
+    expect(downloadMethod).toContain('destPath: destinationPath');
+    expect(downloadMethod).not.toContain('destPath: path');
+
+    // HTTP, userinfo/fragment/port tricks, apex/suffix confusion, and forbidden
+    // credential headers are rejected by the shared policy used above.
+    expect(task).toContain('components.scheme?.lowercased() == "https"');
+    expect(task).toContain('components.user == nil');
+    expect(task).toContain('components.password == nil');
+    expect(task).toContain('components.fragment == nil');
+    expect(task).toContain('(components.port == nil || components.port == 443)');
+    expect(task).toContain('host.hasSuffix(".gold-usergeneratedcontent.net")');
+    expect(task).toContain('host != "gold-usergeneratedcontent.net"');
+    expect(task).not.toContain('host.hasSuffix(".hitomi.la")');
+    const allowedHeaders = task.slice(
+      task.indexOf('private static let allowedHeaders'),
+      task.indexOf('static func isAllowedBypassURL'),
+    );
+    expect(allowedHeaders).not.toMatch(/authorization|cookie|proxy-authorization/i);
+    expect(task).toContain('allowedHeaders.contains(lowerName)');
+    expect(task).toContain('normalized[lowerName] == nil');
+    expect(task).toContain('!value.contains("\\r")');
+    expect(task).toContain('!value.contains("\\n")');
+
+    // Arbitrary absolute paths, nested traversal, and symlink escapes cannot
+    // reach the Rust file sink: only one canonical image-cache child is returned.
+    expect(task).toContain('(rawPath as NSString).isAbsolutePath');
+    expect(task.match(/\.resolvingSymlinksInPath\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(task).toContain('.appendingPathComponent("image-cache", isDirectory: true)');
+    expect(task).toContain('destination.deletingLastPathComponent().path == root.path');
+    expect(task).toContain('isValidCacheKey(cacheKey)');
+  });
+
+  it('classifies a legacy-only queue as parked and never reschedules it', () => {
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+    const runStart = task.indexOf('func run(task: BGProcessingTask)');
+    const runEnd = task.indexOf('func stopForForeground()', runStart);
+    const runMethod = task.slice(runStart, runEnd);
+    const dispositionStart = task.indexOf('func pendingQueueDisposition()');
+    const dispositionEnd = task.indexOf('// MARK: - Drain loop', dispositionStart);
+    const dispositionMethod = task.slice(dispositionStart, dispositionEnd);
+    const drainStart = task.indexOf('func drainQueue(shouldStop: () -> Bool)');
+    const drainEnd = task.indexOf('private enum GalleryOutcome', drainStart);
+    const drainMethod = task.slice(drainStart, drainEnd);
+
+    expect(plugin).toContain('let legacy: Bool');
+    expect(plugin).toContain('static let legacyState = CurrentRunResolution(');
+    expect(plugin).toContain('if resolution.legacy { payload["legacy"] = true }');
+    expect(plugin).toContain('case .legacy:');
+    expect(plugin).toContain('return .legacyState');
+
+    expect(runStart).toBeGreaterThanOrEqual(0);
+    expect(runEnd).toBeGreaterThan(runStart);
+    expect(runMethod).toContain('let drainResult = self.drainQueue(');
+    expect(runMethod).toContain('switch self.pendingQueueDisposition()');
+    expect(runMethod).toMatch(/case \.actionable:\s+if !self\.scheduleProcessingTask\(\)/);
+    expect(runMethod).toMatch(/case \.parkedOnly, \.empty:\s+self\.cancelPendingTask\(\)/);
+    expect(runMethod).not.toContain('pendingOrderFilesState()');
+
+    expect(dispositionStart).toBeGreaterThanOrEqual(0);
+    expect(dispositionEnd).toBeGreaterThan(dispositionStart);
+    expect(dispositionMethod).toContain('hasActionableOrder = true');
+    expect(dispositionMethod).toContain('hasParkedLegacy = true');
+    expect(dispositionMethod).toContain('if hasActionableOrder { return .actionable }');
+    expect(dispositionMethod).toContain('if hasParkedLegacy { return .parkedOnly }');
+
+    expect(drainStart).toBeGreaterThanOrEqual(0);
+    expect(drainEnd).toBeGreaterThan(drainStart);
+    expect(drainMethod).toContain('-> QueueDrainResult');
+    expect(drainMethod).toContain('hasParkedLegacy = true');
+    expect(drainMethod).toContain('return hasParkedLegacy ? .parkedOnly : .drained');
+    expect(drainMethod).not.toContain('return false');
+  });
+
+  it('distinguishes absent, malformed, and unreadable native state', () => {
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+
+    expect(task).toContain('enum NativeFileReadState<Value>');
+    expect(task).toContain('case unreadable(NSError)');
+    expect(task).toContain('func pendingOrderFilesState() -> PendingOrderFilesState');
+    expect(task).toContain('queue enumeration failed:');
+    expect(plugin).toContain('private enum ProgressIdentityState');
+    expect(plugin).toContain('return .unknownState');
+    expect(plugin).toContain(
+      'throw pluginStateError("work-order state is unreadable or malformed")',
+    );
+  });
+
+  it('prevents a finishing old BG task from cancelling or delaying a newer enqueue', () => {
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+    const appDelegate = readFileSync(appDelegateFile, 'utf8');
+
+    expect(task).toContain('private var enqueueGeneration: UInt64 = 0');
+    expect(task).toContain('self.enqueueGeneration == observedEnqueueGeneration {');
+    expect(task).toContain('if recordingPluginEnqueue { enqueueGeneration &+= 1 }');
+    expect(task).toContain('func stopForForeground()');
+    expect(appDelegate).toContain('DownloadBackgroundTask.shared.stopForForeground()');
   });
 });

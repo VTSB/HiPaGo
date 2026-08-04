@@ -1,61 +1,89 @@
 /**
- * Capacitor plugin wrapper for DownloadWorkerPlugin — the native Android
- * WorkManager background download worker (Task C).
+ * Shared Capacitor contract for the native Android WorkManager downloader and
+ * the iOS BGProcessingTask backstop.
  *
  * On Android the worker is the SOLE downloader. TS resolves a gallery's
  * work-order, hands it off to the native side via {@link writeWorkOrder} (so TS
  * never needs raw access to the app's filesDir), then schedules the worker via
  * {@link enqueue}. One unique, connected-network worker chain drains pending
  * work-orders over Wi-Fi, ethernet, or cellular, surviving app background/kill
- * with a foreground notification.
- *
- * {@link cancel} drops one gallery's pending work-order and stops the worker when
- * the queue empties.
- *
- * This plugin is implemented ONLY on Android; callers must gate on isAndroid()
- * before invoking it (web/Tauri/iOS keep the in-process TS downloader).
+ * with a foreground notification. On iOS the same generation-aware contract
+ * schedules a best-effort backstop while the in-process TS downloader remains
+ * primary. Web and Tauri do not register this plugin.
  */
 import { registerPlugin } from '@capacitor/core';
+
+export interface NativeRunLookup {
+  runId: string | null;
+  /** Order and progress both exist but identify different valid generations. */
+  conflict?: boolean;
+  /** Native files exist, but their identity cannot be read or validated safely. */
+  unknown?: boolean;
+  /**
+   * A strictly validated pre-runId work order is pending one-time replacement.
+   * This is not proof of absence: generic cancel/finalize paths must keep their
+   * ownership barrier, while restart recovery may requeue a DB row that also has
+   * no run token so writeWorkOrder can perform the guarded legacy replacement.
+   */
+  legacy?: boolean;
+}
+
+/** True when native state exists but cannot safely prove one run or absence. */
+export function isNativeRunLookupUncertain(result: NativeRunLookup): boolean {
+  return result.conflict === true || result.unknown === true;
+}
 
 export interface DownloadWorkerPlugin {
   /**
    * Persist a work-order JSON to the native handoff dir
-   * (filesDir/dl-queue/<galleryId>.json). `json` is the already-serialized
+   * (`dl-queue/<galleryId>.json` in app-private storage). `json` is the serialized
    * {@link import('@/lib/utils/work-order').WorkOrder}. Does NOT schedule the
    * worker — call {@link enqueue} after.
    */
-  writeWorkOrder(options: { galleryId: string; json: string }): Promise<void>;
+  writeWorkOrder(options: { galleryId: string; runId: string; json: string }): Promise<void>;
 
   /**
-   * Schedule the unique, CONNECTED-constrained download worker chain
-   * (ExistingWorkPolicy.APPEND_OR_REPLACE). The work-order file is assumed
-   * already written. Appending a follow-up pass closes the race where a new
-   * work-order lands while the current worker run is already finishing.
+   * Schedule the platform's native background drain. The work-order file is
+   * assumed already written and must still belong to this runId.
    */
-  enqueue(options: { galleryId: string }): Promise<void>;
+  enqueue(options: { galleryId: string; runId: string }): Promise<void>;
 
   /**
-   * Cancel one gallery's pending download: removes its work-order file and, when
-   * none remain, cancels the unique work. Resolves the count of remaining
-   * work-orders.
+   * Cancel one concrete gallery attempt. A late cancellation is a no-op when the
+   * pathname already belongs to another runId. When no work-orders remain, native
+   * also cancels the unique work chain.
    */
-  cancel(options: { galleryId: string }): Promise<{ remaining: number }>;
+  cancel(options: { galleryId: string; runId: string }): Promise<{
+    runId: string;
+    cancelled: boolean;
+    stale: boolean;
+    remaining: number;
+  }>;
 
   /**
    * Read one gallery's live download progress, published by the worker to
-   * `filesDir/dl-progress/<galleryId>.json`. Resolves `{current, total}` while the
-   * gallery is actively downloading; resolves `{current: null}` (a sentinel the TS
-   * poller maps to `null`) when no progress file exists (not started, or already
-   * completed/cleared). A native terminal failure is reported as
-   * `{current: null, error}` so the foreground app can fail/retry the DB row.
-   *
-   * Android-only: the native worker is the sole downloader on Android. iOS omits
-   * this method (its foreground download is already in-process), so the TS poller
-   * is isAndroid-gated and never calls it on iOS.
+   * app-private `dl-progress/<galleryId>.json`. Native returns progress only when its
+   * embedded runId matches the requested attempt. A replacement is returned as
+   * `{current: null, stale: true, runId}`; absence/completion is `{current: null}`.
+   * A native terminal failure is `{current: null, error}`.
    */
   getProgress(options: {
     galleryId: string;
-  }): Promise<{ current: number; total: number } | { current: null; error?: string }>;
+    runId: string;
+  }): Promise<
+    | { runId: string; current: number; total: number; stale?: false }
+    | { runId: string; current: null; error?: string; stale?: boolean }
+  >;
+
+  /**
+   * Read-only identity discovery for restoring native polling after the JS
+   * runtime restarts. A bare `{runId:null}` is confirmed absence. Conflicting
+   * identities return `conflict:true`; unreadable or otherwise indeterminate
+   * native state returns `unknown:true`. A confirmed pre-runId order returns
+   * `legacy:true`. Callers must fail closed for conflict/unknown and may replace
+   * legacy state only from the explicit restart-upgrade path.
+   */
+  getCurrentRun(options: { galleryId: string }): Promise<NativeRunLookup>;
 }
 
 export const DownloadWorker = registerPlugin<DownloadWorkerPlugin>('DownloadWorker');

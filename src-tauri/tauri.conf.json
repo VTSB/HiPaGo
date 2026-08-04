@@ -23,17 +23,17 @@
       "csp": {
         "default-src": "'self' customprotocol: asset:",
         "connect-src": "ipc: http://ipc.localhost https://api.github.com https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
-        "font-src": "'self' data: https://cdn.jsdelivr.net",
+        "font-src": "'self' data:",
         "img-src": "'self' asset: http://asset.localhost blob: data: https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
-        "style-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self'"
       },
       "devCsp": {
         "default-src": "'self' customprotocol: asset: http://localhost:*",
         "connect-src": "ipc: http://ipc.localhost http://localhost:* ws://localhost:* https://api.github.com https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
-        "font-src": "'self' data: https://cdn.jsdelivr.net",
+        "font-src": "'self' data:",
         "img-src": "'self' asset: http://asset.localhost blob: data: http://localhost:* https://hitomi.la https://*.hitomi.la https://*.gold-usergeneratedcontent.net",
-        "style-src": "'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "style-src": "'self' 'unsafe-inline'",
         "script-src": "'self' 'unsafe-eval' http://localhost:*"
       },
       "assetProtocol": {

@@ -1,9 +1,10 @@
 import type { DBDownload, DownloadStatus } from '@/lib/db/schema';
-import { getDownload, listDownloads, upsertDownload } from '@/lib/db/download';
+import { getDownload, listDownloads, restoreDownloadIfUnchanged } from '@/lib/db/download';
 import { PublicLibrary } from '@/lib/plugins/publicLibrary';
 import {
   hadPersistedSettingsAtBoot,
   migrateSettings,
+  restoreSettingsFromPublicBackup,
   useSettingsStore,
 } from '@/lib/store/settings';
 import { isAndroid } from '@/lib/utils/platform';
@@ -23,6 +24,8 @@ const SETTINGS_FILE_MAX_BYTES = 256 * 1024;
 const DOWNLOADS_FILE_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_DOWNLOAD_ROWS = 50_000;
 const MAX_TAG_ITEMS = 5_000;
+const WRITE_RETRY_INITIAL_MS = 1_000;
+const WRITE_RETRY_MAX_MS = 30_000;
 
 type Theme = 'light' | 'dark';
 type ReaderMode = 'page' | 'scroll';
@@ -382,11 +385,29 @@ function base64ToText(value: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+class BackupTransportError extends Error {
+  constructor(operation: 'stat' | 'read', path: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(`backup ${operation} failed for ${path}: ${detail}`);
+    this.name = 'BackupTransportError';
+  }
+}
+
 async function readText(path: string, maxBytes: number): Promise<string | null> {
-  const stat = await PublicLibrary.stat({ path });
+  let stat: Awaited<ReturnType<typeof PublicLibrary.stat>>;
+  try {
+    stat = await PublicLibrary.stat({ path });
+  } catch (error) {
+    throw new BackupTransportError('stat', path, error);
+  }
   if (!stat.exists) return null;
   if (stat.size <= 0 || stat.size > maxBytes) throw new Error(`invalid backup size: ${path}`);
-  const { dataBase64 } = await PublicLibrary.readFile({ path });
+  let dataBase64: string;
+  try {
+    ({ dataBase64 } = await PublicLibrary.readFile({ path }));
+  } catch (error) {
+    throw new BackupTransportError('read', path, error);
+  }
   return base64ToText(dataBase64);
 }
 
@@ -405,7 +426,11 @@ async function readLatestEnvelope<T>(
       const value = parse(text);
       if (value) candidates.push({ path, value });
       else invalidCopies++;
-    } catch {
+    } catch (error) {
+      // A transport failure leaves this copy's generation unknown. It may be
+      // newer than every readable fallback, so restoring or publishing from an
+      // older copy would risk replacing newer user data with stale state.
+      if (error instanceof BackupTransportError) throw error;
       invalidCopies++;
     }
   }
@@ -421,7 +446,7 @@ async function selectedTreeUri(): Promise<string | null> {
 }
 
 async function currentTreeUri(): Promise<string | null> {
-  return selectedTreeUri().catch(() => null);
+  return selectedTreeUri();
 }
 
 async function assertSameTree(expectedTreeUri: string): Promise<void> {
@@ -617,7 +642,7 @@ async function restoreCatalogDownloads(
       }
       const targetPages = Math.max(entry.pageCount, exts.length);
       const complete = filesComplete && exts.length === targetPages;
-      await upsertDownload({
+      const restored = await restoreDownloadIfUnchanged(null, {
         galleryId: entry.galleryId,
         title: entry.title || folder.title,
         thumbnail: entry.thumbnail,
@@ -633,6 +658,13 @@ async function restoreCatalogDownloads(
         retryCount: 0,
         nextRetryAt: null,
       });
+      if (!restored) {
+        // A queue/retry/native lifecycle appeared while the public tree was
+        // being scanned. It owns the row; a startup catalog snapshot must not
+        // erase its status, queue position, or native run token.
+        skipped++;
+        continue;
+      }
       if (complete) imported++;
       else partial++;
     } catch (error) {
@@ -653,6 +685,7 @@ let writesBlocked = true;
 let dirtyDownloads = false;
 let dirtySettings = false;
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
+let writeRetryDelayMs = WRITE_RETRY_INITIAL_MS;
 let flushRunning: Promise<void> | null = null;
 let restoreRunning: Promise<PublicBackupRestoreResult> | null = null;
 let settingsUnsubscribe: (() => void) | null = null;
@@ -678,11 +711,33 @@ function scheduleWrite(downloads: boolean, settings: boolean): void {
   }, WRITE_DEBOUNCE_MS);
 }
 
-async function runFlush(allowDuringTreeSwitch = false): Promise<void> {
+function scheduleWriteRetry(): void {
+  if (!syncStarted || restoring || treeSwitching || writesBlocked || writeTimer !== null) return;
+  const delay = writeRetryDelayMs;
+  writeRetryDelayMs = Math.min(writeRetryDelayMs * 2, WRITE_RETRY_MAX_MS);
+  writeTimer = setTimeout(() => {
+    writeTimer = null;
+    void flushPublicBackupNow();
+  }, delay);
+}
+
+async function runFlush(allowDuringTreeSwitch = false, strict = false): Promise<void> {
   if (!syncStarted || restoring || writesBlocked || (treeSwitching && !allowDuringTreeSwitch)) {
     return;
   }
-  const treeUri = await currentTreeUri();
+  let treeUri: string | null;
+  try {
+    treeUri = await currentTreeUri();
+  } catch (error) {
+    // A failed native lookup is indeterminate, not proof that no tree is
+    // selected. Keep the dirty flags intact and retry just like a write/read
+    // transport failure. The tree-picker path requests a strict flush so it
+    // can stop before abandoning an unflushed old-tree backup.
+    console.warn('[backup] public backup tree lookup failed:', error);
+    if (strict) throw error;
+    scheduleWriteRetry();
+    return;
+  }
   if (!treeUri) return;
 
   while ((dirtyDownloads || dirtySettings) && !restoring && !writesBlocked) {
@@ -698,9 +753,12 @@ async function runFlush(allowDuringTreeSwitch = false): Promise<void> {
       dirtyDownloads ||= writeDownloads;
       dirtySettings ||= writeSettings;
       console.warn('[backup] public backup write failed:', error);
+      if (strict) throw error;
+      scheduleWriteRetry();
       return;
     }
   }
+  writeRetryDelayMs = WRITE_RETRY_INITIAL_MS;
 }
 
 export function startPublicBackupSync(): void {
@@ -743,7 +801,7 @@ export async function preparePublicBackupForTreeSelection(): Promise<void> {
   if (restoreRunning) await restoreRunning.catch(() => undefined);
   if (flushRunning) await flushRunning;
   if (syncStarted) {
-    flushRunning = runFlush(true).finally(() => {
+    flushRunning = runFlush(true, true).finally(() => {
       flushRunning = null;
     });
     await flushRunning;
@@ -806,8 +864,9 @@ export async function restorePublicBackup(
           (value) => value.generation,
         );
         if (latestSettings) {
-          useSettingsStore.setState(latestSettings.value.settings);
-          settingsRestored = true;
+          settingsRestored = restoreSettingsFromPublicBackup(latestSettings.value.settings, {
+            authoritative: options.restoreSettings === true,
+          });
         }
       }
 
@@ -891,6 +950,7 @@ export function __resetPublicBackupForTests(): void {
   writesBlocked = true;
   dirtyDownloads = false;
   dirtySettings = false;
+  writeRetryDelayMs = WRITE_RETRY_INITIAL_MS;
   flushRunning = null;
   restoreRunning = null;
   previousSettings = '';

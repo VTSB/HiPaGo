@@ -155,6 +155,7 @@ function mockDetail(files: GalleryFile[] = [], block: GalleryBlock = mockBlock) 
     files,
     isLoading: false,
     error: null,
+    retry: vi.fn(),
   });
 }
 

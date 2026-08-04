@@ -259,6 +259,17 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
     expect(await store.imageExists(100, 2, 'jpg')).toBe(false);
   });
 
+  it('imageExists propagates a storage transport error', async () => {
+    await store.ensureGallery(100, 'Transport Error');
+    fakeLib.stat = async () => {
+      throw new Error('temporary page stat failure');
+    };
+
+    await expect(store.imageExists(100, 0, 'webp')).rejects.toThrow(
+      'temporary page stat failure',
+    );
+  });
+
   it('imageSize returns the stored byte size and null for a missing page', async () => {
     await store.putImage(100, 3, makeBytes(12), 'webp');
     expect(await store.imageSize(100, 3, 'webp')).toBe(12);
@@ -298,6 +309,17 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
     await store.putImage(112, 1, makeBytes(0), 'jpg');
 
     await expect(store.allImagesExist(112, ['webp', 'jpg'])).resolves.toBe(false);
+  });
+
+  it('allImagesExist propagates a directory transport error', async () => {
+    await store.ensureGallery(113, 'Transport Error');
+    fakeLib.readdir = async () => {
+      throw new Error('temporary directory failure');
+    };
+
+    await expect(store.allImagesExist(113, ['webp'])).rejects.toThrow(
+      'temporary directory failure',
+    );
   });
 
   it('putImage overwrites an existing file', async () => {

@@ -113,6 +113,30 @@ CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt);
 CREATE INDEX IF NOT EXISTS idx_download_status ON download(status);
 `;
 
+// Latest pre-v8 shape: retry/queue columns and their index exist, but the
+// native attempt ownership token has not been added yet. user_version=7.
+const V7_DOWNLOAD = `
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT,
+  lastError TEXT,
+  queuePosition INTEGER,
+  retryCount INTEGER,
+  nextRetryAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt);
+CREATE INDEX IF NOT EXISTS idx_download_status ON download(status);
+CREATE INDEX IF NOT EXISTS idx_download_queue ON download(status, queuePosition);
+`;
+
 interface ColInfo {
   name: string;
   type: string;
@@ -195,6 +219,7 @@ describe('schema drift: fresh install and upgrades converge', () => {
       expect(dump).toContain('"name":"queuePosition"');
       expect(dump).toContain('"name":"idx_download_queue"');
       expect(dump).toContain('"name":"retryCount"');
+      expect(dump).toContain('"name":"nativeRunId"');
     } finally {
       await a.close();
     }
@@ -218,6 +243,12 @@ describe('schema drift: fresh install and upgrades converge', () => {
     // migrations run would throw here.
     const fresh = await bootSchema(null, 0);
     const upgraded = await bootSchema(V5_DOWNLOAD, 5);
+    expect(upgraded).toBe(fresh);
+  });
+
+  it('upgrade from a v7 download table converges to the fresh-install schema', async () => {
+    const fresh = await bootSchema(null, 0);
+    const upgraded = await bootSchema(V7_DOWNLOAD, 7);
     expect(upgraded).toBe(fresh);
   });
 });

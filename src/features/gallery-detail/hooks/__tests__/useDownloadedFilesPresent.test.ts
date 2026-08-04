@@ -10,8 +10,11 @@ vi.mock('@/lib/db/download', () => ({
   getDownload: (id: number) => mockGetDownload(id),
 }));
 vi.mock('@/lib/utils/download-zip', () => ({
-  hasCompleteDownloadedGallery: (id: number, expectedPageCount: number) =>
-    mockHasCompleteDownloadedGallery(id, expectedPageCount),
+  hasCompleteDownloadedGallery: (
+    id: number,
+    expectedPageCount: number,
+    options?: { folderName?: string | null },
+  ) => mockHasCompleteDownloadedGallery(id, expectedPageCount, options),
 }));
 
 // Controllable store: the hook only reads it via primitive selectors.
@@ -22,7 +25,11 @@ vi.mock('@/lib/store/download-progress', () => ({
 
 import { useDownloadedFilesPresent } from '../useDownloadedFilesPresent';
 
-function makeRow(status: DBDownload['status'], pageCount = 3): DBDownload {
+function makeRow(
+  status: DBDownload['status'],
+  pageCount = 3,
+  folderName: string | null = null,
+): DBDownload {
   return {
     galleryId: 42,
     title: 'T',
@@ -32,6 +39,7 @@ function makeRow(status: DBDownload['status'], pageCount = 3): DBDownload {
     totalBytes: 0,
     downloadedAt: new Date().toISOString(),
     status,
+    folderName,
   };
 }
 beforeEach(() => {
@@ -53,12 +61,14 @@ describe('useDownloadedFilesPresent', () => {
 
   it('downloaded flag false but complete DB row has missing files → missing', async () => {
     storeState.downloaded = { 42: false };
-    mockGetDownload.mockResolvedValue(makeRow('complete', 3));
+    mockGetDownload.mockResolvedValue(makeRow('complete', 3, '42 Exact Folder'));
     mockHasCompleteDownloadedGallery.mockResolvedValue(false);
     const { result } = renderHook(() => useDownloadedFilesPresent(42));
     await waitFor(() => expect(result.current.checking).toBe(false));
     expect(result.current.filesMissing).toBe(true);
-    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 3);
+    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 3, {
+      folderName: '42 Exact Folder',
+    });
   });
 
   it('complete + manifest covers all pages → not missing', async () => {
@@ -67,7 +77,9 @@ describe('useDownloadedFilesPresent', () => {
     const { result } = renderHook(() => useDownloadedFilesPresent(42));
     await waitFor(() => expect(result.current.checking).toBe(false));
     expect(result.current.filesMissing).toBe(false);
-    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 3);
+    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 3, {
+      folderName: null,
+    });
   });
 
   it('complete + empty manifest → missing', async () => {

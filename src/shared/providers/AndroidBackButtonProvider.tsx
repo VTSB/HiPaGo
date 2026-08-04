@@ -14,6 +14,18 @@ function isRootPath(pathname: string): boolean {
   return pathname === '' || pathname === '/' || pathname === '/index.html';
 }
 
+function readerDetailHref(pathname: string, search: string): string | null {
+  const dynamicReader = pathname.match(/^\/gallery\/(\d+)\/reader\/?$/);
+  if (dynamicReader) return `/gallery/${dynamicReader[1]}`;
+
+  if (pathname === '/reader' || pathname === '/reader/') {
+    const galleryId = new URLSearchParams(search).get('id');
+    if (galleryId && /^\d+$/.test(galleryId)) return `/gallery?id=${galleryId}`;
+  }
+
+  return null;
+}
+
 function isSameOriginUrl(url: string | URL | null | undefined): boolean {
   if (url == null) return true;
   try {
@@ -51,7 +63,9 @@ export function AndroidBackButtonProvider({ children }: { children: ReactNode })
       }
 
       if (!isRootPath(window.location.pathname)) {
-        originalReplaceState.call(window.history, window.history.state, '', '/');
+        const fallbackHref =
+          readerDetailHref(window.location.pathname, window.location.search) ?? '/';
+        originalReplaceState.call(window.history, window.history.state, '', fallbackHref);
         setDepth(0);
         window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
         return true;

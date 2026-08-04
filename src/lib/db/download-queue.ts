@@ -11,10 +11,11 @@
  */
 import { ensureDb, persistDb } from './adapter';
 import type { DBDownload } from './schema';
-import { upsertDownload, getDownload, serializeTags } from './download';
+import { getDownload, serializeTags } from './download';
+import { notifyDownloadCatalogChanged } from '@/lib/storage/public-backup-events';
 
 const SELECT_COLS =
-  'galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt';
+  'galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt, nativeRunId';
 
 /** The metadata needed to create a queue entry for a gallery. */
 export interface EnqueueMeta {
@@ -64,9 +65,7 @@ async function maxQueuePosition(): Promise<number | null> {
 export async function enqueueDownload(
   meta: EnqueueMeta,
   opts: { userInitiated?: boolean; keepRetryState?: boolean; queuePosition?: number } = {},
-): Promise<number> {
-  const existing = await getDownload(meta.galleryId);
-
+): Promise<number | null> {
   const position =
     opts.queuePosition !== undefined
       ? opts.queuePosition
@@ -74,28 +73,41 @@ export async function enqueueDownload(
         ? ((await minQueuePosition()) ?? 1) - 1
         : ((await maxQueuePosition()) ?? 0) + 1;
 
-  await upsertDownload({
-    galleryId: meta.galleryId,
-    title: meta.title,
-    thumbnail: meta.thumbnail,
-    tags: serializeTags(meta.tags),
-    // Preserve any partial progress from a prior attempt so the processor can
-    // resume rather than restart.
-    pageCount: existing?.pageCount ?? 0,
-    totalBytes: existing?.totalBytes ?? 0,
-    downloadedAt: existing?.downloadedAt ?? new Date().toISOString(),
-    status: 'queued',
-    folderName: existing?.folderName ?? null,
-    migratedAt: existing?.migratedAt ?? null,
-    // Clear any stale failure reason when (re-)queuing.
-    lastError: null,
-    queuePosition: position,
-    // Auto-retry bookkeeping: keep the escalating-backoff counter for an
-    // automatic requeue; reset it (fresh attempts) for a manual retry / plain
-    // enqueue. nextRetryAt is always cleared — the row is no longer 'failed'.
-    retryCount: opts.keepRetryState ? (existing?.retryCount ?? 0) : 0,
-    nextRetryAt: null,
-  });
+  const db = await ensureDb();
+  // One conditional UPSERT is the ownership boundary. A read-then-replace can
+  // erase a native token if processQueue claims the row between those steps.
+  // Existing progress/storage metadata is deliberately left untouched.
+  const result = await db.execute(
+    `INSERT INTO download
+       (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt,
+        status, folderName, migratedAt, lastError, queuePosition, retryCount,
+        nextRetryAt, nativeRunId)
+     VALUES (?, ?, ?, ?, 0, 0, ?, 'queued', NULL, NULL, NULL, ?, 0, NULL, NULL)
+     ON CONFLICT(galleryId) DO UPDATE SET
+       title = excluded.title,
+       thumbnail = excluded.thumbnail,
+       tags = excluded.tags,
+       status = 'queued',
+       lastError = NULL,
+       queuePosition = excluded.queuePosition,
+       retryCount = CASE WHEN ? THEN download.retryCount ELSE 0 END,
+       nextRetryAt = NULL,
+       nativeRunId = NULL
+     WHERE download.status <> 'downloading'
+       AND download.nativeRunId IS NULL`,
+    [
+      meta.galleryId,
+      meta.title,
+      meta.thumbnail,
+      serializeTags(meta.tags),
+      new Date().toISOString(),
+      position,
+      opts.keepRetryState ? 1 : 0,
+    ],
+  );
+  if (result.changes === 0) return null;
+  await persistDb();
+  notifyDownloadCatalogChanged();
 
   return position;
 }
@@ -122,7 +134,11 @@ export async function listQueue(): Promise<DBDownload[]> {
  * this caller observes zero changes and returns null instead of returning the
  * same work item.
  */
-export async function dequeueNextQueued(galleryId?: number): Promise<DBDownload | null> {
+export async function dequeueNextQueued(
+  galleryId?: number,
+  onClaimCandidate?: (galleryId: number) => void,
+  nativeRunId: string | null = null,
+): Promise<DBDownload | null> {
   const db = await ensureDb();
 
   const candidates = await db.query<{ galleryId: number }>(
@@ -137,21 +153,69 @@ export async function dequeueNextQueued(galleryId?: number): Promise<DBDownload 
   const claimedGalleryId = candidates[0]?.galleryId;
   if (claimedGalleryId === undefined) return null;
 
+  // Publish the candidate synchronously before the conditional UPDATE awaits.
+  // The queue processor uses this hook to cover the otherwise invisible window
+  // where cancel/pause can race the database claim. The UPDATE below remains the
+  // authoritative ownership boundary; a losing claim still returns null.
+  onClaimCandidate?.(claimedGalleryId);
+
   const result = await db.execute(
-    "UPDATE download SET status = 'downloading' WHERE galleryId = ? AND status = 'queued'",
-    [claimedGalleryId],
+    `UPDATE download
+        SET status = 'downloading', nativeRunId = ?
+      WHERE galleryId = ?
+        AND status = 'queued'
+        AND queuePosition IS NOT NULL
+        AND nativeRunId IS NULL`,
+    [nativeRunId, claimedGalleryId],
   );
   if (result.changes === 0) return null;
 
-  await persistDb();
+  try {
+    await persistDb();
 
-  const rows = await db.query<DBDownload>(
-    `SELECT ${SELECT_COLS}
-       FROM download
-      WHERE galleryId = ?`,
-    [claimedGalleryId],
+    const rows = await db.query<DBDownload>(
+      `SELECT ${SELECT_COLS}
+         FROM download
+        WHERE galleryId = ?`,
+      [claimedGalleryId],
+    );
+    const claimed = rows[0] ?? null;
+    if (claimed?.status === 'downloading' && (claimed.nativeRunId ?? null) === nativeRunId) {
+      return claimed;
+    }
+    return null;
+  } catch (error) {
+    // The ownership UPDATE succeeded, but its persistence/readback did not. Do
+    // not strand an invisible `downloading` row: release only this still-queued
+    // claim. A concurrent pause/cancel changes the status or clears the queue
+    // position and therefore wins this compensation CAS.
+    await releaseDownloadClaim(claimedGalleryId, 'queued', nativeRunId).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * Release a claimed-before-handoff row without touching a newer lifecycle
+ * state. Used for dequeue/read faults and other preparation failures.
+ */
+export async function releaseDownloadClaim(
+  galleryId: number,
+  status: 'queued' | 'paused' = 'queued',
+  expectedNativeRunId: string | null = null,
+): Promise<boolean> {
+  const db = await ensureDb();
+  const result = await db.execute(
+    `UPDATE download
+        SET status = ?, nativeRunId = NULL
+      WHERE galleryId = ?
+        AND status = 'downloading'
+        AND queuePosition IS NOT NULL
+        AND nativeRunId IS ?`,
+    [status, galleryId, expectedNativeRunId],
   );
-  return rows[0] ?? null;
+  if (result.changes === 0) return false;
+  await persistDb();
+  return true;
 }
 
 /**
@@ -171,13 +235,31 @@ export async function pauseQueued(galleryId: number): Promise<void> {
  * Resume a paused item back into the active queue.
  * A no-op if the row does not exist or is not 'paused'.
  */
-export async function resumeQueued(galleryId: number): Promise<void> {
+export async function resumeQueued(galleryId: number): Promise<boolean> {
   const db = await ensureDb();
-  await db.execute(
-    "UPDATE download SET status = 'queued' WHERE galleryId = ? AND status = 'paused'",
+  const result = await db.execute(
+    "UPDATE download SET status = 'queued' WHERE galleryId = ? AND status = 'paused' AND nativeRunId IS NULL",
     [galleryId],
   );
+  if (result.changes === 0) return false;
   await persistDb();
+  return true;
+}
+
+/** Resume a native-owned paused row only after that exact run was stopped. */
+export async function resumePausedNativeRun(galleryId: number, runId: string): Promise<boolean> {
+  const db = await ensureDb();
+  const result = await db.execute(
+    `UPDATE download
+        SET status = 'queued', nativeRunId = NULL
+      WHERE galleryId = ?
+        AND status = 'paused'
+        AND nativeRunId = ?`,
+    [galleryId, runId],
+  );
+  if (result.changes === 0) return false;
+  await persistDb();
+  return true;
 }
 
 /**

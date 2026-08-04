@@ -16,10 +16,15 @@ import {
   updateDownloadStatus,
   getDownload,
   serializeTags,
+  transitionNativeDownloadRun,
+  completeNativeDownloadRun,
+  resumeNativeDownloadRun,
+  updateNativeDownloadProgress,
 } from '@/lib/db/download';
 import { parseRetryAfter } from '@/lib/api/tag-fetcher';
 import { galleryFolderName } from '@/lib/storage/base-path-resolver';
-import { isTauri } from './platform';
+import { isAndroid, isTauri } from './platform';
+import type { DBDownload } from '@/lib/db/schema';
 
 /** Sanitize a string for use as a filename/folder component. */
 export function sanitizeFilename(name: string): string {
@@ -38,10 +43,20 @@ export interface DownloadProgress {
 
 export type ZipExportResult = 'saved' | 'started' | 'cancelled';
 
+export type ZipExportSourceMetadata = Pick<DBDownload, 'folderName' | 'pageCount' | 'status'>;
+
 export class ZipExportSourceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ZipExportSourceError';
+  }
+}
+
+/** The DB row was replaced while this foreground/native attempt was finishing. */
+export class StaleDownloadRunError extends Error {
+  constructor() {
+    super('Download attempt was replaced');
+    this.name = 'StaleDownloadRunError';
   }
 }
 
@@ -95,6 +110,7 @@ function decodeManifest(bytes: Uint8Array): string[] {
 
 const DOWNLOAD_CHECKPOINT_PAGE_INTERVAL = 10;
 const ZIP_EXPORT_READ_CONCURRENCY = 8;
+const SAFE_ZIP_MANIFEST_EXTENSION = /^[A-Za-z0-9]{1,16}$/;
 
 type ZipWritableFile = {
   write(data: Uint8Array): Promise<number>;
@@ -483,13 +499,33 @@ export async function downloadGalleryToLibrary(
   tags: Record<string, string[]>,
   onProgress?: (p: DownloadProgress) => void,
   signal?: AbortSignal,
-  opts?: { resume?: boolean; isPauseSignal?: () => boolean },
+  opts?: { resume?: boolean; isPauseSignal?: () => boolean; nativeRunId?: string },
 ): Promise<void> {
   const total = files.length;
+  if (total === 0) {
+    // The manifest contract requires at least one page. Treating an empty work
+    // order as complete would publish no 0000.json, stamp Android public-storage
+    // ownership, and make the next reconciliation delete the catalog row.
+    throw new Error('Gallery has no downloadable files');
+  }
   const now = new Date().toISOString();
 
   const existingRow = await getDownload(galleryId).catch(() => null);
+  if (
+    opts?.nativeRunId &&
+    (existingRow?.status !== 'downloading' || existingRow.nativeRunId !== opts.nativeRunId)
+  ) {
+    throw new StaleDownloadRunError();
+  }
   const folderName = existingRow?.folderName ?? galleryFolderName(galleryId, title);
+  // Preserve an existing public-storage watermark throughout a retry, but do
+  // not create a new one until the manifest-backed completion write succeeds.
+  // Marking a fresh row before completion would let reconciliation prune a
+  // retryable failure whose worker never managed to publish its manifest.
+  const existingPublicStoredAt = existingRow?.migratedAt ?? null;
+  const completedPublicStoredAt = isAndroid()
+    ? (existingPublicStoredAt ?? now)
+    : existingPublicStoredAt;
   const lookup = { folderName };
 
   const store = await createDownloadStore();
@@ -521,9 +557,12 @@ export async function downloadGalleryToLibrary(
   let totalBytes = 0;
   let rowCreated = false;
   let resumeManifestNeedsExtension = false;
-  if (existingRow?.status === 'downloading' && existingRow.pageCount >= total) {
+  if (
+    opts?.nativeRunId ||
+    (existingRow?.status === 'downloading' && existingRow.pageCount >= total)
+  ) {
     rowCreated = true;
-    totalBytes = existingRow.totalBytes ?? 0;
+    totalBytes = existingRow?.totalBytes ?? 0;
   }
 
   // ── Resume seeding (per-page verify) ──────────────────────────────────────
@@ -548,7 +587,13 @@ export async function downloadGalleryToLibrary(
       totalBytes = await manifestBackedGallerySize(store, galleryId, manifestExts, lookup).catch(
         () => 0,
       );
-      await setDownloadError(galleryId, 'downloading', null);
+      if (opts?.nativeRunId) {
+        if (!(await resumeNativeDownloadRun(galleryId, opts.nativeRunId))) {
+          throw new StaleDownloadRunError();
+        }
+      } else {
+        await setDownloadError(galleryId, 'downloading', null);
+      }
     }
   }
 
@@ -666,22 +711,41 @@ export async function downloadGalleryToLibrary(
           downloadedAt: now,
           status: 'downloading',
           folderName,
+          migratedAt: existingPublicStoredAt,
           queuePosition: existingRow?.queuePosition ?? null,
           retryCount: existingRow?.retryCount ?? null,
           nextRetryAt: null,
+          nativeRunId: opts?.nativeRunId ?? existingRow?.nativeRunId ?? null,
         });
         rowCreated = true;
       } else {
-        await updateDownloadProgress(galleryId, pageCount, totalBytes, {
-          persist: shouldWriteDownloadCheckpoint(pageCount, total),
-        });
+        const persist = shouldWriteDownloadCheckpoint(pageCount, total);
+        if (opts?.nativeRunId) {
+          if (
+            !(await updateNativeDownloadProgress(
+              galleryId,
+              opts.nativeRunId,
+              pageCount,
+              totalBytes,
+              { persist },
+            ))
+          ) {
+            throw new StaleDownloadRunError();
+          }
+        } else {
+          await updateDownloadProgress(galleryId, pageCount, totalBytes, { persist });
+        }
       }
 
       onProgress?.({ current: i + 1, total });
     }
 
     // ── Success: mark complete with final stats ───────────────────────────────
-    await upsertDownload({
+    // Cancel/pause may arrive while the final page or checkpoint manifest write
+    // is awaiting native storage. Re-check immediately before the terminal CAS
+    // so that user intent wins that last-page race.
+    throwIfAborted(signal);
+    const completedRow: DBDownload = {
       galleryId,
       title,
       thumbnail,
@@ -691,10 +755,23 @@ export async function downloadGalleryToLibrary(
       downloadedAt: now,
       status: 'complete',
       folderName,
+      migratedAt: completedPublicStoredAt,
       retryCount: 0,
       nextRetryAt: null,
-    });
+    };
+    if (opts?.nativeRunId) {
+      if (!(await completeNativeDownloadRun(completedRow, opts.nativeRunId))) {
+        throw new StaleDownloadRunError();
+      }
+    } else {
+      await upsertDownload(completedRow);
+    }
+    // The terminal DB write itself is asynchronous. If cancel/pause arrived
+    // while it was committing, route through the catch below so user intent is
+    // re-applied (the native path deliberately retains its exact run token).
+    throwIfAborted(signal);
   } catch (err) {
+    if (err instanceof StaleDownloadRunError) throw err;
     const e = err as Error;
     const isAbort = e.name === 'AbortError' || err instanceof DownloadCancelledError;
     // An abort that the caller marked as a PAUSE (not a cancel): leave the row
@@ -703,7 +780,18 @@ export async function downloadGalleryToLibrary(
     const isPause = isAbort && opts?.isPauseSignal?.() === true;
 
     if (isPause) {
-      await updateDownloadStatus(galleryId, 'paused');
+      if (opts?.nativeRunId) {
+        if (
+          !(await transitionNativeDownloadRun(galleryId, opts.nativeRunId, 'paused', null, {
+            clearRunId: false,
+            clearQueuePosition: false,
+          }))
+        ) {
+          throw new StaleDownloadRunError();
+        }
+      } else {
+        await updateDownloadStatus(galleryId, 'paused');
+      }
       throw new DownloadPausedError();
     }
 
@@ -713,14 +801,36 @@ export async function downloadGalleryToLibrary(
       // User cancel. If pages were already written, leave a resumable 'failed'
       // row with NO error message (it was not a failure). If nothing was
       // written yet, leave no trace at all.
-      if (rowCreated) await setDownloadError(galleryId, 'failed', null);
+      if (rowCreated) {
+        if (opts?.nativeRunId) {
+          if (
+            !(await transitionNativeDownloadRun(galleryId, opts.nativeRunId, 'failed', null, {
+              clearRunId: false,
+            }))
+          ) {
+            throw new StaleDownloadRunError();
+          }
+        } else {
+          await setDownloadError(galleryId, 'failed', null);
+        }
+      }
     } else {
       // Genuine failure. Record a 'failed' row WITH the real reason even when no
       // page was stored yet (failure before page 0) so the library shows it and
       // can offer retry.
       const reason = e.message || 'Download failed';
       if (rowCreated) {
-        await setDownloadError(galleryId, 'failed', reason);
+        if (opts?.nativeRunId) {
+          if (
+            !(await transitionNativeDownloadRun(galleryId, opts.nativeRunId, 'failed', reason, {
+              clearRunId: false,
+            }))
+          ) {
+            throw new StaleDownloadRunError();
+          }
+        } else {
+          await setDownloadError(galleryId, 'failed', reason);
+        }
       } else {
         await upsertDownload({
           galleryId,
@@ -732,10 +842,12 @@ export async function downloadGalleryToLibrary(
           downloadedAt: now,
           status: 'failed',
           folderName,
+          migratedAt: existingPublicStoredAt,
           lastError: reason,
           queuePosition: existingRow?.queuePosition ?? null,
           retryCount: existingRow?.retryCount ?? null,
           nextRetryAt: null,
+          nativeRunId: opts?.nativeRunId ?? existingRow?.nativeRunId ?? null,
         });
       }
     }
@@ -761,10 +873,26 @@ export async function exportGalleryZip(
   galleryId: number,
   title: string,
   onProgress?: (progress: DownloadProgress) => void,
+  sourceFallback?: ZipExportSourceMetadata,
 ): Promise<ZipExportResult> {
   const store = await createDownloadStore();
   const row = await getDownload(galleryId).catch(() => null);
-  const options: DownloadStoreLookupOptions = { folderName: row?.folderName ?? null };
+  const source = row ?? sourceFallback;
+  if (!source) {
+    throw new ZipExportSourceError(`No download record found for gallery ${galleryId}`);
+  }
+  if (source.status !== 'complete') {
+    throw new ZipExportSourceError(
+      `Downloaded gallery ${galleryId} is not complete (status: ${source.status})`,
+    );
+  }
+
+  // The rendered library item is a safe fallback when a transient DB lookup
+  // fails. Prefer the latest DB value when present, but never discard the exact
+  // Android SAF folder name that the caller already resolved.
+  const options: DownloadStoreLookupOptions = {
+    folderName: row?.folderName ?? sourceFallback?.folderName ?? null,
+  };
 
   // Load the manifest to know how many pages and their exts.
   const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
@@ -777,6 +905,20 @@ export async function exportGalleryZip(
   if (exts.length === 0) {
     throw new ZipExportSourceError(
       `Downloaded manifest for gallery ${galleryId} is empty or corrupt`,
+    );
+  }
+  if (!exts.every((ext) => SAFE_ZIP_MANIFEST_EXTENSION.test(ext))) {
+    throw new ZipExportSourceError(
+      `Downloaded manifest for gallery ${galleryId} contains an unsafe file extension`,
+    );
+  }
+  if (
+    !Number.isSafeInteger(source.pageCount) ||
+    source.pageCount <= 0 ||
+    exts.length !== source.pageCount
+  ) {
+    throw new ZipExportSourceError(
+      `Downloaded manifest page count ${exts.length} does not match database page count ${source.pageCount} for gallery ${galleryId}`,
     );
   }
 

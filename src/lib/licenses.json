@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-07-25T12:02:46.105Z",
+  "generatedAt": "2026-08-04T14:44:02.160Z",
   "counts": {
-    "npm": 541,
-    "cargo": 602
+    "npm": 542,
+    "cargo": 606
   },
   "npm": [
     {
@@ -540,8 +540,14 @@
       "repository": "https://github.com/tauri-apps/tauri"
     },
     {
+      "name": "@tauri-apps/plugin-dialog",
+      "version": "2.7.2",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/tauri-apps/plugins-workspace"
+    },
+    {
       "name": "@tauri-apps/plugin-fs",
-      "version": "2.4.1",
+      "version": "2.5.1",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/tauri-apps/plugins-workspace"
     },
@@ -5222,6 +5228,12 @@
       "repository": "https://github.com/seanmonstar/reqwest"
     },
     {
+      "name": "rfd",
+      "version": "0.16.0",
+      "license": "MIT",
+      "repository": "https://github.com/PolyMeilex/rfd"
+    },
+    {
       "name": "ring",
       "version": "0.17.14",
       "license": "Apache-2.0 AND ISC",
@@ -5738,8 +5750,14 @@
       "repository": "https://github.com/tauri-apps/tauri"
     },
     {
+      "name": "tauri-plugin-dialog",
+      "version": "2.7.2",
+      "license": "Apache-2.0 OR MIT",
+      "repository": "https://github.com/tauri-apps/plugins-workspace"
+    },
+    {
       "name": "tauri-plugin-fs",
-      "version": "2.4.1",
+      "version": "2.5.1",
       "license": "Apache-2.0 OR MIT",
       "repository": "https://github.com/tauri-apps/plugins-workspace"
     },
@@ -5906,6 +5924,12 @@
       "repository": "https://github.com/toml-rs/toml"
     },
     {
+      "name": "toml",
+      "version": "1.0.6+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/toml-rs/toml"
+    },
+    {
       "name": "toml_datetime",
       "version": "0.6.3",
       "license": "MIT OR Apache-2.0",
@@ -5914,6 +5938,12 @@
     {
       "name": "toml_datetime",
       "version": "0.7.5+spec-1.1.0",
+      "license": "MIT OR Apache-2.0",
+      "repository": "https://github.com/toml-rs/toml"
+    },
+    {
+      "name": "toml_datetime",
+      "version": "1.1.1+spec-1.1.0",
       "license": "MIT OR Apache-2.0",
       "repository": "https://github.com/toml-rs/toml"
     },

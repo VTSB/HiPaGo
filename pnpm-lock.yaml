@@ -4,13 +4,18 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@capacitor-community/sqlite@6.0.2':
+    hash: 0348cd81a7082ededca216e23ad10c489d6a8a67d0712c44b4a38acbec119bf9
+    path: patches/@capacitor-community__sqlite@6.0.2.patch
+
 importers:
 
   .:
     dependencies:
       '@capacitor-community/sqlite':
         specifier: ^6
-        version: 6.0.2(@capacitor/core@6.2.1)
+        version: 6.0.2(patch_hash=0348cd81a7082ededca216e23ad10c489d6a8a67d0712c44b4a38acbec119bf9)(@capacitor/core@6.2.1)
       '@capacitor/core':
         specifier: ^6
         version: 6.2.1
@@ -3635,7 +3640,7 @@ snapshots:
     dependencies:
       css-tree: 3.1.0
 
-  '@capacitor-community/sqlite@6.0.2(@capacitor/core@6.2.1)':
+  '@capacitor-community/sqlite@6.0.2(patch_hash=0348cd81a7082ededca216e23ad10c489d6a8a67d0712c44b4a38acbec119bf9)(@capacitor/core@6.2.1)':
     dependencies:
       '@capacitor/core': 6.2.1
       jeep-sqlite: 2.8.0

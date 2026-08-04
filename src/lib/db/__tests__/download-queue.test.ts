@@ -3,8 +3,10 @@
  * plus the listLibraryDownloads status filter. Uses the real sql.js in-memory
  * adapter (same as download.test.ts) so SQL semantics are exercised end-to-end.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
+import { getDb } from '../adapter';
+import * as adapter from '../adapter';
 import { upsertDownload, getDownload, listLibraryDownloads, serializeTags } from '../download';
 import {
   enqueueDownload,
@@ -12,8 +14,10 @@ import {
   dequeueNextQueued,
   pauseQueued,
   resumeQueued,
+  resumePausedNativeRun,
   removeFromQueue,
   reorderQueue,
+  releaseDownloadClaim,
 } from '../download-queue';
 import type { DBDownload } from '../schema';
 
@@ -96,17 +100,24 @@ describe('enqueueDownload', () => {
 
   it('sets status to queued and clears stale lastError', async () => {
     await upsertDownload(
-      makeRow({ galleryId: 5, status: 'failed', lastError: 'boom', pageCount: 4 }),
+      makeRow({
+        galleryId: 5,
+        status: 'failed',
+        lastError: 'boom',
+        pageCount: 4,
+        nativeRunId: null,
+      }),
     );
     await enqueueDownload(meta(5));
     const row = await getDownload(5);
     expect(row!.status).toBe('queued');
     expect(row!.lastError == null).toBe(true);
+    expect(row!.nativeRunId).toBeNull();
     // preserves partial pages so the processor resumes
     expect(row!.pageCount).toBe(4);
   });
 
-  it('can restore an explicit queue position when reconciling an interrupted active row', async () => {
+  it('cannot overwrite an active row while restoring an explicit queue position', async () => {
     await upsertDownload(
       makeRow({ galleryId: 6, status: 'downloading', queuePosition: 4, retryCount: 2 }),
     );
@@ -117,10 +128,53 @@ describe('enqueueDownload', () => {
     });
 
     const row = await getDownload(6);
-    expect(position).toBe(4);
-    expect(row!.status).toBe('queued');
+    expect(position).toBeNull();
+    expect(row!.status).toBe('downloading');
     expect(row!.queuePosition).toBe(4);
     expect(row!.retryCount).toBe(2);
+  });
+
+  it('cannot clear native ownership from a failed row', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 8,
+        status: 'failed',
+        lastError: 'native stop unconfirmed',
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+
+    const position = await enqueueDownload(meta(8), { userInitiated: true });
+    const row = await getDownload(8);
+
+    expect(position).toBeNull();
+    expect(row).toMatchObject({
+      status: 'failed',
+      lastError: 'native stop unconfirmed',
+      nativeRunId: 'run-aaaaaaaaaaaa',
+    });
+  });
+
+  it('requires exact native-stop ownership before a paused row is resumed', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 7,
+        status: 'paused',
+        queuePosition: 4,
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+
+    expect(await resumeQueued(7)).toBe(false);
+    expect(await getDownload(7)).toMatchObject({
+      status: 'paused',
+      nativeRunId: 'run-aaaaaaaaaaaa',
+    });
+
+    expect(await resumePausedNativeRun(7, 'run-bbbbbbbbbbbb')).toBe(false);
+    expect(await resumePausedNativeRun(7, 'run-aaaaaaaaaaaa')).toBe(true);
+
+    expect(await getDownload(7)).toMatchObject({ status: 'queued', nativeRunId: null });
   });
 });
 
@@ -189,6 +243,91 @@ describe('listQueue + dequeueNextQueued', () => {
     expect(claimed[0]).toMatchObject({ galleryId: 1, status: 'downloading' });
     expect(results.filter((row) => row === null)).toHaveLength(1);
     expect((await getDownload(1))!.status).toBe('downloading');
+  });
+
+  it('publishes a candidate but returns null when another transition wins the claim CAS', async () => {
+    await enqueueDownload(meta(1));
+    let candidate: number | null = null;
+
+    const claimed = await dequeueNextQueued(undefined, (id) => {
+      candidate = id;
+      void getDb().execute("UPDATE download SET status = 'paused' WHERE galleryId = ?", [id]);
+    });
+
+    expect(candidate).toBe(1);
+    expect(claimed).toBeNull();
+    expect(await getDownload(1)).toMatchObject({ status: 'paused' });
+  });
+
+  it('releases a successful claim when persistence fails before readback', async () => {
+    await enqueueDownload(meta(1));
+    const persist = vi
+      .spyOn(adapter, 'persistDb')
+      .mockRejectedValueOnce(new Error('persist unavailable'));
+    try {
+      await expect(dequeueNextQueued()).rejects.toThrow('persist unavailable');
+    } finally {
+      persist.mockRestore();
+    }
+
+    expect(await getDownload(1)).toMatchObject({ status: 'queued', queuePosition: 1 });
+  });
+
+  it('releases a successful claim when its final readback fails', async () => {
+    await enqueueDownload(meta(1));
+    const db = getDb();
+    const originalQuery = db.query.bind(db);
+    const query = vi.spyOn(db, 'query');
+    query
+      .mockImplementationOnce((sql, params) => originalQuery(sql, params))
+      .mockRejectedValueOnce(new Error('readback unavailable'));
+    try {
+      await expect(dequeueNextQueued()).rejects.toThrow('readback unavailable');
+    } finally {
+      query.mockRestore();
+    }
+
+    expect(await getDownload(1)).toMatchObject({ status: 'queued', queuePosition: 1 });
+  });
+
+  it('releaseDownloadClaim cannot overwrite a concurrent pause', async () => {
+    await enqueueDownload(meta(1));
+    await dequeueNextQueued();
+    await releaseDownloadClaim(1, 'paused');
+
+    expect(await releaseDownloadClaim(1, 'queued')).toBe(false);
+    expect(await getDownload(1)).toMatchObject({ status: 'paused' });
+  });
+
+  it('releaseDownloadClaim invalidates native ownership when returning to the queue', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 8,
+        status: 'downloading',
+        queuePosition: 3,
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+
+    expect(await releaseDownloadClaim(8, 'queued', 'run-aaaaaaaaaaaa')).toBe(true);
+    expect(await getDownload(8)).toMatchObject({ status: 'queued', nativeRunId: null });
+  });
+
+  it('a delayed release for run A cannot clear replacement run B', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 9,
+        status: 'downloading',
+        queuePosition: 4,
+        nativeRunId: 'run-bbbbbbbbbbbb',
+      }),
+    );
+
+    expect(await releaseDownloadClaim(9, 'queued', 'run-aaaaaaaaaaaa')).toBe(false);
+    expect(await getDownload(9)).toMatchObject({
+      status: 'downloading',
+      nativeRunId: 'run-bbbbbbbbbbbb',
+    });
   });
 
   it('excludes queued rows whose queuePosition was cleared', async () => {

@@ -19,6 +19,11 @@ class MockIO {
   takeRecords = vi.fn(() => []);
 }
 vi.stubGlobal('IntersectionObserver', MockIO as unknown as typeof IntersectionObserver);
+vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+  callback(0);
+  return 1;
+});
+vi.stubGlobal('cancelAnimationFrame', () => {});
 
 import { ScrollReader } from '../components/ScrollReader';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -45,7 +50,7 @@ function renderReader() {
     />,
   );
   // Outer scroll container is the root <div>; the sized column is its child.
-  const container = result.container.querySelector('div.h-screen') as HTMLElement;
+  const container = result.container.querySelector('div.h-dvh') as HTMLElement;
   const column = container.firstElementChild as HTMLElement;
   return { ...result, container, column };
 }
@@ -56,12 +61,30 @@ function wheel(el: HTMLElement, init: WheelEventInit) {
   });
 }
 
+function pointer(
+  el: HTMLElement,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  init: MouseEventInit & { pointerId: number; pointerType: string },
+) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+  Object.defineProperties(event, {
+    pointerId: { value: init.pointerId },
+    pointerType: { value: init.pointerType },
+  });
+  act(() => el.dispatchEvent(event));
+}
+
 describe('ScrollReader zoom', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     useSettingsStore.setState({ scrollZoom: 1 });
   });
   afterEach(() => {
-    useSettingsStore.setState({ scrollZoom: 1 });
+    act(() => {
+      vi.runOnlyPendingTimers();
+      useSettingsStore.setState({ scrollZoom: 1 });
+    });
+    vi.useRealTimers();
   });
 
   it('sizes the column at scrollZoom*100% (fit at 1)', () => {
@@ -91,6 +114,69 @@ describe('ScrollReader zoom', () => {
     const before = useSettingsStore.getState().scrollZoom;
     wheel(container, { deltaY: -120 }); // no ctrl → native scroll, no zoom
     expect(useSettingsStore.getState().scrollZoom).toBe(before);
+  });
+
+  it('keeps the content under the cursor anchored while zooming', () => {
+    const { container } = renderReader();
+    container.scrollTop = 300;
+
+    wheel(container, { deltaY: -120, ctrlKey: true, clientX: 100, clientY: 200 });
+
+    const zoom = useSettingsStore.getState().scrollZoom;
+    expect(container.scrollTop).toBeCloseTo((300 + 200) * zoom - 200, 5);
+  });
+
+  it('accounts for centered margins when zooming back in from below fit', () => {
+    act(() => useSettingsStore.setState({ scrollZoom: 0.5 }));
+    const { container } = renderReader();
+    const viewportCenter = window.innerWidth / 2;
+
+    wheel(container, {
+      deltaY: -1000,
+      ctrlKey: true,
+      clientX: viewportCenter,
+      clientY: 200,
+    });
+
+    const zoom = useSettingsStore.getState().scrollZoom;
+    expect(zoom).toBeGreaterThan(1);
+    // The center cursor started at the image's 50% point despite the mx-auto
+    // margin, so that same point remains centered after the image overflows.
+    expect(container.scrollLeft).toBeCloseTo(viewportCenter * zoom - viewportCenter, 5);
+  });
+
+  it('keeps mouse drag as a hand-tool pan', () => {
+    const { container } = renderReader();
+    container.scrollLeft = 50;
+    container.scrollTop = 100;
+    container.setPointerCapture = vi.fn();
+    container.hasPointerCapture = vi.fn(() => true);
+    container.releasePointerCapture = vi.fn();
+
+    pointer(container, 'pointerdown', {
+      pointerId: 7,
+      pointerType: 'mouse',
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    pointer(container, 'pointermove', {
+      pointerId: 7,
+      pointerType: 'mouse',
+      clientX: 80,
+      clientY: 70,
+    });
+
+    expect(container.scrollLeft).toBe(70);
+    expect(container.scrollTop).toBe(130);
+
+    pointer(container, 'pointerup', {
+      pointerId: 7,
+      pointerType: 'mouse',
+      clientX: 80,
+      clientY: 70,
+    });
+    expect(container.releasePointerCapture).toHaveBeenCalledWith(7);
   });
 
   it('Ctrl+wheel down zooms out and clamps at the minimum (0.25)', () => {

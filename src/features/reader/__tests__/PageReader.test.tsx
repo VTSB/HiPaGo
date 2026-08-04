@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act, fireEvent } from '@testing-library/react';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -8,15 +8,21 @@ import React from 'react';
 // ---------------------------------------------------------------------------
 
 let resolveGg: (v: unknown) => void = () => {};
-const mockGetGgConfig = vi.fn(() => new Promise((res) => { resolveGg = res; }));
+const mockGetGgConfig = vi.fn(
+  () =>
+    new Promise((res) => {
+      resolveGg = res;
+    }),
+);
 
 vi.mock('@/lib/api/client', () => ({
   getGgConfig: () => mockGetGgConfig(),
 }));
 
 vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (sel: (s: { imageFormat: string; dualPage: boolean }) => unknown) =>
-    sel({ imageFormat: 'webp', dualPage: false }),
+  useSettingsStore: (
+    sel: (s: { imageFormat: string; dualPage: boolean; locale: 'en' }) => unknown,
+  ) => sel({ imageFormat: 'webp', dualPage: false, locale: 'en' }),
 }));
 
 vi.mock('@/lib/utils/image-url', () => ({
@@ -36,7 +42,12 @@ vi.mock('@tanstack/react-virtual', () => ({
     const sz = estimateSize() || 1000;
     return {
       getVirtualItems: () =>
-        Array.from({ length: Math.min(count, 5) }, (_, i) => ({ key: i, index: i, start: i * sz, size: sz })),
+        Array.from({ length: Math.min(count, 5) }, (_, i) => ({
+          key: i,
+          index: i,
+          start: i * sz,
+          size: sz,
+        })),
       getTotalSize: () => count * sz,
       measure: () => {},
       scrollToIndex: scrollToIndexSpy,
@@ -73,13 +84,39 @@ async function drainPreloads() {
   for (let i = 0; i < 80; i++) await Promise.resolve();
 }
 
+function pointer(
+  element: HTMLElement,
+  type: 'pointerdown' | 'pointerup' | 'pointercancel',
+  pointerId: number,
+) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    pointerId: { value: pointerId },
+    pointerType: { value: 'touch' },
+  });
+  act(() => element.dispatchEvent(event));
+}
+
 beforeEach(() => {
   mockObserve.mockClear();
   mockDisconnect.mockClear();
+  mockGetGgConfig.mockReset();
   __resetAbortableImageCacheForTests();
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  mockGetGgConfig.mockImplementation(() => new Promise((res) => { resolveGg = res; }));
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  mockGetGgConfig.mockImplementation(
+    () =>
+      new Promise((res) => {
+        resolveGg = res;
+      }),
+  );
 });
 
 afterEach(() => {
@@ -91,16 +128,42 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 describe('PageReader loading state', () => {
   it('renders a loading indicator while ggConfig is loading (urls empty)', () => {
-    const { container } = render(<PageReader images={images} currentPage={0} onPageChange={vi.fn()} />);
+    const { container } = render(
+      <PageReader images={images} currentPage={0} onPageChange={vi.fn()} />,
+    );
     expect(container.firstChild).not.toBeNull();
     expect(container.querySelector('img')).toBeNull();
   });
 
   it('renders images after ggConfig resolves', async () => {
-    const { container } = render(<PageReader images={images} currentPage={0} onPageChange={vi.fn()} />);
+    const { container } = render(
+      <PageReader images={images} currentPage={0} onPageChange={vi.fn()} />,
+    );
     expect(container.querySelector('img')).toBeNull();
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     expect(container.querySelector('img')).not.toBeNull();
+  });
+
+  it('shows a retryable error and recovers when ggConfig succeeds on retry', async () => {
+    mockGetGgConfig
+      .mockRejectedValueOnce(new Error('gg config unavailable'))
+      .mockResolvedValueOnce(fakeGgConfig);
+
+    const { container } = render(
+      <PageReader images={images} currentPage={0} onPageChange={vi.fn()} />,
+    );
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('gg config unavailable');
+    expect(container.querySelector('img')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(mockGetGgConfig).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 
@@ -109,16 +172,26 @@ describe('PageReader loading state', () => {
 // ---------------------------------------------------------------------------
 describe('PageReader image rendering', () => {
   it('renders AbortableImage (opacity:0 before load) instead of bare img', async () => {
-    const { container } = render(<PageReader images={images} currentPage={0} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const { container } = render(
+      <PageReader images={images} currentPage={0} onPageChange={vi.fn()} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     const img = container.querySelector('img');
     expect(img).not.toBeNull();
     expect(img!.style.opacity).toBe('0');
   });
 
   it('every rendered img has opacity:0 (all use AbortableImage, not bare img)', async () => {
-    const { container } = render(<PageReader images={images} currentPage={0} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const { container } = render(
+      <PageReader images={images} currentPage={0} onPageChange={vi.fn()} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     const imgs = container.querySelectorAll('img:not([data-preload])');
     expect(imgs.length).toBeGreaterThan(0);
     for (const img of Array.from(imgs)) {
@@ -143,8 +216,13 @@ describe('PageReader preload window', () => {
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
       private _record: { srcs: string[] };
-      constructor() { this._record = { srcs: [] }; createdImages.push(this._record); }
-      get src() { return this._src; }
+      constructor() {
+        this._record = { srcs: [] };
+        createdImages.push(this._record);
+      }
+      get src() {
+        return this._src;
+      }
       set src(v: string) {
         this._src = v;
         this._record.srcs.push(v);
@@ -155,17 +233,24 @@ describe('PageReader preload window', () => {
     }
     vi.stubGlobal('Image', MockImage);
   });
-  afterEach(() => { vi.stubGlobal('Image', OriginalImage); });
+  afterEach(() => {
+    vi.stubGlobal('Image', OriginalImage);
+  });
 
   it('warms surrounding pages via JS Image() (no DOM <img data-preload>)', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
-    const { container } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
+    const { container } = render(
+      <PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await drainPreloads();
+    });
     expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
     expect(createdImages.length).toBe(20);
-    const expected = [15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35].map(
-      (i) => `https://cdn.example.com/${String(i).padStart(3, '0')}.jpg`,
-    );
+    const expected = [
+      15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+    ].map((i) => `https://cdn.example.com/${String(i).padStart(3, '0')}.jpg`);
     const loaded = createdImages.map((r) => r.srcs[r.srcs.length - 1]).sort();
     expect(loaded).toEqual(expected.sort());
   });
@@ -173,18 +258,28 @@ describe('PageReader preload window', () => {
   it('clamps preload range at start boundary', async () => {
     const images10 = Array.from({ length: 10 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     render(<PageReader images={images10} currentPage={0} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await drainPreloads();
+    });
     expect(createdImages.length).toBe(9);
   });
 
   it('warms the new preload window after navigation without DOM preload nodes', async () => {
     const images25 = Array.from({ length: 25 }, (_, i) => makeImage(String(i).padStart(3, '0')));
-    const { container, rerender } = render(<PageReader images={images25} currentPage={5} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
+    const { container, rerender } = render(
+      <PageReader images={images25} currentPage={5} onPageChange={vi.fn()} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await drainPreloads();
+    });
     const initialCount = createdImages.length;
     expect(initialCount).toBeGreaterThan(0);
     rerender(<PageReader images={images25} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { await drainPreloads(); });
+    await act(async () => {
+      await drainPreloads();
+    });
     expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
     expect(createdImages.length).toBeGreaterThan(initialCount);
     expect(createdImages.map((r) => r.srcs.at(-1))).toContain('https://cdn.example.com/024.jpg');
@@ -204,11 +299,26 @@ describe('PageReader preload window', () => {
 describe('PageReader native scroll-snap', () => {
   async function mount(currentPage: number, images_: GalleryImage[] = images) {
     const onPageChange = vi.fn();
-    const utils = render(<PageReader images={images_} currentPage={currentPage} onPageChange={onPageChange} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const utils = render(
+      <PageReader images={images_} currentPage={currentPage} onPageChange={onPageChange} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     const scroller = utils.container.firstElementChild as HTMLElement;
     scroller.getBoundingClientRect = () =>
-      ({ left: 0, top: 0, right: 400, bottom: 800, width: 400, height: 800, x: 0, y: 0, toJSON() {} }) as DOMRect;
+      ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 800,
+        width: 400,
+        height: 800,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      }) as DOMRect;
     return { ...utils, onPageChange, scroller };
   }
 
@@ -263,6 +373,89 @@ describe('PageReader native scroll-snap', () => {
     fireEvent.click(scroller, { clientX: 100, clientY: 400 });
     expect(onPageChange).toHaveBeenCalledWith(1);
   });
+
+  it('toggles reader chrome without navigating on a center tap', async () => {
+    const onToggleChrome = vi.fn();
+    const onPageChange = vi.fn();
+    const utils = render(
+      <PageReader
+        images={images}
+        currentPage={1}
+        onPageChange={onPageChange}
+        onToggleChrome={onToggleChrome}
+      />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
+    const scroller = utils.container.firstElementChild as HTMLElement;
+    scroller.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 800,
+        width: 400,
+        height: 800,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      }) as DOMRect;
+
+    fireEvent.click(scroller, { clientX: 200, clientY: 400 });
+
+    expect(onToggleChrome).toHaveBeenCalledTimes(1);
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps a normal single-touch tap navigable', async () => {
+    const { scroller, onPageChange } = await mount(0);
+
+    pointer(scroller, 'pointerdown', 11);
+    pointer(scroller, 'pointerup', 11);
+    fireEvent.click(scroller, { clientX: 300, clientY: 400 });
+
+    expect(onPageChange).toHaveBeenCalledOnce();
+    expect(onPageChange).toHaveBeenCalledWith(1);
+  });
+
+  it('suppresses exactly one synthesized click after a multi-touch sequence lasting over 500ms', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const { scroller, onPageChange } = await mount(0);
+
+    pointer(scroller, 'pointerdown', 21);
+    pointer(scroller, 'pointerdown', 22);
+    now.mockReturnValue(1_750);
+    pointer(scroller, 'pointerup', 21);
+    pointer(scroller, 'pointerup', 22);
+
+    // Android emits a compatibility click after all pinch pointers end. Its
+    // suppression follows the gesture state, not a 500 ms wall-clock window.
+    fireEvent.click(scroller, { clientX: 300, clientY: 400 });
+    expect(onPageChange).not.toHaveBeenCalled();
+
+    // The guard is single-use: a subsequent ordinary click still turns a page.
+    fireEvent.click(scroller, { clientX: 300, clientY: 400 });
+    expect(onPageChange).toHaveBeenCalledOnce();
+    expect(onPageChange).toHaveBeenCalledWith(1);
+
+    now.mockRestore();
+  });
+
+  it('turns one page only after vertical wheel input reaches the threshold', async () => {
+    const { scroller, onPageChange } = await mount(0);
+
+    fireEvent.wheel(scroller, { deltaY: 30, deltaX: 0 });
+    expect(onPageChange).not.toHaveBeenCalled();
+
+    fireEvent.wheel(scroller, { deltaY: 30, deltaX: 0 });
+    expect(onPageChange).toHaveBeenCalledTimes(1);
+    expect(onPageChange).toHaveBeenCalledWith(1);
+
+    fireEvent.wheel(scroller, { deltaY: 120, deltaX: 0 });
+    expect(onPageChange).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -277,7 +470,10 @@ describe('PageReader preload concurrency cap', () => {
   let OriginalImage: typeof Image;
 
   beforeEach(() => {
-    peak = 0; active = 0; created = 0; cleared = 0;
+    peak = 0;
+    active = 0;
+    created = 0;
+    cleared = 0;
     OriginalImage = globalThis.Image;
     class MockImage {
       private _src = '';
@@ -291,7 +487,9 @@ describe('PageReader preload concurrency cap', () => {
         active += 1;
         peak = Math.max(peak, active);
       }
-      get src() { return this._src; }
+      get src() {
+        return this._src;
+      }
       set src(v: string) {
         this._src = v;
         if (v === '') cleared += 1; // abort path sets src='' to cancel the fetch
@@ -299,12 +497,17 @@ describe('PageReader preload concurrency cap', () => {
     }
     vi.stubGlobal('Image', MockImage);
   });
-  afterEach(() => { vi.stubGlobal('Image', OriginalImage); });
+  afterEach(() => {
+    vi.stubGlobal('Image', OriginalImage);
+  });
 
   it('never fires more than 4 preload requests in flight at once', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     // With no load events firing, the pump fills exactly the cap and waits.
     expect(peak).toBeLessThanOrEqual(4);
     expect(created).toBe(4);
@@ -312,8 +515,13 @@ describe('PageReader preload concurrency cap', () => {
 
   it('aborts in-flight warms on unmount so connection slots are freed', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
-    const { unmount } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const { unmount } = render(
+      <PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     expect(created).toBe(4);
     expect(cleared).toBe(0); // still in flight
     unmount();
@@ -323,11 +531,18 @@ describe('PageReader preload concurrency cap', () => {
 
   it('aborts the previous page warms when navigating to a new page', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
-    const { rerender } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const { rerender } = render(
+      <PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     expect(created).toBe(4);
     rerender(<PageReader images={images50} currentPage={30} onPageChange={vi.fn()} />);
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
     // The 4 warms from page 20 were aborted (src cleared) when the effect re-ran.
     expect(cleared).toBe(4);
   });
@@ -356,14 +571,24 @@ describe('PageReader open-at-page positioning', () => {
       configurable: true,
       value(this: HTMLElement) {
         return {
-          width: mockBoundingWidth, height: 800,
-          top: 0, left: 0, right: mockBoundingWidth, bottom: 800, x: 0, y: 0, toJSON() {},
+          width: mockBoundingWidth,
+          height: 800,
+          top: 0,
+          left: 0,
+          right: mockBoundingWidth,
+          bottom: 800,
+          x: 0,
+          y: 0,
+          toJSON() {},
         } as DOMRect;
       },
     });
     // Run rAF callbacks synchronously so a dispatched scroll event resolves its
     // throttled handler within the test.
-    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { cb(0); return 1; });
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    });
     vi.stubGlobal('cancelAnimationFrame', () => {});
   });
 
@@ -375,8 +600,13 @@ describe('PageReader open-at-page positioning', () => {
   async function mountAt(currentPage: number) {
     const onPageChange = vi.fn();
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
-    const utils = render(<PageReader images={images50} currentPage={currentPage} onPageChange={onPageChange} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    const utils = render(
+      <PageReader images={images50} currentPage={currentPage} onPageChange={onPageChange} />,
+    );
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     const scroller = utils.container.firstElementChild as HTMLElement;
     return { ...utils, onPageChange, scroller };
   }
@@ -401,7 +631,10 @@ describe('PageReader open-at-page positioning', () => {
     // Simulate the device failure: the programmatic jump settles short (the
     // virtual window was still small), so the scroll fires at a low position.
     scroller.scrollLeft = 3 * W;
-    await act(async () => { fireEvent.scroll(scroller); await Promise.resolve(); });
+    await act(async () => {
+      fireEvent.scroll(scroller);
+      await Promise.resolve();
+    });
     // Suppression must be held: currentPage is NOT overwritten with page 3.
     expect(onPageChange).not.toHaveBeenCalledWith(3);
   });
@@ -412,7 +645,10 @@ describe('PageReader open-at-page positioning', () => {
     const { container, rerender } = render(
       <PageReader images={imgs} currentPage={1} onPageChange={onPageChange} />,
     );
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     const scroller = container.firstElementChild as HTMLElement;
     const track = scroller.firstElementChild as HTMLElement;
     const scrollToSpy = vi.fn();
@@ -435,7 +671,10 @@ describe('PageReader open-at-page positioning', () => {
     const { container, rerender } = render(
       <PageReader images={imgs} currentPage={1} onPageChange={onPageChange} />,
     );
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await act(async () => {
+      resolveGg(fakeGgConfig);
+      await Promise.resolve();
+    });
     const scroller = container.firstElementChild as HTMLElement;
     const scrollToSpy = vi.fn();
     scroller.scrollTo = scrollToSpy as unknown as typeof scroller.scrollTo;

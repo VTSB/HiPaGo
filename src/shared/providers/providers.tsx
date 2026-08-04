@@ -13,6 +13,8 @@ import { AndroidBackButtonProvider } from '@/shared/providers/AndroidBackButtonP
 import { setSecureScreen } from '@/lib/plugins/secureScreen';
 
 const LOCALE_TO_LANG: Record<string, string> = { en: 'en', ko: 'ko' };
+const SETTINGS_RETRY_BASE_MS = 1000;
+const SETTINGS_RETRY_MAX_MS = 30_000;
 
 export function Providers({ children }: { children: ReactNode }) {
   const locale = useSettingsStore((s) => s.locale);
@@ -33,13 +35,52 @@ export function Providers({ children }: { children: ReactNode }) {
   );
   useEffect(() => {
     let active = true;
-    void initializeSettingsPersistence().finally(() => {
-      if (!active) return;
-      initLocaleOnce();
+    let released = false;
+    let localeInitialized = false;
+    let retryDelay = SETTINGS_RETRY_BASE_MS;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const releaseAppInitialization = () => {
+      if (!active || released) return;
+      released = true;
+      // Database startup must not remain blocked behind a temporarily
+      // unavailable native settings plugin. A later successful retry rehydrates
+      // the Zustand store and its normal subscriptions update the live UI.
       setSettingsReady(true);
-    });
+    };
+
+    const initializeLocale = () => {
+      if (!active || localeInitialized) return;
+      localeInitialized = true;
+      // Auto-locale writes localStorage. Delay it until native restore has
+      // succeeded so it cannot be mistaken for an explicit same-session user
+      // change by the restore baseline comparison.
+      initLocaleOnce();
+    };
+
+    const attemptSettingsInitialization = async () => {
+      try {
+        await initializeSettingsPersistence();
+        if (!active) return;
+        releaseAppInitialization();
+        initializeLocale();
+      } catch {
+        if (!active) return;
+        releaseAppInitialization();
+
+        const delay = retryDelay;
+        retryDelay = Math.min(retryDelay * 2, SETTINGS_RETRY_MAX_MS);
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          void attemptSettingsInitialization();
+        }, delay);
+      }
+    };
+
+    void attemptSettingsInitialization();
     return () => {
       active = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, []);
 

@@ -12,21 +12,17 @@ public class BypassPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     @objc func fetch(_ call: CAPPluginCall) {
-        guard let url = call.getString("url"), !url.isEmpty else {
-            call.reject("URL is required")
+        guard
+            let url = call.getString("url"),
+            NativeDownloadRequestPolicy.isAllowedBypassURL(url),
+            let validatedHeaders = NativeDownloadRequestPolicy.validateHeaders(
+                call.getObject("headers")
+            )
+        else {
+            call.reject("Invalid bypass request")
             return
         }
-
-        // Parse optional headers
-        var headers: [String: String]? = nil
-        if let headersObj = call.getObject("headers") {
-            headers = [:]
-            for (key, value) in headersObj {
-                if let strValue = value as? String {
-                    headers?[key] = strValue
-                }
-            }
-        }
+        let headers = validatedHeaders.isEmpty ? nil : validatedHeaders
 
         // Run on background queue
         DispatchQueue.global(qos: .userInitiated).async {
@@ -45,33 +41,33 @@ public class BypassPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Stream a URL's body straight to an absolute file path (one chunk at a time
-    /// in native code — the image never enters the JS heap). Used by the persistent
-    /// image cache; the JS adapter then serves the file via Capacitor.convertFileSrc.
+    /// Stream a URL's body straight to a canonical direct child of the app's
+    /// image-cache directory (one chunk at a time in native code — the image never
+    /// enters the JS heap). The JS adapter serves it via Capacitor.convertFileSrc.
     /// Resolves { size } = total bytes written.
     @objc func downloadToFile(_ call: CAPPluginCall) {
-        guard let url = call.getString("url"), !url.isEmpty else {
-            call.reject("URL is required")
+        guard
+            let url = call.getString("url"),
+            NativeDownloadRequestPolicy.isAllowedBypassURL(url),
+            let path = call.getString("path"),
+            let destination = NativeDownloadRequestPolicy.resolveImageCacheDestination(path),
+            let validatedHeaders = NativeDownloadRequestPolicy.validateHeaders(
+                call.getObject("headers")
+            )
+        else {
+            call.reject("Invalid bypass download request")
             return
         }
-        guard let path = call.getString("path"), !path.isEmpty else {
-            call.reject("path is required")
-            return
-        }
-
-        var headers: [String: String]? = nil
-        if let headersObj = call.getObject("headers") {
-            headers = [:]
-            for (key, value) in headersObj {
-                if let strValue = value as? String {
-                    headers?[key] = strValue
-                }
-            }
-        }
+        let headers = validatedHeaders.isEmpty ? nil : validatedHeaders
+        let destinationPath = destination.path
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let size = try bypassDownloadToFile(url: url, headers: headers, destPath: path)
+                let size = try bypassDownloadToFile(
+                    url: url,
+                    headers: headers,
+                    destPath: destinationPath
+                )
                 call.resolve(["size": size])
             } catch {
                 call.reject("Bypass download failed: \(error.localizedDescription)")

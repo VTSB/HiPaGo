@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -38,12 +39,15 @@ import java.net.URL;
  *   check({owner, repo}) → {available, version?, notes?, apkUrl?}
  *     Queries https://api.github.com/repos/{owner}/{repo}/releases/latest,
  *     compares the tag (e.g. "v0.0.7") against the installed app version,
- *     finds the first `.apk` asset, returns the download URL. Network,
+ *     finds the exact version-matched Android universal asset, and returns its
+ *     approved VTSB/HiPaGo GitHub download URL. Network,
  *     response, and parse failures return error metadata so the JS service can
  *     distinguish a failed check from a successful no-update result.
  *
  *   install({apkUrl}) → {status}
- *     Downloads via DownloadManager into the app's external-files Downloads
+ *     Revalidates the approved release URL, downloads via DownloadManager into
+ *     the app's external-files Downloads directory, checks package identity and
+ *     monotonic version metadata,
  *     directory (path declared in res/xml/file_paths.xml), then on
  *     ACTION_DOWNLOAD_COMPLETE fires an Intent.ACTION_VIEW with a
  *     FileProvider URI and the application/vnd.android.package-archive MIME
@@ -52,6 +56,8 @@ import java.net.URL;
  */
 @CapacitorPlugin(name = "Updater")
 public class UpdaterPlugin extends Plugin {
+    private static final String RELEASE_OWNER = "VTSB";
+    private static final String RELEASE_REPO = "HiPaGo";
 
     @PluginMethod
     public void check(PluginCall call) {
@@ -61,9 +67,16 @@ public class UpdaterPlugin extends Plugin {
             call.reject("owner and repo are required");
             return;
         }
+        if (!RELEASE_OWNER.equals(owner) || !RELEASE_REPO.equals(repo)) {
+            call.reject("Only VTSB/HiPaGo releases are allowed");
+            return;
+        }
         new Thread(() -> {
             try {
-                URL url = new URL("https://api.github.com/repos/" + owner + "/" + repo + "/releases/latest");
+                URL url = new URL(
+                        "https://api.github.com/repos/"
+                                + RELEASE_OWNER + "/" + RELEASE_REPO + "/releases/latest"
+                );
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestProperty("Accept", "application/vnd.github+json");
                 // A user-initiated "Check for updates" must always hit the network
@@ -111,7 +124,7 @@ public class UpdaterPlugin extends Plugin {
                     return;
                 }
 
-                String apkUrl = findApkAssetUrl(json.optJSONArray("assets"));
+                String apkUrl = findApkAssetUrl(json.optJSONArray("assets"), remoteVer);
                 if (apkUrl == null) {
                     JSObject ret = new JSObject();
                     ret.put("available", false);
@@ -138,8 +151,11 @@ public class UpdaterPlugin extends Plugin {
     @PluginMethod
     public void install(PluginCall call) {
         final String apkUrl = call.getString("apkUrl");
-        if (apkUrl == null || apkUrl.isEmpty()) {
-            call.reject("apkUrl is required");
+        final String expectedVersion;
+        try {
+            expectedVersion = NativeRequestPolicy.requireAllowedUpdaterAssetUrl(apkUrl);
+        } catch (IllegalArgumentException invalidUrl) {
+            call.reject("Invalid updater asset URL: " + invalidUrl.getMessage(), invalidUrl);
             return;
         }
         final Context ctx = getContext();
@@ -159,11 +175,11 @@ public class UpdaterPlugin extends Plugin {
                 return;
             }
             final File apkFile = new File(dlDir, "hipago-update.apk");
-            if (apkFile.exists()) {
-                // Stale APK from a half-finished prior run would resolve to
-                // a different version; force a fresh download.
-                //noinspection ResultOfMethodCallIgnored
-                apkFile.delete();
+            // A stale APK from a half-finished prior run could resolve to a
+            // different version. Never enqueue over it unless absence is proven.
+            if (!removeStaleApk(apkFile)) {
+                call.reject("stale update APK could not be removed");
+                return;
             }
 
             DownloadManager.Request req = new DownloadManager.Request(Uri.parse(apkUrl));
@@ -205,6 +221,15 @@ public class UpdaterPlugin extends Plugin {
 
                     if (!apkFile.exists() || apkFile.length() <= 0) {
                         call.reject("downloaded APK missing or empty");
+                        return;
+                    }
+                    try {
+                        validateDownloadedApk(ctx, apkFile, expectedVersion);
+                    } catch (Exception invalidApk) {
+                        call.reject(
+                                "downloaded APK validation failed: " + invalidApk.getMessage(),
+                                invalidApk
+                        );
                         return;
                     }
 
@@ -323,24 +348,65 @@ public class UpdaterPlugin extends Plugin {
         }
     }
 
-    private static String findApkAssetUrl(JSONArray assets) {
+    static String findApkAssetUrl(JSONArray assets, String version) {
         if (assets == null) {
             return null;
         }
+        String expectedName = "HiPaGo_" + version + "_android_universal.apk";
         for (int i = 0; i < assets.length(); i++) {
             JSONObject a = assets.optJSONObject(i);
             if (a == null) {
                 continue;
             }
             String name = a.optString("name", "");
-            if (name.toLowerCase().endsWith(".apk")) {
+            if (expectedName.equals(name)) {
                 String url = a.optString("browser_download_url", "");
                 if (!url.isEmpty()) {
+                    String urlVersion = NativeRequestPolicy.requireAllowedUpdaterAssetUrl(url);
+                    if (!version.equals(urlVersion)) {
+                        throw new IllegalArgumentException(
+                                "Android release asset version does not match tag_name"
+                        );
+                    }
                     return url;
                 }
             }
         }
         return null;
+    }
+
+    static boolean removeStaleApk(File apkFile) {
+        return apkFile != null
+                && (!apkFile.exists() || (apkFile.delete() && !apkFile.exists()));
+    }
+
+    private static void validateDownloadedApk(
+            Context ctx,
+            File apkFile,
+            String expectedVersion
+    ) throws Exception {
+        PackageManager packageManager = ctx.getPackageManager();
+        PackageInfo archive = packageManager.getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
+        if (archive == null) {
+            throw new Exception("package archive could not be parsed");
+        }
+        PackageInfo installed = packageManager.getPackageInfo(ctx.getPackageName(), 0);
+        NativeRequestPolicy.requireValidUpdateArchive(
+                ctx.getPackageName(),
+                packageVersionCode(installed),
+                archive.packageName,
+                archive.versionName,
+                packageVersionCode(archive),
+                expectedVersion
+        );
+    }
+
+    private static long packageVersionCode(PackageInfo info) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return info.getLongVersionCode();
+        }
+        //noinspection deprecation
+        return info.versionCode;
     }
 
     private static boolean isNewer(String remote, String current) {

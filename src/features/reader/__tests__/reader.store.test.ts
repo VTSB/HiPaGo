@@ -20,6 +20,7 @@ const initialState = {
   scrollPosition: 0,
   isLoading: false,
   error: null,
+  progressReadyGalleryId: null,
 };
 
 beforeEach(() => {
@@ -38,6 +39,7 @@ describe('useReaderStore', () => {
       expect(s.scrollPosition).toBe(0);
       expect(s.isLoading).toBe(false);
       expect(s.error).toBeNull();
+      expect(s.progressReadyGalleryId).toBeNull();
     });
   });
 
@@ -66,6 +68,26 @@ describe('useReaderStore', () => {
       const s = useReaderStore.getState();
       expect(s.error).toBeNull();
       expect(s.isLoading).toBe(false);
+    });
+
+    it('closes the progress persistence barrier for the new gallery', () => {
+      useReaderStore.setState({ progressReadyGalleryId: 9 });
+
+      useReaderStore.getState().setGallery(10, [makeImage('001')]);
+
+      expect(useReaderStore.getState().progressReadyGalleryId).toBeNull();
+    });
+  });
+
+  describe('markProgressReady', () => {
+    it('opens the barrier only for the active gallery', () => {
+      useReaderStore.getState().setGallery(42, [makeImage('001')]);
+
+      useReaderStore.getState().markProgressReady(7);
+      expect(useReaderStore.getState().progressReadyGalleryId).toBeNull();
+
+      useReaderStore.getState().markProgressReady(42);
+      expect(useReaderStore.getState().progressReadyGalleryId).toBe(42);
     });
   });
 
@@ -163,7 +185,12 @@ describe('useReaderStore', () => {
     it('returns all state to initial values', () => {
       const images = [makeImage('001'), makeImage('002')];
       useReaderStore.getState().setGallery(99, images);
-      useReaderStore.setState({ mode: 'scroll', scrollPosition: 500, isLoading: true, error: 'err' });
+      useReaderStore.setState({
+        mode: 'scroll',
+        scrollPosition: 500,
+        isLoading: true,
+        error: 'err',
+      });
       useReaderStore.getState().setCurrentPage(1);
 
       useReaderStore.getState().reset();
@@ -177,6 +204,7 @@ describe('useReaderStore', () => {
       expect(s.scrollPosition).toBe(0);
       expect(s.isLoading).toBe(false);
       expect(s.error).toBeNull();
+      expect(s.progressReadyGalleryId).toBeNull();
     });
   });
 });

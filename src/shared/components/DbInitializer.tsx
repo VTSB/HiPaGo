@@ -45,7 +45,7 @@ export function DbInitializer() {
             .then((info) => {
               useSettingsStore
                 .getState()
-                .setDownloadTree(
+                .restoreDownloadTreeFromNative(
                   info.valid && info.treeUri ? info.treeUri : null,
                   info.valid ? (info.displayName ?? null) : null,
                 );

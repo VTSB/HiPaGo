@@ -32,6 +32,16 @@ interface ZipExportState {
 }
 
 let nextToken = 0;
+const deleteClaimGenerations = new Map<number, number>();
+
+/**
+ * Monotonic per-gallery deletion epoch. Async queue/start work captures this
+ * before awaiting and can detect a deletion that began and finished while it
+ * was suspended, even after `deletingGalleryIds` no longer contains the id.
+ */
+export function getDeleteClaimGeneration(galleryId: number): number {
+  return deleteClaimGenerations.get(galleryId) ?? 0;
+}
 
 /**
  * Process-wide single-flight state. Keeping export and deletion claims outside
@@ -62,6 +72,7 @@ export const useZipExportStore = create<ZipExportState>((set, get) => ({
     }
     const deletingGalleryIds = new Set(state.deletingGalleryIds);
     deletingGalleryIds.add(galleryId);
+    deleteClaimGenerations.set(galleryId, getDeleteClaimGeneration(galleryId) + 1);
     set({ deletingGalleryIds });
     return true;
   },

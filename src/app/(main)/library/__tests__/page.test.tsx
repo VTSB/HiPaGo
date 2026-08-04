@@ -63,7 +63,9 @@ const mockDownloadProgressState = vi.hoisted(() => ({
   queue: [] as QueueItem[],
   globalPaused: false,
   start: vi.fn(async () => {}),
-  cancel: vi.fn(),
+  cancel: vi.fn(async () => true),
+  retryFailed: vi.fn(async () => true),
+  retryMissing: vi.fn(async () => true),
   refreshDownloaded: vi.fn(async () => {}),
   refreshQueue: vi.fn(async () => {}),
   reorder: vi.fn(async () => {}),
@@ -76,13 +78,16 @@ const mockDownloadProgressState = vi.hoisted(() => ({
 const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
 const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
+const mockGetDownload = vi.fn<(id: number) => Promise<DBDownload | null>>();
 const mockCreateDownloadStore = vi.fn();
+type MockZipExportSource = Pick<DBDownload, 'folderName' | 'pageCount' | 'status'>;
 const mockExportGalleryZip =
   vi.fn<
     (
       galleryId: number,
       title: string,
       onProgress?: (progress: { current: number; total: number }) => void,
+      sourceFallback?: MockZipExportSource,
     ) => Promise<'saved' | 'started' | 'cancelled'>
   >();
 const mockHasCompleteDownloadedGallery =
@@ -112,6 +117,7 @@ vi.mock('@/lib/db/download', () => ({
   // mock so existing assertions (which seed mockListDownloads) keep working.
   listLibraryDownloads: () => mockListDownloads(),
   searchDownloads: (opts: { query?: string }) => mockSearchDownloads(opts),
+  getDownload: (id: number) => mockGetDownload(id),
   deleteDownload: (id: number) => mockDeleteDownload(id),
   // The redesigned card deserializes tags at render time (not just in retry),
   // so the mock must provide it too.
@@ -159,7 +165,8 @@ vi.mock('@/lib/utils/download-zip', () => ({
     galleryId: number,
     title: string,
     onProgress?: (progress: { current: number; total: number }) => void,
-  ) => mockExportGalleryZip(galleryId, title, onProgress),
+    sourceFallback?: MockZipExportSource,
+  ) => mockExportGalleryZip(galleryId, title, onProgress, sourceFallback),
   hasCompleteDownloadedGallery: (
     galleryId: number,
     expectedPageCount: number,
@@ -267,6 +274,10 @@ describe('LibraryPage', () => {
     mockDownloadProgressState.downloaded = {};
     mockDownloadProgressState.queue = [];
     mockDownloadProgressState.globalPaused = false;
+    mockGetDownload.mockImplementation(async (id) => {
+      const rows = await mockListDownloads();
+      return rows.find((row) => row.galleryId === id) ?? null;
+    });
     useZipExportStore.getState().reset();
     window.history.replaceState({}, '', '/library');
     sessionStorage.clear();
@@ -586,7 +597,7 @@ describe('LibraryPage', () => {
     expect(mockDeleteGallery.mock.invocationCallOrder[0]).toBeLessThan(
       mockDeleteDownload.mock.invocationCallOrder[0],
     );
-    expect(mockDownloadProgressState.cancel).not.toHaveBeenCalled();
+    expect(mockDownloadProgressState.cancel).toHaveBeenCalledWith(2001);
   });
 
   it('keeps the DB row and shows an error when physical folder deletion fails', async () => {
@@ -682,6 +693,42 @@ describe('LibraryPage', () => {
     expect(mockDeleteDownload).toHaveBeenCalledWith(2002);
   });
 
+  it('fails closed when a paused native run cannot be cancelled exactly', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        galleryId: 2007,
+        title: 'Paused Native Download',
+        status: 'paused',
+        nativeRunId: 'run-paused-native-2007',
+      }),
+    ]);
+    mockDownloadProgressState.cancel.mockResolvedValueOnce(false);
+    const mockDeleteGallery = vi.fn().mockResolvedValue(undefined);
+    mockCreateDownloadStore.mockResolvedValue({
+      usage: vi.fn().mockResolvedValue(0),
+      deleteGallery: mockDeleteGallery,
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => {
+      await renderPage();
+    });
+    await screen.findByText('Paused Native Download');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
+    });
+
+    await screen.findByText('library.deleteFailed');
+    expect(mockDownloadProgressState.cancel).toHaveBeenCalledWith(2007);
+    expect(mockDeleteGallery).not.toHaveBeenCalled();
+    expect(mockDeleteDownload).not.toHaveBeenCalled();
+    expect(useZipExportStore.getState().deletingGalleryIds.has(2007)).toBe(false);
+  });
+
   it('clears a pending auto-retry before deleting a failed row', async () => {
     mockListDownloads.mockResolvedValue([
       makeItem({
@@ -767,15 +814,26 @@ describe('LibraryPage', () => {
   });
 
   it('shows an export error when stored files are missing', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4001, title: 'Broken Export' })]);
+    mockListDownloads.mockResolvedValue([
+      makeItem({
+        galleryId: 4001,
+        title: 'Broken Export',
+        folderName: '4001 Broken Export',
+      }),
+    ]);
     const sourceError = new Error('Missing downloaded page 2');
     sourceError.name = 'ZipExportSourceError';
-    mockExportGalleryZip.mockRejectedValue(sourceError);
+    mockExportGalleryZip.mockImplementation(async () => {
+      mockHasCompleteDownloadedGallery.mockResolvedValue(false);
+      throw sourceError;
+    });
 
+    let qc!: Awaited<ReturnType<typeof renderPage>>['qc'];
     await act(async () => {
-      await renderPage();
+      ({ qc } = await renderPage());
     });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+    const invalidateQueries = vi.spyOn(qc, 'invalidateQueries');
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
@@ -786,7 +844,19 @@ describe('LibraryPage', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('library.exportSourceFailed');
-    expect(mockExportGalleryZip).toHaveBeenCalledWith(4001, 'Broken Export', expect.any(Function));
+    expect(mockExportGalleryZip).toHaveBeenCalledWith(4001, 'Broken Export', expect.any(Function), {
+      folderName: '4001 Broken Export',
+      pageCount: 20,
+      status: 'complete',
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['download-integrity'] });
+    await waitFor(() =>
+      expect(mockHasCompleteDownloadedGallery.mock.calls.length).toBeGreaterThan(1),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'library.retry' })).toBeTruthy();
   });
 
   it('shows a storage-specific export error when saving the ZIP fails', async () => {
@@ -836,15 +906,56 @@ describe('LibraryPage', () => {
       fireEvent.click(retry);
     });
 
-    await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4003 }));
-    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(4003);
-    expect(mockQueueOps.enqueueDownload).toHaveBeenCalledWith(
-      expect.objectContaining({ galleryId: 4003, title: 'Missing Files' }),
-      { userInitiated: true },
+    await waitFor(() =>
+      expect(mockDownloadProgressState.retryMissing).toHaveBeenCalledWith(
+        expect.objectContaining({
+          galleryId: 4003,
+          title: 'Missing Files',
+          status: 'complete',
+        }),
+      ),
     );
-    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4003);
-    expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
+    expect(mockQueueOps.enqueueDownload).not.toHaveBeenCalled();
+    expect(mockProcessQueue).not.toHaveBeenCalledWith({ onlyGalleryId: 4003 });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['download-integrity'] });
+  });
+
+  it('does not fall back to a metadata upsert when a stale missing-files retry loses CAS', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 4007, title: 'Stale Missing Files' }),
+    ]);
+    mockHasCompleteDownloadedGallery.mockResolvedValue(false);
+    mockDownloadProgressState.retryMissing.mockResolvedValueOnce(false);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+    await waitFor(() =>
+      expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(4007, 20, {
+        folderName: null,
+      }),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.retry' }));
+    });
+
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(mockDownloadProgressState.retryMissing).toHaveBeenCalledWith(
+      expect.objectContaining({
+        galleryId: 4007,
+        title: 'Stale Missing Files',
+        status: 'complete',
+      }),
+    );
+    expect(mockQueueOps.enqueueDownload).not.toHaveBeenCalled();
+    expect(mockProcessQueue).not.toHaveBeenCalledWith({ onlyGalleryId: 4007 });
+    expect(mockDeleteDownload).not.toHaveBeenCalledWith(4007);
   });
 
   it('manual retry only starts the selected failed gallery', async () => {
@@ -864,14 +975,37 @@ describe('LibraryPage', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'library.retry' }));
     });
 
-    await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4100 }));
-    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(4100);
-    expect(mockQueueOps.enqueueDownload).toHaveBeenCalledWith(
-      expect.objectContaining({ galleryId: 4100, title: 'Failed Retry' }),
-      { userInitiated: true },
+    await waitFor(() =>
+      expect(mockDownloadProgressState.retryFailed).toHaveBeenCalledWith(
+        expect.objectContaining({ galleryId: 4100, title: 'Failed Retry', status: 'failed' }),
+      ),
     );
-    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4100);
-    expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
+    expect(mockQueueOps.enqueueDownload).not.toHaveBeenCalled();
+    expect(mockProcessQueue).not.toHaveBeenCalledWith({ onlyGalleryId: 4100 });
+  });
+
+  it('fails a stale manual retry without overwriting a newer lifecycle', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 4101, title: 'Stale Failed Retry', status: 'failed' }),
+    ]);
+    mockDownloadProgressState.retryFailed.mockResolvedValueOnce(false);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'library.retry' }));
+    });
+
+    await waitFor(() => expect(consoleError).toHaveBeenCalled());
+    expect(mockQueueOps.enqueueDownload).not.toHaveBeenCalled();
+    expect(mockProcessQueue).not.toHaveBeenCalledWith({ onlyGalleryId: 4101 });
   });
 
   it('shows pending auto-retry from the live store before the DB row refetches', async () => {
@@ -1053,7 +1187,11 @@ describe('LibraryPage', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
     });
     expect(mockExportGalleryZip).toHaveBeenCalledTimes(1);
-    expect(mockExportGalleryZip).toHaveBeenCalledWith(4002, 'Slow Export', expect.any(Function));
+    expect(mockExportGalleryZip).toHaveBeenCalledWith(4002, 'Slow Export', expect.any(Function), {
+      folderName: null,
+      pageCount: 20,
+      status: 'complete',
+    });
     expect(screen.queryByRole('button', { name: 'library.more' })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: 'library.delete' })).toBeNull();
   });

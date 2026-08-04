@@ -12,10 +12,10 @@ import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import {
   listLibraryDownloads,
   searchDownloads,
+  getDownload,
   deleteDownload,
   deserializeTags,
 } from '@/lib/db/download';
-import { enqueueDownload } from '@/lib/db/download-queue';
 import { clearAutoRetry, AUTO_RETRY_MAX } from '@/lib/db/download-retry';
 import {
   DOWNLOAD_LIBRARY_CHANGED_EVENT,
@@ -153,7 +153,7 @@ interface LibraryCardProps {
   item: DBDownload;
   localCoverUrl?: string | null;
   onDelete: (item: DBDownload) => void;
-  onExport: (galleryId: number, title: string) => void;
+  onExport: (item: DBDownload) => void;
   onRetry: (item: DBDownload) => void;
   isRetrying: boolean;
   isExporting: boolean;
@@ -322,7 +322,7 @@ function LibraryCard({
       items.push({
         key: 'export',
         label: t('library.exportZip'),
-        onClick: () => onExport(item.galleryId, item.title),
+        onClick: () => onExport(item),
       });
     }
     items.push({
@@ -497,7 +497,6 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const storeEntries = useDownloadProgressStore((s) => s.entries);
   const downloadedFlags = useDownloadProgressStore((s) => s.downloaded);
   const hasQueuedWork = useDownloadProgressStore((s) => s.queue.length > 0);
-  const refreshQueue = useDownloadProgressStore((s) => s.refreshQueue);
 
   const handleQueryChange = useCallback((v: string) => {
     setRawQuery(v);
@@ -646,16 +645,33 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
       setDeleteError(null);
       try {
         const liveEntry = useDownloadProgressStore.getState().entries[galleryId];
-        if (item.status === 'downloading' || !!liveEntry?.progress) {
-          await useDownloadProgressStore.getState().cancel(galleryId);
+        // Capture the latest storage identity before cancel; an exact zero-page
+        // native cancel may legitimately remove its DB row.
+        const beforeCancelItem = await getDownload(galleryId);
+        // Always cross the store's cancellation barrier before touching files.
+        // This covers a queue claim/re-download that may have started after the
+        // rendered `item` snapshot was read. Complete idle rows are a safe no-op.
+        const cancelled = await useDownloadProgressStore.getState().cancel(galleryId);
+        if (!cancelled) {
+          throw new Error('download worker cancellation could not be confirmed');
         }
-        if (item.status === 'failed' && (item.nextRetryAt || liveEntry?.retryAt)) {
+        // Cancellation may have committed newer folder metadata than the
+        // rendered card snapshot. Read it only after all writers are quiescent;
+        // a read failure must not orphan the real folder by deleting only DB.
+        const latestItem = await getDownload(galleryId);
+        if (
+          (latestItem?.status ?? item.status) === 'failed' &&
+          (latestItem?.nextRetryAt || item.nextRetryAt || liveEntry?.retryAt)
+        ) {
           await clearAutoRetry(galleryId).catch(() => {});
           useDownloadProgressStore.getState().clearRetryPending(galleryId);
         }
         // Keep the DB row until the physical folder has been removed.
         const store = await createDownloadStore();
-        await store.deleteGallery(galleryId, { folderName: item.folderName ?? null });
+        await store.deleteGallery(galleryId, {
+          folderName:
+            latestItem?.folderName ?? beforeCancelItem?.folderName ?? item.folderName ?? null,
+        });
         await deleteDownload(galleryId);
         await useDownloadProgressStore.getState().refreshQueue();
         const zipExportState = useZipExportStore.getState();
@@ -666,6 +682,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         return;
       } finally {
         useZipExportStore.getState().releaseDelete(galleryId);
+        // A deletion claim temporarily blocks this gallery from being claimed
+        // by the download processor. Resume the queue once the filesystem/DB
+        // transaction has either committed or failed closed.
+        void processQueue();
       }
       void queryClient.invalidateQueries({ queryKey: ['library-list'] });
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
@@ -677,14 +697,24 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
 
   // Export a downloaded gallery's stored images back out as a ZIP.
   const handleExport = useCallback(
-    async (galleryId: number, title: string) => {
+    async (item: DBDownload) => {
+      const { galleryId, title } = item;
       const token = useZipExportStore.getState().begin(galleryId, title);
       if (token === null) return;
       try {
         const { exportGalleryZip } = await import('@/lib/utils/download-zip');
-        const result = await exportGalleryZip(galleryId, title, (progress) => {
-          useZipExportStore.getState().updateProgress(token, progress);
-        });
+        const result = await exportGalleryZip(
+          galleryId,
+          title,
+          (progress) => {
+            useZipExportStore.getState().updateProgress(token, progress);
+          },
+          {
+            folderName: item.folderName ?? null,
+            pageCount: item.pageCount,
+            status: item.status,
+          },
+        );
         const zipExportState = useZipExportStore.getState();
         if (result === 'cancelled') zipExportState.cancel(token);
         else zipExportState.finish(token, result);
@@ -698,48 +728,41 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           );
         void queryClient.invalidateQueries({ queryKey: ['library-list'] });
         void queryClient.invalidateQueries({ queryKey: ['library-search'] });
+        void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       }
     },
     [queryClient],
   );
 
-  // Retry a failed download by RESUMING it THROUGH THE QUEUE: enqueue the row
-  // (userInitiated → front of queue) and kick the processor. The processor
-  // re-fetches the gallery's file list (not stored on the row), resumes from the
-  // partial pages, and pushes live progress into the store. This unifies retry
-  // with the single download authority — no separate single-flight here.
+  // Retry one exact failed snapshot. The store proves any native owner stopped,
+  // then uses a lifecycle CAS (or insert-if-absent for a cancelled zero-page
+  // row), so a stale menu action cannot overwrite a newer queued/native run.
   const handleRetry = useCallback(
     async (item: DBDownload) => {
       // The processor already single-flights per gallery; a live entry means it's
       // in flight, so ignore a duplicate tap.
       if (storeEntries[item.galleryId]?.progress) return;
       try {
-        // Manual retry resets the auto-restart attempt counter — a fresh set of
-        // automatic attempts thereafter. enqueueDownload (default path) also
-        // resets it, but clear explicitly so the reset holds even if the enqueue
-        // is later changed, and clear the store's "retry pending" entry now.
-        await clearAutoRetry(item.galleryId);
-        await enqueueDownload(
-          {
-            galleryId: item.galleryId,
-            title: item.title,
-            thumbnail: item.thumbnail,
-            tags: deserializeTags(item.tags),
-          },
-          { userInitiated: true },
-        );
-        useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
-        void refreshQueue();
-        void processQueue({ onlyGalleryId: item.galleryId });
+        let retried: boolean;
+        if (item.status === 'failed') {
+          retried = await useDownloadProgressStore.getState().retryFailed(item);
+        } else {
+          // A complete row with missing physical pages is a re-download, not a
+          // failed retry. The store reserves the same enqueue/delete barrier as
+          // every other lifecycle mutation and requires this exact complete row
+          // to still exist, so a stale card cannot recreate a deleted gallery.
+          retried = await useDownloadProgressStore.getState().retryMissing(item);
+        }
+        if (!retried) throw new Error('download row changed before retry');
       } catch (e) {
-        console.error('Retry failed to enqueue:', e);
+        console.error('Retry failed:', e);
       } finally {
         queryClient.invalidateQueries({ queryKey: ['library-list'] });
         queryClient.invalidateQueries({ queryKey: ['library-search'] });
         queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       }
     },
-    [storeEntries, queryClient, refreshQueue],
+    [storeEntries, queryClient],
   );
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);

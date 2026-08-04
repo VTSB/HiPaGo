@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@capacitor-community/sqlite@6.0.2': patches/@capacitor-community__sqlite@6.0.2.patch

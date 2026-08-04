@@ -42,6 +42,20 @@ public class GalleryDownloadWorkerTest {
     }
 
     @Test
+    public void malformedCleanupPreservesLegacyFoundByLockedReread() throws Exception {
+        File order = writeOrder(
+                "123.json",
+                "{\"galleryId\":123,\"title\":\"legacy\",\"pages\":[]}"
+        );
+
+        // Calling cleanup directly models an earlier unlocked read that failed
+        // transiently. The locked re-read now sees the durable legacy order.
+        GalleryDownloadWorker.deleteMalformedOrderIfStillMalformed(order);
+
+        assertTrue(order.exists());
+    }
+
+    @Test
     public void numericStringQueuePositionMatchesJsonOptLongSemantics() throws Exception {
         File order = writeOrder("string-position.json", "{\"galleryId\":123,\"queuePosition\":\"3\"}");
 
@@ -49,25 +63,52 @@ public class GalleryDownloadWorkerTest {
     }
 
     @Test
-    public void validatesWorkOrderPageRelPathsBeforeSafAccess() {
-        assertTrue(GalleryDownloadWorker.isValidRelPath("HiPaGo/123 Title/0001.webp"));
-        assertTrue(GalleryDownloadWorker.isValidRelPath("downloads/123/0001.avif"));
+    public void comparesQueuePositionThenFilenameWithoutApi24ComparatorHelpers() throws Exception {
+        File first = writeOrder("z.json", "{\"galleryId\":1,\"queuePosition\":1}");
+        File second = writeOrder("a.json", "{\"galleryId\":2,\"queuePosition\":2}");
+        File tie = writeOrder("b.json", "{\"galleryId\":3,\"queuePosition\":2}");
 
-        assertTrue(!GalleryDownloadWorker.isValidRelPath(null));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath(""));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("/HiPaGo/123/0001.webp"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo/123/"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo/../0001.webp"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo//0001.webp"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo\\123\\0001.webp"));
+        assertTrue(GalleryDownloadWorker.compareOrderFiles(first, second) < 0);
+        assertTrue(GalleryDownloadWorker.compareOrderFiles(second, tie) < 0);
+        assertTrue(GalleryDownloadWorker.compareOrderFiles(tie, second) > 0);
+    }
+
+    @Test
+    public void validatesWorkOrderPageRelPathsBeforeSafAccess() {
+        assertTrue(GalleryDownloadWorker.isValidGalleryFolder("123", "123 Title"));
+        assertTrue(GalleryDownloadWorker.isValidGalleryFolder("123", "123"));
+        assertTrue(GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/123 Title/0001.webp", "123", "123 Title", 0, "webp"));
+
+        assertTrue(!GalleryDownloadWorker.isValidGalleryFolder("123", "999 Title"));
+        assertTrue(!GalleryDownloadWorker.isValidGalleryFolder("123", "123/Title"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "downloads/123/0001.avif", "123", "123", 0, "avif"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo2/123/0001.webp", "123", "123", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/123/0002.webp", "123", "123", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/123/0001.jpg", "123", "123", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/999/0001.webp", "123", "999", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                null, "123", "123", 0, "webp"));
     }
 
     @Test
     public void validatesDownloadUrlAndExtensionBeforeNativeDownload() {
-        assertTrue(GalleryDownloadWorker.isValidDownloadUrl("https://aa.hitomi.la/webp/x.webp"));
-        assertTrue(GalleryDownloadWorker.isValidDownloadUrl("http://example.test/x.webp"));
+        assertTrue(GalleryDownloadWorker.isValidDownloadUrl(
+                "https://aa.gold-usergeneratedcontent.net/webp/x.webp"
+        ));
+        assertTrue(GalleryDownloadWorker.isValidDownloadUrl(
+                "https://tagindex.hitomi.la/global/t/e.json"
+        ));
         assertTrue(!GalleryDownloadWorker.isValidDownloadUrl(null));
         assertTrue(!GalleryDownloadWorker.isValidDownloadUrl(""));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("http://hitomi.la/x.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("https://aa.hitomi.la/x.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("https://hitomi.la.evil.test/x.webp"));
         assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("file:///tmp/x.webp"));
 
         assertTrue(GalleryDownloadWorker.isValidExtension("webp"));

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   ImageCacheStore,
   DEFAULT_IMAGE_CACHE_MAX_BYTES,
@@ -67,6 +67,139 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
     expect(s.usage()).toBe(100);
     expect(files.get('a')).toBe(100);
     expect(await s.fileUrl('a')).toBe('file://cache/a'); // hit
+  });
+
+  it('coalesces concurrent same-key downloads and starts a fresh operation after success', async () => {
+    const { backend, files } = fakeBackend();
+    const originalDownload = backend.download;
+    let releaseDownload!: () => void;
+    const downloadGate = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    const download = vi.fn(
+      async (key: string, requestUrl: string, headers: Record<string, string>) => {
+        await downloadGate;
+        return originalDownload(key, requestUrl, headers);
+      },
+    );
+    backend.download = download;
+
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    const first = s.ensureCached('a', url(100), { Referer: 'first' });
+    const second = s.ensureCached('a', url(100), { Referer: 'second' });
+
+    await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+    releaseDownload();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'file://cache/a',
+      'file://cache/a',
+    ]);
+
+    files.delete('a'); // force a miss after the completed operation was removed
+    await expect(s.ensureCached('a', url(100), {})).resolves.toBe('file://cache/a');
+    expect(download).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes cross-key commits and protects every concurrent result from eviction', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    const originalDownload = backend.download;
+    const originalSaveIndex = backend.saveIndex;
+
+    let releaseDownloads!: () => void;
+    const downloadsGate = new Promise<void>((resolve) => {
+      releaseDownloads = resolve;
+    });
+    const download = vi.fn(
+      async (key: string, requestUrl: string, headers: Record<string, string>) => {
+        await downloadsGate;
+        return originalDownload(key, requestUrl, headers);
+      },
+    );
+    backend.download = download;
+
+    let releaseOldSave!: () => void;
+    const oldSaveGate = new Promise<void>((resolve) => {
+      releaseOldSave = resolve;
+    });
+    const saveCompletions: number[] = [];
+    let saveCall = 0;
+    const saveIndex = vi.fn(async (entries: ImageCacheIndexEntry[]) => {
+      const call = ++saveCall;
+      // Without the commit mutex, the newer snapshot can finish first and the
+      // delayed older snapshot then overwrites it. The mutex must prevent the
+      // second write from even starting while this gate is held.
+      if (call === 1) await oldSaveGate;
+      await originalSaveIndex(entries);
+      saveCompletions.push(call);
+    });
+    backend.saveIndex = saveIndex;
+
+    const s = new ImageCacheStore(backend, 50);
+    await s.init();
+    const first = s.ensureCached('a', url(100), {});
+    const second = s.ensureCached('b', url(100), {});
+
+    await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(2));
+    releaseDownloads();
+    await vi.waitFor(() => expect(saveIndex).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(saveIndex).toHaveBeenCalledTimes(1);
+
+    releaseOldSave();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'file://cache/a',
+      'file://cache/b',
+    ]);
+
+    expect(saveCompletions).toEqual([1, 2]);
+    expect(files.has('a')).toBe(true);
+    expect(files.has('b')).toBe(true);
+    expect(new Set(getIndex().map((entry) => entry.key))).toEqual(new Set(['a', 'b']));
+  });
+
+  it('clears the same-key operation after a download failure so it can be retried', async () => {
+    const { backend } = fakeBackend();
+    const originalDownload = backend.download;
+    let attempts = 0;
+    const download = vi.fn(
+      async (key: string, requestUrl: string, headers: Record<string, string>) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('network unavailable');
+        return originalDownload(key, requestUrl, headers);
+      },
+    );
+    backend.download = download;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const s = new ImageCacheStore(backend, null);
+      await s.init();
+      await expect(s.ensureCached('a', url(100), {})).resolves.toBeNull();
+      await expect(s.ensureCached('a', url(100), {})).resolves.toBe('file://cache/a');
+      expect(download).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('clears the same-key operation when index persistence rejects', async () => {
+    const { backend } = fakeBackend();
+    const originalSaveIndex = backend.saveIndex;
+    const persistenceError = new Error('index write failed');
+    let attempts = 0;
+    const saveIndex = vi.fn(async (entries: ImageCacheIndexEntry[]) => {
+      attempts += 1;
+      if (attempts === 1) throw persistenceError;
+      await originalSaveIndex(entries);
+    });
+    backend.saveIndex = saveIndex;
+
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await expect(s.ensureCached('a', url(100), {})).rejects.toBe(persistenceError);
+    await expect(s.ensureCached('a', url(100), {})).resolves.toBe('file://cache/a');
+    expect(saveIndex).toHaveBeenCalledTimes(2);
   });
 
   it('evicts the least-recently-used entry until under the cap', async () => {
@@ -153,6 +286,285 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
     await s.clear();
     expect(s.count()).toBe(0);
     expect(s.usage()).toBe(0);
+    expect(files.size).toBe(0);
+  });
+
+  it('clear drains and supersedes an in-flight native download before deleting the cache', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    const originalDownload = backend.download;
+    let signalDownloadStarted!: () => void;
+    let releaseDownload!: () => void;
+    const downloadStarted = new Promise<void>((resolve) => {
+      signalDownloadStarted = resolve;
+    });
+    const downloadGate = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    backend.download = vi.fn(async (key, requestUrl, headers) => {
+      signalDownloadStarted();
+      await downloadGate;
+      return originalDownload(key, requestUrl, headers);
+    });
+    const clearAll = vi.spyOn(backend, 'clearAll');
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+
+    const ensure = s.ensureCached('late', url(100), {});
+    await downloadStarted;
+    let clearSettled = false;
+    const clearing = s.clear().then(() => {
+      clearSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(clearSettled).toBe(false);
+    expect(clearAll).not.toHaveBeenCalled();
+
+    releaseDownload();
+    await expect(ensure).resolves.toBeNull();
+    await clearing;
+
+    expect(clearAll).toHaveBeenCalledTimes(1);
+    expect(s.count()).toBe(0);
+    expect(s.usage()).toBe(0);
+    expect(files.size).toBe(0);
+    expect(getIndex()).toEqual([]);
+  });
+
+  it('clear supersedes an ensure while its index commit is awaiting native IO', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    const originalSaveIndex = backend.saveIndex;
+    let signalSaveStarted!: () => void;
+    let releaseSave!: () => void;
+    const saveStarted = new Promise<void>((resolve) => {
+      signalSaveStarted = resolve;
+    });
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    backend.saveIndex = vi.fn(async (entries) => {
+      signalSaveStarted();
+      await saveGate;
+      await originalSaveIndex(entries);
+    });
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+
+    const ensure = s.ensureCached('committing', url(100), {});
+    await saveStarted;
+    const clearing = s.clear();
+    releaseSave();
+
+    await expect(ensure).resolves.toBeNull();
+    await clearing;
+    expect(s.count()).toBe(0);
+    expect(files.size).toBe(0);
+    expect(getIndex()).toEqual([]);
+  });
+
+  it('clear supersedes an ensure while its final file URL is awaiting native IO', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    let signalFileUrlStarted!: () => void;
+    let releaseFileUrl!: () => void;
+    const fileUrlStarted = new Promise<void>((resolve) => {
+      signalFileUrlStarted = resolve;
+    });
+    const fileUrlGate = new Promise<void>((resolve) => {
+      releaseFileUrl = resolve;
+    });
+    backend.fileUrl = vi.fn(async (key) => {
+      signalFileUrlStarted();
+      await fileUrlGate;
+      return `file://cache/${key}`;
+    });
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+
+    const ensure = s.ensureCached('url-pending', url(100), {});
+    await fileUrlStarted;
+    const clearing = s.clear();
+    releaseFileUrl();
+
+    await expect(ensure).resolves.toBeNull();
+    await clearing;
+    expect(s.count()).toBe(0);
+    expect(files.size).toBe(0);
+    expect(getIndex()).toEqual([]);
+  });
+
+  it('clear supersedes an ensure while its outer bookkeeping is queued', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await s.ensureCached('bookkeeping-blocker', url(50), {});
+
+    const originalSaveIndex = backend.saveIndex;
+    let holdNextSave = false;
+    let signalBlockedSaveStarted!: () => void;
+    let releaseBlockedSave!: () => void;
+    const blockedSaveStarted = new Promise<void>((resolve) => {
+      signalBlockedSaveStarted = resolve;
+    });
+    const blockedSaveGate = new Promise<void>((resolve) => {
+      releaseBlockedSave = resolve;
+    });
+    backend.saveIndex = vi.fn(async (entries) => {
+      if (holdNextSave) {
+        holdNextSave = false;
+        signalBlockedSaveStarted();
+        await blockedSaveGate;
+      }
+      await originalSaveIndex(entries);
+    });
+
+    const originalFileUrl = backend.fileUrl;
+    let signalFinalFileUrlStarted!: () => void;
+    let releaseFinalFileUrl!: () => void;
+    const finalFileUrlStarted = new Promise<void>((resolve) => {
+      signalFinalFileUrlStarted = resolve;
+    });
+    const finalFileUrlGate = new Promise<void>((resolve) => {
+      releaseFinalFileUrl = resolve;
+    });
+    backend.fileUrl = vi.fn(async (key) => {
+      if (key === 'cleanup-race') {
+        signalFinalFileUrlStarted();
+        await finalFileUrlGate;
+      }
+      return originalFileUrl(key);
+    });
+
+    let ensureSettled = false;
+    const ensure = s.ensureCached('cleanup-race', url(100), {}).then((result) => {
+      ensureSettled = true;
+      return result;
+    });
+    await finalFileUrlStarted;
+
+    // Hold a separate state commit so the ensure's outer finally bookkeeping
+    // cannot finish after its inner operation has already produced a live URL.
+    holdNextSave = true;
+    const blockerLookup = s.fileUrl('bookkeeping-blocker');
+    await blockedSaveStarted;
+    const operations = Reflect.get(s, 'inFlightEnsures') as Map<
+      string,
+      Promise<string | null>
+    >;
+    const innerOperation = operations.get('cleanup-race');
+    expect(innerOperation).toBeDefined();
+
+    releaseFinalFileUrl();
+    await expect(innerOperation).resolves.toBe('file://cache/cleanup-race');
+    expect(ensureSettled).toBe(false);
+
+    const clearing = s.clear();
+    releaseBlockedSave();
+
+    await expect(blockerLookup).resolves.toBeNull();
+    await expect(ensure).resolves.toBeNull();
+    await clearing;
+    expect(files.size).toBe(0);
+    expect(getIndex()).toEqual([]);
+  });
+
+  it('does not return a direct cached URL after clear deletes the touched file', async () => {
+    const { backend, files } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await s.ensureCached('direct-url', url(100), {});
+
+    let signalFileUrlStarted!: () => void;
+    let releaseFileUrl!: () => void;
+    const fileUrlStarted = new Promise<void>((resolve) => {
+      signalFileUrlStarted = resolve;
+    });
+    const fileUrlGate = new Promise<void>((resolve) => {
+      releaseFileUrl = resolve;
+    });
+    backend.fileUrl = vi.fn(async (key) => {
+      signalFileUrlStarted();
+      await fileUrlGate;
+      return `file://cache/${key}`;
+    });
+
+    const lookup = s.fileUrl('direct-url');
+    await fileUrlStarted;
+    await s.clear();
+    releaseFileUrl();
+
+    await expect(lookup).resolves.toBeNull();
+    expect(files.size).toBe(0);
+  });
+
+  it('does not return a direct cached path after clear deletes the touched file', async () => {
+    const { backend, files } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await s.ensureCached('direct-path', url(100), {});
+
+    let signalFilePathStarted!: () => void;
+    let releaseFilePath!: () => void;
+    const filePathStarted = new Promise<void>((resolve) => {
+      signalFilePathStarted = resolve;
+    });
+    const filePathGate = new Promise<void>((resolve) => {
+      releaseFilePath = resolve;
+    });
+    backend.filePath = vi.fn(async (key) => {
+      signalFilePathStarted();
+      await filePathGate;
+      return `/cache/${key}`;
+    });
+
+    const lookup = s.cachedFilePath('direct-path');
+    await filePathStarted;
+    await s.clear();
+    releaseFilePath();
+
+    await expect(lookup).resolves.toBeNull();
+    expect(files.size).toBe(0);
+  });
+
+  it('blocks direct lookups behind a clear that is still draining an old ensure', async () => {
+    const { backend, files } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await s.ensureCached('old-hit', url(50), {});
+
+    const originalDownload = backend.download;
+    let signalDownloadStarted!: () => void;
+    let releaseDownload!: () => void;
+    const downloadStarted = new Promise<void>((resolve) => {
+      signalDownloadStarted = resolve;
+    });
+    const downloadGate = new Promise<void>((resolve) => {
+      releaseDownload = resolve;
+    });
+    backend.download = vi.fn(async (key, requestUrl, headers) => {
+      if (key === 'pending-clear') {
+        signalDownloadStarted();
+        await downloadGate;
+      }
+      return originalDownload(key, requestUrl, headers);
+    });
+
+    const pendingEnsure = s.ensureCached('pending-clear', url(100), {});
+    await downloadStarted;
+    const clearing = s.clear();
+    let lookupsSettled = false;
+    const lookups = Promise.all([s.fileUrl('old-hit'), s.cachedFilePath('old-hit')]).then(
+      (result) => {
+        lookupsSettled = true;
+        return result;
+      },
+    );
+    await Promise.resolve();
+    expect(lookupsSettled).toBe(false);
+
+    releaseDownload();
+    await expect(pendingEnsure).resolves.toBeNull();
+    await clearing;
+    await expect(lookups).resolves.toEqual([null, null]);
     expect(files.size).toBe(0);
   });
 

@@ -15,6 +15,7 @@
  *   opens the GitHub Release page in the system browser.
  */
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { UpdateService, type CheckResult } from '@/services/UpdateService';
 import { useT } from '@/lib/i18n/useT';
 
@@ -31,6 +32,8 @@ function firstMeaningfulLine(notes?: string): string | undefined {
 
 export function UpdateBanner() {
   const t = useT();
+  const pathname = usePathname();
+  const readerRoute = pathname === '/reader' || /^\/gallery\/[^/]+\/reader\/?$/.test(pathname);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
@@ -38,6 +41,10 @@ export function UpdateBanner() {
   const [notice, setNotice] = useState<ApplyNotice>(null);
 
   useEffect(() => {
+    // The reader owns the full visual viewport. A sticky global banner would
+    // add document height and shift the artwork below the native safe area.
+    if (readerRoute) return;
+
     let cancelled = false;
     UpdateService.checkForUpdate()
       .then((r) => {
@@ -56,9 +63,9 @@ export function UpdateBanner() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [readerRoute]);
 
-  if (!result || !result.available || dismissed) return null;
+  if (readerRoute || !result || !result.available || dismissed) return null;
 
   const onApply = async () => {
     if (result.applyFn) {
@@ -112,7 +119,7 @@ export function UpdateBanner() {
     <div
       role="region"
       aria-label={t('update.banner.title')}
-      className="sticky top-0 z-[60] border-b border-zinc-200 bg-white/95 text-zinc-900 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95 dark:text-zinc-100"
+      className="sticky top-0 z-[60] border-b border-zinc-200 bg-white/95 pt-[env(safe-area-inset-top)] text-zinc-900 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95 dark:text-zinc-100"
     >
       <div className="mx-auto flex min-h-14 max-w-7xl items-center gap-3 px-4 py-2">
         {/* Download / update icon */}

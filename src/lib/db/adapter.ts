@@ -37,6 +37,7 @@ export interface DbAdapter {
 let _db: DbAdapter | null = null;
 let _rawDb: DbAdapter | null = null;
 let _ensureInit: (() => Promise<void>) | null = null;
+let _resetInit: (() => void) | null = null;
 
 // Native adapters expose transactions as separate BEGIN / statement / COMMIT
 // calls. The Tauri SQL plugin also routes every command through a connection
@@ -82,6 +83,11 @@ export function setEnsureInit(fn: () => Promise<void>): void {
   _ensureInit = fn;
 }
 
+/** Register cleanup for initializer-owned state after the live adapter closes. */
+export function setResetInit(fn: () => void): void {
+  _resetInit = fn;
+}
+
 /** Get the DB adapter, ensuring initialization first. Use this in all production code. */
 export async function ensureDb(): Promise<DbAdapter> {
   if (!_db && _ensureInit) await _ensureInit();
@@ -106,9 +112,13 @@ export function isDbInitialized(): boolean {
 
 export async function closeDb(): Promise<void> {
   if (_db) {
-    await _db.close();
-    _db = null;
-    _rawDb = null;
+    try {
+      await _db.close();
+    } finally {
+      _db = null;
+      _rawDb = null;
+      _resetInit?.();
+    }
   }
 }
 

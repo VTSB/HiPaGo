@@ -23,6 +23,8 @@ import org.robolectric.annotation.Config;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
 public class GalleryDownloadWorkerRuntimeTest {
+    private static final String RUN_ID = "run-aaaaaaaaaaaaaaaa";
+
     private Context context;
 
     @Before
@@ -43,13 +45,18 @@ public class GalleryDownloadWorkerRuntimeTest {
         File orderFile = new File(handoffDir, "123.json");
         Files.write(
                 orderFile.toPath(),
-                "{\"galleryId\":123,\"pages\":[{\"index\":0}]}".getBytes(StandardCharsets.UTF_8)
+                ("{\"galleryId\":123,\"runId\":\"" + RUN_ID
+                        + "\",\"pages\":[{\"index\":0}]}").getBytes(StandardCharsets.UTF_8)
         );
 
         File progressDir = new File(context.getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR);
         assertTrue(progressDir.mkdirs());
         File activeProgress = new File(progressDir, "123.json");
-        Files.write(activeProgress.toPath(), "{\"current\":1,\"total\":2}".getBytes(StandardCharsets.UTF_8));
+        Files.write(
+                activeProgress.toPath(),
+                ("{\"runId\":\"" + RUN_ID + "\",\"current\":1,\"total\":2}")
+                        .getBytes(StandardCharsets.UTF_8)
+        );
         File staleProgress = new File(progressDir, "999.json");
         Files.write(staleProgress.toPath(), "{\"current\":1,\"total\":2}".getBytes(StandardCharsets.UTF_8));
 
@@ -68,8 +75,151 @@ public class GalleryDownloadWorkerRuntimeTest {
                 )
         );
         assertEquals("Select a download folder", progress.getString("error"));
+        assertEquals(RUN_ID, progress.getString("runId"));
         assertTrue(progress.isNull("current"));
         assertTrue(!staleProgress.exists());
+    }
+
+    @Test
+    public void safSizeProviderFailureReturnsRetryAndKeepsCurrentOrder() throws Exception {
+        File orderFile = writeSinglePageOrder("HiPaGo/123 Title/0001.webp", "123 Title");
+        GalleryDownloadWorker worker = TestListenableWorkerBuilder
+                .from(context, GalleryDownloadWorker.class)
+                .build();
+        FailingSizeSafLibrary saf = new FailingSizeSafLibrary(context);
+        worker.setSafForTesting(saf);
+
+        ListenableWorker.Result result = worker.doWork();
+
+        assertEquals(ListenableWorker.Result.retry(), result);
+        assertTrue(orderFile.exists());
+        assertEquals(1, saf.sizeCalls);
+        JSONObject progress = new JSONObject(
+                new String(
+                        Files.readAllBytes(new File(
+                                context.getFilesDir(),
+                                GalleryDownloadWorker.PROGRESS_DIR + "/123.json"
+                        ).toPath()),
+                        StandardCharsets.UTF_8
+                )
+        );
+        assertEquals(RUN_ID, progress.getString("runId"));
+        assertTrue(progress.isNull("current"));
+        assertEquals("Background download failed", progress.getString("error"));
+    }
+
+    @Test
+    public void safTreeProviderFailureReturnsRetryAndKeepsCurrentOrder() throws Exception {
+        File orderFile = writeSinglePageOrder("HiPaGo/123 Title/0001.webp", "123 Title");
+        GalleryDownloadWorker worker = TestListenableWorkerBuilder
+                .from(context, GalleryDownloadWorker.class)
+                .build();
+        worker.setSafForTesting(new ThrowingHasTreeSafLibrary(context));
+
+        ListenableWorker.Result result = worker.doWork();
+
+        assertEquals(ListenableWorker.Result.retry(), result);
+        assertTrue(orderFile.exists());
+    }
+
+    @Test
+    public void releasedLegacyOrderAndProgressSurviveUntilPluginMigration() throws Exception {
+        File orderFile = writeSinglePageOrder("HiPaGo/123 Title/0001.webp", "123 Title");
+        JSONObject legacyOrder = new JSONObject(
+                new String(Files.readAllBytes(orderFile.toPath()), StandardCharsets.UTF_8)
+        );
+        legacyOrder.remove("runId");
+        Files.write(orderFile.toPath(), legacyOrder.toString().getBytes(StandardCharsets.UTF_8));
+
+        File progressDir = new File(context.getFilesDir(), GalleryDownloadWorker.PROGRESS_DIR);
+        assertTrue(progressDir.mkdirs());
+        File progressFile = new File(progressDir, "123.json");
+        Files.write(
+                progressFile.toPath(),
+                "{\"current\":1,\"total\":2}".getBytes(StandardCharsets.UTF_8)
+        );
+
+        GalleryDownloadWorker worker = TestListenableWorkerBuilder
+                .from(context, GalleryDownloadWorker.class)
+                .build();
+        FailingSizeSafLibrary saf = new FailingSizeSafLibrary(context);
+        worker.setSafForTesting(saf);
+
+        ListenableWorker.Result result = worker.doWork();
+
+        assertEquals(ListenableWorker.Result.success(), result);
+        assertTrue(orderFile.exists());
+        assertTrue(progressFile.exists());
+        assertEquals(0, saf.sizeCalls);
+    }
+
+    @Test
+    public void nonLibraryPagePathIsUnrecoverableBeforeSafAccess() throws Exception {
+        File orderFile = writeSinglePageOrder("downloads/123/0001.webp", "123");
+        GalleryDownloadWorker worker = TestListenableWorkerBuilder
+                .from(context, GalleryDownloadWorker.class)
+                .build();
+        FailingSizeSafLibrary saf = new FailingSizeSafLibrary(context);
+        worker.setSafForTesting(saf);
+
+        ListenableWorker.Result result = worker.doWork();
+
+        assertEquals(ListenableWorker.Result.success(), result);
+        assertTrue(!orderFile.exists());
+        assertEquals(0, saf.sizeCalls);
+    }
+
+    private File writeSinglePageOrder(String relPath, String folderName) throws Exception {
+        File handoffDir = new File(context.getFilesDir(), GalleryDownloadWorker.HANDOFF_DIR);
+        assertTrue(handoffDir.mkdirs());
+        File orderFile = new File(handoffDir, "123.json");
+        JSONObject page = new JSONObject();
+        page.put("index", 0);
+        page.put("url", "https://aa.gold-usergeneratedcontent.net/webp/x.webp");
+        page.put("ext", "webp");
+        page.put("relPath", relPath);
+        JSONObject order = new JSONObject();
+        order.put("galleryId", 123);
+        order.put("runId", RUN_ID);
+        order.put("folderName", folderName);
+        order.put("pages", new org.json.JSONArray().put(page));
+        Files.write(orderFile.toPath(), order.toString().getBytes(StandardCharsets.UTF_8));
+        return orderFile;
+    }
+
+    private static final class FailingSizeSafLibrary extends SafLibrary {
+        int sizeCalls;
+
+        FailingSizeSafLibrary(Context context) {
+            super(context);
+        }
+
+        @Override
+        public boolean hasTree() {
+            return true;
+        }
+
+        @Override
+        public byte[] readBytes(String relPath) {
+            return null;
+        }
+
+        @Override
+        public long size(String relPath) {
+            sizeCalls++;
+            throw new IllegalStateException("provider query failed");
+        }
+    }
+
+    private static final class ThrowingHasTreeSafLibrary extends SafLibrary {
+        ThrowingHasTreeSafLibrary(Context context) {
+            super(context);
+        }
+
+        @Override
+        public boolean hasTree() {
+            throw new IllegalStateException("provider query failed");
+        }
     }
 
     private static void deleteRecursively(File file) throws Exception {

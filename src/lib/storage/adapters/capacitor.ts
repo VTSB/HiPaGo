@@ -11,6 +11,14 @@ import { imageFileName, galleryFolderName } from '../download-store';
 
 const DOWNLOADS_DIR = 'downloads';
 
+function isMissingDirectoryError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  // Capacitor Filesystem's Android implementation uses this exact rejection
+  // for both readdir and rmdir. Keep the allowlist narrow: every other native
+  // failure is indeterminate and must propagate at destructive boundaries.
+  return message === 'Directory does not exist';
+}
+
 export class CapacitorDownloadStore implements DownloadStore {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private Filesystem: any;
@@ -174,8 +182,9 @@ export class CapacitorDownloadStore implements DownloadStore {
         if (!isNaN(id)) ids.push(id);
       }
       return ids;
-    } catch {
-      return [];
+    } catch (error) {
+      if (isMissingDirectoryError(error)) return [];
+      throw error;
     }
   }
 
@@ -186,7 +195,8 @@ export class CapacitorDownloadStore implements DownloadStore {
         directory: this.Directory.Data,
         recursive: true,
       });
-    } catch {
+    } catch (error) {
+      if (!isMissingDirectoryError(error)) throw error;
       // Already gone — treat as success.
     }
   }

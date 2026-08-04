@@ -42,9 +42,16 @@ class OpfsStore implements DownloadStore {
       create: true,
     });
     const writable = await fh.createWritable();
-    // Use ArrayBuffer (a valid BufferSource / BlobPart) to satisfy
-    // FileSystemWriteChunkType with the strict Uint8Array<ArrayBufferLike> type.
-    await writable.write(new Blob([bytes.buffer as ArrayBuffer]));
+    // `bytes` can be a sub-view of a larger response buffer. Copy the view so
+    // OPFS receives exactly byteOffset..byteLength, never unrelated prefix or
+    // suffix bytes from the backing ArrayBuffer.
+    const exactBuffer =
+      bytes.byteOffset === 0 &&
+      bytes.byteLength === bytes.buffer.byteLength &&
+      bytes.buffer instanceof ArrayBuffer
+        ? bytes.buffer
+        : (bytes.slice().buffer as ArrayBuffer);
+    await writable.write(new Blob([exactBuffer]));
     await writable.close();
   }
 

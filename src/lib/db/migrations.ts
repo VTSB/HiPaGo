@@ -125,6 +125,18 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 8,
+    description: 'Add nativeRunId column to download (native attempt ownership token)',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+      if (cols.length === 0) return;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has('nativeRunId')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN nativeRunId TEXT');
+      }
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

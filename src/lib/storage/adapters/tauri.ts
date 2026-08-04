@@ -19,6 +19,21 @@ type FsEntry = {
   children?: unknown;
 };
 
+/**
+ * tauri-plugin-fs serializes Rust I/O errors as strings. Only errors with an
+ * unambiguous missing-file code are normal absence; permission, IPC, and other
+ * filesystem failures must remain observable to callers.
+ */
+function isNotFoundError(error: unknown): boolean {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === 'ENOENT') return true;
+  }
+
+  const message = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
+  return /\bENOENT\b/i.test(message) || /\(os error (?:2|3)\)/i.test(message);
+}
+
 export class TauriDownloadStore implements DownloadStore {
   private baseDir: unknown;
 
@@ -104,8 +119,9 @@ export class TauriDownloadStore implements DownloadStore {
       if (data instanceof Uint8Array) return data;
       if (data instanceof ArrayBuffer) return new Uint8Array(data);
       return Uint8Array.from(data as number[]);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
     }
   }
 
@@ -115,8 +131,9 @@ export class TauriDownloadStore implements DownloadStore {
       // size 0 is a torn write and is reported as missing.
       const st = await this.stat(this.imagePath(galleryId, index, ext));
       return (st?.size ?? 0) > 0;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isNotFoundError(error)) return false;
+      throw error;
     }
   }
 
@@ -127,8 +144,9 @@ export class TauriDownloadStore implements DownloadStore {
       const { appDataDir, join } = await import('@tauri-apps/api/path');
       const abs = await join(await appDataDir(), this.imagePath(galleryId, index, ext));
       return convertFileSrc(abs);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
     }
   }
 
@@ -146,8 +164,9 @@ export class TauriDownloadStore implements DownloadStore {
       const { appDataDir, join } = await import('@tauri-apps/api/path');
       const abs = await join(await appDataDir(), dir, first);
       return convertFileSrc(abs);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
     }
   }
 
@@ -162,8 +181,9 @@ export class TauriDownloadStore implements DownloadStore {
         }
       }
       return ids;
-    } catch {
-      return [];
+    } catch (error) {
+      if (isNotFoundError(error)) return [];
+      throw error;
     }
   }
 
@@ -174,7 +194,8 @@ export class TauriDownloadStore implements DownloadStore {
         path: this.galleryPath(galleryId),
         options: { baseDir: this.baseDir, recursive: true },
       });
-    } catch {
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
       // Already gone — treat as success.
     }
   }
@@ -188,14 +209,16 @@ export class TauriDownloadStore implements DownloadStore {
           try {
             const stat = await this.stat(`${this.galleryPath(galleryId)}/${entry.name}`);
             total += stat.size ?? 0;
-          } catch {
-            // Skip unreadable entries.
+          } catch (error) {
+            if (!isNotFoundError(error)) throw error;
+            // An entry may disappear between readDir and stat.
           }
         }
       }
       return total;
-    } catch {
-      return 0;
+    } catch (error) {
+      if (isNotFoundError(error)) return 0;
+      throw error;
     }
   }
 

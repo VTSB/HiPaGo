@@ -183,6 +183,17 @@ const translations = {
   'reader.next': { en: 'Next', ko: '다음' },
   'reader.scroll': { en: 'Scroll', ko: '스크롤' },
   'reader.page': { en: 'Page', ko: '페이지' },
+  'reader.pages': { en: 'Reader pages', ko: '뷰어 페이지' },
+  'reader.controls': { en: 'Reader controls', ko: '뷰어 컨트롤' },
+  'reader.singlePage': { en: 'Single-page view', ko: '한 페이지 보기' },
+  'reader.twoPage': { en: 'Two-page view', ko: '두 페이지 보기' },
+  'reader.retry': { en: 'Retry', ko: '다시 시도' },
+  'reader.loading': { en: 'Loading reader', ko: '뷰어 불러오는 중' },
+  'reader.imageLoadFailed': { en: 'Could not load this page', ko: '이 페이지를 불러오지 못했습니다' },
+  'reader.loadFailed': { en: 'Could not prepare the reader', ko: '뷰어를 준비하지 못했습니다' },
+  'reader.empty': { en: 'This gallery has no readable pages', ko: '감상할 수 있는 페이지가 없습니다' },
+  'reader.fullscreen': { en: 'Enter fullscreen', ko: '전체 화면 시작' },
+  'reader.exitFullscreen': { en: 'Exit fullscreen', ko: '전체 화면 종료' },
 
   // Settings
   'settings.title': { en: 'Settings', ko: '설정' },

@@ -48,6 +48,19 @@ export interface ImageCacheBackend {
 export class ImageCacheStore {
   private readonly backend: ImageCacheBackend;
   private readonly entries = new Map<string, { size: number; lastAccess: number }>();
+  private readonly inFlightEnsures = new Map<string, Promise<string | null>>();
+  /**
+   * Every key in the current concurrent ensure wave stays protected until the
+   * last wave member settles. This lets all callers receive a live file even
+   * when their combined size temporarily exceeds a small cache cap.
+   */
+  private readonly protectedKeys = new Set<string>();
+  /** FIFO lane for shared LRU/index state. Native downloads stay outside it. */
+  private stateCommitTail: Promise<void> = Promise.resolve();
+  /** Clear supersedes every ensure that began in an older cache generation. */
+  private cacheGeneration = 0;
+  /** Blocks new ensures until a clear has drained old native downloads. */
+  private clearInFlight: Promise<void> | null = null;
   private totalBytes = 0;
   private maxBytes: number | null;
   /** Monotonic recency counter; survives restart via the persisted index. */
@@ -61,18 +74,34 @@ export class ImageCacheStore {
 
   /** Load the persisted index. Idempotent. */
   async init(): Promise<void> {
-    if (this.initialized) return;
-    const idx = await this.backend.loadIndex();
-    this.entries.clear();
-    this.totalBytes = 0;
-    let maxSeen = 0;
-    for (const e of idx) {
-      this.entries.set(e.key, { size: e.size, lastAccess: e.lastAccess });
-      this.totalBytes += e.size;
-      if (e.lastAccess > maxSeen) maxSeen = e.lastAccess;
-    }
-    this.clock = maxSeen; // continue numbering after the most-recent persisted use
-    this.initialized = true;
+    await this.withStateCommit(async () => {
+      if (this.initialized) return;
+      const idx = await this.backend.loadIndex();
+      this.entries.clear();
+      this.totalBytes = 0;
+      let maxSeen = 0;
+      for (const e of idx) {
+        this.entries.set(e.key, { size: e.size, lastAccess: e.lastAccess });
+        this.totalBytes += e.size;
+        if (e.lastAccess > maxSeen) maxSeen = e.lastAccess;
+      }
+      this.clock = maxSeen; // continue numbering after the most-recent persisted use
+      this.initialized = true;
+    });
+  }
+
+  /**
+   * Serialize mutations and persistence of entries/totalBytes/clock. The tail
+   * always recovers from a rejected operation so one I/O failure cannot poison
+   * later cache work.
+   */
+  private withStateCommit<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.stateCommitTail.then(operation, operation);
+    this.stateCommitTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private nextTick(): number {
@@ -102,30 +131,42 @@ export class ImageCacheStore {
    * cachedFilePath.
    */
   private async touch(key: string): Promise<boolean> {
-    const entry = this.entries.get(key);
-    if (!entry) return false;
-    const size = await this.backend.statSize(key);
-    if (size == null) {
-      this.totalBytes -= entry.size;
-      this.entries.delete(key);
-      await this.flushIndex();
-      return false;
-    }
-    entry.lastAccess = this.nextTick();
-    await this.flushIndex();
-    return true;
+    return this.withStateCommit(async () => {
+      const entry = this.entries.get(key);
+      if (!entry) return false;
+      const size = await this.backend.statSize(key);
+      if (size == null) {
+        this.totalBytes -= entry.size;
+        this.entries.delete(key);
+        await this.flushIndexLocked();
+        return false;
+      }
+      entry.lastAccess = this.nextTick();
+      await this.flushIndexLocked();
+      return true;
+    });
   }
 
   /** Serve the cached file URL (convertFileSrc) for `key`, bumping recency, or
    *  null on a miss / reclaimed file. */
   async fileUrl(key: string): Promise<string | null> {
-    return (await this.touch(key)) ? this.backend.fileUrl(key) : null;
+    // A lookup that begins after clear() must observe the empty generation,
+    // even while clear is still draining an older native ensure.
+    while (this.clearInFlight) await this.clearInFlight;
+    const generation = this.cacheGeneration;
+    if (!(await this.touch(key)) || generation !== this.cacheGeneration) return null;
+    const fileUrl = await this.backend.fileUrl(key);
+    return generation === this.cacheGeneration ? fileUrl : null;
   }
 
   /** The raw native fs path/uri of `key`'s cached file (for a native file copy,
    *  e.g. the download flow), bumping recency, or null on a miss / reclaimed file. */
   async cachedFilePath(key: string): Promise<string | null> {
-    return (await this.touch(key)) ? this.backend.filePath(key) : null;
+    while (this.clearInFlight) await this.clearInFlight;
+    const generation = this.cacheGeneration;
+    if (!(await this.touch(key)) || generation !== this.cacheGeneration) return null;
+    const filePath = await this.backend.filePath(key);
+    return generation === this.cacheGeneration ? filePath : null;
   }
 
   /**
@@ -141,9 +182,53 @@ export class ImageCacheStore {
    * (e.g. the Android background warm, where display does not need the file)
    * should skip this when `getMaxBytes() === 0`.
    */
-  async ensureCached(key: string, url: string, headers: Record<string, string>): Promise<string | null> {
+  async ensureCached(
+    key: string,
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<string | null> {
+    // A clear owns an exclusive generation boundary: starts after this point
+    // belong to the new empty cache and must not share a pre-clear operation.
+    while (this.clearInFlight) await this.clearInFlight;
+
+    const generation = this.cacheGeneration;
+    const inFlight = this.inFlightEnsures.get(key);
+    if (inFlight) {
+      const result = await inFlight;
+      return generation === this.cacheGeneration ? result : null;
+    }
+
+    this.protectedKeys.add(key);
+    const operation = this.ensureCachedOnce(key, url, headers, generation);
+    this.inFlightEnsures.set(key, operation);
+    let result: string | null = null;
+    try {
+      result = await operation;
+    } finally {
+      await this.withStateCommit(async () => {
+        if (this.inFlightEnsures.get(key) === operation) {
+          this.inFlightEnsures.delete(key);
+        }
+        // Keep completed members protected while any concurrently-started
+        // ensure is still committing. No eviction is triggered by release;
+        // the next cache mutation enforces the cap, matching keepKey semantics.
+        if (this.inFlightEnsures.size === 0) this.protectedKeys.clear();
+      });
+    }
+    // The inner operation can finish its final fileUrl check and then wait here
+    // for serialized bookkeeping. A clear may cross that wait and delete the
+    // file, so validate the generation once more at the actual API boundary.
+    return generation === this.cacheGeneration ? result : null;
+  }
+
+  private async ensureCachedOnce(
+    key: string,
+    url: string,
+    headers: Record<string, string>,
+    generation: number,
+  ): Promise<string | null> {
     const hit = await this.fileUrl(key);
-    if (hit) return hit;
+    if (hit) return generation === this.cacheGeneration ? hit : null;
     let size: number;
     try {
       size = await this.backend.download(key, url, headers);
@@ -155,49 +240,81 @@ export class ImageCacheStore {
       });
       return null;
     }
-    const existing = this.entries.get(key);
-    if (existing) this.totalBytes -= existing.size;
-    this.entries.set(key, { size, lastAccess: this.nextTick() });
-    this.totalBytes += size;
-    await this.flushIndex();
-    await this.evictIfNeeded(key);
-    return this.backend.fileUrl(key);
+    let committed = false;
+    await this.withStateCommit(async () => {
+      if (generation !== this.cacheGeneration) return;
+      const existing = this.entries.get(key);
+      if (existing) this.totalBytes -= existing.size;
+      this.entries.set(key, { size, lastAccess: this.nextTick() });
+      this.totalBytes += size;
+      await this.flushIndexLocked();
+      await this.evictIfNeededLocked(key);
+      committed = true;
+    });
+    // clear() can advance the generation while index persistence or eviction
+    // is awaiting native IO, even though the state commit itself is serialized.
+    if (!committed || generation !== this.cacheGeneration) return null;
+    const fileUrl = await this.backend.fileUrl(key);
+    // fileUrl may itself cross the clear boundary. Never hand a caller a URL
+    // from a generation that clear() has already superseded.
+    return generation === this.cacheGeneration ? fileUrl : null;
   }
 
   /** Set the byte cap (`null` = unlimited) and evict down to it if needed. */
   async setMaxBytes(maxBytes: number | null): Promise<void> {
-    this.maxBytes = maxBytes;
-    await this.evictIfNeeded();
+    await this.withStateCommit(async () => {
+      this.maxBytes = maxBytes;
+      await this.evictIfNeededLocked();
+    });
   }
 
   /** Remove everything from the cache. */
   async clear(): Promise<void> {
-    await this.backend.clearAll();
-    this.entries.clear();
-    this.totalBytes = 0;
+    if (this.clearInFlight) return this.clearInFlight;
+
+    // Increment synchronously so every already-started ensure becomes stale
+    // before any native download can commit its index entry.
+    this.cacheGeneration++;
+    const pendingEnsures = [...this.inFlightEnsures.values()];
+    const operation = (async () => {
+      // Native downloads write canonical key paths. Drain the old generation
+      // before clearAll so none can recreate a file after clear returns.
+      await Promise.allSettled(pendingEnsures);
+      await this.withStateCommit(async () => {
+        await this.backend.clearAll();
+        this.entries.clear();
+        this.totalBytes = 0;
+      });
+    })();
+    this.clearInFlight = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.clearInFlight === operation) this.clearInFlight = null;
+    }
   }
 
   /** Evict LRU entries until under the cap. `keepKey`, if given, is never evicted
    *  (the file a caller is about to serve must survive even at cap 0). */
-  private async evictIfNeeded(keepKey?: string): Promise<void> {
+  private async evictIfNeededLocked(keepKey?: string): Promise<void> {
     if (this.maxBytes == null || this.totalBytes <= this.maxBytes) return;
     // Least-recently-accessed first.
     const order = [...this.entries.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
     let changed = false;
     for (const [key, entry] of order) {
       if (this.totalBytes <= this.maxBytes) break;
-      if (key === keepKey) continue;
+      if (key === keepKey || this.protectedKeys.has(key)) continue;
       await this.backend.remove(key);
       this.entries.delete(key);
       this.totalBytes -= entry.size;
       changed = true;
     }
-    if (changed) await this.flushIndex();
+    if (changed) await this.flushIndexLocked();
   }
 
   // Adapters may debounce saveIndex internally; the core flushes on every
   // mutation so recency/accounting survive an abrupt restart.
-  private async flushIndex(): Promise<void> {
+  private async flushIndexLocked(): Promise<void> {
     const entries: ImageCacheIndexEntry[] = [];
     for (const [key, e] of this.entries) {
       entries.push({ key, size: e.size, lastAccess: e.lastAccess });

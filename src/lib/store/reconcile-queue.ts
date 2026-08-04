@@ -15,12 +15,25 @@
  */
 import { ensureDb } from '@/lib/db/adapter';
 import type { DBDownload } from '@/lib/db/schema';
-import { enqueueDownload } from '@/lib/db/download-queue';
-import { listDueAutoRetries } from '@/lib/db/download-retry';
-import { deserializeTags, getDownload } from '@/lib/db/download';
+import { listDueAutoRetries, requeueInterruptedDownload } from '@/lib/db/download-retry';
 import { isUnmeteredNetwork } from '@/lib/utils/network';
 import { isAndroid, isIos } from '@/lib/utils/platform';
-import { processQueue, armAutoRetryTimer, finalizeDownloadIfComplete } from './download-progress';
+import { DownloadWorker, isNativeRunLookupUncertain } from '@/lib/plugins/downloadWorker';
+import {
+  adoptDiscoveredNativeRunIfUnchanged,
+  clearNativeRunIfUnchanged,
+  rebindNativeRunIfUnchanged,
+  transitionNativeDownloadRun,
+} from '@/lib/db/download';
+import {
+  processQueue,
+  armAutoRetryTimer,
+  finalizeDownloadIfComplete,
+  confirmNativeRunStopped,
+  tryBeginDownloadLifecycleReconciliation,
+  requeueDueRetryWithLifecycleBarrier,
+  useDownloadProgressStore,
+} from './download-progress';
 
 let started = false;
 
@@ -53,9 +66,10 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
   let rows: DBDownload[] = [];
   try {
     rows = await db.query<DBDownload>(
-      `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
+      `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt, nativeRunId
          FROM download
-        WHERE status IN ('downloading', 'failed', 'queued') AND pageCount > 0`,
+        WHERE (status IN ('downloading', 'failed', 'queued') AND pageCount > 0)
+           OR (status = 'complete' AND nativeRunId IS NOT NULL)`,
     );
   } catch {
     return 0;
@@ -63,12 +77,95 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
 
   let completed = 0;
   for (const row of rows) {
+    const reconciliation = tryBeginDownloadLifecycleReconciliation(row.galleryId);
+    if (!reconciliation) continue;
     try {
       // ONE completion rule, shared with the Android in-app poller: a
       // 'downloading' row whose manifest now covers all pages → 'complete'.
-      if (await finalizeDownloadIfComplete(row.galleryId)) completed++;
+      const nativeRun = await DownloadWorker.getCurrentRun({ galleryId: String(row.galleryId) });
+      if (isNativeRunLookupUncertain(nativeRun)) continue;
+      const nativeRunId = nativeRun.runId;
+      if (!reconciliation.isCurrent()) continue;
+      const expectedRunId = row.nativeRunId ?? null;
+      if (nativeRun.legacy === true && expectedRunId !== null) {
+        // A pre-runId order cannot prove that a tokenized DB lifecycle stopped.
+        // Keep both states intact for a later explicit recovery decision.
+        continue;
+      }
+      if (nativeRun.legacy === true) {
+        // Do not let an already-complete manifest finalize this tokenless row
+        // before the zombie/queued path publishes a fresh runId. The guarded
+        // replacement is what makes native cleanup generation-safe.
+        continue;
+      }
+      if (nativeRunId !== null && nativeRunId !== expectedRunId) {
+        if (row.status === 'failed' || row.status === 'complete') {
+          // Preserve terminal intent while rebinding to the only native writer,
+          // then stop that exact run. If stop fails, the failed row retains the
+          // real token so delete/retry can try again instead of staying on A.
+          const rebound = await rebindNativeRunIfUnchanged(row, nativeRunId).catch(() => false);
+          if (!rebound) continue;
+          if (!reconciliation.isCurrent()) continue;
+          const reboundSnapshot = { ...row, nativeRunId };
+          const cancelled = await DownloadWorker.cancel({
+            galleryId: String(row.galleryId),
+            runId: nativeRunId,
+          }).catch(() => null);
+          const stopped = await confirmNativeRunStopped(row.galleryId, nativeRunId, cancelled);
+          if (!reconciliation.isCurrent()) continue;
+          if (stopped) {
+            await clearNativeRunIfUnchanged(reboundSnapshot).catch(() => false);
+          }
+          continue;
+        }
+        // Native state is the actual writer. Adopt it from the exact launch
+        // snapshot; never cancel a run merely because an older DB read
+        // disagreed, since a concurrent replacement may already own it.
+        await adoptDiscoveredNativeRunIfUnchanged(row, nativeRunId).catch(() => false);
+        continue;
+      }
+      if (
+        await finalizeDownloadIfComplete(row.galleryId, reconciliation.isCurrent, {
+          nativeRunId: expectedRunId,
+          snapshot: row,
+        })
+      ) {
+        completed++;
+        continue;
+      }
+
+      if (expectedRunId && nativeRunId === expectedRunId && row.status === 'failed') {
+        // A failed/cancelled lifecycle is terminal user intent. Try to stop its
+        // exact lingering native owner, but never revive or enqueue it.
+        const cancelled = await DownloadWorker.cancel({
+          galleryId: String(row.galleryId),
+          runId: expectedRunId,
+        }).catch(() => null);
+        const stopped = await confirmNativeRunStopped(row.galleryId, expectedRunId, cancelled);
+        if (!reconciliation.isCurrent()) continue;
+        if (stopped) {
+          await clearNativeRunIfUnchanged(row).catch(() => false);
+        }
+        continue;
+      }
+
+      if (expectedRunId && nativeRunId === expectedRunId && row.status === 'queued') {
+        // Native is still the authoritative writer. Remove a stale queue slot
+        // and surface the row as active instead of letting processQueue create B.
+        await adoptDiscoveredNativeRunIfUnchanged(row, expectedRunId).catch(() => false);
+        continue;
+      }
+
+      if (expectedRunId && nativeRunId === null && row.status !== 'downloading') {
+        // The order is gone and the manifest is incomplete. Release the stale
+        // token without changing a queued row's position; failed rows remain
+        // visible for a deliberate retry.
+        await clearNativeRunIfUnchanged(row).catch(() => false);
+      }
     } catch {
       // Leave the row as-is; the zombie re-enqueue path will resume it.
+    } finally {
+      reconciliation.release();
     }
   }
   return completed;
@@ -94,23 +191,96 @@ export async function reconcileQueue(): Promise<void> {
     // from disk; rows with pageCount 0 may have been atomically claimed from
     // the queue just before app death and should not stay stuck as active.
     const zombies = await db.query<DBDownload>(
-      `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt
+      `SELECT galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt, nativeRunId
          FROM download
         WHERE status = 'downloading'`,
     );
 
     for (const z of zombies) {
-      const latest = await getDownload(z.galleryId).catch(() => null);
-      if (latest?.status === 'complete') continue;
-      await enqueueDownload(
-        {
-          galleryId: z.galleryId,
-          title: z.title,
-          thumbnail: z.thumbnail,
-          tags: deserializeTags(z.tags),
-        },
-        { keepRetryState: true, queuePosition: z.queuePosition ?? undefined },
-      );
+      const reconciliation = tryBeginDownloadLifecycleReconciliation(z.galleryId);
+      if (!reconciliation) continue;
+      try {
+        if (!isAndroid() && !isIos()) {
+          await requeueInterruptedDownload(z);
+          continue;
+        }
+
+        let nativeRunId: string | null;
+        try {
+          const nativeRun = await DownloadWorker.getCurrentRun({ galleryId: String(z.galleryId) });
+          if (isNativeRunLookupUncertain(nativeRun)) continue;
+          if (nativeRun.legacy === true && z.nativeRunId != null) continue;
+          nativeRunId = nativeRun.runId;
+        } catch {
+          continue;
+        }
+        if (!reconciliation.isCurrent()) continue;
+        const expectedRunId = z.nativeRunId ?? null;
+
+        if (expectedRunId && nativeRunId === expectedRunId) {
+          if (isAndroid()) {
+            await DownloadWorker.enqueue({
+              galleryId: String(z.galleryId),
+              runId: expectedRunId,
+            }).catch(() => {});
+            reconciliation.release();
+            await useDownloadProgressStore.getState().refreshDownloaded(z.galleryId);
+          } else {
+            const cancelled = await DownloadWorker.cancel({
+              galleryId: String(z.galleryId),
+              runId: expectedRunId,
+            }).catch(() => null);
+            const stopped = await confirmNativeRunStopped(z.galleryId, expectedRunId, cancelled);
+            if (!reconciliation.isCurrent()) continue;
+            if (stopped) {
+              await requeueInterruptedDownload(z);
+            }
+          }
+          continue;
+        }
+
+        if (nativeRunId && nativeRunId !== expectedRunId) {
+          // The launch snapshot may already have been superseded by a live
+          // lifecycle. Claim the discovered native writer from the *entire*
+          // snapshot before touching it; losing this CAS means B belongs to the
+          // replacement lifecycle and must remain untouched.
+          const adopted = await adoptDiscoveredNativeRunIfUnchanged(z, nativeRunId).catch(
+            () => false,
+          );
+          if (!adopted) continue;
+          if (!reconciliation.isCurrent()) continue;
+          const adoptedSnapshot: DBDownload = {
+            ...z,
+            status: 'downloading',
+            nativeRunId,
+            lastError: null,
+            queuePosition: null,
+            nextRetryAt: null,
+          };
+          const cancelled = await DownloadWorker.cancel({
+            galleryId: String(z.galleryId),
+            runId: nativeRunId,
+          }).catch(() => null);
+          const stopped = await confirmNativeRunStopped(z.galleryId, nativeRunId, cancelled);
+          if (!reconciliation.isCurrent()) continue;
+          if (!stopped) continue;
+          if (expectedRunId) {
+            await transitionNativeDownloadRun(
+              z.galleryId,
+              nativeRunId,
+              'failed',
+              'Background download identity conflict',
+            ).catch(() => false);
+            continue;
+          }
+          await requeueInterruptedDownload(adoptedSnapshot);
+          continue;
+        }
+
+        if (reconciliation.isCurrent()) await requeueInterruptedDownload(z);
+      } finally {
+        reconciliation.release();
+      }
     }
 
     // Staged auto-restart (Task E): an item that was waiting to auto-retry when
@@ -125,18 +295,7 @@ export async function reconcileQueue(): Promise<void> {
       } catch {
         due = [];
       }
-      for (const d of due) {
-        // KEEP the escalating-backoff counter for an automatic requeue.
-        await enqueueDownload(
-          {
-            galleryId: d.galleryId,
-            title: d.title,
-            thumbnail: d.thumbnail,
-            tags: deserializeTags(d.tags),
-          },
-          { keepRetryState: true },
-        );
-      }
+      for (const d of due) await requeueDueRetryWithLifecycleBarrier(d);
     }
 
     // Auto-resume on Android only requires connectivity because the native

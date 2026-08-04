@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { GalleryFile, GgConfig } from '../types';
 import type { DownloadStore } from '@/lib/storage/download-store';
+import type { DBDownload } from '@/lib/db/schema';
 
 // Mock fflate before importing the module under test
 vi.mock('fflate', async (importOriginal) => {
@@ -48,8 +49,12 @@ vi.mock('@/lib/api/client', () => {
 vi.mock('@/lib/db/download', () => ({
   upsertDownload: vi.fn().mockResolvedValue(undefined),
   updateDownloadProgress: vi.fn().mockResolvedValue(undefined),
+  updateNativeDownloadProgress: vi.fn().mockResolvedValue(true),
   setDownloadError: vi.fn().mockResolvedValue(undefined),
   updateDownloadStatus: vi.fn().mockResolvedValue(undefined),
+  resumeNativeDownloadRun: vi.fn().mockResolvedValue(true),
+  transitionNativeDownloadRun: vi.fn().mockResolvedValue(true),
+  completeNativeDownloadRun: vi.fn().mockResolvedValue(true),
   getDownload: vi.fn().mockResolvedValue(null),
   serializeTags: vi.fn((tags: Record<string, string[]>) => JSON.stringify(tags)),
 }));
@@ -93,6 +98,7 @@ import {
   getDownloadedGalleryPages,
   getDownloadedImage,
   hasCompleteDownloadedGallery,
+  StaleDownloadRunError,
   type DownloadProgress,
 } from '../download-zip';
 import { unzipSync, zipSync } from 'fflate';
@@ -102,7 +108,11 @@ import {
   upsertDownload,
   setDownloadError,
   updateDownloadProgress,
+  updateNativeDownloadProgress,
   updateDownloadStatus,
+  resumeNativeDownloadRun,
+  transitionNativeDownloadRun,
+  completeNativeDownloadRun,
   getDownload,
 } from '@/lib/db/download';
 import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
@@ -425,6 +435,27 @@ describe('downloadGalleryAsZip', () => {
 describe('downloadGalleryToLibrary', () => {
   let memStore: ReturnType<typeof makeMemoryStore>;
 
+  const nativeRow = (
+    galleryId: number,
+    nativeRunId: string,
+    overrides: Partial<DBDownload> = {},
+  ): DBDownload => ({
+    galleryId,
+    title: `Gallery ${galleryId}`,
+    thumbnail: 'thumb.jpg',
+    tags: '{}',
+    pageCount: 1,
+    totalBytes: 3,
+    downloadedAt: '2026-07-31T00:00:00.000Z',
+    status: 'downloading',
+    folderName: `${galleryId} Gallery ${galleryId}`,
+    queuePosition: 1,
+    retryCount: 0,
+    nextRetryAt: null,
+    nativeRunId,
+    ...overrides,
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     memStore = makeMemoryStore();
@@ -436,12 +467,17 @@ describe('downloadGalleryToLibrary', () => {
     vi.mocked(upsertDownload).mockResolvedValue(undefined);
     vi.mocked(setDownloadError).mockResolvedValue(undefined);
     vi.mocked(updateDownloadProgress).mockResolvedValue(undefined);
+    vi.mocked(updateNativeDownloadProgress).mockResolvedValue(true);
     vi.mocked(updateDownloadStatus).mockResolvedValue(undefined);
+    vi.mocked(resumeNativeDownloadRun).mockResolvedValue(true);
+    vi.mocked(transitionNativeDownloadRun).mockResolvedValue(true);
+    vi.mocked(completeNativeDownloadRun).mockResolvedValue(true);
     vi.mocked(getDownload).mockResolvedValue(null);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('writes each image to the store and stores a manifest', async () => {
@@ -848,6 +884,162 @@ describe('downloadGalleryToLibrary', () => {
     expect(lastUpsert.totalBytes).toBe(10); // 5 × 2
   });
 
+  it('throws StaleDownloadRunError when the exact-run completion CAS loses without recording a failure', async () => {
+    const nativeRunId = 'run-complete-aaaaaaaa';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(51, nativeRunId));
+    vi.mocked(completeNativeDownloadRun).mockResolvedValue(false);
+
+    await expect(
+      downloadGalleryToLibrary(
+        51,
+        'Gallery 51',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { nativeRunId },
+      ),
+    ).rejects.toBeInstanceOf(StaleDownloadRunError);
+
+    expect(completeNativeDownloadRun).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 51, status: 'complete', pageCount: 1 }),
+      nativeRunId,
+    );
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+    expect(updateDownloadStatus).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).not.toHaveBeenCalled();
+  });
+
+  it('observes an abort raised by final progress before committing the native run', async () => {
+    const nativeRunId = 'run-abort-aaaaaaaaaa';
+    const controller = new AbortController();
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(52, nativeRunId));
+
+    await expect(
+      downloadGalleryToLibrary(
+        52,
+        'Gallery 52',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        ({ current, total }) => {
+          if (current === total) controller.abort();
+        },
+        controller.signal,
+        { nativeRunId },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).toHaveBeenCalledWith(52, nativeRunId, 'failed', null, {
+      clearRunId: false,
+    });
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+  });
+
+  it('uses exact-run CAS helpers for native resume, progress, and completion', async () => {
+    const nativeRunId = 'run-resume-aaaaaaaaa';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(53, nativeRunId));
+    await memStore.putImage(53, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(53, 0, new Uint8Array([7]), 'webp');
+
+    await downloadGalleryToLibrary(
+      53,
+      'Gallery 53',
+      'thumb.jpg',
+      [makeFile('first.jpg'), makeFile('second.jpg')],
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true, nativeRunId },
+    );
+
+    expect(resumeNativeDownloadRun).toHaveBeenCalledWith(53, nativeRunId);
+    expect(updateNativeDownloadProgress).toHaveBeenCalledWith(
+      53,
+      nativeRunId,
+      2,
+      expect.any(Number),
+      { persist: true },
+    );
+    expect(completeNativeDownloadRun).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 53, status: 'complete', pageCount: 2 }),
+      nativeRunId,
+    );
+    expect(setDownloadError).not.toHaveBeenCalled();
+    expect(updateDownloadProgress).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
+
+  it('stops without lifecycle writes when a native progress CAS reports stale ownership', async () => {
+    const nativeRunId = 'run-progress-aaaaaaaa';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(54, nativeRunId));
+    vi.mocked(updateNativeDownloadProgress).mockResolvedValue(false);
+
+    await expect(
+      downloadGalleryToLibrary(
+        54,
+        'Gallery 54',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { nativeRunId },
+      ),
+    ).rejects.toBeInstanceOf(StaleDownloadRunError);
+
+    expect(updateNativeDownloadProgress).toHaveBeenCalledWith(
+      54,
+      nativeRunId,
+      1,
+      expect.any(Number),
+      { persist: true },
+    );
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+    expect(updateDownloadStatus).not.toHaveBeenCalled();
+  });
+
+  it('stops before network or DB progress when the native resume CAS reports stale ownership', async () => {
+    const nativeRunId = 'run-resume-bbbbbbbbb';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(55, nativeRunId));
+    vi.mocked(resumeNativeDownloadRun).mockResolvedValue(false);
+    await memStore.putImage(55, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(55, 0, new Uint8Array([7]), 'webp');
+
+    await expect(
+      downloadGalleryToLibrary(
+        55,
+        'Gallery 55',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { resume: true, nativeRunId },
+      ),
+    ).rejects.toBeInstanceOf(StaleDownloadRunError);
+
+    expect(apiClient.fetchUrl).not.toHaveBeenCalled();
+    expect(updateNativeDownloadProgress).not.toHaveBeenCalled();
+    expect(updateDownloadProgress).not.toHaveBeenCalled();
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+  });
+
   it('calls onProgress once per image', async () => {
     const files = [makeFile('a.jpg'), makeFile('b.jpg'), makeFile('c.jpg')];
     const progress: Array<{ current: number; total: number }> = [];
@@ -914,6 +1106,83 @@ describe('downloadGalleryToLibrary', () => {
 
     const firstUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
     expect(firstUpsert.folderName).toBe('42 My Title');
+  });
+
+  it('marks a new Android public row only when manifest-backed completion succeeds', async () => {
+    vi.stubGlobal('window', {
+      Capacitor: {
+        getPlatform: () => 'android',
+      },
+    });
+
+    await downloadGalleryToLibrary(
+      44,
+      'Public Library',
+      'thumb.jpg',
+      [makeFile()],
+      makeGgConfig(),
+      {},
+    );
+
+    const [activeRow, completedRow] = vi.mocked(upsertDownload).mock.calls.map(([row]) => row);
+    expect(activeRow).toMatchObject({
+      galleryId: 44,
+      status: 'downloading',
+      folderName: '44 Public Library',
+      migratedAt: null,
+    });
+    expect(completedRow).toMatchObject({
+      galleryId: 44,
+      status: 'complete',
+      folderName: '44 Public Library',
+      migratedAt: expect.any(String),
+    });
+  });
+
+  it('rejects an empty gallery without publishing storage or a completion watermark', async () => {
+    vi.stubGlobal('window', {
+      Capacitor: {
+        getPlatform: () => 'android',
+      },
+    });
+    const putImage = vi.spyOn(memStore, 'putImage');
+
+    await expect(
+      downloadGalleryToLibrary(46, 'Empty Gallery', 'thumb.jpg', [], makeGgConfig(), {}),
+    ).rejects.toThrow('Gallery has no downloadable files');
+
+    expect(getDownload).not.toHaveBeenCalled();
+    expect(createDownloadStore).not.toHaveBeenCalled();
+    expect(putImage).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+  });
+
+  it('keeps a zero-page Android failure unmarked when no public manifest was published', async () => {
+    vi.stubGlobal('window', {
+      Capacitor: {
+        getPlatform: () => 'android',
+      },
+    });
+    vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network unavailable'));
+
+    await expect(
+      downloadGalleryToLibrary(
+        45,
+        'No Manifest',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+      ),
+    ).rejects.toThrow('Network unavailable');
+
+    expect(vi.mocked(upsertDownload).mock.calls.at(-1)?.[0]).toMatchObject({
+      galleryId: 45,
+      status: 'failed',
+      pageCount: 0,
+      migratedAt: null,
+    });
   });
 
   it('reuses an existing persisted folderName while resuming', async () => {
@@ -1519,6 +1788,25 @@ describe('exportGalleryZip', () => {
   let nativeChunks: Uint8Array[];
   let blobParts: unknown[];
 
+  function downloadRow(
+    galleryId: number,
+    pageCount: number,
+    overrides: Partial<DBDownload> = {},
+  ): DBDownload {
+    return {
+      galleryId,
+      title: `Gallery ${galleryId}`,
+      thumbnail: '',
+      tags: '{}',
+      pageCount,
+      totalBytes: 0,
+      downloadedAt: '2026-07-31T00:00:00.000Z',
+      status: 'complete',
+      folderName: null,
+      ...overrides,
+    };
+  }
+
   function configureNativeInvoke(options?: { writeError?: Error; commitError?: Error }) {
     nativeZip.invoke.mockImplementation(
       async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
@@ -1544,6 +1832,20 @@ describe('exportGalleryZip', () => {
     memStore = makeMemoryStore();
     vi.mocked(createDownloadStore).mockResolvedValue(memStore);
     vi.mocked(zipSync).mockReturnValue(new Uint8Array([1, 2, 3]));
+    vi.mocked(getDownload).mockImplementation(async (galleryId) => {
+      const manifest = memStore.store.get(`${galleryId}/0000.json`);
+      let pageCount = 1;
+      if (manifest) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(manifest)) as unknown;
+          if (Array.isArray(parsed) && parsed.length > 0) pageCount = parsed.length;
+        } catch {
+          // Keep a positive DB page count so malformed-manifest tests reach
+          // the manifest validation path rather than metadata validation.
+        }
+      }
+      return downloadRow(galleryId, pageCount);
+    });
 
     anchorEl = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
     vi.stubGlobal('document', {
@@ -1605,6 +1907,63 @@ describe('exportGalleryZip', () => {
     );
     expect(zipSync).not.toHaveBeenCalled();
     expect(anchorEl.click).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsafe manifest extensions before reading pages or creating a zip', async () => {
+    await memStore.putImage(
+      996,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp/../../escape'])),
+      'json',
+    );
+
+    await expect(exportGalleryZip(996, 'Unsafe')).rejects.toThrow('unsafe file extension');
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(anchorEl.click).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manifest whose page count differs from the complete DB row', async () => {
+    await memStore.putImage(
+      995,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    vi.mocked(getDownload).mockResolvedValue(downloadRow(995, 3));
+
+    await expect(exportGalleryZip(995, 'Mismatched')).rejects.toThrow(
+      'manifest page count 2 does not match database page count 3',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+  });
+
+  it('rejects a DB row that is no longer complete', async () => {
+    await memStore.putImage(994, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    vi.mocked(getDownload).mockResolvedValue(downloadRow(994, 1, { status: 'failed' }));
+
+    await expect(exportGalleryZip(994, 'Failed')).rejects.toThrow(
+      'gallery 994 is not complete (status: failed)',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+  });
+
+  it('uses caller metadata and exact folderName when the DB lookup fails', async () => {
+    const folderName = '993 Exact SAF Folder';
+    await memStore.putImage(993, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(993, 0, new Uint8Array([9, 9]), 'webp');
+    vi.mocked(getDownload).mockRejectedValue(new Error('database unavailable'));
+    const getImage = vi.spyOn(memStore, 'getImage');
+
+    await expect(
+      exportGalleryZip(993, 'Fallback', undefined, {
+        folderName,
+        pageCount: 1,
+        status: 'complete',
+      }),
+    ).resolves.toBe('started');
+
+    expect(getImage).toHaveBeenCalledWith(993, -1, 'json', { folderName });
+    expect(getImage).toHaveBeenCalledWith(993, 0, 'webp', { folderName });
   });
 
   it('throws when a manifest page exists as a zero-byte torn file', async () => {

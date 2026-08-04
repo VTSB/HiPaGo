@@ -44,7 +44,8 @@ import uniffi.bypass.BypassKt;
  * Handoff dir: {@code context.getFilesDir()/dl-queue/<galleryId>.json}.
  * Work-order JSON shape (written by TS {@code writeWorkOrder}):
  * <pre>
- *   { "galleryId": 12345, "title": "...", "folderName": "12345 Title",
+ *   { "galleryId": 12345, "runId": "opaque-attempt-id", "title": "...",
+ *     "folderName": "12345 Title",
  *     "pages": [ { "index": 0, "url": "https://…", "headers": { "Referer": … },
  *                  "ext": "webp", "relPath": "HiPaGo/12345 Title/0001.webp" }, … ] }
  * </pre>
@@ -66,9 +67,8 @@ import uniffi.bypass.BypassKt;
  *    per gallery), satisfying the foreground-service requirement.
  *  - Honors {@link #isStopped()} (WorkManager cancellation) between pages.
  *
- * DEVICE-PENDING: Java is not compiled in the sandbox; this file is verified by
- * code review here and must be smoke-tested on a physical/emulator Android
- * device (foreground service, SAF-from-worker, resume, network constraint).
+ * JVM tests cover queue, path, and provider-error behavior. Foreground service,
+ * persisted SAF grants, and real network resume still require device QA.
  */
 public class GalleryDownloadWorker extends Worker {
 
@@ -85,7 +85,7 @@ public class GalleryDownloadWorker extends Worker {
      *  galleries. The in-app poller reads at ~1s, so once/second is plenty. */
     private static final long PROGRESS_WRITE_THROTTLE_MS = 1000L;
 
-    private final SafLibrary saf;
+    private SafLibrary saf;
 
     private enum GalleryResult {
         COMPLETED,
@@ -94,11 +94,21 @@ public class GalleryDownloadWorker extends Worker {
         UNRECOVERABLE
     }
 
+    private enum ManifestWriteResult {
+        WRITTEN,
+        STALE_RUN,
+        FAILED
+    }
+
     public GalleryDownloadWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
         // A fresh SafLibrary per worker run is fine — the worker is sequential, so
         // its dir cache never races. Uses the worker's application context.
         this.saf = new SafLibrary(context);
+    }
+
+    void setSafForTesting(SafLibrary saf) {
+        this.saf = saf;
     }
 
     @NonNull
@@ -120,13 +130,20 @@ public class GalleryDownloadWorker extends Worker {
         // revoked persisted permission, which will not heal from WorkManager's
         // retry loop. Keep the work-order files for app-level reconcile after the
         // user reselects a folder, but stop this worker run.
-        if (!saf.hasTree()) {
+        final boolean hasTree;
+        try {
+            hasTree = saf.hasTree();
+        } catch (Throwable providerError) {
+            return Result.retry();
+        }
+        if (!hasTree) {
             File[] pending = listOrderFiles(handoffDir);
             pruneStaleProgress(pending);
             for (File orderFile : pending) {
-                String name = orderFile.getName();
-                String galleryId = name.substring(0, name.length() - ".json".length());
-                writeProgressFailure(galleryId, "Select a download folder");
+                NativeDownloadRun run = NativeDownloadRun.fromOrderFile(orderFile);
+                if (run != null && orderFileMatchesGallery(orderFile, run.galleryId)) {
+                    writeProgressFailure(run, orderFile, "Select a download folder");
+                }
             }
             return Result.success();
         }
@@ -150,10 +167,6 @@ public class GalleryDownloadWorker extends Worker {
             boolean processedAny = false;
 
             for (File orderFile : orderFiles) {
-                if (failedThisRun.contains(orderFile.getName())) {
-                    continue;
-                }
-
                 if (isStopped()) {
                     // WorkManager cancelled us. Stop cleanly, leaving remaining
                     // work-orders for the next run.
@@ -161,35 +174,54 @@ public class GalleryDownloadWorker extends Worker {
                 }
 
                 JSONObject order = readOrder(orderFile);
-                if (order == null) {
+                NativeDownloadRun run = NativeDownloadRun.fromOrder(order);
+                if (run == null || !orderFileMatchesGallery(orderFile, run.galleryId)) {
+                    String fileGalleryId = galleryIdForOrderFile(orderFile);
+                    if (DownloadWorkerPlugin.isConfirmedLegacyOrder(order, fileGalleryId)) {
+                        // A released pre-runId order must survive app upgrade until
+                        // the JS/plugin handoff migrates it atomically. Treating it
+                        // as malformed here can erase a pending download before the
+                        // renderer has a chance to publish the replacement run.
+                        continue;
+                    }
                     // Unparseable work-order: drop it so it does not wedge the queue.
-                    orderFile.delete();
+                    deleteMalformedOrderIfStillMalformed(orderFile);
                     processedAny = true;
+                    continue;
+                }
+                if (failedThisRun.contains(run.key())) {
                     continue;
                 }
 
                 processedAny = true;
-                GalleryResult result = processGallery(order, orderFile);
+                GalleryResult result = processGallery(order, orderFile, run);
                 if (result == GalleryResult.COMPLETED) {
                     // Full success: remove the work-order so it is not reprocessed.
-                    orderFile.delete();
+                    deleteOrderIfCurrent(orderFile, run);
                 } else if (result == GalleryResult.RETRYABLE_FAILURE) {
+                    // A replacement run for the same gallery owns this pathname
+                    // now. Do not classify or defer that new run as the failed one.
+                    if (!orderIsCurrent(orderFile, run)) {
+                        continue;
+                    }
                     // If SAF permission disappeared during this gallery, retrying
                     // in WorkManager will not repair it. Leave the work-order for
                     // app-level reconcile after the user reselects a folder.
-                    if (!saf.hasTree()) {
-                        return Result.success();
+                    try {
+                        if (!saf.hasTree()) return Result.success();
+                    } catch (Throwable providerError) {
+                        return Result.retry();
                     }
                     // Keep the file and continue with later work-orders in this
                     // run. WorkManager still receives Result.retry() after the
                     // pass so transient failures get backoff without starving
                     // unrelated queued galleries behind this one.
-                    failedThisRun.add(orderFile.getName());
+                    failedThisRun.add(run.key());
                     sawRetryableFailure = true;
                     continue;
                 } else if (result == GalleryResult.UNRECOVERABLE) {
                     // Malformed work-order content cannot be repaired by retries.
-                    orderFile.delete();
+                    deleteOrderIfCurrent(orderFile, run);
                 } else {
                     return Result.success();
                 }
@@ -212,10 +244,76 @@ public class GalleryDownloadWorker extends Worker {
         if (files == null) return new File[0];
         // Process by TS queuePosition first so native handoff preserves manual
         // front/reorder semantics; fall back to filename for older work-orders.
-        Arrays.sort(files, Comparator
-                .comparingLong(GalleryDownloadWorker::orderQueuePosition)
-                .thenComparing(File::getName));
+        Arrays.sort(files, new Comparator<File>() {
+            @Override
+            public int compare(File left, File right) {
+                return compareOrderFiles(left, right);
+            }
+        });
         return files;
+    }
+
+    /** API 23-compatible equivalent of comparingLong(...).thenComparing(...). */
+    static int compareOrderFiles(File left, File right) {
+        long leftPosition = orderQueuePosition(left);
+        long rightPosition = orderQueuePosition(right);
+        if (leftPosition < rightPosition) return -1;
+        if (leftPosition > rightPosition) return 1;
+        return left.getName().compareTo(right.getName());
+    }
+
+    private static String galleryIdForOrderFile(File orderFile) {
+        if (orderFile == null) return null;
+        String name = orderFile.getName();
+        if (!name.endsWith(".json")) return null;
+        String galleryId = name.substring(0, name.length() - ".json".length());
+        if (galleryId.isEmpty()) return null;
+        for (int i = 0; i < galleryId.length(); i++) {
+            char c = galleryId.charAt(i);
+            if (c < '0' || c > '9') return null;
+        }
+        return galleryId;
+    }
+
+    private static boolean orderFileMatchesGallery(File orderFile, String galleryId) {
+        return galleryId != null && galleryId.equals(galleryIdForOrderFile(orderFile));
+    }
+
+    private boolean orderIsCurrent(File orderFile, NativeDownloadRun run) {
+        synchronized (NativeDownloadRun.lockFor(run.galleryId)) {
+            return run.matchesOrderFile(orderFile);
+        }
+    }
+
+    private boolean deleteOrderIfCurrent(File orderFile, NativeDownloadRun run) {
+        return run.deleteOrderFileIfCurrent(orderFile);
+    }
+
+    static void deleteMalformedOrderIfStillMalformed(File orderFile) {
+        String galleryId = galleryIdForOrderFile(orderFile);
+        if (galleryId == null) {
+            // The plugin never publishes non-numeric order filenames, so this
+            // cannot be a valid concurrent replacement. Drop it to avoid an
+            // unprocessable private-file artifact wedging the drain loop.
+            //noinspection ResultOfMethodCallIgnored
+            orderFile.delete();
+            return;
+        }
+        synchronized (NativeDownloadRun.lockFor(galleryId)) {
+            JSONObject currentOrder = readOrder(orderFile);
+            if (DownloadWorkerPlugin.isConfirmedLegacyOrder(currentOrder, galleryId)) {
+                // The unlocked read that led here may have failed transiently
+                // while a valid released legacy order remained (or appeared)
+                // at this pathname. Re-check that format under the same lock
+                // used by plugin migration before authorizing deletion.
+                return;
+            }
+            NativeDownloadRun current = NativeDownloadRun.fromOrder(currentOrder);
+            if (current == null || !orderFileMatchesGallery(orderFile, current.galleryId)) {
+                //noinspection ResultOfMethodCallIgnored
+                orderFile.delete();
+            }
+        }
     }
 
     static long orderQueuePosition(File orderFile) {
@@ -240,27 +338,58 @@ public class GalleryDownloadWorker extends Worker {
      * @return a completion class for the caller to map to work-order cleanup or
      *         WorkManager retry.
      */
-    private GalleryResult processGallery(JSONObject order, File orderFile) {
+    private GalleryResult processGallery(
+            JSONObject order,
+            File orderFile,
+            NativeDownloadRun run
+    ) {
         String title = order.optString("title", "");
         String locale = normalizeLocale(order.optString("locale", ""));
         // galleryId names the live-progress file the in-app poller reads. TS writes
         // numeric galleryIds; fall back to a string so a malformed id still works.
-        String galleryId = order.optString("galleryId", null);
+        String galleryId = run.galleryId;
         JSONArray pages = order.optJSONArray("pages");
         if (pages == null || pages.length() == 0) {
             // Nothing to download — treat as complete so the work-order is cleared.
-            deleteProgress(galleryId);
+            deleteProgress(run);
             return GalleryResult.COMPLETED;
         }
 
         int total = pages.length();
         File cacheDir = getApplicationContext().getCacheDir();
 
+        String folderName = order.optString("folderName", null);
+        if (!isValidGalleryFolder(galleryId, folderName)) {
+            writeProgressFailure(run, orderFile, "Invalid background download order");
+            return GalleryResult.UNRECOVERABLE;
+        }
+        for (int i = 0; i < total; i++) {
+            JSONObject page = pages.optJSONObject(i);
+            if (page == null) {
+                writeProgressFailure(run, orderFile, "Invalid background download order");
+                return GalleryResult.UNRECOVERABLE;
+            }
+            String relPath = page.optString("relPath", null);
+            String ext = page.optString("ext", "webp");
+            if (page.optInt("index", -1) != i
+                    || !isValidExtension(ext)
+                    || !isValidRelPath(relPath, galleryId, folderName, i, ext)) {
+                writeProgressFailure(run, orderFile, "Invalid background download order");
+                return GalleryResult.UNRECOVERABLE;
+            }
+        }
+
         // The manifest is the per-page ext array. Treat its length as the commit
         // marker for already-written pages; SAF existence alone can include a
         // non-zero partial file left by a killed provider write.
         String[] exts = new String[total];
-        int manifestCount = seedManifestExts(pages, exts);
+        int manifestCount;
+        try {
+            manifestCount = seedManifestExts(pages, exts);
+        } catch (Throwable providerError) {
+            writeProgressFailure(run, orderFile, "Background download failed");
+            return GalleryResult.RETRYABLE_FAILURE;
+        }
 
         // Last time we wrote the live-progress file for this gallery (throttle).
         long lastProgressWrite = 0L;
@@ -268,28 +397,38 @@ public class GalleryDownloadWorker extends Worker {
         for (int i = 0; i < total; i++) {
             if (isStopped()) {
                 // Cancelled mid-gallery — drop the stale progress file.
-                deleteProgress(galleryId);
+                deleteProgress(run);
                 return GalleryResult.CANCELED;
             }
-            if (!orderFile.exists()) {
+            if (!orderIsCurrent(orderFile, run)) {
                 // User cancelled this active Android handoff. Stop between pages
                 // without recreating progress; any already-written pages are left
                 // for a later explicit retry.
-                deleteProgress(galleryId);
+                deleteProgress(run);
                 return GalleryResult.CANCELED;
             }
 
             JSONObject page = pages.optJSONObject(i);
             if (page == null) {
-                deleteProgress(galleryId); // malformed — leave the gallery partial
+                writeProgressFailure(run, orderFile, "Invalid background download order");
                 return GalleryResult.UNRECOVERABLE;
             }
 
             String relPath = page.optString("relPath", null);
             String url = page.optString("url", null);
             String ext = page.optString("ext", "webp");
-            if (!isValidRelPath(relPath) || !isValidDownloadUrl(url) || !isValidExtension(ext)) {
-                deleteProgress(galleryId);
+            if (page.optInt("index", -1) != i
+                    || !isValidExtension(ext)
+                    || !isValidRelPath(relPath, galleryId, folderName, i, ext)) {
+                writeProgressFailure(run, orderFile, "Invalid background download order");
+                return GalleryResult.UNRECOVERABLE;
+            }
+            final Map<String, String> requestHeaders;
+            try {
+                NativeRequestPolicy.requireAllowedBypassUrl(url);
+                requestHeaders = NativeRequestPolicy.validateHeaders(headersFor(page));
+            } catch (IllegalArgumentException invalidRequest) {
+                writeProgressFailure(run, orderFile, "Invalid background download order");
                 return GalleryResult.UNRECOVERABLE;
             }
 
@@ -297,30 +436,47 @@ public class GalleryDownloadWorker extends Worker {
 
             // Resume: only skip a page if a prior manifest write committed it.
             // Non-manifest partial files are overwritten below.
-            if (!shouldSkipExistingPage(i, manifestCount, saf.size(relPath))) {
+            final long existingSize;
+            try {
+                existingSize = saf.size(relPath);
+            } catch (Throwable providerError) {
+                writeProgressFailure(run, orderFile, "Background download failed");
+                return GalleryResult.RETRYABLE_FAILURE;
+            }
+            if (!shouldSkipExistingPage(i, manifestCount, existingSize)) {
                 // Download to a temp file in the cache dir via the Rust core, then copy
                 // into the SAF tree and delete the temp. The image never enters the JS
                 // heap (this is native code).
                 File temp = new File(cacheDir, "dl-" + System.nanoTime() + "." + ext);
                 try {
-                    BypassKt.bypassDownloadToFile(url, headersFor(page), temp.getAbsolutePath());
-                    if (isStopped() || !orderFile.exists()) {
-                        deleteProgress(galleryId);
+                    BypassKt.bypassDownloadToFile(url, requestHeaders, temp.getAbsolutePath());
+                    if (isStopped()) {
+                        deleteProgress(run);
                         return GalleryResult.CANCELED;
                     }
-                    long sourceSize = temp.length();
-                    long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
-                    long storedSize = saf.size(relPath);
-                    if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
-                        saf.delete(relPath);
-                        throw new Exception("incomplete SAF write");
+                    // Treat the generation check + SAF publish as one boundary.
+                    // A replacement writeWorkOrder/cancel holds this same lock,
+                    // so it cannot publish run B between the check and run A's
+                    // final-file rename.
+                    synchronized (NativeDownloadRun.lockFor(galleryId)) {
+                        if (!run.matchesOrderFile(orderFile)) {
+                            deleteProgress(run);
+                            return GalleryResult.CANCELED;
+                        }
+                        long sourceSize = temp.length();
+                        long written = saf.copyFromFile(temp.getAbsolutePath(), relPath);
+                        long storedSize = saf.size(relPath);
+                        if (sourceSize <= 0 || written != sourceSize || storedSize != sourceSize) {
+                            saf.delete(relPath);
+                            throw new Exception("incomplete SAF write");
+                        }
                     }
                 } catch (Throwable t) {
                     // Page hard-failure (URL/gg expiry, network, SAF revoked). Leave the
                     // gallery partial; TS re-resolves / reconciles on next open. Publish
                     // an explicit failure sentinel so a foreground app can fail/retry the
                     // DB row without waiting for relaunch.
-                    writeProgressFailure(galleryId, "Background download failed");
+                    writeProgressFailure(run, orderFile, "Background download failed");
                     return GalleryResult.RETRYABLE_FAILURE;
                 } finally {
                     if (temp.exists()) {
@@ -333,12 +489,23 @@ public class GalleryDownloadWorker extends Worker {
                 // Write/update the 0000.json manifest incrementally (JSON array of
                 // exts) so the reader/reconcile sees the gallery growing. The manifest
                 // path is the gallery folder + 0000.json, derived from the page relPath.
-                if (isStopped() || !orderFile.exists()) {
-                    deleteProgress(galleryId);
+                if (isStopped() || !orderIsCurrent(orderFile, run)) {
+                    deleteProgress(run);
                     return GalleryResult.CANCELED;
                 }
-                if (!writeManifest(relPath, exts, i + 1)) {
-                    writeProgressFailure(galleryId, "Background download failed");
+                ManifestWriteResult manifestWrite = writeManifest(
+                        run,
+                        orderFile,
+                        relPath,
+                        exts,
+                        i + 1
+                );
+                if (manifestWrite == ManifestWriteResult.STALE_RUN) {
+                    deleteProgress(run);
+                    return GalleryResult.CANCELED;
+                }
+                if (manifestWrite == ManifestWriteResult.FAILED) {
+                    writeProgressFailure(run, orderFile, "Background download failed");
                     return GalleryResult.RETRYABLE_FAILURE;
                 }
                 manifestCount = Math.max(manifestCount, i + 1);
@@ -354,7 +521,8 @@ public class GalleryDownloadWorker extends Worker {
                 updateNotification(title, committed, total, locale);
                 // Best-effort; an IO failure here must never fail the download.
                 lastProgressWrite = maybeWriteProgress(
-                        galleryId,
+                        run,
+                        orderFile,
                         committed,
                         total,
                         lastProgressWrite
@@ -365,32 +533,43 @@ public class GalleryDownloadWorker extends Worker {
         // All pages present → write the final, full manifest once more (defensive)
         // and report success.
         String anyRelPath = pages.optJSONObject(0).optString("relPath", null);
-        if (isStopped() || !orderFile.exists()) {
-            deleteProgress(galleryId);
+        if (isStopped() || !orderIsCurrent(orderFile, run)) {
+            deleteProgress(run);
             return GalleryResult.CANCELED;
         }
-        if (anyRelPath != null && !writeManifest(anyRelPath, exts, total)) {
-            writeProgressFailure(galleryId, "Background download failed");
-            return GalleryResult.RETRYABLE_FAILURE;
+        if (anyRelPath != null) {
+            ManifestWriteResult finalManifest = writeManifest(
+                    run,
+                    orderFile,
+                    anyRelPath,
+                    exts,
+                    total
+            );
+            if (finalManifest == ManifestWriteResult.STALE_RUN) {
+                deleteProgress(run);
+                return GalleryResult.CANCELED;
+            }
+            if (finalManifest == ManifestWriteResult.FAILED) {
+                writeProgressFailure(run, orderFile, "Background download failed");
+                return GalleryResult.RETRYABLE_FAILURE;
+            }
         }
         // Publish 100% only after every page and the final manifest are durable.
         // The app can now safely finalize the DB row and remove the queue item as
         // soon as it observes either this value or the deleted progress file.
         updateNotification(title, total, total, locale);
-        maybeWriteProgress(galleryId, total, total, lastProgressWrite);
+        maybeWriteProgress(run, orderFile, total, total, lastProgressWrite);
         // Gallery complete → remove its live-progress file (the poller then reads
         // null and the row reconciles to 'complete').
-        deleteProgress(galleryId);
+        deleteProgress(run);
         return GalleryResult.COMPLETED;
     }
 
     // -----------------------------------------------------------------------
     // Live progress file (in-app progress bridge)
     //
-    // DEVICE-PENDING: Java is not compiled in the sandbox; the progress-file
-    // write/throttle/cleanup + DownloadWorkerPlugin.getProgress read are verified
-    // by code review here and must be smoke-tested on a device (advancing %
-    // in-app while foreground, file removed on completion/cancel/failure).
+    // JVM tests cover progress write/cleanup and run ownership. Advancing
+    // foreground progress and lifecycle reconciliation still require device QA.
     // -----------------------------------------------------------------------
 
     /** {@code filesDir/dl-progress} (created on demand). */
@@ -404,16 +583,22 @@ public class GalleryDownloadWorker extends Worker {
     }
 
     /**
-     * Write {@code dl-progress/<galleryId>.json = {"current":N,"total":M}} at most
-     * once per {@link #PROGRESS_WRITE_THROTTLE_MS}. {@code current} is the number
+     * Write {@code dl-progress/<galleryId>.json =
+     * {"runId":"...","current":N,"total":M}} at most once per
+     * {@link #PROGRESS_WRITE_THROTTLE_MS}. {@code current} is the number
      * of pages whose non-empty files are covered by the manifest. The first page
      * (lastWrite == 0) and the final page always write so the bar starts and lands
      * exactly. Returns the timestamp of the most recent write so the caller can
      * carry the throttle clock. Best-effort: any failure is swallowed (never fails
      * the download).
      */
-    private long maybeWriteProgress(String galleryId, int current, int total, long lastWrite) {
-        if (galleryId == null || galleryId.isEmpty()) return lastWrite;
+    private long maybeWriteProgress(
+            NativeDownloadRun run,
+            File orderFile,
+            int current,
+            int total,
+            long lastWrite
+    ) {
         long now = System.currentTimeMillis();
         boolean isFirstOrLast = lastWrite == 0L || current >= total;
         if (!isFirstOrLast && (now - lastWrite) < PROGRESS_WRITE_THROTTLE_MS) {
@@ -423,7 +608,7 @@ public class GalleryDownloadWorker extends Worker {
             JSONObject obj = new JSONObject();
             obj.put("current", current);
             obj.put("total", total);
-            writeProgressObject(galleryId, obj);
+            if (!writeProgressObject(run, orderFile, obj)) return lastWrite;
         } catch (Throwable t) {
             // Progress is advisory; a failed write just leaves the last value.
             return lastWrite;
@@ -432,11 +617,14 @@ public class GalleryDownloadWorker extends Worker {
     }
 
     /** Remove a gallery's live-progress file (completion/cancel/failure). Best-effort. */
-    private void deleteProgress(String galleryId) {
-        if (galleryId == null || galleryId.isEmpty()) return;
+    private void deleteProgress(NativeDownloadRun run) {
         try {
-            File f = new File(progressDir(), galleryId + ".json");
-            new AtomicFile(f).delete();
+            synchronized (NativeDownloadRun.lockFor(run.galleryId)) {
+                File f = new File(progressDir(), run.galleryId + ".json");
+                if (run.matchesProgressFile(f)) {
+                    new AtomicFile(f).delete();
+                }
+            }
         } catch (Throwable ignored) {
             // Best-effort cleanup; a stale file just reads as the last value until
             // the next run prunes it (pruneStaleProgress) or getProgress returns it.
@@ -444,35 +632,43 @@ public class GalleryDownloadWorker extends Worker {
     }
 
     /** Publish a terminal failure sentinel for the in-app poller. Best-effort. */
-    private void writeProgressFailure(String galleryId, String message) {
-        if (galleryId == null || galleryId.isEmpty()) return;
+    private void writeProgressFailure(NativeDownloadRun run, File orderFile, String message) {
         try {
             JSONObject obj = new JSONObject();
             obj.put("current", JSONObject.NULL);
             obj.put("error", message);
-            writeProgressObject(galleryId, obj);
+            writeProgressObject(run, orderFile, obj);
         } catch (Throwable ignored) {
             // Best-effort failure signal; TS still has launch reconcile fallback.
         }
     }
 
     /** Atomically replace a progress file so readers never observe torn JSON. */
-    private void writeProgressObject(String galleryId, JSONObject obj) throws Throwable {
-        AtomicFile atomic = new AtomicFile(new File(progressDir(), galleryId + ".json"));
-        FileOutputStream out = null;
-        try {
-            out = atomic.startWrite();
-            out.write(obj.toString().getBytes("UTF-8"));
-            atomic.finishWrite(out);
-        } catch (Throwable t) {
-            if (out != null) {
-                try {
-                    atomic.failWrite(out);
-                } catch (Throwable ignored) {
-                    // Preserve the original write error.
+    private boolean writeProgressObject(
+            NativeDownloadRun run,
+            File orderFile,
+            JSONObject obj
+    ) throws Throwable {
+        synchronized (NativeDownloadRun.lockFor(run.galleryId)) {
+            if (!run.matchesOrderFile(orderFile)) return false;
+            obj.put("runId", run.runId);
+            AtomicFile atomic = new AtomicFile(new File(progressDir(), run.galleryId + ".json"));
+            FileOutputStream out = null;
+            try {
+                out = atomic.startWrite();
+                out.write(obj.toString().getBytes("UTF-8"));
+                atomic.finishWrite(out);
+            } catch (Throwable t) {
+                if (out != null) {
+                    try {
+                        atomic.failWrite(out);
+                    } catch (Throwable ignored) {
+                        // Preserve the original write error.
+                    }
                 }
+                throw t;
             }
-            throw t;
+            return true;
         }
     }
 
@@ -481,25 +677,33 @@ public class GalleryDownloadWorker extends Worker {
      * no matching work-order in {@code dl-queue} — orphans from a crashed run.
      * Best-effort; never affects the download.
      */
-    private void pruneStaleProgress(File[] orderFiles) {
+    private void pruneStaleProgress(File[] ignoredOrderFiles) {
         try {
             File dir = new File(getApplicationContext().getFilesDir(), PROGRESS_DIR);
             File[] progressFiles = dir.listFiles((d, name) -> name.endsWith(".json"));
             if (progressFiles == null || progressFiles.length == 0) return;
 
-            java.util.Set<String> activeIds = new java.util.HashSet<>();
-            if (orderFiles != null) {
-                for (File o : orderFiles) {
-                    String name = o.getName();
-                    activeIds.add(name.substring(0, name.length() - ".json".length()));
-                }
-            }
             for (File p : progressFiles) {
                 String name = p.getName();
                 String id = name.substring(0, name.length() - ".json".length());
-                if (!activeIds.contains(id)) {
-                    //noinspection ResultOfMethodCallIgnored
-                    p.delete();
+                synchronized (NativeDownloadRun.lockFor(id)) {
+                    File order = new File(
+                            new File(getApplicationContext().getFilesDir(), HANDOFF_DIR),
+                            id + ".json"
+                    );
+                    JSONObject orderJson = readOrder(order);
+                    if (DownloadWorkerPlugin.isConfirmedLegacyOrder(orderJson, id)) {
+                        // The plugin performs strict legacy order/progress parsing
+                        // before one-time replacement. Preserve both files until
+                        // that migration boundary, including malformed progress
+                        // that must fail closed rather than be silently discarded.
+                        continue;
+                    }
+                    NativeDownloadRun current = NativeDownloadRun.fromOrderFile(order);
+                    if (current == null || !current.matchesProgressFile(p)) {
+                        //noinspection ResultOfMethodCallIgnored
+                        p.delete();
+                    }
                 }
             }
         } catch (Throwable ignored) {
@@ -511,33 +715,37 @@ public class GalleryDownloadWorker extends Worker {
      * Build the {@code 0000.json} manifest path from a page's relPath (same parent
      * dir) and write the first {@code count} exts as a JSON array.
      */
-    private boolean writeManifest(String pageRelPath, String[] exts, int count) {
+    private ManifestWriteResult writeManifest(
+            NativeDownloadRun run,
+            File orderFile,
+            String pageRelPath,
+            String[] exts,
+            int count
+    ) {
         JSONArray arr = new JSONArray();
         for (int k = 0; k < count; k++) {
             arr.put(exts[k] != null ? exts[k] : "webp");
         }
-        try {
-            saf.writeBytes(manifestPathForPage(pageRelPath), arr.toString().getBytes("UTF-8"));
-            return true;
-        } catch (Throwable t) {
-            // Reconcile depends on the manifest to mark the DB row complete.
-            // Keep the work-order so a later worker pass can rewrite it.
-            return false;
+        synchronized (NativeDownloadRun.lockFor(run.galleryId)) {
+            if (!run.matchesOrderFile(orderFile)) return ManifestWriteResult.STALE_RUN;
+            try {
+                saf.writeBytes(manifestPathForPage(pageRelPath), arr.toString().getBytes("UTF-8"));
+                return ManifestWriteResult.WRITTEN;
+            } catch (Throwable t) {
+                // Reconcile depends on the manifest to mark the DB row complete.
+                // Keep the work-order so a later worker pass can rewrite it.
+                return ManifestWriteResult.FAILED;
+            }
         }
     }
 
-    private int seedManifestExts(JSONArray pages, String[] exts) {
+    private int seedManifestExts(JSONArray pages, String[] exts) throws Exception {
         JSONObject firstPage = pages.optJSONObject(0);
         if (firstPage == null) return 0;
 
         String firstRelPath = firstPage.optString("relPath", null);
-        if (!isValidRelPath(firstRelPath)) return 0;
-
-        try {
-            return decodeManifestExts(saf.readBytes(manifestPathForPage(firstRelPath)), exts);
-        } catch (Throwable ignored) {
-            return 0;
-        }
+        byte[] manifest = saf.readBytes(manifestPathForPage(firstRelPath));
+        return manifest == null ? 0 : decodeManifestExts(manifest, exts);
     }
 
     static String manifestPathForPage(String pageRelPath) {
@@ -585,20 +793,39 @@ public class GalleryDownloadWorker extends Worker {
         return out.isEmpty() ? null : out;
     }
 
-    static boolean isValidRelPath(String relPath) {
-        if (relPath == null || relPath.isEmpty()) return false;
-        if (relPath.startsWith("/") || relPath.startsWith("\\")) return false;
-        if (relPath.indexOf('\0') >= 0 || relPath.indexOf('\\') >= 0) return false;
-        String[] parts = relPath.split("/", -1);
-        for (String part : parts) {
-            if (part.isEmpty() || part.equals(".") || part.equals("..")) return false;
+    static boolean isValidGalleryFolder(String galleryId, String folderName) {
+        if (!DownloadWorkerPlugin.isValidGalleryId(galleryId)
+                || folderName == null
+                || folderName.isEmpty()
+                || folderName.indexOf('/') >= 0
+                || folderName.indexOf('\\') >= 0
+                || folderName.indexOf('\0') >= 0
+                || folderName.equals(".")
+                || folderName.equals("..")) {
+            return false;
         }
-        return true;
+        return folderName.equals(galleryId) || folderName.startsWith(galleryId + " ");
+    }
+
+    static boolean isValidRelPath(
+            String relPath,
+            String galleryId,
+            String folderName,
+            int pageIndex,
+            String ext
+    ) {
+        if (relPath == null
+                || pageIndex < 0
+                || !isValidGalleryFolder(galleryId, folderName)
+                || !isValidExtension(ext)) {
+            return false;
+        }
+        String fileName = String.format(Locale.ROOT, "%04d.%s", pageIndex + 1, ext);
+        return (SafLibrary.LIBRARY_ROOT + "/" + folderName + "/" + fileName).equals(relPath);
     }
 
     static boolean isValidDownloadUrl(String url) {
-        if (url == null || url.isEmpty()) return false;
-        return url.startsWith("https://") || url.startsWith("http://");
+        return NativeRequestPolicy.isAllowedBypassUrl(url);
     }
 
     static boolean isValidExtension(String ext) {
@@ -660,7 +887,7 @@ public class GalleryDownloadWorker extends Worker {
         }
         Notification notification = builder.build();
 
-        // On API 34+ (targetSdk 34) the foreground service type must be declared
+        // On API 34+ (the app targets API 36) the foreground service type must be declared
         // both in the manifest AND on the ForegroundInfo. DATA_SYNC matches a
         // network download. Older APIs use the 2-arg constructor.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

@@ -29,8 +29,7 @@ class PragmaTestAdapter implements DbAdapter {
     this.db.run(sql, params);
     const changes = this.db.getRowsModified();
     const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const lastInsertRowId =
-      result.length > 0 ? (result[0].values[0][0] as number) : 0;
+    const lastInsertRowId = result.length > 0 ? (result[0].values[0][0] as number) : 0;
     return { changes, lastInsertRowId };
   }
 
@@ -65,9 +64,7 @@ async function createAdapter(): Promise<PragmaTestAdapter> {
 }
 
 async function getUserVersion(adapter: PragmaTestAdapter): Promise<number> {
-  const rows = await adapter.query<{ user_version: number }>(
-    'PRAGMA user_version',
-  );
+  const rows = await adapter.query<{ user_version: number }>('PRAGMA user_version');
   return rows[0].user_version;
 }
 
@@ -322,7 +319,7 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     await runMigrations(adapter);
 
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
-    expect(LATEST_VERSION).toBe(7);
+    expect(LATEST_VERSION).toBe(8);
   });
 
   it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {
@@ -672,5 +669,72 @@ describe('runMigrations: migration v7 adds retryCount + nextRetryAt to download'
     expect(colNames.has('queuePosition')).toBe(true);
     expect(colNames.has('retryCount')).toBe(true);
     expect(colNames.has('nextRetryAt')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Migration v8: adds nativeRunId to download (native attempt ownership)
+// ---------------------------------------------------------------------------
+
+const SCHEMA_V7_DOWNLOAD = `
+CREATE TABLE IF NOT EXISTS download (
+  galleryId INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '{}',
+  pageCount INTEGER NOT NULL DEFAULT 0,
+  totalBytes INTEGER NOT NULL DEFAULT 0,
+  downloadedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'downloading',
+  folderName TEXT,
+  migratedAt TEXT,
+  lastError TEXT,
+  queuePosition INTEGER,
+  retryCount INTEGER,
+  nextRetryAt TEXT
+);
+`;
+
+describe('runMigrations: migration v8 adds nativeRunId to download', () => {
+  let adapter: PragmaTestAdapter;
+
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('upgrades a v7 table, preserves rows, and initializes nativeRunId to NULL', async () => {
+    await adapter.exec(SCHEMA_V7_DOWNLOAD);
+    await adapter.exec(
+      `INSERT INTO download (galleryId, title, thumbnail, downloadedAt, status)
+       VALUES (71, 'Existing', '/tn', '2024-01-01', 'downloading')`,
+    );
+    await adapter.exec('PRAGMA user_version = 7');
+
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    expect(cols.map((c) => c.name)).toContain('nativeRunId');
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
+    const rows = await adapter.query<{ title: string; nativeRunId: string | null }>(
+      'SELECT title, nativeRunId FROM download WHERE galleryId = 71',
+    );
+    expect(rows).toEqual([{ title: 'Existing', nativeRunId: null }]);
+  });
+
+  it('is idempotent when nativeRunId already exists but user_version is still 7', async () => {
+    await adapter.exec(SCHEMA_V7_DOWNLOAD);
+    await adapter.exec('ALTER TABLE download ADD COLUMN nativeRunId TEXT');
+    await adapter.exec('PRAGMA user_version = 7');
+
+    await runMigrations(adapter);
+    await runMigrations(adapter);
+
+    const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+    expect(cols.filter((c) => c.name === 'nativeRunId')).toHaveLength(1);
+    expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
   });
 });

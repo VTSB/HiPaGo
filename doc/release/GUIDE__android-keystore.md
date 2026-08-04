@@ -55,7 +55,7 @@ android/app/build/outputs/apk/release/app-release.apk
 This debug-key-signed APK is installable for local testing, but it is not a
 store/distribution artifact.
 
-## GitHub Actions secrets
+## GitHub Actions production configuration
 
 The release workflow expects these repository secrets:
 
@@ -63,6 +63,30 @@ The release workflow expects these repository secrets:
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_ALIAS_PASSWORD`
+
+The protected `production` environment must also define this non-secret
+environment variable:
+
+- `ANDROID_EXPECTED_CERT_SHA256`
+
+Set it to the SHA-256 digest of the distribution certificate, independently of
+the injected keystore. The value may contain spaces or colons and may use either
+letter case; the workflow removes spaces and colons, converts it to uppercase,
+and then requires exactly 64 hexadecimal characters. Do not compute or replace
+this variable from `ANDROID_KEYSTORE_BASE64` inside the workflow, because the
+independent value is what detects an accidentally replaced or incorrect
+keystore.
+
+One way for a release operator to obtain the digest from a known-good APK is:
+
+```sh
+apksigner verify --verbose --print-certs app-release.apk
+```
+
+Copy the signer `certificate SHA-256 digest` value (shown with a label such as
+`Signer #1` or `V2 Signer`) into the protected environment variable.
+Certificate fingerprints are public identifiers; the keystore and its
+passwords remain secrets.
 
 Create the base64 value without line wrapping:
 
@@ -78,4 +102,8 @@ base64 -i /absolute/path/to/hipago-release.jks | tr -d '\n'
 
 The workflow decodes `ANDROID_KEYSTORE_BASE64` to
 `android/app/hipago-release.jks`, runs `assembleRelease`, and verifies
-`app-release.apk` with `apksigner`.
+`app-release.apk` with `apksigner`. For production tags it then compares the
+APK's sole signer certificate SHA-256 digest with
+`ANDROID_EXPECTED_CERT_SHA256`. A missing, malformed, or mismatched digest fails
+before the APK can be staged or uploaded. Branch rehearsal builds keep using the
+local debug-key path and do not require this production variable.

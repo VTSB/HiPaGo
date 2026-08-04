@@ -5,6 +5,12 @@ import React from 'react';
 import { UpdateBanner } from '../UpdateBanner';
 import { UpdateService, type CheckResult } from '@/services/UpdateService';
 
+const navigationMocks = vi.hoisted(() => ({ pathname: '/' }));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => navigationMocks.pathname,
+}));
+
 vi.mock('@/lib/i18n/useT', () => ({
   useT: () => (key: string) => key,
 }));
@@ -27,6 +33,7 @@ function mockAvailable(result: Partial<CheckResult>) {
 describe('UpdateBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    navigationMocks.pathname = '/';
     sessionStorage.clear();
   });
 
@@ -74,6 +81,15 @@ describe('UpdateBanner', () => {
     await waitFor(() => {
       expect(warn).toHaveBeenCalledWith('[UpdateBanner] check failed', error);
     });
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+  });
+
+  it('does not check or render the global banner inside the reader viewport', () => {
+    navigationMocks.pathname = '/gallery/42/reader';
+
+    render(<UpdateBanner />);
+
+    expect(UpdateService.checkForUpdate).not.toHaveBeenCalled();
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 });

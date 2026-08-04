@@ -358,6 +358,15 @@ describe('WebDownloadStore (OPFS) imageExists', () => {
     expect(await store.imageExists(100, 0, 'webp')).toBe(true);
   });
 
+  it('writes only the requested Uint8Array view, not its whole backing buffer', async () => {
+    const backing = new Uint8Array([0xaa, 0x01, 0x02, 0x03, 0xbb]);
+    const pageView = backing.subarray(1, 4);
+
+    await store.putImage(100, 3, pageView, 'webp');
+
+    expect(await store.getImage(100, 3, 'webp')).toEqual(new Uint8Array([0x01, 0x02, 0x03]));
+  });
+
   it('reports a missing page as not present', async () => {
     expect(await store.imageExists(100, 9, 'webp')).toBe(false);
   });

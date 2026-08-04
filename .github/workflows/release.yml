@@ -469,7 +469,7 @@ jobs:
       - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: corretto
-          java-version: '21'
+          java-version: '17'
 
       - name: Setup Android SDK
         # v4 runs on node24 (v3 was the last Node 20 release — deprecated
@@ -478,7 +478,15 @@ jobs:
         with:
           # Avoid the default obsolete `tools` package, which pulls the
           # Android Emulator package even though release builds do not need it.
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+          # The app uses Android 16 Build Tools 36.0.0 explicitly. Capacitor's
+          # library modules retain AGP 8.11's default Build Tools 35.0.0.
+          packages: 'platform-tools platforms;android-36 build-tools;35.0.0 build-tools;36.0.0 ndk;28.2.13676358'
+
+      - name: Select Android NDK
+        shell: bash
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
 
       # Caches ~/.gradle (dependencies + wrapper) and the Gradle build cache,
       # with built-in cache cleanup to avoid unbounded growth. Big Android win:
@@ -570,6 +578,9 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --build-cache
 
+      - name: Verify Android 16 KB page-size compatibility
+        run: bash android/scripts/verify-elf-alignment.sh android/app/build/outputs/apk/release/app-release.apk
+
       - name: Verify APK is installable
         run: |
           set -euo pipefail
@@ -579,6 +590,19 @@ jobs:
           build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           "$build_tools/apksigner" verify --verbose --print-certs "$apk"
           "$build_tools/aapt" dump badging "$apk" | sed -n '1,8p'
+
+      - name: Verify production Android signer identity
+        if: env.IS_RELEASE == 'true'
+        env:
+          # Configure this independently in the protected production
+          # environment. Never derive it from the injected keystore in CI.
+          ANDROID_EXPECTED_CERT_SHA256: ${{ vars.ANDROID_EXPECTED_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/release/app-release.apk"
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$build_tools/apksigner" verify --verbose --print-certs "$apk" |
+            node scripts/verify-android-signer.mjs "$ANDROID_EXPECTED_CERT_SHA256"
 
       - name: Stage Android release asset
         if: env.IS_RELEASE == 'true'

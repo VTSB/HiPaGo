@@ -221,15 +221,13 @@ public class PublicLibraryPlugin extends Plugin {
         io.execute(() -> {
             try {
                 if (!saf().hasTree()) { call.reject("NO_TREE"); return; }
-                DocumentFile[] entries = saf().listDir(path);
+                SafLibrary.DirectoryEntry[] entries = saf().listDir(path);
                 if (entries == null) { call.reject("directory not found: " + path); return; }
                 JSArray files = new JSArray();
-                for (DocumentFile entry : entries) {
-                    String name = entry.getName();
-                    if (name == null) continue; // keep the DirEntry.name: string contract honest
+                for (SafLibrary.DirectoryEntry entry : entries) {
                     JSObject item = new JSObject();
-                    item.put("name", name);
-                    item.put("size", entry.isFile() ? entry.length() : 0);
+                    item.put("name", entry.name);
+                    item.put("size", entry.file ? entry.size : 0);
                     files.put(item);
                 }
                 JSObject ret = new JSObject();
@@ -249,10 +247,10 @@ public class PublicLibraryPlugin extends Plugin {
         io.execute(() -> {
             try {
                 if (!saf().hasTree()) { call.reject("NO_TREE"); return; }
-                boolean exists = saf().exists(path);
+                SafLibrary.PathStat stat = saf().stat(path);
                 JSObject ret = new JSObject();
-                ret.put("exists", exists);
-                ret.put("size", exists ? saf().length(path) : 0);
+                ret.put("exists", stat.exists);
+                ret.put("size", stat.exists && !stat.directory ? stat.size : 0);
                 call.resolve(ret);
             } catch (SecurityException e) {
                 call.reject(e.getMessage());
@@ -291,7 +289,7 @@ public class PublicLibraryPlugin extends Plugin {
         io.execute(() -> {
             try {
                 if (!saf().hasTree()) { call.reject("NO_TREE"); return; }
-                saf().copyFromFile(from, to);
+                saf().copyFromImageCacheFile(from, to);
                 call.resolve();
             } catch (SecurityException e) {
                 call.reject(e.getMessage());
