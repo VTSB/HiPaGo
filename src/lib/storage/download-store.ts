@@ -41,7 +41,13 @@ export interface DownloadStore {
    * @param bytes      Raw image data.
    * @param ext        File extension without leading dot, e.g. "webp".
    */
-  putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void>;
+  putImage(
+    galleryId: number,
+    index: number,
+    bytes: Uint8Array,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<void>;
 
   /**
    * Copy an existing file (e.g. a persistent image-cache file) into the gallery
@@ -55,6 +61,7 @@ export interface DownloadStore {
     index: number,
     srcPath: string,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<number>;
 
   /**
@@ -93,6 +100,29 @@ export interface DownloadStore {
   ): Promise<boolean>;
 
   /**
+   * Batch existence check for every page listed by a gallery manifest. Returns
+   * true only when each expected page filename exists and has non-zero size.
+   * Optional: directory-backed adapters can implement this with one directory
+   * listing; callers fall back to per-page `imageExists`/`getImage` probes.
+   */
+  allImagesExist?(
+    galleryId: number,
+    extensions: readonly string[],
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean>;
+
+  /**
+   * Cheap size lookup for a stored page. Optional: adapters that omit it force
+   * callers to fall back to reading the image bytes.
+   */
+  imageSize?(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<number | null>;
+
+  /**
    * A WebView-loadable URL (convertFileSrc) for the gallery's first downloaded
    * page, to use as an offline cover — no image bytes pass through the JS heap.
    * Returns null when nothing is downloaded. Optional: adapters without a native
@@ -117,6 +147,12 @@ export interface DownloadStore {
 
   /** List all gallery IDs that have at least one stored image. */
   listGalleries(): Promise<number[]>;
+
+  /**
+   * Optional richer directory listing for stores that preserve gallery folder
+   * names, e.g. Android public storage's "<id> <title>" directories.
+   */
+  listGalleryFolders?(): Promise<{ galleryId: number; folderName: string; title: string }[]>;
 
   /** Delete a gallery folder and all its images. */
   deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void>;

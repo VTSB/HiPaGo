@@ -34,10 +34,11 @@ async function offlineDownloadFallback(
   }
   if (!row) return null;
   if (row.status !== 'complete') return null;
+  const lookup = { folderName: row.folderName ?? null };
 
   let completeOnDisk = false;
   try {
-    completeOnDisk = await hasCompleteDownloadedGallery(id, row.pageCount);
+    completeOnDisk = await hasCompleteDownloadedGallery(id, row.pageCount, lookup);
   } catch {
     completeOnDisk = false;
   }
@@ -45,7 +46,7 @@ async function offlineDownloadFallback(
 
   let pages: { index: number; ext: string }[] = [];
   try {
-    pages = await getDownloadedGalleryPages(id);
+    pages = await getDownloadedGalleryPages(id, lookup);
   } catch {
     pages = [];
   }
@@ -166,5 +167,6 @@ export function useGalleryDetail(id: number) {
     files: query.data?.files ?? [],
     isLoading: query.isLoading,
     error: query.error,
+    retry: query.refetch,
   };
 }

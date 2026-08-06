@@ -139,17 +139,23 @@ function openIDB(): Promise<IDBDatabase> {
 }
 
 async function loadFromIndexedDB(): Promise<Uint8Array | null> {
+  const idb = await openIDB();
   try {
-    const idb = await openIDB();
-    return new Promise((resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const tx = idb.transaction(IDB_STORE, 'readonly');
       const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
-      req.onsuccess = () => resolve(req.result ?? null);
-      req.onerror = () => reject(req.error);
+      let saved: Uint8Array | null = null;
+
+      req.onsuccess = () => {
+        saved = req.result ?? null;
+      };
+      req.onerror = () => reject(req.error ?? new Error('IndexedDB read failed'));
+      tx.oncomplete = () => resolve(saved);
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB read transaction failed'));
+      tx.onabort = () => reject(tx.error ?? new Error('IndexedDB read transaction aborted'));
     });
-  } catch {
-    // Recoverable: IndexedDB unavailable or blocked — fall back to fresh WASM init
-    return null;
+  } finally {
+    idb.close();
   }
 }
 

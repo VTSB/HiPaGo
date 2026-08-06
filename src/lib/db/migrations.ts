@@ -52,9 +52,7 @@ export const MIGRATIONS: Migration[] = [
       await adapter.exec(
         'CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt)',
       );
-      await adapter.exec(
-        'CREATE INDEX IF NOT EXISTS idx_download_status ON download(status)',
-      );
+      await adapter.exec('CREATE INDEX IF NOT EXISTS idx_download_status ON download(status)');
     },
   },
   {
@@ -127,6 +125,18 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 8,
+    description: 'Add nativeRunId column to download (native attempt ownership token)',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(download)');
+      if (cols.length === 0) return;
+      const colNames = new Set(cols.map((c) => c.name));
+      if (!colNames.has('nativeRunId')) {
+        await adapter.exec('ALTER TABLE download ADD COLUMN nativeRunId TEXT');
+      }
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time
@@ -145,7 +155,9 @@ export const LATEST_VERSION: number =
 /**
  * Run all pending migrations against the given adapter.
  * Uses PRAGMA user_version to determine the current schema version.
- * Each migration runs inside a transaction; on failure it rolls back and re-throws.
+ * Each migration uses an explicit transaction when the adapter can pin all
+ * statements to one connection. Pool-backed adapters run the same sequence
+ * serially with statement-level auto-commit.
  */
 export async function runMigrations(adapter: DbAdapter): Promise<void> {
   const rows = await adapter.query<{ user_version: number }>('PRAGMA user_version');
@@ -155,14 +167,15 @@ export async function runMigrations(adapter: DbAdapter): Promise<void> {
   if (currentVersion >= dynamicLatest) return;
 
   const pending = MIGRATIONS.filter((m) => m.version > currentVersion);
+  const useExplicitTransaction = adapter.supportsExplicitTransactions !== false;
   for (const migration of pending) {
-    await adapter.exec('BEGIN');
+    if (useExplicitTransaction) await adapter.exec('BEGIN');
     try {
       await migration.up(adapter);
       await adapter.exec(`PRAGMA user_version = ${migration.version}`);
-      await adapter.exec('COMMIT');
+      if (useExplicitTransaction) await adapter.exec('COMMIT');
     } catch (e) {
-      await adapter.exec('ROLLBACK');
+      if (useExplicitTransaction) await adapter.exec('ROLLBACK');
       throw e;
     }
   }

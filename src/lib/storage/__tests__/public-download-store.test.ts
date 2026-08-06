@@ -217,6 +217,27 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
     expect(result).toBeNull();
   });
 
+  it('getImage propagates storage I/O errors instead of reporting a missing file', async () => {
+    await store.ensureGallery(998, 'Transient Error');
+    fakeLib.exists = async () => {
+      throw new Error('temporary SAF failure');
+    };
+
+    await expect(store.getImage(998, -1, 'json')).rejects.toThrow('temporary SAF failure');
+  });
+
+  it('exact folder lookup propagates a stat error so reconciliation stays conservative', async () => {
+    fakeLib.stat = async () => {
+      throw new Error('temporary stat failure');
+    };
+
+    await expect(
+      AndroidPublicDownloadStore.create().getImage(997, -1, 'json', {
+        folderName: '997 Existing Folder',
+      }),
+    ).rejects.toThrow('temporary stat failure');
+  });
+
   // imageExists (stat-backed, size>0)
 
   it('imageExists returns true for a present non-empty page', async () => {
@@ -236,6 +257,69 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
   it('imageExists returns false when the ext differs', async () => {
     await store.putImage(100, 2, makeBytes(8), 'webp');
     expect(await store.imageExists(100, 2, 'jpg')).toBe(false);
+  });
+
+  it('imageExists propagates a storage transport error', async () => {
+    await store.ensureGallery(100, 'Transport Error');
+    fakeLib.stat = async () => {
+      throw new Error('temporary page stat failure');
+    };
+
+    await expect(store.imageExists(100, 0, 'webp')).rejects.toThrow(
+      'temporary page stat failure',
+    );
+  });
+
+  it('imageSize returns the stored byte size and null for a missing page', async () => {
+    await store.putImage(100, 3, makeBytes(12), 'webp');
+    expect(await store.imageSize(100, 3, 'webp')).toBe(12);
+    expect(await store.imageSize(100, 4, 'webp')).toBeNull();
+  });
+
+  it('imageSize propagates a transient stat error during restore validation', async () => {
+    await store.ensureGallery(101, 'Restore Validation');
+    fakeLib.stat = async () => {
+      throw new Error('temporary page stat failure');
+    };
+
+    await expect(store.imageSize(101, 0, 'webp')).rejects.toThrow('temporary page stat failure');
+  });
+
+  it('allImagesExist validates every manifest page with one directory listing', async () => {
+    await store.putImage(110, 0, makeBytes(8), 'webp');
+    await store.putImage(110, 1, makeBytes(8), 'jpg');
+    const readdir = vi.spyOn(fakeLib, 'readdir');
+
+    await expect(store.allImagesExist(110, ['webp', 'jpg'], { folderName: '110' })).resolves.toBe(
+      true,
+    );
+    expect(readdir).toHaveBeenCalledOnce();
+  });
+
+  it('allImagesExist rejects a missing or wrongly-extended expected page', async () => {
+    await store.putImage(111, 0, makeBytes(8), 'webp');
+
+    await expect(store.allImagesExist(111, ['webp', 'jpg'])).resolves.toBe(false);
+    await store.putImage(111, 1, makeBytes(8), 'webp');
+    await expect(store.allImagesExist(111, ['webp', 'jpg'])).resolves.toBe(false);
+  });
+
+  it('allImagesExist treats a zero-byte expected page as missing', async () => {
+    await store.putImage(112, 0, makeBytes(8), 'webp');
+    await store.putImage(112, 1, makeBytes(0), 'jpg');
+
+    await expect(store.allImagesExist(112, ['webp', 'jpg'])).resolves.toBe(false);
+  });
+
+  it('allImagesExist propagates a directory transport error', async () => {
+    await store.ensureGallery(113, 'Transport Error');
+    fakeLib.readdir = async () => {
+      throw new Error('temporary directory failure');
+    };
+
+    await expect(store.allImagesExist(113, ['webp'])).rejects.toThrow(
+      'temporary directory failure',
+    );
   });
 
   it('putImage overwrites an existing file', async () => {
@@ -315,6 +399,63 @@ describe('AndroidPublicDownloadStore — DownloadStore contract', () => {
 
   it('deleteGallery on a non-existent gallery does not throw', async () => {
     await expect(store.deleteGallery(99999)).resolves.not.toThrow();
+  });
+
+  it('deleteGallery removes the exact folder and stale aliases for the same gallery id', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/450 Old Title`);
+    fakeLib.dirs.add(`${LIB}/450 Current Title`);
+    fakeLib.files.set(`${LIB}/450 Old Title/0001.webp`, toBase64(makeBytes(4, 0x11)));
+    fakeLib.files.set(`${LIB}/450 Current Title/0001.webp`, toBase64(makeBytes(4, 0x22)));
+
+    await store.deleteGallery(450, { folderName: '450 Current Title' });
+
+    expect(fakeLib.dirs.has(`${LIB}/450 Current Title`)).toBe(false);
+    expect(fakeLib.files.has(`${LIB}/450 Current Title/0001.webp`)).toBe(false);
+    expect(fakeLib.dirs.has(`${LIB}/450 Old Title`)).toBe(false);
+    expect(fakeLib.files.has(`${LIB}/450 Old Title/0001.webp`)).toBe(false);
+  });
+
+  it('keeps the DB-referenced folder when a stale-alias delete fails mid-sweep', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/450 Current Title`);
+    fakeLib.dirs.add(`${LIB}/450 Old Title`);
+    fakeLib.files.set(`${LIB}/450 Current Title/0001.webp`, toBase64(makeBytes(4, 0x11)));
+    fakeLib.files.set(`${LIB}/450 Old Title/0001.webp`, toBase64(makeBytes(4, 0x22)));
+
+    // The stale alias is now deleted first; make that deletion fail so the
+    // sweep aborts before touching the DB-referenced preferred folder.
+    vi.spyOn(fakeLib, 'deleteDir').mockRejectedValueOnce(new Error('provider denied alias'));
+
+    await expect(
+      store.deleteGallery(450, { folderName: '450 Current Title' }),
+    ).rejects.toThrow('provider denied alias');
+
+    // The DB-referenced preferred folder must survive the mid-sweep failure.
+    expect(fakeLib.dirs.has(`${LIB}/450 Current Title`)).toBe(true);
+    expect(fakeLib.files.has(`${LIB}/450 Current Title/0001.webp`)).toBe(true);
+  });
+
+  it('deleteGallery propagates native delete errors and keeps the folder tracked', async () => {
+    await store.ensureGallery(451, 'Provider Failure');
+    await store.putImage(451, 0, makeBytes(4), 'webp');
+    vi.spyOn(fakeLib, 'deleteDir').mockRejectedValueOnce(new Error('provider denied delete'));
+
+    await expect(store.deleteGallery(451, { folderName: '451 Provider Failure' })).rejects.toThrow(
+      'provider denied delete',
+    );
+    expect(fakeLib.dirs.has(`${LIB}/451 Provider Failure`)).toBe(true);
+  });
+
+  it('deleteGallery rejects a false-positive native success when the folder still exists', async () => {
+    await store.ensureGallery(452, 'Silent Failure');
+    await store.putImage(452, 0, makeBytes(4), 'webp');
+    vi.spyOn(fakeLib, 'deleteDir').mockResolvedValueOnce(undefined);
+
+    await expect(store.deleteGallery(452, { folderName: '452 Silent Failure' })).rejects.toThrow(
+      'Failed to delete download folder: 452 Silent Failure',
+    );
+    expect(fakeLib.dirs.has(`${LIB}/452 Silent Failure`)).toBe(true);
   });
 
   // gallerySize / usage
@@ -446,6 +587,27 @@ describe('AndroidPublicDownloadStore — Android-specific behaviour', () => {
       expect(typeof id).toBe('number');
       expect(isNaN(id)).toBe(false);
     }
+  });
+
+  it('listGalleryFolders returns strict IDs, folder names, and title fallbacks', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.dirs.add(`${LIB}/123 Named Gallery`);
+    fakeLib.dirs.add(`${LIB}/456`);
+    fakeLib.dirs.add(`${LIB}/789invalid`);
+
+    expect(await store.listGalleryFolders()).toEqual([
+      { galleryId: 123, folderName: '123 Named Gallery', title: 'Named Gallery' },
+      { galleryId: 456, folderName: '456', title: 'Gallery 456' },
+    ]);
+  });
+
+  it('listGalleryFolders propagates a transient directory read error', async () => {
+    fakeLib.dirs.add(LIB);
+    fakeLib.readdir = async () => {
+      throw new Error('temporary directory failure');
+    };
+
+    await expect(store.listGalleryFolders()).rejects.toThrow('temporary directory failure');
   });
 
   it('putImageFromFile copies from srcPath to the gallery folder', async () => {

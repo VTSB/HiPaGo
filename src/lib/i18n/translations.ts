@@ -6,7 +6,7 @@ const translations = {
   'nav.search': { en: 'Search', ko: '검색' },
   'nav.favorites': { en: 'Favorites', ko: '즐겨찾기' },
   'nav.history': { en: 'History', ko: '기록' },
-  'nav.library': { en: 'Library', ko: '라이브러리' },
+  'nav.library': { en: 'Library', ko: '보관함' },
   'nav.saved': { en: 'Library', ko: '보관함' },
   'nav.settings': { en: 'Settings', ko: '설정' },
 
@@ -112,18 +112,29 @@ const translations = {
   'db.error.dismiss': { en: 'Dismiss', ko: '닫기' },
 
   // Library (offline downloads)
-  'library.title': { en: 'Library', ko: '라이브러리' },
+  'library.title': { en: 'Library', ko: '보관함' },
   'library.empty': { en: 'No downloaded galleries yet.', ko: '다운로드된 갤러리가 없습니다.' },
   'library.storageUsed': { en: 'Storage used', ko: '사용 중인 저장 공간' },
   'library.pages': { en: 'pages', ko: '페이지' },
   'library.open': { en: 'Open', ko: '열기' },
   'library.delete': { en: 'Delete', ko: '삭제' },
   'library.exportZip': { en: 'Export ZIP', ko: 'ZIP 내보내기' },
+  'library.exportingZip': { en: 'Exporting ZIP', ko: 'ZIP 내보내는 중' },
+  'library.exportSucceeded': { en: 'ZIP saved', ko: 'ZIP 저장 완료' },
+  'library.exportStarted': { en: 'ZIP download started', ko: 'ZIP 다운로드 시작됨' },
+  'library.exportSourceFailed': {
+    en: 'Could not export ZIP. Some downloaded files are missing or damaged.',
+    ko: 'ZIP을 내보낼 수 없습니다. 다운로드 파일이 일부 없거나 손상되었습니다.',
+  },
   'library.exportFailed': {
-    en: 'Could not export ZIP. Some downloaded files may be missing.',
-    ko: 'ZIP을 내보낼 수 없습니다. 일부 다운로드 파일이 없을 수 있습니다.',
+    en: 'Could not save ZIP. Check the destination permission and available disk space.',
+    ko: 'ZIP을 저장할 수 없습니다. 저장 위치의 권한과 남은 공간을 확인해 주세요.',
   },
   'library.confirmDelete': { en: 'Delete this download?', ko: '이 다운로드를 삭제하시겠습니까?' },
+  'library.deleteFailed': {
+    en: 'Could not delete the downloaded files. Check the download folder permission and try again.',
+    ko: '다운로드 파일을 삭제하지 못했습니다. 다운로드 폴더 권한을 확인한 뒤 다시 시도해 주세요.',
+  },
   'library.retry': { en: 'Retry', ko: '재시도' },
   'library.retrying': { en: 'Retrying', ko: '재시도 중' },
   // Staged auto-restart of failed downloads (Task E). `{time}`/`{k}`/`{max}` are
@@ -172,6 +183,17 @@ const translations = {
   'reader.next': { en: 'Next', ko: '다음' },
   'reader.scroll': { en: 'Scroll', ko: '스크롤' },
   'reader.page': { en: 'Page', ko: '페이지' },
+  'reader.pages': { en: 'Reader pages', ko: '뷰어 페이지' },
+  'reader.controls': { en: 'Reader controls', ko: '뷰어 컨트롤' },
+  'reader.singlePage': { en: 'Single-page view', ko: '한 페이지 보기' },
+  'reader.twoPage': { en: 'Two-page view', ko: '두 페이지 보기' },
+  'reader.retry': { en: 'Retry', ko: '다시 시도' },
+  'reader.loading': { en: 'Loading reader', ko: '뷰어 불러오는 중' },
+  'reader.imageLoadFailed': { en: 'Could not load this page', ko: '이 페이지를 불러오지 못했습니다' },
+  'reader.loadFailed': { en: 'Could not prepare the reader', ko: '뷰어를 준비하지 못했습니다' },
+  'reader.empty': { en: 'This gallery has no readable pages', ko: '감상할 수 있는 페이지가 없습니다' },
+  'reader.fullscreen': { en: 'Enter fullscreen', ko: '전체 화면 시작' },
+  'reader.exitFullscreen': { en: 'Exit fullscreen', ko: '전체 화면 종료' },
 
   // Settings
   'settings.title': { en: 'Settings', ko: '설정' },
@@ -189,10 +211,10 @@ const translations = {
   'settings.langFilter.english': { en: 'English', ko: '영어' },
   'settings.langFilter.chinese': { en: 'Chinese', ko: '중국어' },
   'settings.langFilter.korean': { en: 'Korean', ko: '한국어' },
-  'settings.libraryInitialTab': { en: 'Library Start Tab', ko: '라이브러리 시작 탭' },
+  'settings.libraryInitialTab': { en: 'Library Start Tab', ko: '보관함 시작 탭' },
   'settings.libraryInitialTab.desc': {
     en: 'Choose which tab opens first when entering Library',
-    ko: '라이브러리에 들어갈 때 처음 열 탭을 선택합니다',
+    ko: '보관함에 들어갈 때 처음 열 탭을 선택합니다',
   },
   'settings.tagDb': { en: 'Tag DB', ko: '태그 DB' },
   'settings.tagDb.desc': {
@@ -232,10 +254,10 @@ const translations = {
   'settings.reader.scroll': { en: 'Scroll', ko: '스크롤' },
   'settings.imageFormat': { en: 'Image Format', ko: '이미지 형식' },
   'settings.imageFormat.desc': { en: 'Preferred image format for loading', ko: '이미지 로딩 형식' },
-  'settings.secureScreen': { en: 'Secure Screen', ko: '보안 화면' },
+  'settings.secureScreen': { en: 'Hide in Recents', ko: '최근 앱 숨김' },
   'settings.secureScreen.desc': {
-    en: 'Hide app content from Android screenshots, screen recording, and recent apps',
-    ko: 'Android 스크린샷, 화면 녹화, 최근 앱 화면에서 앱 내용을 숨깁니다',
+    en: 'Hide app content from Android recent-app previews while allowing screenshots',
+    ko: '스크린샷은 허용하고 Android 최근 앱 미리보기에서만 앱 내용을 숨깁니다',
   },
   'settings.secureScreen.off': { en: 'Off', ko: '끔' },
   'settings.secureScreen.on': { en: 'On', ko: '켬' },
@@ -263,11 +285,34 @@ const translations = {
     en: 'Pick a folder for offline galleries. The app creates a HiPaGo subfolder inside it. Files stay visible in a file manager and persist after uninstall, but are hidden from the Gallery app (.nomedia). You only choose the folder once.',
     ko: '오프라인 갤러리를 저장할 폴더를 선택하세요. 그 안에 HiPaGo 하위 폴더를 앱이 자동으로 만듭니다. 파일 관리자에서는 보이고 앱 삭제 후에도 유지되지만, 갤러리 앱에는 표시되지 않습니다(.nomedia). 폴더는 한 번만 고르면 됩니다.',
   },
+  'settings.downloadLocation.backupDesc': {
+    en: 'The download list and app settings are backed up as downloads.json and settings.json (with recovery copies) in the HiPaGo folder. After reinstalling, select the same parent folder once to restore them automatically.',
+    ko: '다운로드 목록과 앱 설정은 HiPaGo 폴더의 downloads.json과 settings.json에 복구용 사본과 함께 백업됩니다. 앱을 다시 설치한 뒤 같은 상위 폴더를 한 번 선택하면 자동으로 복원됩니다.',
+  },
   'settings.downloadLocation.current': { en: 'Current folder', ko: '현재 폴더' },
   'settings.downloadLocation.notSelected': { en: 'Not selected yet', ko: '아직 선택 안 됨' },
   'settings.downloadLocation.select': { en: 'Select folder', ko: '폴더 선택' },
   'settings.downloadLocation.change': { en: 'Change folder', ko: '폴더 변경' },
+  'settings.downloadLocation.restore': { en: 'Restore backup', ko: '백업 복원' },
+  'settings.downloadLocation.restoring': { en: 'Restoring…', ko: '복원 중…' },
+  'settings.downloadLocation.restoreDone': {
+    en: 'Backup restore finished. Saved downloads and settings were applied when available.',
+    ko: '백업 복원을 마쳤습니다. 저장된 다운로드 목록과 설정을 확인해 적용했습니다.',
+  },
+  'settings.downloadLocation.restoreEmpty': {
+    en: 'No backup data was found in this folder. New changes will be backed up automatically.',
+    ko: '이 폴더에서 복원할 백업을 찾지 못했습니다. 앞으로의 변경 내용은 자동으로 백업됩니다.',
+  },
+  'settings.downloadLocation.restoreFailed': {
+    en: 'Could not restore the backup. Make sure you selected the folder that contains HiPaGo.',
+    ko: '백업을 복원하지 못했습니다. HiPaGo 폴더가 들어 있는 상위 폴더를 선택했는지 확인하세요.',
+  },
   'settings.downloadLocation.clear': { en: 'Clear', ko: '해제' },
+  'settings.downloadLocation.scanning': { en: 'Scanning...', ko: '스캔 중...' },
+  'settings.downloadLocation.restoreNone': {
+    en: 'No complete downloads were found to restore.',
+    ko: '복원할 수 있는 완료된 다운로드가 없습니다.',
+  },
   'settings.downloadLocation.hint': {
     en: 'If not set, you will be asked to pick a folder on your first download.',
     ko: '설정하지 않으면 첫 다운로드 시 폴더를 선택하라는 창이 뜹니다.',

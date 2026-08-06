@@ -1,13 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getDownload } from '@/lib/db/download';
 import { createDownloadStore } from '@/lib/storage/download-store';
-import {
-  getDownloadedGalleryPages,
-  getDownloadedImage,
-  hasCompleteDownloadedGallery,
-} from '@/lib/utils/download-zip';
+import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
 
 export interface OfflineImageDim {
   width: number;
@@ -43,10 +39,37 @@ export interface OfflineImagesResult {
    * so this is normally null and the reader uses a stable manga-page fallback.
    */
   dims: OfflineImageDim[] | null;
-  /** True when the DB row says "complete" but no pages were found in storage. */
+  /** True when a completed gallery's manifest or a requested page is absent. */
   missing: boolean;
+  /** Storage/DB failure. Distinct from a file that is verifiably absent. */
+  error: Error | null;
+  /** Retry the DB, manifest, and storage initialization checks. */
+  retry: () => void;
   /** True while the DB check + manifest load are in flight. */
   loading: boolean;
+}
+
+type OfflineImagesState = Omit<OfflineImagesResult, 'retry'>;
+
+interface OwnedOfflineImagesState {
+  galleryId: number;
+  retryToken: number;
+  value: OfflineImagesState;
+}
+
+function createLoadingState(): OfflineImagesState {
+  return {
+    sources: null,
+    urls: null,
+    dims: null,
+    missing: false,
+    error: null,
+    loading: true,
+  };
+}
+
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
 }
 
 /**
@@ -59,13 +82,13 @@ export interface OfflineImagesResult {
  * virtualized window and scroll mode reads only images near the viewport.
  */
 export function useOfflineImages(galleryId: number): OfflineImagesResult {
-  const [result, setResult] = useState<OfflineImagesResult>({
-    sources: null,
-    urls: null,
-    dims: null,
-    missing: false,
-    loading: true,
-  });
+  const [retryToken, setRetryToken] = useState(0);
+  const retry = useCallback(() => setRetryToken((token) => token + 1), []);
+  const [ownedResult, setOwnedResult] = useState<OwnedOfflineImagesState>(() => ({
+    galleryId,
+    retryToken,
+    value: createLoadingState(),
+  }));
   const runIdRef = useRef(0);
 
   useEffect(() => {
@@ -73,62 +96,141 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
     const runId = ++runIdRef.current;
 
     async function load() {
-      setResult({ sources: null, urls: null, dims: null, missing: false, loading: true });
+      setOwnedResult({
+        galleryId,
+        retryToken,
+        value: createLoadingState(),
+      });
+
+      const reportError = (error: unknown) => {
+        if (cancelled || runId !== runIdRef.current) return;
+        setOwnedResult((current) =>
+          current.galleryId === galleryId && current.retryToken === retryToken
+            ? {
+                ...current,
+                value: {
+                  ...current.value,
+                  missing: false,
+                  error: asError(error),
+                  loading: false,
+                },
+              }
+            : current,
+        );
+      };
+
+      const reportMissing = () => {
+        if (cancelled || runId !== runIdRef.current) return;
+        setOwnedResult((current) =>
+          current.galleryId !== galleryId || current.retryToken !== retryToken
+            ? current
+            : current.value.error
+              ? current
+              : {
+                  ...current,
+                  value: {
+                    ...current.value,
+                    missing: true,
+                    loading: false,
+                  },
+                },
+        );
+      };
 
       let row: Awaited<ReturnType<typeof getDownload>>;
       try {
         row = await getDownload(galleryId);
-      } catch {
-        if (!cancelled) {
-          setResult({ sources: null, urls: null, dims: null, missing: false, loading: false });
-        }
+      } catch (error) {
+        reportError(error);
         return;
       }
 
       if (cancelled || runId !== runIdRef.current) return;
 
       if (!row || row.status !== 'complete') {
-        setResult({ sources: null, urls: null, dims: null, missing: false, loading: false });
+        setOwnedResult({
+          galleryId,
+          retryToken,
+          value: {
+            sources: null,
+            urls: null,
+            dims: null,
+            missing: false,
+            error: null,
+            loading: false,
+          },
+        });
         return;
       }
 
+      const lookup = { folderName: row.folderName ?? null };
+      const expectedPageCount = row.pageCount ?? 0;
       let pages: { index: number; ext: string }[];
       try {
-        pages = await getDownloadedGalleryPages(galleryId);
-      } catch {
-        pages = [];
-      }
-
-      if (cancelled || runId !== runIdRef.current) return;
-
-      let completeOnDisk = false;
-      try {
-        completeOnDisk = await hasCompleteDownloadedGallery(galleryId, row.pageCount ?? 0);
-      } catch {
-        completeOnDisk = false;
-      }
-
-      if (!completeOnDisk) {
-        setResult({ sources: null, urls: null, dims: null, missing: true, loading: false });
+        pages = await getDownloadedGalleryPages(galleryId, lookup);
+      } catch (error) {
+        reportError(error);
         return;
       }
 
-      const store = await createDownloadStore().catch(() => null);
       if (cancelled || runId !== runIdRef.current) return;
 
-      if (store?.imageUrl) {
+      const validManifest =
+        pages.length > 0 &&
+        (expectedPageCount <= 0 || pages.length === expectedPageCount) &&
+        pages.every(({ index, ext }, position) => index === position && ext.length > 0);
+      if (!validManifest) {
+        setOwnedResult({
+          galleryId,
+          retryToken,
+          value: {
+            sources: null,
+            urls: null,
+            dims: null,
+            missing: true,
+            error: null,
+            loading: false,
+          },
+        });
+        return;
+      }
+
+      let store: Awaited<ReturnType<typeof createDownloadStore>>;
+      try {
+        store = await createDownloadStore();
+      } catch (error) {
+        reportError(error);
+        return;
+      }
+      if (cancelled || runId !== runIdRef.current) return;
+
+      if (store.imageUrl) {
         const imageUrl = store.imageUrl.bind(store);
         const sources: OfflineImageSource[] = pages.map(({ index, ext }) => ({
           index,
           ext,
-          loadUrl: () => imageUrl(galleryId, index, ext).catch(() => null),
+          loadUrl: async () => {
+            try {
+              const url = await imageUrl(galleryId, index, ext);
+              if (!url) reportMissing();
+              return url;
+            } catch (error) {
+              reportError(error);
+              throw error;
+            }
+          },
         }));
-        setResult({
-          sources,
-          urls: null,
-          dims: null,
-          missing: false,
-          loading: false,
+        setOwnedResult({
+          galleryId,
+          retryToken,
+          value: {
+            sources,
+            urls: null,
+            dims: null,
+            missing: false,
+            error: null,
+            loading: false,
+          },
         });
         return;
       }
@@ -137,18 +239,37 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
         index,
         ext,
         loadUrl: async () => {
-          const bytes = await getDownloadedImage(galleryId, index).catch(() => null);
-          if (!bytes) return null;
-          const buf = bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ) as ArrayBuffer;
-          return URL.createObjectURL(new Blob([buf]));
+          try {
+            const bytes = await store.getImage(galleryId, index, ext, lookup);
+            if (!bytes || bytes.byteLength === 0) {
+              reportMissing();
+              return null;
+            }
+            const buf = bytes.buffer.slice(
+              bytes.byteOffset,
+              bytes.byteOffset + bytes.byteLength,
+            ) as ArrayBuffer;
+            return URL.createObjectURL(new Blob([buf]));
+          } catch (error) {
+            reportError(error);
+            throw error;
+          }
         },
       }));
 
       if (!cancelled) {
-        setResult({ sources, urls: null, dims: null, missing: false, loading: false });
+        setOwnedResult({
+          galleryId,
+          retryToken,
+          value: {
+            sources,
+            urls: null,
+            dims: null,
+            missing: false,
+            error: null,
+            loading: false,
+          },
+        });
       }
     }
 
@@ -157,7 +278,12 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
     return () => {
       cancelled = true;
     };
-  }, [galleryId]);
+  }, [galleryId, retryToken]);
 
-  return result;
+  const result =
+    ownedResult.galleryId === galleryId && ownedResult.retryToken === retryToken
+      ? ownedResult.value
+      : createLoadingState();
+
+  return { ...result, retry };
 }

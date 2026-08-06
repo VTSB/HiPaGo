@@ -125,6 +125,7 @@ describe('DB boot path: upgrade from pre-queuePosition download table', () => {
 
     // queuePosition column + queue index are present after the upgrade.
     expect(await columns(adapter, 'download')).toContain('queuePosition');
+    expect(await columns(adapter, 'download')).toContain('nativeRunId');
     expect(await indexNames(adapter, 'download')).toContain('idx_download_queue');
     expect(
       (await adapter.query<{ user_version: number }>('PRAGMA user_version'))[0].user_version,
@@ -148,6 +149,7 @@ describe('DB boot path: upgrade from pre-queuePosition download table', () => {
     ).resolves.not.toThrow();
 
     expect(await columns(adapter, 'download')).toContain('queuePosition');
+    expect(await columns(adapter, 'download')).toContain('nativeRunId');
     expect(await indexNames(adapter, 'download')).toContain('idx_download_queue');
     expect(
       (await adapter.query<{ user_version: number }>('PRAGMA user_version'))[0].user_version,

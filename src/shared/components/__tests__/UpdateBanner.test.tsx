@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { UpdateBanner } from '../UpdateBanner';
 import { UpdateService, type CheckResult } from '@/services/UpdateService';
+
+const navigationMocks = vi.hoisted(() => ({ pathname: '/' }));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => navigationMocks.pathname,
+}));
 
 vi.mock('@/lib/i18n/useT', () => ({
   useT: () => (key: string) => key,
@@ -24,10 +30,15 @@ function mockAvailable(result: Partial<CheckResult>) {
   });
 }
 
-describe('UpdateBanner Android install recovery', () => {
+describe('UpdateBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    navigationMocks.pathname = '/';
     sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('recovers when Android sends the user to unknown-app settings', async () => {
@@ -58,5 +69,27 @@ describe('UpdateBanner Android install recovery', () => {
     });
     expect(screen.getByText('update.banner.installerStarted')).toBeInTheDocument();
     expect(screen.queryByText('update.banner.installing')).not.toBeInTheDocument();
+  });
+
+  it('observes automatic check failures without showing a disruptive banner', async () => {
+    const error = new Error('updater permission denied');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(UpdateService.checkForUpdate).mockRejectedValue(error);
+
+    render(<UpdateBanner />);
+
+    await waitFor(() => {
+      expect(warn).toHaveBeenCalledWith('[UpdateBanner] check failed', error);
+    });
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+  });
+
+  it('does not check or render the global banner inside the reader viewport', () => {
+    navigationMocks.pathname = '/gallery/42/reader';
+
+    render(<UpdateBanner />);
+
+    expect(UpdateService.checkForUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 });

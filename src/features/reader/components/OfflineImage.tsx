@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/shared/components/Spinner';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImages';
+import { useT } from '@/lib/i18n/useT';
 
 interface OfflineImageProps {
   source: OfflineImageSource;
@@ -38,6 +39,7 @@ function LocalBlobImage({
   spinner = false,
   fetchPriority,
 }: OfflineImageProps) {
+  const t = useT();
   const imgRef = useRef<HTMLImageElement>(null);
   const objectUrlRef = useRef<string | null>(null);
   const [visible, setVisible] = useState(loading === 'eager');
@@ -106,16 +108,34 @@ function LocalBlobImage({
     [],
   );
 
+  const retry = useCallback(() => {
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = null;
+    setUrl(null);
+    setLoaded(false);
+    setFailed(false);
+  }, []);
+
   if (failed) {
     return (
-      <div
+      <button
+        type="button"
+        aria-label={`${t('reader.retry')}: ${alt}`}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          retry();
+        }}
         className={className}
         style={{
           ...style,
           display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--color-zinc-800, #27272a)',
+          pointerEvents: 'auto',
         }}
       >
         <svg
@@ -130,7 +150,10 @@ function LocalBlobImage({
             clipRule="evenodd"
           />
         </svg>
-      </div>
+        <span style={{ color: 'var(--color-zinc-300, #d4d4d8)', fontSize: 14 }}>
+          {t('reader.imageLoadFailed')} · {t('reader.retry')}
+        </span>
+      </button>
     );
   }
 

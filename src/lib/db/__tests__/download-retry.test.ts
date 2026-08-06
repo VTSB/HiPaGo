@@ -14,6 +14,11 @@ import {
   listDueAutoRetries,
   clearAutoRetry,
   earliestNextRetryAt,
+  requeueDueAutoRetry,
+  requeueInterruptedDownload,
+  retryDownloadIfUnchanged,
+  retryDownloadIfAbsent,
+  redownloadCompleteIfUnchanged,
 } from '../download-retry';
 import type { DBDownload } from '../schema';
 
@@ -54,7 +59,8 @@ describe('scheduleAutoRetry', () => {
   it('sets retryCount + nextRetryAt and keeps status failed', async () => {
     await upsertDownload(makeRow({ galleryId: 1, status: 'failed' }));
     const due = '2024-06-01T10:05:00Z';
-    await scheduleAutoRetry(1, 1, due);
+    const snapshot = (await getDownload(1))!;
+    expect(await scheduleAutoRetry(snapshot, 1, due)).toBe(true);
     const row = await getDownload(1);
     expect(row!.status).toBe('failed');
     expect(row!.retryCount).toBe(1);
@@ -65,10 +71,174 @@ describe('scheduleAutoRetry', () => {
     await upsertDownload(
       makeRow({ galleryId: 2, status: 'queued', queuePosition: 1, lastError: null }),
     );
-    await scheduleAutoRetry(2, 1, '2024-06-01T10:05:00Z');
+    const snapshot = (await getDownload(2))!;
+    expect(await scheduleAutoRetry(snapshot, 1, '2024-06-01T10:05:00Z')).toBe(false);
     const row = await getDownload(2);
     expect(row!.nextRetryAt == null).toBe(true);
     expect(row!.status).toBe('queued');
+  });
+
+  it('does not overwrite a newer failed attempt from a stale failure snapshot', async () => {
+    await upsertDownload(makeRow({ galleryId: 3, status: 'failed', retryCount: 0 }));
+    const snapshot = (await getDownload(3))!;
+    await upsertDownload(
+      makeRow({
+        galleryId: 3,
+        status: 'failed',
+        retryCount: 2,
+        nextRetryAt: '2024-06-01T10:10:00Z',
+      }),
+    );
+
+    expect(await scheduleAutoRetry(snapshot, 1, '2024-06-01T10:05:00Z')).toBe(false);
+    const row = await getDownload(3);
+    expect(row!.retryCount).toBe(2);
+    expect(row!.nextRetryAt).toBe('2024-06-01T10:10:00Z');
+  });
+
+  it('does not schedule over an ABA replacement with a different native run', async () => {
+    await upsertDownload(makeRow({ galleryId: 4, retryCount: 0, nativeRunId: 'run-aaaaaaaaaaaa' }));
+    const snapshot = (await getDownload(4))!;
+    await upsertDownload({ ...snapshot, nativeRunId: 'run-bbbbbbbbbbbb' });
+
+    expect(await scheduleAutoRetry(snapshot, 1, '2024-06-01T10:05:00Z')).toBe(false);
+    expect(await getDownload(4)).toMatchObject({
+      retryCount: 0,
+      nextRetryAt: null,
+      nativeRunId: 'run-bbbbbbbbbbbb',
+    });
+  });
+});
+
+describe('retryDownloadIfUnchanged', () => {
+  it('queues the exact tokenless failed snapshot and resets retry state', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 10,
+        retryCount: 2,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    const snapshot = (await getDownload(10))!;
+
+    expect(await retryDownloadIfUnchanged(snapshot)).toBe(true);
+    expect(await getDownload(10)).toMatchObject({
+      status: 'queued',
+      retryCount: 0,
+      nextRetryAt: null,
+      nativeRunId: null,
+    });
+  });
+
+  it('does not overwrite a newer native claim from a stale failed UI snapshot', async () => {
+    await upsertDownload(makeRow({ galleryId: 11 }));
+    const snapshot = (await getDownload(11))!;
+    await upsertDownload({
+      ...snapshot,
+      status: 'downloading',
+      nativeRunId: 'run-bbbbbbbbbbbb',
+    });
+
+    expect(await retryDownloadIfUnchanged(snapshot)).toBe(false);
+    expect(await getDownload(11)).toMatchObject({
+      status: 'downloading',
+      nativeRunId: 'run-bbbbbbbbbbbb',
+    });
+  });
+
+  it('refuses a failed row while a native run token is still owned', async () => {
+    await upsertDownload(makeRow({ galleryId: 12, nativeRunId: 'run-aaaaaaaaaaaa' }));
+    const snapshot = (await getDownload(12))!;
+
+    expect(await retryDownloadIfUnchanged(snapshot)).toBe(false);
+    expect(await getDownload(12)).toMatchObject({
+      status: 'failed',
+      nativeRunId: 'run-aaaaaaaaaaaa',
+    });
+  });
+
+  it('recreates a cancelled missing row without overwriting a replacement', async () => {
+    const source = makeRow({ galleryId: 13, nativeRunId: 'run-aaaaaaaaaaaa' });
+
+    expect(await retryDownloadIfAbsent(source)).toBe(true);
+    expect(await getDownload(13)).toMatchObject({
+      status: 'queued',
+      pageCount: 0,
+      nativeRunId: null,
+    });
+    expect(await retryDownloadIfAbsent(source)).toBe(false);
+  });
+});
+
+describe('redownloadCompleteIfUnchanged', () => {
+  it('queues the exact tokenless complete snapshot without losing resume metadata', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 14,
+        status: 'complete',
+        pageCount: 7,
+        totalBytes: 1234,
+        lastError: null,
+      }),
+    );
+    const snapshot = (await getDownload(14))!;
+
+    expect(await redownloadCompleteIfUnchanged(snapshot)).toBe(true);
+    expect(await getDownload(14)).toMatchObject({
+      status: 'queued',
+      pageCount: 7,
+      totalBytes: 1234,
+      nativeRunId: null,
+    });
+  });
+
+  it('does not recreate a complete row deleted after the UI snapshot', async () => {
+    await upsertDownload(makeRow({ galleryId: 15, status: 'complete', lastError: null }));
+    const snapshot = (await getDownload(15))!;
+    const db = await import('../adapter').then(({ ensureDb }) => ensureDb());
+    await db.execute('DELETE FROM download WHERE galleryId = ?', [15]);
+
+    expect(await redownloadCompleteIfUnchanged(snapshot)).toBe(false);
+    expect(await getDownload(15)).toBeNull();
+  });
+
+  it('does not overwrite a replacement lifecycle created after delete wins the retry race', async () => {
+    await upsertDownload(makeRow({ galleryId: 17, status: 'complete', lastError: null }));
+    const staleSnapshot = (await getDownload(17))!;
+    const db = await import('../adapter').then(({ ensureDb }) => ensureDb());
+    await db.execute('DELETE FROM download WHERE galleryId = ?', [17]);
+    await upsertDownload(
+      makeRow({
+        galleryId: 17,
+        title: 'Replacement lifecycle',
+        status: 'downloading',
+        nativeRunId: 'run-replacement-aa',
+      }),
+    );
+
+    expect(await redownloadCompleteIfUnchanged(staleSnapshot)).toBe(false);
+    expect(await getDownload(17)).toMatchObject({
+      title: 'Replacement lifecycle',
+      status: 'downloading',
+      nativeRunId: 'run-replacement-aa',
+    });
+  });
+
+  it('refuses a complete row while a native cleanup token remains', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 16,
+        status: 'complete',
+        lastError: null,
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+
+    expect(await redownloadCompleteIfUnchanged((await getDownload(16))!)).toBe(false);
+    expect(await getDownload(16)).toMatchObject({
+      status: 'complete',
+      nativeRunId: 'run-aaaaaaaaaaaa',
+    });
   });
 });
 
@@ -114,6 +284,17 @@ describe('listDueAutoRetries', () => {
     // No schedule: nextRetryAt NULL.
     await upsertDownload(
       makeRow({ galleryId: 4, status: 'failed', retryCount: 0, nextRetryAt: null }),
+    );
+    // Native-owned failures are reconciled/stopped before retrying.  Returning
+    // them here could start a second writer while the old worker is alive.
+    await upsertDownload(
+      makeRow({
+        galleryId: 7,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
     );
     // Wrong status: queued.
     await upsertDownload(
@@ -173,12 +354,161 @@ describe('clearAutoRetry', () => {
         status: 'failed',
         retryCount: 2,
         nextRetryAt: '2024-06-01T11:00:00Z',
+        nativeRunId: 'run-aaaaaaaaaaaa',
       }),
     );
     await clearAutoRetry(1);
     const row = await getDownload(1);
     expect(row!.retryCount).toBe(0);
     expect(row!.nextRetryAt == null).toBe(true);
+  });
+});
+
+describe('conditional retry/reconcile requeue', () => {
+  it('requeues the exact due snapshot while preserving its retry count', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 20,
+        status: 'failed',
+        retryCount: 2,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    const [snapshot] = await listDueAutoRetries('2024-06-01T12:00:00Z');
+
+    expect(await requeueDueAutoRetry(snapshot)).toBe(true);
+    const row = await getDownload(20);
+    expect(row).toMatchObject({
+      status: 'queued',
+      retryCount: 2,
+      nextRetryAt: null,
+      nativeRunId: null,
+    });
+    expect(row!.queuePosition).not.toBeNull();
+  });
+
+  it('cannot resurrect a due row deleted after the due-list snapshot', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 21,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    const [snapshot] = await listDueAutoRetries('2024-06-01T12:00:00Z');
+    const db = await import('../adapter').then(({ ensureDb }) => ensureDb());
+    await db.execute('DELETE FROM download WHERE galleryId = ?', [21]);
+
+    expect(await requeueDueAutoRetry(snapshot)).toBe(false);
+    expect(await getDownload(21)).toBeNull();
+  });
+
+  it('does not overwrite a manual retry with an older due snapshot', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 22,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    const [snapshot] = await listDueAutoRetries('2024-06-01T12:00:00Z');
+    await enqueueDownload(
+      { galleryId: 22, title: 'Manual', thumbnail: '/manual', tags: {} },
+      { userInitiated: true },
+    );
+
+    expect(await requeueDueAutoRetry(snapshot)).toBe(false);
+    const row = await getDownload(22);
+    expect(row).toMatchObject({ status: 'queued', retryCount: 0, title: 'Manual' });
+  });
+
+  it('does not requeue an ABA replacement with a different nativeRunId', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 24,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+      }),
+    );
+    const [snapshot] = await listDueAutoRetries('2024-06-01T12:00:00Z');
+    await upsertDownload({ ...snapshot, nativeRunId: 'run-bbbbbbbbbbbb' });
+
+    expect(await requeueDueAutoRetry(snapshot)).toBe(false);
+    expect(await getDownload(24)).toMatchObject({
+      status: 'failed',
+      nativeRunId: 'run-bbbbbbbbbbbb',
+    });
+  });
+
+  it('refuses a due native-owned failure even when passed directly', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 25,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+    const snapshot = (await getDownload(25))!;
+
+    expect(await requeueDueAutoRetry(snapshot)).toBe(false);
+    expect(await getDownload(25)).toMatchObject({
+      status: 'failed',
+      nativeRunId: 'run-aaaaaaaaaaaa',
+      nextRetryAt: '2024-06-01T11:00:00Z',
+    });
+  });
+
+  it('does not requeue an ABA replacement whose retry fields match but lifecycle changed', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 26,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T11:00:00Z',
+        lastError: 'attempt A',
+      }),
+    );
+    const [snapshot] = await listDueAutoRetries('2024-06-01T12:00:00Z');
+    await upsertDownload({ ...snapshot, lastError: 'attempt B', totalBytes: 99 });
+
+    expect(await requeueDueAutoRetry(snapshot)).toBe(false);
+    expect(await getDownload(26)).toMatchObject({
+      status: 'failed',
+      retryCount: 1,
+      nextRetryAt: '2024-06-01T11:00:00Z',
+      lastError: 'attempt B',
+      totalBytes: 99,
+    });
+  });
+
+  it('cannot resurrect an interrupted row deleted after launch scanning', async () => {
+    await upsertDownload(makeRow({ galleryId: 23, status: 'downloading', queuePosition: 4 }));
+    const snapshot = (await getDownload(23))!;
+    const db = await import('../adapter').then(({ ensureDb }) => ensureDb());
+    await db.execute('DELETE FROM download WHERE galleryId = ?', [23]);
+
+    expect(await requeueInterruptedDownload(snapshot)).toBe(false);
+    expect(await getDownload(23)).toBeNull();
+  });
+
+  it('invalidates native ownership when an interrupted row is requeued', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 25,
+        status: 'downloading',
+        queuePosition: 4,
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+    const snapshot = (await getDownload(25))!;
+
+    expect(await requeueInterruptedDownload(snapshot)).toBe(true);
+    expect(await getDownload(25)).toMatchObject({ status: 'queued', nativeRunId: null });
   });
 });
 
@@ -207,6 +537,17 @@ describe('earliestNextRetryAt', () => {
         status: 'failed',
         retryCount: AUTO_RETRY_MAX + 1,
         nextRetryAt: '2024-06-01T09:00:00Z',
+      }),
+    );
+    // An overdue schedule that still has a native owner is intentionally held
+    // until exact native stop clears its token; it must not arm a 0ms loop.
+    await upsertDownload(
+      makeRow({
+        galleryId: 4,
+        status: 'failed',
+        retryCount: 1,
+        nextRetryAt: '2024-06-01T08:00:00Z',
+        nativeRunId: 'run-aaaaaaaaaaaa',
       }),
     );
     const earliest = await earliestNextRetryAt();

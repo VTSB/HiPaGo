@@ -17,6 +17,7 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { fetchGalleryInfo } from '@/lib/api/gallery';
 import { galleryHref } from '@/lib/utils/routes';
 import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
+import { prioritizeFavorites, toFavoriteTagKey } from '@/lib/utils/tag-favorites';
 
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 
@@ -67,6 +68,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   const queryClient = useQueryClient();
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
+  const favoriteTags = useSettingsStore((s) => s.favoriteTags ?? []);
   const blurred = useMemo(() => shouldBlur(block, blurTags), [block, blurTags]);
   const tagEntries = useMemo(
     () =>
@@ -90,8 +92,8 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       }
     }
     all.sort((a, b) => a.priority - b.priority);
-    return all;
-  }, [block.tags, block.type]);
+    return prioritizeFavorites(all, favoriteTags, ({ tag, type }) => toFavoriteTagKey(type, tag));
+  }, [block.tags, block.type, favoriteTags]);
 
   // Use the BIG image only if it is ALREADY in the persistent image cache (e.g.
   // cached after viewing the detail page) — served from disk, no network. Never

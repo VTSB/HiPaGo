@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { setupTestDb, clearAllTables, teardownTestDb, countRows, queryAll, queryOne } from './test-db';
+import {
+  setupTestDb,
+  clearAllTables,
+  teardownTestDb,
+  countRows,
+  queryAll,
+  queryOne,
+} from './test-db';
 import {
   saveGalleryBlock,
   getGalleryBlock,
@@ -15,14 +22,14 @@ import {
   hasGalleryImages,
   deleteGalleryImages,
 } from '../gallery';
-import {
-  getTag,
-  getTagsByType,
-  setTagTransform,
-  getTagTransform,
-} from '../tag';
+import { getTag, getTagsByType, setTagTransform, getTagTransform } from '../tag';
 import { saveGalleryRelated, getGalleryRelated, deleteGalleryRelated } from '../gallery-relate';
-import { saveGalleryTags, getGalleryTags, deleteGalleryTags, getGalleryIdsByTag } from '../gallery-tag';
+import {
+  saveGalleryTags,
+  getGalleryTags,
+  deleteGalleryTags,
+  getGalleryIdsByTag,
+} from '../gallery-tag';
 import { getSyncStatus, setSyncStatus, deleteSyncStatus } from '../sync-status';
 import { GalleryBlockType, TagType, TAG_TYPE_TO_BYTE } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile } from '@/lib/utils/types';
@@ -45,8 +52,24 @@ function makeBlock(id: number, overrides: Partial<GalleryBlock> = {}): GalleryBl
 }
 
 const sampleFiles: GalleryFile[] = [
-  { width: 1280, height: 1800, haswebp: 1, hasavif: 1, hasavifsmalltn: 1, name: '001.jpg', hash: 'aaa111' },
-  { width: 800, height: 600, haswebp: 0, hasavif: 0, hasavifsmalltn: 0, name: '002.png', hash: 'bbb222' },
+  {
+    width: 1280,
+    height: 1800,
+    haswebp: 1,
+    hasavif: 1,
+    hasavifsmalltn: 1,
+    name: '001.jpg',
+    hash: 'aaa111',
+  },
+  {
+    width: 800,
+    height: 600,
+    haswebp: 0,
+    hasavif: 0,
+    hasavifsmalltn: 0,
+    name: '002.png',
+    hash: 'bbb222',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -217,12 +240,16 @@ describe('Cross-table consistency on upsert', () => {
 
 describe('Tag deduplication across galleries', () => {
   it('two galleries sharing a tag name+type produce only ONE tag record', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['shared-artist'] },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: { [TagType.ARTIST]: ['shared-artist'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['shared-artist'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: { [TagType.ARTIST]: ['shared-artist'] },
+      }),
+    );
 
     const allArtists = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.ARTIST]);
     const sharedArtists = allArtists.filter((t) => t.name === 'shared-artist');
@@ -230,12 +257,16 @@ describe('Tag deduplication across galleries', () => {
   });
 
   it('both galleries getGalleryTags return the shared tag', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['shared-artist'] },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: { [TagType.ARTIST]: ['shared-artist'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['shared-artist'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: { [TagType.ARTIST]: ['shared-artist'] },
+      }),
+    );
 
     const tags100 = await getGalleryTags(100);
     const tags200 = await getGalleryTags(200);
@@ -245,12 +276,16 @@ describe('Tag deduplication across galleries', () => {
   });
 
   it('getGalleryIdsByTag reverse lookup returns both gallery IDs', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['shared-artist'] },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: { [TagType.ARTIST]: ['shared-artist'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['shared-artist'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: { [TagType.ARTIST]: ['shared-artist'] },
+      }),
+    );
 
     const artists = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.ARTIST]);
     const sharedTag = artists.find((t) => t.name === 'shared-artist')!;
@@ -261,12 +296,16 @@ describe('Tag deduplication across galleries', () => {
   });
 
   it('different name with same type are stored as separate tag records', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['artist-a'] },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: { [TagType.ARTIST]: ['artist-b'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['artist-a'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: { [TagType.ARTIST]: ['artist-b'] },
+      }),
+    );
 
     const artists = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.ARTIST]);
     expect(artists).toHaveLength(2);
@@ -280,9 +319,11 @@ describe('Tag deduplication across galleries', () => {
 
 describe('Gallery data cleanup', () => {
   it('deleteGalleryTags removes junction entries, gallery core record remains', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.TAG]: ['t1', 't2'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.TAG]: ['t1', 't2'] },
+      }),
+    );
 
     await deleteGalleryTags(100);
 
@@ -320,10 +361,12 @@ describe('Gallery data cleanup', () => {
   });
 
   it('deleting all junction/image tables leaves only core gallery record', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['a1'] },
-      related: [200],
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['a1'] },
+        related: [200],
+      }),
+    );
     await saveGalleryImages(100, sampleFiles);
 
     await deleteGalleryTags(100);
@@ -334,7 +377,10 @@ describe('Gallery data cleanup', () => {
     expect(await getGalleryRelated(100)).toHaveLength(0);
     expect(await hasGalleryImages(100)).toBe(false);
 
-    const gallery = await queryOne<{ id: number; title: string }>('SELECT id, title FROM gallery WHERE id = ?', [100]);
+    const gallery = await queryOne<{ id: number; title: string }>(
+      'SELECT id, title FROM gallery WHERE id = ?',
+      [100],
+    );
     expect(gallery).toBeDefined();
     expect(gallery!.title).toBe('Gallery 100');
   });
@@ -462,21 +508,25 @@ describe('sync_status integration', () => {
 
 describe('Tag i18n + transform with gallery flow', () => {
   it('setTagTransform / getTagTransform work independently of gallery flow', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.TAG]: ['english-tag'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.TAG]: ['english-tag'] },
+      }),
+    );
 
     await setTagTransform('english-tag', 'transformed-tag');
     expect(await getTagTransform('english-tag')).toBe('transformed-tag');
   });
 
   it('gallery tags reconstruct correctly after transform set', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: {
-        [TagType.ARTIST]: ['artist-i18n'],
-        [TagType.TAG]: ['tag-transform'],
-      },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: {
+          [TagType.ARTIST]: ['artist-i18n'],
+          [TagType.TAG]: ['tag-transform'],
+        },
+      }),
+    );
 
     await setTagTransform('tag-transform', 'renamed-tag');
 
@@ -486,9 +536,11 @@ describe('Tag i18n + transform with gallery flow', () => {
   });
 
   it('getTag by ID returns correct type byte after gallery save', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.MALE]: ['test-male'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.MALE]: ['test-male'] },
+      }),
+    );
 
     const maleTags = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.MALE]);
     const maleTag = maleTags.find((t) => t.name === 'test-male')!;
@@ -507,24 +559,30 @@ describe('Tag i18n + transform with gallery flow', () => {
 
 describe('Multiple galleries with complex tag relationships', () => {
   it('creates exactly 6 unique tags for 3 overlapping galleries', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: {
-        [TagType.ARTIST]: ['a1', 'a2'],
-        [TagType.TAG]: ['t1'],
-      },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: {
-        [TagType.ARTIST]: ['a2', 'a3'],
-        [TagType.FEMALE]: ['f1'],
-      },
-    }));
-    await saveGalleryBlock(makeBlock(300, {
-      tags: {
-        [TagType.TAG]: ['t1'],
-        [TagType.MALE]: ['m1'],
-      },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: {
+          [TagType.ARTIST]: ['a1', 'a2'],
+          [TagType.TAG]: ['t1'],
+        },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: {
+          [TagType.ARTIST]: ['a2', 'a3'],
+          [TagType.FEMALE]: ['f1'],
+        },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(300, {
+        tags: {
+          [TagType.TAG]: ['t1'],
+          [TagType.MALE]: ['m1'],
+        },
+      }),
+    );
 
     const allTags = await queryAll<{ name: string }>('SELECT name FROM tag');
     expect(allTags).toHaveLength(6);
@@ -533,15 +591,21 @@ describe('Multiple galleries with complex tag relationships', () => {
   });
 
   it('getGalleryIdsByTag for a2 returns galleries A and B', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['a1', 'a2'], [TagType.TAG]: ['t1'] },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: { [TagType.ARTIST]: ['a2', 'a3'], [TagType.FEMALE]: ['f1'] },
-    }));
-    await saveGalleryBlock(makeBlock(300, {
-      tags: { [TagType.TAG]: ['t1'], [TagType.MALE]: ['m1'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['a1', 'a2'], [TagType.TAG]: ['t1'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: { [TagType.ARTIST]: ['a2', 'a3'], [TagType.FEMALE]: ['f1'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(300, {
+        tags: { [TagType.TAG]: ['t1'], [TagType.MALE]: ['m1'] },
+      }),
+    );
 
     const artists = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.ARTIST]);
     const a2Tag = artists.find((t) => t.name === 'a2')!;
@@ -552,15 +616,21 @@ describe('Multiple galleries with complex tag relationships', () => {
   });
 
   it('getGalleryIdsByTag for t1 returns galleries A and C', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ARTIST]: ['a1', 'a2'], [TagType.TAG]: ['t1'] },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: { [TagType.ARTIST]: ['a2', 'a3'], [TagType.FEMALE]: ['f1'] },
-    }));
-    await saveGalleryBlock(makeBlock(300, {
-      tags: { [TagType.TAG]: ['t1'], [TagType.MALE]: ['m1'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ARTIST]: ['a1', 'a2'], [TagType.TAG]: ['t1'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: { [TagType.ARTIST]: ['a2', 'a3'], [TagType.FEMALE]: ['f1'] },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(300, {
+        tags: { [TagType.TAG]: ['t1'], [TagType.MALE]: ['m1'] },
+      }),
+    );
 
     const tagRows = await getTagsByType(TAG_TYPE_TO_BYTE[TagType.TAG]);
     const t1Tag = tagRows.find((t) => t.name === 't1')!;
@@ -571,24 +641,30 @@ describe('Multiple galleries with complex tag relationships', () => {
   });
 
   it('each gallery reconstructs its own distinct tags after shared-tag saves', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: {
-        [TagType.ARTIST]: ['a1', 'a2'],
-        [TagType.TAG]: ['t1'],
-      },
-    }));
-    await saveGalleryBlock(makeBlock(200, {
-      tags: {
-        [TagType.ARTIST]: ['a2', 'a3'],
-        [TagType.FEMALE]: ['f1'],
-      },
-    }));
-    await saveGalleryBlock(makeBlock(300, {
-      tags: {
-        [TagType.TAG]: ['t1'],
-        [TagType.MALE]: ['m1'],
-      },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: {
+          [TagType.ARTIST]: ['a1', 'a2'],
+          [TagType.TAG]: ['t1'],
+        },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(200, {
+        tags: {
+          [TagType.ARTIST]: ['a2', 'a3'],
+          [TagType.FEMALE]: ['f1'],
+        },
+      }),
+    );
+    await saveGalleryBlock(
+      makeBlock(300, {
+        tags: {
+          [TagType.TAG]: ['t1'],
+          [TagType.MALE]: ['m1'],
+        },
+      }),
+    );
 
     const blockA = await getGalleryBlock(100);
     expect(blockA!.tags[TagType.ARTIST]?.sort()).toEqual(['a1', 'a2']);
@@ -670,11 +746,27 @@ describe('Edge cases', () => {
     expect(count).toBe(1);
   });
 
+  it('serializes concurrent gallery and sync-status transactions', async () => {
+    await expect(
+      Promise.all([
+        saveGalleryBlock(makeBlock(101, { title: 'Concurrent A' })),
+        saveGalleryBlock(makeBlock(102, { title: 'Concurrent B' })),
+        setSyncStatus('concurrent-sync', '{"status":"loading"}'),
+      ]),
+    ).resolves.toEqual([undefined, undefined, undefined]);
+
+    expect((await getGalleryBlock(101))?.title).toBe('Concurrent A');
+    expect((await getGalleryBlock(102))?.title).toBe('Concurrent B');
+    expect(await getSyncStatus('concurrent-sync')).toBe('{"status":"loading"}');
+  });
+
   it('saving gallery with single tag and single related round-trips correctly', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.CHARACTER]: ['char-single'] },
-      related: [999],
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.CHARACTER]: ['char-single'] },
+        related: [999],
+      }),
+    );
     const result = await getGalleryBlock(100);
     expect(result!.tags[TagType.CHARACTER]).toEqual(['char-single']);
     expect(result!.related).toEqual([999]);
@@ -708,9 +800,11 @@ describe('Edge cases', () => {
   });
 
   it('TagType.ID byte-collision: saved as byte 0, reconstructed as TagType.BEFORE', async () => {
-    await saveGalleryBlock(makeBlock(100, {
-      tags: { [TagType.ID]: ['id-value-123'] },
-    }));
+    await saveGalleryBlock(
+      makeBlock(100, {
+        tags: { [TagType.ID]: ['id-value-123'] },
+      }),
+    );
     const result = await getGalleryBlock(100);
     expect(result).not.toBeNull();
     expect(result!.tags[TagType.BEFORE]).toEqual(['id-value-123']);

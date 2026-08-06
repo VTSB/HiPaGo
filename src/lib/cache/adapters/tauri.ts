@@ -50,8 +50,8 @@ export async function createTauriImageCacheBackend(): Promise<ImageCacheBackend>
     },
     async download(key, url, headers) {
       await ensureDir();
-      const destPath = await absPath(key);
-      const size = await invoke<number>('bypass_download_to_file', { url, headers, destPath });
+      const cacheKey = safeKey(key);
+      const size = await invoke<number>('bypass_download_to_file', { url, headers, cacheKey });
       return size;
     },
     async fileUrl(key) {

@@ -63,10 +63,11 @@ export function SearchInput({
       />
       {value && !disabled && (
         <button
+          type="button"
           onMouseDown={(e) => {
             e.preventDefault();
-            onClear?.();
           }}
+          onClick={onClear}
           className="absolute right-2 flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 hover:text-zinc-200"
           aria-label="Clear"
         >

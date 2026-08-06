@@ -19,13 +19,27 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useT } from '@/lib/i18n/useT';
 import { isAndroid } from '@/lib/utils/platform';
 import { PublicLibrary } from '@/lib/plugins/publicLibrary';
+import type { PublicBackupRestoreResult } from '@/lib/storage/public-backup';
+
+type BusyAction = 'pick' | 'restore' | 'clear' | null;
+type RestoreNotice = 'done' | 'empty' | 'failed' | null;
+
+function noticeForRestore(result: PublicBackupRestoreResult): Exclude<RestoreNotice, null> {
+  const restored =
+    result.settingsRestored ||
+    result.downloadsImported + result.downloadsDiscovered + result.partialDownloads > 0;
+  if (restored) return 'done';
+  if (!result.treeAvailable || result.failed > 0) return 'failed';
+  return 'empty';
+}
 
 export function DownloadLocationCard() {
   const t = useT();
   const treeName = useSettingsStore((s) => s.downloadTreeName);
   const treeUri = useSettingsStore((s) => s.downloadTreeUri);
   const setDownloadTree = useSettingsStore((s) => s.setDownloadTree);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [restoreNotice, setRestoreNotice] = useState<RestoreNotice>(null);
 
   // Reconcile the settings mirror with the native persisted tree on mount —
   // the grant can be lost (folder deleted, app data cleared) outside the app.
@@ -51,29 +65,66 @@ export function DownloadLocationCard() {
   if (!isAndroid()) return null;
 
   const selected = !!treeUri;
+  const busy = busyAction !== null;
   const folderLabel = treeName || t('settings.downloadLocation.notSelected');
 
   const handlePick = async () => {
-    setBusy(true);
+    setBusyAction('pick');
+    setRestoreNotice(null);
+    let backup: typeof import('@/lib/storage/public-backup') | null = null;
+    let folderSelected = false;
     try {
+      backup = await import('@/lib/storage/public-backup');
+      await backup.preparePublicBackupForTreeSelection();
       const { treeUri: uri, displayName } = await PublicLibrary.openDocumentTree();
+      folderSelected = true;
       setDownloadTree(uri, displayName);
+      // Picking a folder here is an explicit restore action. Apply its settings
+      // before continuous sync can replace them with this installation's state.
+      const result = await backup.activatePublicBackupForSelectedTree({ restoreSettings: true });
+      setRestoreNotice(noticeForRestore(result));
     } catch {
-      // User cancelled the picker — leave the current selection untouched.
+      // A cancelled picker leaves the current selection untouched. Always
+      // release the write freeze in case the picker or restore failed.
+      if (folderSelected) setRestoreNotice('failed');
     } finally {
-      setBusy(false);
+      backup?.resumePublicBackupAfterTreeSelection();
+      setBusyAction(null);
+    }
+  };
+
+  const handleRestore = async () => {
+    setBusyAction('restore');
+    setRestoreNotice(null);
+    try {
+      const { activatePublicBackupForSelectedTree } = await import('@/lib/storage/public-backup');
+      const result = await activatePublicBackupForSelectedTree({ restoreSettings: true });
+      setRestoreNotice(noticeForRestore(result));
+    } catch {
+      setRestoreNotice('failed');
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const handleClear = async () => {
-    setBusy(true);
+    setBusyAction('clear');
+    setRestoreNotice(null);
+    let backup: typeof import('@/lib/storage/public-backup') | null = null;
+    try {
+      backup = await import('@/lib/storage/public-backup');
+      await backup.preparePublicBackupForTreeSelection();
+    } catch {
+      // Clearing the native selection is still useful if a final backup flush fails.
+    }
     try {
       await PublicLibrary.clearTree();
     } catch {
       // Ignore — clear the mirror regardless.
     } finally {
+      backup?.resumePublicBackupAfterTreeSelection();
       setDownloadTree(null, null);
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -85,6 +136,10 @@ export function DownloadLocationCard() {
         </p>
         <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:mb-3 sm:text-xs dark:text-zinc-400">
           {t('settings.downloadLocation.desc')}
+        </p>
+
+        <p className="mb-4 rounded-lg bg-zinc-100 px-3 py-2.5 text-xs leading-relaxed text-zinc-600 dark:bg-zinc-800/70 dark:text-zinc-300">
+          {t('settings.downloadLocation.backupDesc')}
         </p>
 
         {/* Current chosen folder */}
@@ -111,6 +166,19 @@ export function DownloadLocationCard() {
           {selected && (
             <button
               type="button"
+              onClick={handleRestore}
+              disabled={busy}
+              className="min-h-11 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition-colors active:bg-zinc-100 disabled:opacity-40 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+            >
+              {busyAction === 'restore'
+                ? t('settings.downloadLocation.restoring')
+                : t('settings.downloadLocation.restore')}
+            </button>
+          )}
+
+          {selected && (
+            <button
+              type="button"
               onClick={handleClear}
               disabled={busy}
               className="min-h-11 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-600 transition-colors active:bg-zinc-100 disabled:opacity-40 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-400 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
@@ -123,6 +191,23 @@ export function DownloadLocationCard() {
         {!selected && (
           <p className="mt-3 text-xs text-zinc-400 dark:text-zinc-500">
             {t('settings.downloadLocation.hint')}
+          </p>
+        )}
+
+        {restoreNotice && (
+          <p
+            role="status"
+            className={`mt-3 text-xs ${
+              restoreNotice === 'failed'
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-zinc-500 dark:text-zinc-400'
+            }`}
+          >
+            {restoreNotice === 'done'
+              ? t('settings.downloadLocation.restoreDone')
+              : restoreNotice === 'empty'
+                ? t('settings.downloadLocation.restoreEmpty')
+                : t('settings.downloadLocation.restoreFailed')}
           </p>
         )}
       </div>

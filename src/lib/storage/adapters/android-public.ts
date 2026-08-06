@@ -70,12 +70,31 @@ export class AndroidPublicDownloadStore implements DownloadStore {
    *    the caller surfaces and records it.
    */
   async ensureReady(): Promise<void> {
-    const res = await ensureDownloadTree();
-    if (!res.ok) {
-      if (res.reason === 'cancelled') throw new DownloadCancelledError();
-      throw new Error(`download folder unavailable: ${res.message}`);
+    const currentTree = await PublicLibrary.getTree().catch(() => ({ valid: false }));
+    const selectingTree = !currentTree.valid;
+    let backup: typeof import('../public-backup') | null = null;
+
+    try {
+      if (selectingTree) {
+        backup = await import('../public-backup');
+        await backup.preparePublicBackupForTreeSelection();
+      }
+
+      const res = await ensureDownloadTree();
+      if (!res.ok) {
+        if (res.reason === 'cancelled') throw new DownloadCancelledError();
+        throw new Error(`download folder unavailable: ${res.message}`);
+      }
+      useSettingsStore.getState().setDownloadTree(res.treeUri ?? null, res.displayName ?? null);
+
+      if (selectingTree) {
+        backup ??= await import('../public-backup');
+        await backup.activatePublicBackupForSelectedTree();
+      }
+    } catch (error) {
+      if (selectingTree) backup?.resumePublicBackupAfterTreeSelection();
+      throw error;
     }
-    useSettingsStore.getState().setDownloadTree(res.treeUri ?? null, res.displayName ?? null);
   }
 
   // ── Folder resolution ──────────────────────────────────────────────────────
@@ -108,14 +127,10 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     if (preferred) {
       if (!this.isSafeFolderName(preferred)) return null;
       const libDir = await resolveLibraryDir();
-      try {
-        const { exists } = await PublicLibrary.stat({ path: `${libDir}/${preferred}` });
-        if (exists) {
-          this.folderCache.set(galleryId, preferred);
-          return preferred;
-        }
-      } catch {
-        // Exact DB folder is unavailable — do not fall back to a stale prefix hit.
+      const { exists } = await PublicLibrary.stat({ path: `${libDir}/${preferred}` });
+      if (exists) {
+        this.folderCache.set(galleryId, preferred);
+        return preferred;
       }
       this.folderCache.delete(galleryId);
       return null;
@@ -125,18 +140,16 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     if (cached !== undefined) return cached;
 
     const libDir = await resolveLibraryDir();
-    try {
-      const { files } = await PublicLibrary.readdir({ path: libDir });
-      const idStr = String(galleryId);
-      for (const entry of files) {
-        const n = entry.name;
-        if (n === idStr || n.startsWith(idStr + ' ')) {
-          this.folderCache.set(galleryId, n);
-          return n;
-        }
+    const { exists } = await PublicLibrary.stat({ path: libDir });
+    if (!exists) return null;
+    const { files } = await PublicLibrary.readdir({ path: libDir });
+    const idStr = String(galleryId);
+    for (const entry of files) {
+      const n = entry.name;
+      if (n === idStr || n.startsWith(idStr + ' ')) {
+        this.folderCache.set(galleryId, n);
+        return n;
       }
-    } catch {
-      // Library dir doesn't exist yet or readdir failed — not found.
     }
     return null;
   }
@@ -154,9 +167,15 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── putImage ───────────────────────────────────────────────────────────────
 
-  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
+  async putImage(
+    galleryId: number,
+    index: number,
+    bytes: Uint8Array,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<void> {
     const libDir = await ensureLibraryDir();
-    let folder = await this.resolveFolder(galleryId);
+    let folder = await this.resolveFolder(galleryId, options);
     if (!folder) {
       // No title available here — create a bare numeric folder as last resort.
       folder = String(galleryId);
@@ -174,9 +193,10 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     index: number,
     srcPath: string,
     ext: string,
+    options?: DownloadStoreLookupOptions,
   ): Promise<number> {
     const libDir = await ensureLibraryDir();
-    let folder = await this.resolveFolder(galleryId);
+    let folder = await this.resolveFolder(galleryId, options);
     if (!folder) {
       folder = String(galleryId);
       await PublicLibrary.mkdir({ path: `${libDir}/${folder}` });
@@ -200,14 +220,10 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     if (!folder) return null;
     const libDir = await resolveLibraryDir();
     const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
-    try {
-      const { exists } = await PublicLibrary.exists({ path: filePath });
-      if (!exists) return null;
-      const { dataBase64 } = await PublicLibrary.readFile({ path: filePath });
-      return this.fromBase64(dataBase64);
-    } catch {
-      return null;
-    }
+    const { exists } = await PublicLibrary.exists({ path: filePath });
+    if (!exists) return null;
+    const { dataBase64 } = await PublicLibrary.readFile({ path: filePath });
+    return this.fromBase64(dataBase64);
   }
 
   // ── imageExists ──────────────────────────────────────────────────────────────
@@ -222,14 +238,43 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     if (!folder) return false;
     const libDir = await resolveLibraryDir();
     const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
-    try {
-      // stat reports existence + size in one call; a present file with size 0
-      // is a torn write and is reported as missing.
-      const { exists, size } = await PublicLibrary.stat({ path: filePath });
-      return exists && (size ?? 0) > 0;
-    } catch {
-      return false;
-    }
+    // stat reports confirmed absence as `exists: false`. Transport/provider
+    // failures reject and must stay distinguishable from a missing page;
+    // callers use that distinction to avoid destructive repair decisions.
+    const { exists, size } = await PublicLibrary.stat({ path: filePath });
+    return exists && (size ?? 0) > 0;
+  }
+
+  async allImagesExist(
+    galleryId: number,
+    extensions: readonly string[],
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean> {
+    if (extensions.length === 0) return false;
+    const folder = await this.resolveFolder(galleryId, options);
+    if (!folder) return false;
+    const libDir = await resolveLibraryDir();
+    // As with imageExists(), a rejected directory read is an indeterminate
+    // storage failure, not proof that every expected page is absent.
+    const { files } = await PublicLibrary.readdir({ path: `${libDir}/${folder}` });
+    const nonEmptyFiles = new Set(
+      files.filter((entry) => entry.size > 0).map((entry) => entry.name),
+    );
+    return extensions.every((ext, index) => nonEmptyFiles.has(imageFileName(index, ext)));
+  }
+
+  async imageSize(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<number | null> {
+    const folder = await this.resolveFolder(galleryId, options);
+    if (!folder) return null;
+    const libDir = await resolveLibraryDir();
+    const filePath = `${libDir}/${folder}/${imageFileName(index, ext)}`;
+    const { exists, size } = await PublicLibrary.stat({ path: filePath });
+    return exists && (size ?? 0) > 0 ? (size ?? 0) : null;
   }
 
   // ── coverUrl ──────────────────────────────────────────────────────────────
@@ -278,6 +323,26 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     }
   }
 
+  async listGalleryFolders(): Promise<{ galleryId: number; folderName: string; title: string }[]> {
+    const libDir = await resolveLibraryDir();
+    const { exists } = await PublicLibrary.stat({ path: libDir });
+    if (!exists) return [];
+    const { files } = await PublicLibrary.readdir({ path: libDir });
+    const folders: { galleryId: number; folderName: string; title: string }[] = [];
+    for (const entry of files) {
+      const name = entry.name;
+      if (name === '.nomedia') continue;
+      const match = /^(\d+)(?:\s+(.*))?$/.exec(name);
+      if (!match) continue;
+      const galleryId = Number(match[1]);
+      if (!Number.isSafeInteger(galleryId) || galleryId <= 0) continue;
+      const title = match[2]?.trim() || `Gallery ${galleryId}`;
+      folders.push({ galleryId, folderName: name, title });
+      this.folderCache.set(galleryId, name);
+    }
+    return folders;
+  }
+
   // ── gallerySize ────────────────────────────────────────────────────────────
 
   async gallerySize(galleryId: number, options?: DownloadStoreLookupOptions): Promise<number> {
@@ -307,14 +372,57 @@ export class AndroidPublicDownloadStore implements DownloadStore {
 
   // ── deleteGallery ──────────────────────────────────────────────────────────
 
-  async deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void> {
-    const folder = await this.resolveFolder(galleryId, options);
-    if (!folder) return; // Already gone — treat as success.
+  /**
+   * Resolve every app-owned folder for destructive operations without collapsing native I/O
+   * failures into "not found". Read paths are intentionally best-effort, but a
+   * delete caller must distinguish absent folders from a revoked permission
+   * or provider failure so it does not drop the DB row while files remain.
+   */
+  private async resolveFoldersForDelete(
+    galleryId: number,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<string[]> {
     const libDir = await resolveLibraryDir();
-    try {
-      await PublicLibrary.deleteDir({ path: `${libDir}/${folder}` });
-    } catch {
-      // Already gone — treat as success.
+    const preferred = options?.folderName?.trim();
+    if (preferred) {
+      if (!this.isSafeFolderName(preferred)) {
+        throw new Error(`Unsafe download folder name: ${preferred}`);
+      }
+    }
+
+    // A missing library root means the gallery is already absent. Stat/readdir
+    // rejection is a real storage failure and deliberately propagates.
+    const { exists: libraryExists } = await PublicLibrary.stat({ path: libDir });
+    if (!libraryExists) return [];
+
+    const { files } = await PublicLibrary.readdir({ path: libDir });
+    const idStr = String(galleryId);
+    const matches = files
+      .map((entry) => entry.name)
+      .filter((name) => name === idStr || name.startsWith(idStr + ' '));
+    if (preferred && matches.includes(preferred)) {
+      // Delete stale aliases first and the DB-referenced preferred folder last,
+      // so a mid-sweep failure on an alias leaves the preferred folder (and the
+      // still-readable gallery) intact instead of orphaning the DB row.
+      return [...matches.filter((name) => name !== preferred), preferred];
+    }
+    return matches;
+  }
+
+  async deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void> {
+    const folders = await this.resolveFoldersForDelete(galleryId, options);
+    if (folders.length === 0) return;
+    const libDir = await resolveLibraryDir();
+    for (const folder of folders) {
+      const path = `${libDir}/${folder}`;
+      await PublicLibrary.deleteDir({ path });
+
+      // Verify the provider actually removed the tree. Older native builds ignored
+      // DocumentFile.delete() returning false, and providers can fail silently.
+      const { exists } = await PublicLibrary.stat({ path });
+      if (exists) {
+        throw new Error(`Failed to delete download folder: ${folder}`);
+      }
     }
     this.folderCache.delete(galleryId);
   }

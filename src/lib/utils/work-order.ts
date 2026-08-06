@@ -42,10 +42,34 @@ export interface WorkOrderPage extends WorkOrderItem {
  */
 export interface WorkOrder {
   galleryId: number;
+  /** Opaque identity for this concrete attempt; changes on every rebuild/retry. */
+  runId: string;
   title: string;
   folderName: string;
+  /** UI locale used by native background surfaces such as Android notifications. */
+  locale?: 'en' | 'ko';
   queuePosition?: number | null;
   pages: WorkOrderPage[];
+}
+
+/**
+ * Generate an opaque native-attempt id without embedding gallery/user data.
+ * WebView/Node crypto is required because run ids are a correctness boundary,
+ * not a best-effort UI identifier.
+ */
+export function createDownloadRunId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+    throw new Error('Secure random generation is unavailable');
+  }
+  const bytes = new Uint8Array(16);
+  cryptoApi.getRandomValues(bytes);
+  // UUID-v4 shape is readable in diagnostics and accepted by the native
+  // alphanumeric/hyphen validator; uniqueness, not UUID semantics, is required.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /**
@@ -81,8 +105,13 @@ export function buildWorkOrder(
   title: string,
   files: GalleryFile[],
   ggConfig: GgConfig,
+  runId = createDownloadRunId(),
+  existingFolderName?: string | null,
 ): WorkOrder {
-  const folderName = galleryFolderName(galleryId, title);
+  // Keep retries in the exact physical folder recorded by the DB. A gallery's
+  // title can change between attempts; deriving a new name would split one
+  // logical download across two directories and hide reusable partial pages.
+  const folderName = existingFolderName || galleryFolderName(galleryId, title);
   const headers = getNativeHeaders();
   const items = resolveWorkOrder(files, ggConfig);
   const pages: WorkOrderPage[] = items.map((item) => ({
@@ -91,7 +120,7 @@ export function buildWorkOrder(
     relPath: `${LIBRARY_ROOT}/${folderName}/${String(item.index + 1).padStart(4, '0')}.${item.ext}`,
     headers,
   }));
-  return { galleryId, title, folderName, pages };
+  return { galleryId, runId, title, folderName, pages };
 }
 
 /**
@@ -121,6 +150,7 @@ export function buildIosWorkOrder(
   title: string,
   files: GalleryFile[],
   ggConfig: GgConfig,
+  runId = createDownloadRunId(),
 ): WorkOrder {
   const headers = getNativeHeaders();
   const items = resolveWorkOrder(files, ggConfig);
@@ -132,5 +162,5 @@ export function buildIosWorkOrder(
   }));
   // folderName is the numeric-only iOS gallery folder (galleryFolderName in
   // download-store.ts = String(galleryId)).
-  return { galleryId, title, folderName: String(galleryId), pages };
+  return { galleryId, runId, title, folderName: String(galleryId), pages };
 }

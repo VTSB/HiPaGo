@@ -24,6 +24,7 @@ import { AbortableImage } from '@/shared/components/AbortableImage';
 import { useT } from '@/lib/i18n/useT';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import { useDownloadProgressStore, type QueueItem } from '@/lib/store/download-progress';
+import { downloadProgressPercent } from '@/lib/utils/download-progress-percent';
 
 // ---------------------------------------------------------------------------
 // Shared row chrome
@@ -121,7 +122,8 @@ function ActiveRow({ item }: { item: QueueItem }) {
 
   const current = item.progress?.current ?? 0;
   const total = item.progress?.total ?? 0;
-  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  const hasProgressTotal = total > 0;
+  const pct = downloadProgressPercent({ current, total });
 
   return (
     <div className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/60">
@@ -141,9 +143,40 @@ function ActiveRow({ item }: { item: QueueItem }) {
             />
           </div>
           <span className="shrink-0 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-            {current}/{total} · {pct}%
+            {hasProgressTotal ? `${current}/${total} · ${pct}%` : t('library.queue.downloading')}
           </span>
         </div>
+      </div>
+      <div className="flex shrink-0 items-center">
+        <IconButton label={t('library.queue.pause')} onClick={() => void pause(item.id)}>
+          {PauseIcon}
+        </IconButton>
+        <IconButton label={t('library.queue.cancel')} onClick={() => cancel(item.id)} destructive>
+          {CancelIcon}
+        </IconButton>
+      </div>
+    </div>
+  );
+}
+
+/** Native Android accepted the work order, but its sequential worker has not
+ * started transferring this gallery. It is not draggable because native owns
+ * the persisted order at this point. */
+function NativeWaitingRow({ item }: { item: QueueItem }) {
+  const t = useT();
+  const pause = useDownloadProgressStore((s) => s.pause);
+  const cancel = useDownloadProgressStore((s) => s.cancel);
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-white px-3 py-2.5 dark:bg-zinc-900">
+      <QueueThumb item={item} />
+      <div className="min-w-0 flex-1">
+        <h4 className="line-clamp-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          {item.title || `#${item.id}`}
+        </h4>
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          {t('library.queue.queued')}
+        </span>
       </div>
       <div className="flex shrink-0 items-center">
         <IconButton label={t('library.queue.pause')} onClick={() => void pause(item.id)}>
@@ -242,7 +275,11 @@ export function DownloadQueueView() {
   }, [refreshQueue]);
 
   const activeItems = useMemo(() => queue.filter((q) => q.status === 'downloading'), [queue]);
-  const pending = useMemo(() => queue.filter((q) => q.status !== 'downloading'), [queue]);
+  const nativeWaitingItems = useMemo(() => queue.filter((q) => q.status === 'waiting'), [queue]);
+  const pending = useMemo(
+    () => queue.filter((q) => q.status === 'queued' || q.status === 'paused'),
+    [queue],
+  );
   const pendingIds = useMemo(() => pending.map((p) => p.id), [pending]);
 
   const sensors = useSensors(
@@ -296,6 +333,10 @@ export function DownloadQueueView() {
       <div className="flex flex-col gap-1.5">
         {activeItems.map((item) => (
           <ActiveRow key={item.id} item={item} />
+        ))}
+
+        {nativeWaitingItems.map((item) => (
+          <NativeWaitingRow key={item.id} item={item} />
         ))}
 
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

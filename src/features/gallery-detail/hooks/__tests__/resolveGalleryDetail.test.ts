@@ -203,6 +203,7 @@ describe('resolveGalleryDetail', () => {
       totalBytes: 0,
       downloadedAt: '2024-05-05T00:00:00.000Z',
       status: 'complete',
+      folderName: '12345 Downloaded Title',
     } as unknown as Awaited<ReturnType<typeof getDownload>>);
     vi.mocked(getDownloadedGalleryPages).mockResolvedValue([
       { index: 2, ext: 'webp' },
@@ -223,7 +224,12 @@ describe('resolveGalleryDetail', () => {
     expect(result.files[1].hasavif).toBe(1);
     expect(result.files[0].haswebp).toBe(1);
     expect(result.images).toBe(synthImages);
-    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3);
+    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3, {
+      folderName: '12345 Downloaded Title',
+    });
+    expect(getDownloadedGalleryPages).toHaveBeenCalledWith(12345, {
+      folderName: '12345 Downloaded Title',
+    });
     // It must NOT pollute the gallery cache with the synthetic block.
     expect(saveGalleryBlock).not.toHaveBeenCalled();
   });
@@ -255,7 +261,9 @@ describe('resolveGalleryDetail', () => {
     vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
 
     await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
-    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3);
+    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3, {
+      folderName: null,
+    });
     expect(getDownloadedGalleryPages).not.toHaveBeenCalled();
   });
 

@@ -1,9 +1,10 @@
 /**
- * Capacitor plugin wrapper for Android FLAG_SECURE.
+ * Capacitor plugin wrapper for Android recent-apps preview protection.
  *
- * When enabled, Android hides the app from screenshots, screen recording, and
- * the recent-apps thumbnail. It is intentionally Android-only; other platforms
- * no-op so settings hydration never fails on web/iOS.
+ * When enabled, Android hides app content from the recent-apps thumbnail while
+ * allowing normal foreground screenshots where the platform supports it. It is
+ * intentionally Android-only; other platforms no-op so settings hydration never
+ * fails on web/iOS.
  */
 import { Capacitor, registerPlugin } from '@capacitor/core';
 

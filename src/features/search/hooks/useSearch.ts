@@ -5,6 +5,7 @@ import { useSearchStore } from '@/features/search/store/search.store';
 import { getSuggestionsForQuery, parseQuery } from '@/lib/api/search';
 import { searchLocalTags } from '@/lib/db/search-local';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { useSettingsStore } from '@/lib/store/settings';
 import { isHangul } from '@/lib/utils/tag-query';
 import type { TagType } from '@/lib/utils/types';
 
@@ -19,10 +20,15 @@ export function useSearch() {
   const clearSuggestions = useSearchStore((s) => s.clearSuggestions);
   const setIsLoadingSuggestions = useSearchStore((s) => s.setIsLoadingSuggestions);
   const dbReady = useDbStatusStore((s) => s.dbReady);
+  const favoriteTags = useSettingsStore((s) => s.favoriteTags);
+  const localFavoriteRevision = dbReady ? favoriteTags.join('\u0000') : '';
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchIdRef = useRef(0);
 
   useEffect(() => {
+    // Only local autocomplete needs a refetch when favorites change: the DB
+    // query can pull a newly favored item in from beyond its result limit.
+    void localFavoriteRevision;
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     const activeTerm = autocompleteQuery?.trim() ?? '';
@@ -40,9 +46,11 @@ export function useSearch() {
         const searchTerm = tagType ? tag : activeTerm;
         const typeFilter = tagType ? (tagType as TagType) : undefined;
         const currentId = ++searchIdRef.current;
-        searchLocalTags(searchTerm, typeFilter).then((results) => {
-          if (currentId === searchIdRef.current) setSuggestions(results);
-        }).catch(() => {});
+        searchLocalTags(searchTerm, typeFilter)
+          .then((results) => {
+            if (currentId === searchIdRef.current) setSuggestions(results);
+          })
+          .catch(() => {});
       } else {
         clearSuggestions();
       }
@@ -92,7 +100,14 @@ export function useSearch() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [autocompleteQuery, dbReady, clearSuggestions, setIsLoadingSuggestions, setSuggestions]);
+  }, [
+    autocompleteQuery,
+    dbReady,
+    localFavoriteRevision,
+    clearSuggestions,
+    setIsLoadingSuggestions,
+    setSuggestions,
+  ]);
 
   const search = useCallback(
     (searchQuery: string) => {
@@ -104,5 +119,16 @@ export function useSearch() {
     [setQuery, setAutocompleteQuery, addRecentSearch, setIsSearching],
   );
 
-  return { query, autocompleteQuery, setQuery, setAutocompleteQuery, addRecentSearch, setIsSearching, setSuggestions, clearSuggestions, setIsLoadingSuggestions, search };
+  return {
+    query,
+    autocompleteQuery,
+    setQuery,
+    setAutocompleteQuery,
+    addRecentSearch,
+    setIsSearching,
+    setSuggestions,
+    clearSuggestions,
+    setIsLoadingSuggestions,
+    search,
+  };
 }

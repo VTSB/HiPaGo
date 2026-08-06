@@ -42,11 +42,31 @@ describe('AndroidBackButtonProvider', () => {
     expect(backSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the root page for a direct deep route with no app history', () => {
+  it('falls back to the root page for a non-reader deep route with no app history', () => {
     window.history.replaceState(null, '', '/gallery?id=123');
     render(<AndroidBackButtonProvider>content</AndroidBackButtonProvider>);
 
     expect(window.__hipagoHandleAndroidBack?.()).toBe(true);
     expect(window.location.pathname).toBe('/');
+  });
+
+  it('replaces a direct dynamic reader route with its gallery detail', () => {
+    window.history.replaceState(null, '', '/gallery/123/reader');
+    const popStateSpy = vi.fn();
+    window.addEventListener('popstate', popStateSpy, { once: true });
+    render(<AndroidBackButtonProvider>content</AndroidBackButtonProvider>);
+
+    expect(window.__hipagoHandleAndroidBack?.()).toBe(true);
+    expect(window.location.pathname).toBe('/gallery/123');
+    expect(popStateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a direct static reader route with its query gallery detail', () => {
+    window.history.replaceState(null, '', '/reader?id=456');
+    render(<AndroidBackButtonProvider>content</AndroidBackButtonProvider>);
+
+    expect(window.__hipagoHandleAndroidBack?.()).toBe(true);
+    expect(window.location.pathname).toBe('/gallery');
+    expect(window.location.search).toBe('?id=456');
   });
 });

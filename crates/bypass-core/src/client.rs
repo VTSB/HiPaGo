@@ -30,6 +30,22 @@ impl Client {
             .impersonate(Impersonate::Chrome131)
             .enable_ech_grease(true)
             .proxy(proxy)
+            .redirect(rquest::redirect::Policy::custom(|attempt| {
+                let same_https_origin = attempt.url().scheme() == "https"
+                    && attempt.previous().last().is_some_and(|previous| {
+                        previous.scheme() == "https"
+                            && previous.host_str() == attempt.url().host_str()
+                            && previous.port_or_known_default()
+                                == attempt.url().port_or_known_default()
+                    });
+                if attempt.previous().len() >= 5 {
+                    attempt.error("too many redirects")
+                } else if same_https_origin {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .build()

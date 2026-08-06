@@ -9,7 +9,11 @@ export function ReaderFromQuery() {
   const page = Number.parseInt(searchParams.get('page') ?? '', 10);
 
   if (!Number.isFinite(id)) {
-    return <div className="flex min-h-screen items-center justify-center bg-black text-white">Invalid gallery ID</div>;
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-black text-white">
+        Invalid gallery ID
+      </div>
+    );
   }
 
   return <ReaderView galleryId={id} initialPage={Number.isFinite(page) ? page : undefined} />;

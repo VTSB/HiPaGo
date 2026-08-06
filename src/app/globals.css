@@ -35,7 +35,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
-  --font-mono: var(--font-geist-mono);
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 .dark {
@@ -45,6 +45,28 @@
   --control-hover: #3f3f46;      /* zinc-700 */
   --control-fg: #f4f4f5;         /* zinc-100 */
   --control-placeholder: #71717a; /* zinc-500 */
+}
+
+/* Reader chrome follows scroll position imperatively. Keyboard focus must
+   always bring the toolbar back on-screen so controls never become a focus trap. */
+.reader-toolbar:focus-within {
+  transform: translateY(0) !important;
+  opacity: 1 !important;
+}
+
+.reader-back-button:focus-visible {
+  transform: translateY(0) !important;
+  opacity: 1 !important;
+}
+
+.reader-fullscreen-button {
+  display: none;
+}
+
+@media (min-width: 640px) and (pointer: fine) {
+  .reader-fullscreen-button {
+    display: flex;
+  }
 }
 
 html {

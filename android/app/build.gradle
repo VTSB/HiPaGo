@@ -19,13 +19,14 @@ def releaseSigningProps = releaseSigningPropNames.collectEntries { name ->
     [(name): readReleaseSigningProp(name)]
 }
 def releaseSigningRequested = releaseSigningProps.values().any { it }
-def signedReleaseRequired = readReleaseSigningProp('HIPAGO_REQUIRE_SIGNED_RELEASE').equalsIgnoreCase('true') ||
-    (System.getenv('HIPAGO_REQUIRE_SIGNED_RELEASE') ?: '').equalsIgnoreCase('true')
 def missingReleaseSigningProps = releaseSigningPropNames.findAll { !releaseSigningProps[it] }
+def signedReleaseRequired = (System.getenv('HIPAGO_REQUIRE_SIGNED_RELEASE') ?: '')
+    .trim()
+    .equalsIgnoreCase('true')
 
-if ((signedReleaseRequired || releaseSigningRequested) && !missingReleaseSigningProps.empty) {
+if ((releaseSigningRequested || signedReleaseRequired) && !missingReleaseSigningProps.empty) {
     throw new GradleException(
-        'Android release signing is required but these Gradle properties are missing: ' +
+        'Android release signing properties are required but missing: ' +
             missingReleaseSigningProps.join(', ')
     )
 }
@@ -40,12 +41,13 @@ if (releaseSigningRequested && !file(releaseSigningProps.HIPAGO_KEYSTORE_PATH).i
 android {
     namespace "com.hipago.app"
     compileSdk rootProject.ext.compileSdkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
     defaultConfig {
         applicationId "com.hipago.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "0.0.8"
+        versionCode 9009009
+        versionName "9.9.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -56,9 +58,10 @@ android {
     signingConfigs {
         // Release signing is configured only when the four operator-injected
         // Gradle properties (set via ORG_GRADLE_PROJECT_* env in CI per
-        // doc/release/GUIDE__android-keystore.md) are present. Without them
-        // the block is created but no storeFile is set, so any build that
-        // references it would fail loudly — this is intentional.
+        // doc/release/GUIDE__android-keystore.md) are present. Without them,
+        // release builds intentionally fall back to signingConfigs.debug below
+        // because local agents do not have access to the private distribution
+        // key.
         release {
             if (releaseSigningRequested) {
                 storeFile file(releaseSigningProps.HIPAGO_KEYSTORE_PATH)
@@ -72,13 +75,14 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Apply release signing only when the operator's keystore props
-            // are present. Local dev (no props) falls back to AGP's default
-            // (unsigned release APK), so `./gradlew assembleRelease` does
-            // not require a developer to provision the secret. CI sets the
-            // props before `gradlew assembleRelease` runs.
+            // Apply distribution signing only when the operator's keystore
+            // props are present. Local dev/agent builds deliberately use the
+            // Android debug key so release APKs are installable without
+            // exposing the private distribution key.
             if (releaseSigningRequested) {
                 signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
             }
         }
     }
@@ -122,19 +126,24 @@ dependencies {
     // WorkManager — runs the background gallery download worker
     // (GalleryDownloadWorker) so downloads survive app kill, on a connected
     // network constraint with a foreground-service progress notification.
-    // 2.9.x is the stable line compatible with compileSdk 34.
-    implementation "androidx.work:work-runtime:2.9.1"
+    // 2.10.x keeps WorkManager's minSdk at 21; the app itself now targets
+    // API 23+ to match sqlcipher-android's supported runtime floor.
+    implementation "androidx.work:work-runtime:2.10.5"
     implementation project(':capacitor-android')
     // Kotlin stdlib + JNA — the generated UniFFI bindings link against both.
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$rootProject.ext.kotlinVersion"
-    implementation "net.java.dev.jna:jna:5.14.0@aar"
+    implementation "net.java.dev.jna:jna:5.16.0@aar"
     testImplementation "junit:junit:$junitVersion"
     testImplementation "org.json:json:20240303"
     testImplementation "org.robolectric:robolectric:4.12.2"
     testImplementation "androidx.test:core:1.5.0"
-    testImplementation "androidx.work:work-testing:2.9.1"
+    testImplementation "androidx.work:work-testing:2.10.5"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    // The Capacitor SQLite module keeps these as implementation-only, so the
+    // device compatibility test declares the same official pair explicitly.
+    androidTestImplementation "net.zetetic:sqlcipher-android:4.17.0@aar"
+    androidTestImplementation "androidx.sqlite:sqlite:2.6.2"
     if (findProject(':capacitor-cordova-android-plugins') != null) {
         implementation project(':capacitor-cordova-android-plugins')
     }

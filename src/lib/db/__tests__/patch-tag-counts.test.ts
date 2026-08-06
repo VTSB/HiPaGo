@@ -3,6 +3,7 @@ import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
 import { findOrCreateTag, getTag, updateTagCount } from '../tag';
 import { patchNewTagCounts } from '../patch-tag-counts';
 import { TagType } from '@/lib/utils/types';
+import { useDbStatusStore } from '@/lib/store/db-status';
 
 // Mock apiClient.fetchUrl used internally by patchNewTagCounts
 vi.mock('@/lib/api/client', () => ({
@@ -36,6 +37,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearAllTables();
+  useDbStatusStore.getState().setIsSyncing(false);
   vi.mocked(apiClient.fetchUrl).mockReset();
 });
 
@@ -43,6 +45,16 @@ describe('patchNewTagCounts', () => {
   it('returns early for empty input without making API calls', async () => {
     await patchNewTagCounts([]);
     expect(vi.mocked(apiClient.fetchUrl)).not.toHaveBeenCalled();
+  });
+
+  it('skips gallery count patching while the full tag sync is active', async () => {
+    const tagId = await findOrCreateTag(TagType.ARTIST, 'syncing-artist');
+    useDbStatusStore.getState().setIsSyncing(true);
+
+    await patchNewTagCounts([{ type: TagType.ARTIST, name: 'syncing-artist' }]);
+
+    expect(vi.mocked(apiClient.fetchUrl)).not.toHaveBeenCalled();
+    expect((await getTag(tagId))!.count).toBe(0);
   });
 
   it('skips tags that already have count > 0', async () => {
@@ -151,7 +163,7 @@ describe('patchNewTagCounts', () => {
 
     // Should not throw
     await expect(
-      patchNewTagCounts([{ type: TagType.ARTIST, name: 'error-artist' }])
+      patchNewTagCounts([{ type: TagType.ARTIST, name: 'error-artist' }]),
     ).resolves.toBeUndefined();
 
     const tag = await getTag(tagId);

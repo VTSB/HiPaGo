@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,10 @@ vi.mock('@/features/gallery-detail/hooks/useDownloadGallery', () => ({
   useDownloadGallery: vi.fn(() => ({ progress: null, start: vi.fn(), cancel: vi.fn() })),
 }));
 
+vi.mock('@/features/gallery-detail/hooks/useDownloadedFilesPresent', () => ({
+  useDownloadedFilesPresent: vi.fn(() => ({ filesMissing: false, checking: false })),
+}));
+
 vi.mock('@/lib/i18n/useT', () => ({
   useT: () => (key: string) => key,
 }));
@@ -106,7 +110,8 @@ vi.mock('@/shared/components/AbortableImage', () => ({
 }));
 
 vi.mock('@/shared/components/TagChip', () => ({
-  TagChip: () => null,
+  TagChip: ({ tag, type }: { tag: string; type: string }) =>
+    React.createElement('span', { 'data-tag-chip': `${type}:${tag}` }, tag),
 }));
 
 vi.mock('@/features/gallery-list/components/GalleryCard', () => ({
@@ -120,6 +125,8 @@ import { useGalleryDetail } from '../hooks/useGalleryDetail';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile, GalleryImages } from '@/lib/utils/types';
 import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
+import { useSettingsStore } from '@/lib/store/settings';
+import { toFavoriteTagKey } from '@/lib/utils/tag-favorites';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -141,13 +148,14 @@ const emptyImages: GalleryImages = {
   images: [],
 };
 
-function mockDetail(files: GalleryFile[] = []) {
+function mockDetail(files: GalleryFile[] = [], block: GalleryBlock = mockBlock) {
   vi.mocked(useGalleryDetail).mockReturnValue({
-    block: mockBlock,
-    images: emptyImages,
+    block,
+    images: { ...emptyImages, id: block.id },
     files,
     isLoading: false,
     error: null,
+    retry: vi.fn(),
   });
 }
 
@@ -156,25 +164,72 @@ beforeEach(() => {
   mockUnobserve.mockClear();
   mockDisconnect.mockClear();
   mockTakeRecords.mockClear();
+  useSettingsStore.setState({ locale: 'en', favoriteTags: [] });
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
 });
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-describe('GalleryDetail thumbnail virtualization', () => {
+describe('GalleryDetail', () => {
+  it('prioritizes favorites within each metadata type and toggles them as a sibling control', () => {
+    const favoriteKey = toFavoriteTagKey(TagType.ARTIST, 'favorite artist');
+    useSettingsStore.setState({ favoriteTags: [favoriteKey] });
+    mockDetail([], {
+      ...mockBlock,
+      tags: {
+        [TagType.ARTIST]: ['popular artist', 'favorite artist', 'second artist'],
+        [TagType.TAG]: ['other tag'],
+      },
+    });
+
+    const { container } = render(<GalleryDetail id={123} />);
+    const artistChips = Array.from(container.querySelectorAll('[data-tag-chip^="artist:"]')).map(
+      (chip) => chip.getAttribute('data-tag-chip'),
+    );
+
+    expect(artistChips).toEqual([
+      'artist:favorite artist',
+      'artist:popular artist',
+      'artist:second artist',
+    ]);
+
+    const favoriteButton = container.querySelector<HTMLButtonElement>(
+      `[data-tag-favorite-key="${favoriteKey}"]`,
+    );
+    expect(favoriteButton).not.toBeNull();
+    expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
+    expect(favoriteButton?.closest('a')).toBeNull();
+
+    act(() => {
+      fireEvent.click(favoriteButton!);
+    });
+    expect(useSettingsStore.getState().favoriteTags).toEqual([]);
+  });
+
   it('localizes detailed media type and falls back to raw language when no translation exists', () => {
     mockDetail();
 
-    render(<GalleryDetail id={123} />);
+    const { container } = render(<GalleryDetail id={123} />);
 
     expect(document.body.textContent).toContain('만화');
     expect(document.body.textContent).toContain('italian');
     expect(document.body.textContent).not.toContain('manga · italian');
+    expect(
+      container.querySelector(
+        `[data-tag-favorite-key="${toFavoriteTagKey(TagType.TYPE, 'manga')}"]`,
+      ),
+    ).toBeNull();
+    expect(
+      container.querySelector(
+        `[data-tag-favorite-key="${toFavoriteTagKey(TagType.LANGUAGE, 'italian')}"]`,
+      ),
+    ).toBeNull();
   });
 
   it('renders at most 20 thumbnails initially for a large gallery', () => {

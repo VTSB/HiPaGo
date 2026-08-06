@@ -1,4 +1,4 @@
-import { setDb, isDbInitialized, setEnsureInit } from './adapter';
+import { setDb, isDbInitialized, setEnsureInit, setResetInit } from './adapter';
 import type { DbAdapter } from './adapter';
 import { SCHEMA_SQL } from './schema-sql';
 import { runMigrations } from './migrations';
@@ -20,48 +20,48 @@ function setStage(stage: string | null): void {
 // === DB Entity Interfaces ===
 
 export interface DBGallery {
-  id: number;           // PK (gallery ID from API)
-  type: number;         // GalleryBlockType as byte
+  id: number; // PK (gallery ID from API)
+  type: number; // GalleryBlockType as byte
   title: string;
-  date: string;         // ISO string
+  date: string; // ISO string
   thumbnail: string;
-  url: string;          // gallery URL
+  url: string; // gallery URL
   language: string;
   mediaType: string;
-  updatedAt: string;    // cache timestamp
+  updatedAt: string; // cache timestamp
 }
 
 export interface DBGalleryRelate {
-  idx?: number;         // PK auto-increment
-  id: number;           // FK -> gallery.id
-  related: number;      // related gallery ID
+  idx?: number; // PK auto-increment
+  id: number; // FK -> gallery.id
+  related: number; // related gallery ID
 }
 
 export interface DBTag {
-  tagId?: number;       // PK auto-increment
-  type: number;         // TagType byte
+  tagId?: number; // PK auto-increment
+  type: number; // TagType byte
   name: string;
-  count: number;        // usage count
+  count: number; // usage count
 }
 
 export interface DBTagI18n {
-  tagId: number;        // PK, FK -> tag.tagId
-  local: string;        // localized name
+  tagId: number; // PK, FK -> tag.tagId
+  local: string; // localized name
 }
 
 export interface DBTagTransform {
-  original: string;     // PK
+  original: string; // PK
   transformed: string;
 }
 
 export interface DBGalleryTag {
-  id: number;           // FK -> gallery.id
-  tagId: number;        // FK -> tag.tagId
+  id: number; // FK -> gallery.id
+  tagId: number; // FK -> tag.tagId
 }
 
 export interface DBSyncStatus {
-  tag: string;          // PK
-  data: string;         // JSON payload
+  tag: string; // PK
+  data: string; // JSON payload
 }
 
 export interface DBFavorite {
@@ -95,15 +95,17 @@ export interface DBGalleryImage {
 export type DownloadStatus = 'downloading' | 'complete' | 'failed' | 'queued' | 'paused';
 
 export interface DBDownload {
-  galleryId: number;    // PK
+  galleryId: number; // PK
   title: string;
   thumbnail: string;
-  tags: string;         // JSON-serialized tag map
+  tags: string; // JSON-serialized tag map
   pageCount: number;
   totalBytes: number;
   downloadedAt: string; // ISO string
   status: DownloadStatus;
   folderName?: string | null;
+  /** ISO watermark proving the row's files live in Android public storage.
+   *  NULL identifies legacy Directory.Data rows until migration commits. */
   migratedAt?: string | null;
   /** Last failure reason (real error message), set when status is 'failed'. NULL otherwise. */
   lastError?: string | null;
@@ -116,6 +118,9 @@ export interface DBDownload {
   /** ISO timestamp when the next automatic retry of a 'failed' row is due.
    *  NULL when no auto-retry is scheduled (never failed, cap exhausted, or queued). */
   nextRetryAt?: string | null;
+  /** Opaque identity of the concrete native DownloadWorker attempt that owns
+   *  this row. NULL when no native attempt owns the current lifecycle state. */
+  nativeRunId?: string | null;
 }
 
 // === Database Initialization ===
@@ -126,25 +131,52 @@ let _initPromise: Promise<void> | null = null;
  * Initialize the database by detecting the platform and creating the appropriate adapter.
  * Safe to call multiple times — subsequent calls are no-ops.
  */
-export async function initializeDatabase(): Promise<void> {
-  if (isDbInitialized()) return;
+export function initializeDatabase(): Promise<void> {
+  if (isDbInitialized()) return Promise.resolve();
   if (_initPromise) return _initPromise;
 
-  _initPromise = (async () => {
-    const adapter = await detectPlatformAdapter();
-    setStage('creating tables');
-    await adapter.exec(SCHEMA_SQL);
-    setStage('running migrations');
-    await runMigrations(adapter);
-    setDb(adapter);
-    setStage(null);
+  const initPromise = (async () => {
+    let adapter: DbAdapter | null = null;
+    try {
+      adapter = await detectPlatformAdapter();
+      setStage('creating tables');
+      await adapter.exec(SCHEMA_SQL);
+      setStage('running migrations');
+      await runMigrations(adapter);
+      setDb(adapter);
+      adapter = null; // Ownership moved to the global singleton.
+      setStage(null);
+    } catch (error) {
+      if (adapter) {
+        try {
+          await adapter.close();
+        } catch (closeError) {
+          console.warn('[db] Failed to close an incomplete database adapter:', closeError);
+        }
+      }
+      throw error;
+    }
   })();
+  _initPromise = initPromise;
+  // Reset only the attempt that actually failed. Keep this handler detached
+  // from the returned promise so concurrent callers still receive the exact
+  // same promise object.
+  void initPromise.catch(() => {
+    if (_initPromise === initPromise) {
+      _initPromise = null;
+      setStage(null);
+    }
+  });
 
-  return _initPromise;
+  return initPromise;
 }
 
 // Register initializer so ensureDb() can auto-init
 setEnsureInit(() => initializeDatabase());
+setResetInit(() => {
+  _initPromise = null;
+  setStage(null);
+});
 
 export async function detectPlatformAdapter(): Promise<DbAdapter> {
   if (typeof window === 'undefined') {

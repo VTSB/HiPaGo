@@ -1,6 +1,6 @@
 'use client';
 
-import { TagChip } from '@/shared/components/TagChip';
+import { TagFavoriteChip } from '@/shared/components/TagFavoriteChip';
 import { useT } from '@/lib/i18n/useT';
 import { getTagColor, TAG_TYPE_DISPLAY } from '@/lib/utils/types';
 import type { Suggestion, TagType } from '@/lib/utils/types';
@@ -106,7 +106,8 @@ export function UnifiedDropdown({
 
   return (
     <div
-      role="listbox"
+      role="region"
+      aria-label={t('search.title')}
       className={
         inline
           ? 'w-full px-1'
@@ -126,8 +127,8 @@ export function UnifiedDropdown({
               type="button"
               onMouseDown={(e) => {
                 e.preventDefault();
-                onClearRecents();
               }}
+              onClick={onClearRecents}
               className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
             >
               {t('search.clearHistory')}
@@ -142,61 +143,64 @@ export function UnifiedDropdown({
             return (
               <div
                 key={item.query}
-                role="button"
-                tabIndex={0}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onSelectRecent(item.query);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onSelectRecent(item.query);
-                  }
-                }}
-                className={`w-full flex items-center gap-2 px-3 ${inline ? 'py-3 min-h-[44px] rounded-2xl' : 'py-2'} text-left text-sm cursor-pointer ${
+                className={`flex w-full items-center gap-2 px-3 ${inline ? 'min-h-[44px] rounded-2xl py-3' : 'py-2'} text-sm ${
                   isSelected ? 'bg-zinc-100 dark:bg-zinc-700' : ''
                 } hover:bg-zinc-100 dark:hover:bg-zinc-700`}
               >
-                {/* Clock icon */}
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  className="h-3.5 w-3.5 flex-shrink-0 text-zinc-400"
+                <button
+                  type="button"
+                  data-search-option
+                  aria-current={isSelected ? 'true' : undefined}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                  }}
+                  onClick={() => onSelectRecent(item.query)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 >
-                  <path
-                    fillRule="evenodd"
-                    d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+                  {/* Clock icon */}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    className="h-3.5 w-3.5 flex-shrink-0 text-zinc-400"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8Zm7.75-4.25a.75.75 0 0 0-1.5 0V8c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5v-3.5Z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
 
-                {/* Tag tokens */}
-                <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-                  {tokens.map((token, i) => {
-                    const parsed = parseToken(token);
-                    return parsed ? (
-                      <span
-                        key={i}
-                        className={`inline-flex rounded-full px-1.5 py-0.5 text-xs font-medium ${getTagColor(parsed.type)}`}
-                      >
-                        {parsed.type}:{tagFromSearch(parsed.tag, parsed.type).displayForm}
-                        {TAG_TYPE_DISPLAY[parsed.type]}
-                      </span>
-                    ) : (
-                      <span key={i} className="text-xs text-zinc-700 dark:text-zinc-300">
-                        {token}
-                      </span>
-                    );
-                  })}
-                </div>
+                  {/* Tag tokens */}
+                  <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                    {tokens.map((token, i) => {
+                      const parsed = parseToken(token);
+                      return parsed ? (
+                        <span
+                          key={i}
+                          className={`inline-flex rounded-full px-1.5 py-0.5 text-xs font-medium ${getTagColor(parsed.type)}`}
+                        >
+                          {parsed.type}:{tagFromSearch(parsed.tag, parsed.type).displayForm}
+                          {TAG_TYPE_DISPLAY[parsed.type]}
+                        </span>
+                      ) : (
+                        <span key={i} className="text-xs text-zinc-700 dark:text-zinc-300">
+                          {token}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </button>
 
                 {/* Delete button */}
                 <button
                   type="button"
+                  aria-label={`${t('search.clearHistory')}: ${item.query}`}
                   onMouseDown={(e) => {
                     e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
                     e.stopPropagation();
                     onRemoveRecent(item.query);
                   }}
@@ -240,34 +244,49 @@ export function UnifiedDropdown({
             const { suggestion } = item;
 
             return (
-              <button
-                key={`${suggestion.tagType}-${suggestion.tag}-${localIdx}`}
-                id={`search-option-${flatIdx}`}
-                type="button"
-                role="option"
-                aria-selected={flatIdx === selectedIndex}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  onSelectSuggestion(suggestion.tag, suggestion.tagType, suggestion.localName);
-                }}
-                className={`flex w-full min-w-0 items-center gap-2 px-4 ${inline ? 'py-3 min-h-[44px] rounded-2xl' : 'py-2 first:rounded-t-lg last:rounded-b-lg'} text-left text-sm transition-colors ${
+              <div
+                key={`${suggestion.tagType}-${suggestion.tag}`}
+                className={`relative flex w-full min-w-0 items-center ${inline ? 'min-h-[44px] rounded-2xl' : 'first:rounded-t-lg last:rounded-b-lg'} transition-colors ${
                   isSelected ? 'bg-zinc-100 dark:bg-zinc-700' : ''
                 } hover:bg-zinc-100 dark:hover:bg-zinc-700`}
               >
-                <span className="min-w-0 flex-1">
-                  <TagChip
-                    tag={suggestion.tag}
-                    type={suggestion.tagType}
-                    displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
-                    linked={false}
-                    size="sm"
-                    wrap
-                  />
-                </span>
-                <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
-                  {suggestion.amount.toLocaleString()}
-                </span>
-              </button>
+                <button
+                  id={`search-option-${flatIdx}`}
+                  type="button"
+                  data-search-option
+                  aria-current={isSelected ? 'true' : undefined}
+                  aria-label={`${koreanDisplay ? (suggestion.localName ?? suggestion.tag) : suggestion.tag} ${suggestion.amount.toLocaleString()}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
+                  onClick={() =>
+                    onSelectSuggestion(suggestion.tag, suggestion.tagType, suggestion.localName)
+                  }
+                  className={`absolute inset-0 z-0 w-full text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500 ${inline ? 'rounded-2xl' : 'rounded-lg'}`}
+                >
+                  <span className="sr-only">
+                    {koreanDisplay ? (suggestion.localName ?? suggestion.tag) : suggestion.tag}{' '}
+                    {suggestion.amount.toLocaleString()}
+                  </span>
+                </button>
+                <div
+                  className={`pointer-events-none relative z-10 flex w-full min-w-0 items-center gap-2 px-4 ${inline ? 'py-3' : 'py-2'}`}
+                >
+                  <span className="min-w-0 flex-1">
+                    <TagFavoriteChip
+                      tag={suggestion.tag}
+                      type={suggestion.tagType}
+                      displayName={koreanDisplay ? suggestion.localName : suggestion.tag}
+                      linked={false}
+                      size={inline ? 'md' : 'sm'}
+                      wrap
+                    />
+                  </span>
+                  <span className="shrink-0 text-xs text-zinc-500 tabular-nums dark:text-zinc-400">
+                    {suggestion.amount.toLocaleString()}
+                  </span>
+                </div>
+              </div>
             );
           })}
         </>

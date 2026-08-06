@@ -42,6 +42,20 @@ public class GalleryDownloadWorkerTest {
     }
 
     @Test
+    public void malformedCleanupPreservesLegacyFoundByLockedReread() throws Exception {
+        File order = writeOrder(
+                "123.json",
+                "{\"galleryId\":123,\"title\":\"legacy\",\"pages\":[]}"
+        );
+
+        // Calling cleanup directly models an earlier unlocked read that failed
+        // transiently. The locked re-read now sees the durable legacy order.
+        GalleryDownloadWorker.deleteMalformedOrderIfStillMalformed(order);
+
+        assertTrue(order.exists());
+    }
+
+    @Test
     public void numericStringQueuePositionMatchesJsonOptLongSemantics() throws Exception {
         File order = writeOrder("string-position.json", "{\"galleryId\":123,\"queuePosition\":\"3\"}");
 
@@ -49,25 +63,52 @@ public class GalleryDownloadWorkerTest {
     }
 
     @Test
-    public void validatesWorkOrderPageRelPathsBeforeSafAccess() {
-        assertTrue(GalleryDownloadWorker.isValidRelPath("HiPaGo/123 Title/0001.webp"));
-        assertTrue(GalleryDownloadWorker.isValidRelPath("downloads/123/0001.avif"));
+    public void comparesQueuePositionThenFilenameWithoutApi24ComparatorHelpers() throws Exception {
+        File first = writeOrder("z.json", "{\"galleryId\":1,\"queuePosition\":1}");
+        File second = writeOrder("a.json", "{\"galleryId\":2,\"queuePosition\":2}");
+        File tie = writeOrder("b.json", "{\"galleryId\":3,\"queuePosition\":2}");
 
-        assertTrue(!GalleryDownloadWorker.isValidRelPath(null));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath(""));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("/HiPaGo/123/0001.webp"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo/123/"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo/../0001.webp"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo//0001.webp"));
-        assertTrue(!GalleryDownloadWorker.isValidRelPath("HiPaGo\\123\\0001.webp"));
+        assertTrue(GalleryDownloadWorker.compareOrderFiles(first, second) < 0);
+        assertTrue(GalleryDownloadWorker.compareOrderFiles(second, tie) < 0);
+        assertTrue(GalleryDownloadWorker.compareOrderFiles(tie, second) > 0);
+    }
+
+    @Test
+    public void validatesWorkOrderPageRelPathsBeforeSafAccess() {
+        assertTrue(GalleryDownloadWorker.isValidGalleryFolder("123", "123 Title"));
+        assertTrue(GalleryDownloadWorker.isValidGalleryFolder("123", "123"));
+        assertTrue(GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/123 Title/0001.webp", "123", "123 Title", 0, "webp"));
+
+        assertTrue(!GalleryDownloadWorker.isValidGalleryFolder("123", "999 Title"));
+        assertTrue(!GalleryDownloadWorker.isValidGalleryFolder("123", "123/Title"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "downloads/123/0001.avif", "123", "123", 0, "avif"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo2/123/0001.webp", "123", "123", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/123/0002.webp", "123", "123", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/123/0001.jpg", "123", "123", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                "HiPaGo/999/0001.webp", "123", "999", 0, "webp"));
+        assertTrue(!GalleryDownloadWorker.isValidRelPath(
+                null, "123", "123", 0, "webp"));
     }
 
     @Test
     public void validatesDownloadUrlAndExtensionBeforeNativeDownload() {
-        assertTrue(GalleryDownloadWorker.isValidDownloadUrl("https://aa.hitomi.la/webp/x.webp"));
-        assertTrue(GalleryDownloadWorker.isValidDownloadUrl("http://example.test/x.webp"));
+        assertTrue(GalleryDownloadWorker.isValidDownloadUrl(
+                "https://aa.gold-usergeneratedcontent.net/webp/x.webp"
+        ));
+        assertTrue(GalleryDownloadWorker.isValidDownloadUrl(
+                "https://tagindex.hitomi.la/global/t/e.json"
+        ));
         assertTrue(!GalleryDownloadWorker.isValidDownloadUrl(null));
         assertTrue(!GalleryDownloadWorker.isValidDownloadUrl(""));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("http://hitomi.la/x.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("https://aa.hitomi.la/x.webp"));
+        assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("https://hitomi.la.evil.test/x.webp"));
         assertTrue(!GalleryDownloadWorker.isValidDownloadUrl("file:///tmp/x.webp"));
 
         assertTrue(GalleryDownloadWorker.isValidExtension("webp"));
@@ -108,6 +149,54 @@ public class GalleryDownloadWorkerTest {
         assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(1, 1, 12));
         assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(0, 1, 0));
         assertFalse(GalleryDownloadWorker.shouldSkipExistingPage(0, 0, 12));
+    }
+
+    @Test
+    public void progressCountsOnlyManifestCommittedPages() {
+        // The final page has started, but only nine pages are durable: never show
+        // 10/10 until the manifest commit succeeds.
+        assertEquals(9, GalleryDownloadWorker.committedProgressCount(9, 9));
+        assertEquals(10, GalleryDownloadWorker.committedProgressCount(9, 10));
+        assertEquals(0, GalleryDownloadWorker.committedProgressCount(0, 0));
+    }
+
+    @Test
+    public void progressPercentReachesOneHundredOnlyWhenComplete() {
+        assertEquals(99, GalleryDownloadWorker.progressPercent(199, 200));
+        assertEquals(100, GalleryDownloadWorker.progressPercent(200, 200));
+        assertEquals(100, GalleryDownloadWorker.progressPercent(201, 200));
+        assertEquals(0, GalleryDownloadWorker.progressPercent(0, 0));
+    }
+
+    @Test
+    public void localizesDownloadNotificationStrings() {
+        assertEquals("ko", GalleryDownloadWorker.normalizeLocale("ko"));
+        assertEquals("en", GalleryDownloadWorker.normalizeLocale("fr"));
+
+        assertEquals("HiPaGo downloads", GalleryDownloadWorker.notificationTitle("en"));
+        assertEquals("HiPaGo 다운로드", GalleryDownloadWorker.notificationTitle("ko"));
+        assertEquals("Preparing downloads…", GalleryDownloadWorker.notificationPreparing("en"));
+        assertEquals("다운로드 준비 중…", GalleryDownloadWorker.notificationPreparing("ko"));
+        assertEquals(
+                "Downloading 3/10 (30%)",
+                GalleryDownloadWorker.notificationDownloading("en", 3, 10, 30)
+        );
+        assertEquals(
+                "다운로드 중 3/10 (30%)",
+                GalleryDownloadWorker.notificationDownloading("ko", 3, 10, 30)
+        );
+        assertEquals("Downloading...", GalleryDownloadWorker.notificationDownloadingIndeterminate("en"));
+        assertEquals("다운로드 중…", GalleryDownloadWorker.notificationDownloadingIndeterminate("ko"));
+        assertEquals("Downloads", GalleryDownloadWorker.notificationChannelName("en"));
+        assertEquals("다운로드", GalleryDownloadWorker.notificationChannelName("ko"));
+        assertEquals(
+                "Background gallery downloads",
+                GalleryDownloadWorker.notificationChannelDescription("en")
+        );
+        assertEquals(
+                "백그라운드 갤러리 다운로드",
+                GalleryDownloadWorker.notificationChannelDescription("ko")
+        );
     }
 
     private File writeOrder(String name, String json) throws Exception {

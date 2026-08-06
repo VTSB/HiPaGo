@@ -5,7 +5,12 @@
  * the inline logic did (getImageUrl 'auto' + urlExt split).
  */
 import { describe, it, expect } from 'vitest';
-import { resolveWorkOrder, buildWorkOrder, buildIosWorkOrder } from '../work-order';
+import {
+  resolveWorkOrder,
+  buildWorkOrder,
+  buildIosWorkOrder,
+  createDownloadRunId,
+} from '../work-order';
 import { getImageUrl } from '../image-url';
 import { galleryFolderName, LIBRARY_ROOT } from '@/lib/storage/base-path-resolver';
 import type { GalleryFile, GgConfig } from '../types';
@@ -64,6 +69,20 @@ describe('resolveWorkOrder', () => {
 });
 
 describe('buildWorkOrder (Task C handoff)', () => {
+  it('assigns a fresh opaque run id to each concrete attempt', () => {
+    const first = createDownloadRunId();
+    const second = createDownloadRunId();
+
+    expect(first).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
+    expect(second).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
+    expect(second).not.toBe(first);
+  });
+
+  it('preserves an explicitly supplied run id in the serialized handoff', () => {
+    const order = buildWorkOrder(12345, 'My Title', [file()], ggConfig, 'run-aaaaaaaaaaaaaaaa');
+    expect(order.runId).toBe('run-aaaaaaaaaaaaaaaa');
+  });
+
   it('produces the galleryId/title/folderName + one page per file', () => {
     const files = [file(), file({ hash: 'b'.repeat(64) })];
     const order = buildWorkOrder(12345, 'My Title', files, ggConfig);
@@ -71,6 +90,20 @@ describe('buildWorkOrder (Task C handoff)', () => {
     expect(order.title).toBe('My Title');
     expect(order.folderName).toBe(galleryFolderName(12345, 'My Title'));
     expect(order.pages).toHaveLength(2);
+  });
+
+  it('keeps an existing physical folder name when a retry sees a changed title', () => {
+    const order = buildWorkOrder(
+      12345,
+      'New Title',
+      [file()],
+      ggConfig,
+      'run-aaaaaaaaaaaaaaaa',
+      '12345 Old Title',
+    );
+
+    expect(order.folderName).toBe('12345 Old Title');
+    expect(order.pages[0].relPath).toContain(`${LIBRARY_ROOT}/12345 Old Title/0001.`);
   });
 
   it('relPath is HiPaGo/<folder>/<1-based zero-padded>.<ext> (matches imageFileName)', () => {
@@ -102,6 +135,11 @@ describe('buildWorkOrder (Task C handoff)', () => {
 });
 
 describe('buildIosWorkOrder (Task D backstop)', () => {
+  it('preserves an explicitly supplied run id for shared native bridge calls', () => {
+    const order = buildIosWorkOrder(12345, 'My Title', [file()], ggConfig, 'run-aaaaaaaaaaaaaaaa');
+    expect(order.runId).toBe('run-aaaaaaaaaaaaaaaa');
+  });
+
   it('uses the NUMERIC downloads/<id>/ layout (no title), unlike the Android HiPaGo/<id title>/', () => {
     const files = [file({ haswebp: 1 }), file({ hash: 'b'.repeat(64) })];
     const order = buildIosWorkOrder(12345, 'My Title', files, ggConfig);

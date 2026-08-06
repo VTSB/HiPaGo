@@ -116,6 +116,59 @@ describe('DownloadQueueView', () => {
     expect(screen.getByText('(2)')).toBeTruthy();
   });
 
+  it('clamps active progress percentages at 100%', () => {
+    state.queue = [
+      {
+        id: 3,
+        title: 'Overreported download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: { current: 12, total: 10 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('12/10 · 100%')).toBeTruthy();
+  });
+
+  it('does not round an incomplete active download up to 100%', () => {
+    state.queue = [
+      {
+        id: 30,
+        title: 'Almost complete download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: { current: 199, total: 200 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('199/200 · 99%')).toBeTruthy();
+    expect(screen.queryByText('199/200 · 100%')).toBeNull();
+  });
+
+  it('shows a downloading label before an active row knows its total page count', () => {
+    state.queue = [
+      {
+        id: 4,
+        title: 'Claimed download',
+        thumbnail: '',
+        status: 'downloading',
+        position: null,
+        progress: null,
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('library.queue.downloading')).toBeTruthy();
+    expect(screen.queryByText('0/0 · 0%')).toBeNull();
+  });
+
   it('routes active pause and cancel buttons to the store actions', () => {
     state.queue = [
       {
@@ -135,6 +188,26 @@ describe('DownloadQueueView', () => {
 
     expect(state.pause).toHaveBeenCalledWith(10);
     expect(state.cancel).toHaveBeenCalledWith(10);
+  });
+
+  it('renders native-owned waiting rows without an active spinner or drag handle', () => {
+    state.queue = [
+      {
+        id: 11,
+        title: 'Native pending download',
+        thumbnail: '',
+        status: 'waiting',
+        position: null,
+        progress: { current: 0, total: 10 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('Native pending download')).toBeTruthy();
+    expect(screen.getByText('library.queue.queued')).toBeTruthy();
+    expect(screen.queryByTestId('spinner')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'library.queue.reorder' })).toBeNull();
   });
 
   it('routes queued pause and paused resume buttons to the store actions', () => {

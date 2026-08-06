@@ -3,11 +3,7 @@ import { setupTestDb, clearAllTables, teardownTestDb, queryAll, queryOne } from 
 import { getDb } from '../adapter';
 import { TAG_TYPE_TO_BYTE, TagType } from '@/lib/utils/types';
 import { useDbStatusStore } from '@/lib/store/db-status';
-import {
-  getSyncStatus,
-  setSyncStatus,
-  deleteSyncStatus,
-} from '../sync-status';
+import { getSyncStatus, setSyncStatus, deleteSyncStatus } from '../sync-status';
 import {
   SYNC_KEY_TAGS,
   parseSyncData,
@@ -32,7 +28,11 @@ vi.mock('@/lib/store/tag-i18n', () => ({
 // Mock runtime tag fetching (must be before import)
 // ---------------------------------------------------------------------------
 
-interface MockTag { name: string; count: number; type: string }
+interface MockTag {
+  name: string;
+  count: number;
+  type: string;
+}
 
 let mockParsedTags: MockTag[] = [];
 let mockFetchPageShouldFail = false;
@@ -217,10 +217,15 @@ describe('checkDbReady', () => {
   });
 
   it('returns true and sets dbReady=true when sync_status is "completed"', async () => {
-    await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({ status: 'completed', timestamp: 1000, count: 100 }));
+    await setSyncStatus(
+      SYNC_KEY_TAGS,
+      JSON.stringify({ status: 'completed', timestamp: 1000, count: 100 }),
+    );
     // checkDbReady now also verifies the tag table is non-empty.
     await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
-      TAG_TYPE_TO_BYTE[TagType.TAG], 'ready-tag', 1,
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'ready-tag',
+      1,
     ]);
     const ready = await checkDbReady();
     expect(ready).toBe(true);
@@ -292,7 +297,10 @@ describe('markTagSyncLoading', () => {
 describe('runTagSync — full flow', () => {
   it('inserts tags into DB and marks completed', async () => {
     setMockTags({
-      female: [['ahegao', 5000], ['anal', 3000]],
+      female: [
+        ['ahegao', 5000],
+        ['anal', 3000],
+      ],
       male: [['blowjob', 4000]],
     });
 
@@ -325,10 +333,11 @@ describe('runTagSync — full flow', () => {
   });
 
   it('updates existing tag count on re-sync', async () => {
-    await getDb().execute(
-      'INSERT INTO tag (type, name, count) VALUES (?, ?, ?)',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'ahegao', 100],
-    );
+    await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.FEMALE],
+      'ahegao',
+      100,
+    ]);
 
     setMockTags({
       female: [['ahegao', 9999]],
@@ -350,10 +359,11 @@ describe('runTagSync — full flow', () => {
   });
 
   it('skips update when existing tag has same count', async () => {
-    await getDb().execute(
-      'INSERT INTO tag (type, name, count) VALUES (?, ?, ?)',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE], 'ahegao', 5000],
-    );
+    await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
+      TAG_TYPE_TO_BYTE[TagType.FEMALE],
+      'ahegao',
+      5000,
+    ]);
 
     setMockTags({
       female: [['ahegao', 5000]],
@@ -375,10 +385,9 @@ describe('runTagSync — full flow', () => {
     await runTagSync();
 
     // sync was skipped — no tags inserted
-    const tags = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.FEMALE]],
-    );
+    const tags = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.FEMALE],
+    ]);
     expect(tags).toHaveLength(0);
   });
 
@@ -403,13 +412,16 @@ describe('runTagSync — full flow', () => {
       },
     });
 
-    setMockTags({});
+    setMockTags({ tag: [['progress-tag', 1]] });
     await runTagSync();
 
     expect(progressValues.length).toBeGreaterThan(0);
     for (let i = 1; i < progressValues.length; i++) {
       expect(progressValues[i]).toBeGreaterThanOrEqual(progressValues[i - 1]);
     }
+    expect(progressValues.at(-1)).toBe(100);
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(useDbStatusStore.getState().syncError).toBeNull();
   });
 
   it('inserts tags into correct type bytes per field', async () => {
@@ -480,7 +492,10 @@ describe('tag sync completes without applyKoreanLocalization', () => {
 
   it('calls loadLocale after sync completes, not before', async () => {
     setMockTags({
-      female: [['blowjob', 10000], ['loli', 8000]],
+      female: [
+        ['blowjob', 10000],
+        ['loli', 8000],
+      ],
     });
 
     expect(mockLoadLocale).not.toHaveBeenCalled();
@@ -508,10 +523,15 @@ describe('Full lifecycle', () => {
   });
 
   it('completed DB -> checkDbReady=true -> no sync needed', async () => {
-    await setSyncStatus(SYNC_KEY_TAGS, JSON.stringify({ status: 'completed', timestamp: 1000, count: 100 }));
+    await setSyncStatus(
+      SYNC_KEY_TAGS,
+      JSON.stringify({ status: 'completed', timestamp: 1000, count: 100 }),
+    );
     // checkDbReady now also verifies the tag table is non-empty.
     await getDb().execute('INSERT INTO tag (type, name, count) VALUES (?, ?, ?)', [
-      TAG_TYPE_TO_BYTE[TagType.TAG], 'completed-tag', 1,
+      TAG_TYPE_TO_BYTE[TagType.TAG],
+      'completed-tag',
+      1,
     ]);
 
     const ready = await checkDbReady();
@@ -599,13 +619,16 @@ describe('Batch insert correctness', () => {
 
     await runTagSync();
 
-    const artists = await queryAll<{ name: string }>(
-      'SELECT name FROM tag WHERE type = ?',
-      [TAG_TYPE_TO_BYTE[TagType.ARTIST]],
-    );
+    const artists = await queryAll<{ name: string }>('SELECT name FROM tag WHERE type = ?', [
+      TAG_TYPE_TO_BYTE[TagType.ARTIST],
+    ]);
     expect(artists).toHaveLength(5);
     expect(artists.map((t) => t.name).sort()).toEqual([
-      'artist_a1', 'artist_a2', 'artist_a3', 'artist_a4', 'artist_a5',
+      'artist_a1',
+      'artist_a2',
+      'artist_a3',
+      'artist_a4',
+      'artist_a5',
     ]);
   });
 
@@ -643,7 +666,10 @@ describe('Local search works after sync', () => {
     const { searchLocalTags } = await import('../search-local');
 
     setMockTags({
-      female: [['beauty mark', 34000], ['big breasts', 120000]],
+      female: [
+        ['beauty mark', 34000],
+        ['big breasts', 120000],
+      ],
     });
 
     await runTagSync();

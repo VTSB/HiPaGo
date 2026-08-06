@@ -14,7 +14,17 @@ export default async function ReaderPage({
   const { id } = await params;
   const { page } = await searchParams;
   const galleryId = parseInt(id, 10);
-  if (isNaN(galleryId)) return <div className="flex min-h-screen items-center justify-center bg-black text-white">Invalid gallery ID</div>;
+  if (isNaN(galleryId))
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-black text-white">
+        Invalid gallery ID
+      </div>
+    );
   const initialPage = page ? parseInt(page, 10) : undefined;
-  return <ReaderView galleryId={galleryId} initialPage={initialPage && !isNaN(initialPage) ? initialPage : undefined} />;
+  return (
+    <ReaderView
+      galleryId={galleryId}
+      initialPage={initialPage && !isNaN(initialPage) ? initialPage : undefined}
+    />
+  );
 }

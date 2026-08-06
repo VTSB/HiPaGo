@@ -1,17 +1,64 @@
 /**
  * Web DownloadStore adapter.
  *
- * Primary backend: OPFS (Origin Private File System via
- * navigator.storage.getDirectory()).  Each gallery is a sub-directory;
- * each image is a file inside it.
+ * Primary backend for new installs: OPFS (Origin Private File System via
+ * navigator.storage.getDirectory()). Each gallery is a sub-directory; each
+ * image is a file inside it.
  *
- * Fallback backend: IndexedDB blob store — used when OPFS is unavailable
- * (older browsers, jsdom test environment).  Keys are
+ * Legacy/fallback backend: IndexedDB blob store — used when OPFS is absent
+ * (older browsers, jsdom test environment). Keys are
  * "<galleryId>/<filename>"; galleries are enumerated by scanning keys.
+ *
+ * The selected backend is sticky. A browser gaining OPFS support must keep
+ * reading an existing IndexedDB library, and a transient OPFS failure must not
+ * silently switch an existing OPFS installation to an empty IndexedDB store.
  */
 
 import type { DownloadStore } from '../download-store';
 import { imageFileName, galleryFolderName } from '../download-store';
+
+type WebDownloadBackendKind = 'opfs' | 'idb';
+
+const BACKEND_CHOICE_KEY = 'hipago:web-download-backend:v1';
+
+function readBackendChoice(): WebDownloadBackendKind | null {
+  try {
+    const value = globalThis.localStorage?.getItem(BACKEND_CHOICE_KEY);
+    return value === 'opfs' || value === 'idb' ? value : null;
+  } catch {
+    // localStorage can be blocked in private/embedded contexts. The markerless
+    // selection path still probes legacy IndexedDB data before choosing OPFS.
+    return null;
+  }
+}
+
+function rememberBackendChoice(choice: WebDownloadBackendKind): void {
+  try {
+    globalThis.localStorage?.setItem(BACKEND_CHOICE_KEY, choice);
+  } catch {
+    // Best effort. On the next launch, content probing makes the same safe
+    // choice even when the preference store itself is unavailable.
+  }
+}
+
+function supportsOpfs(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    navigator.storage !== undefined &&
+    typeof navigator.storage.getDirectory === 'function'
+  );
+}
+
+/** Only genuine absence is benign; permission and I/O failures must propagate. */
+function isNotFoundError(error: unknown): boolean {
+  if (typeof error === 'object' && error !== null) {
+    if ('name' in error && (error as { name?: unknown }).name === 'NotFoundError') return true;
+    if ('code' in error && (error as { code?: unknown }).code === 'ENOENT') return true;
+  }
+
+  const message = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
+  return /\bENOENT\b/i.test(message);
+}
 
 // ── OPFS backend ───────────────────────────────────────────────────────────
 
@@ -22,59 +69,52 @@ class OpfsStore implements DownloadStore {
     this.root = root;
   }
 
-  private async galleryDir(
-    galleryId: number,
-    create = false,
-  ): Promise<FileSystemDirectoryHandle> {
+  private async galleryDir(galleryId: number, create = false): Promise<FileSystemDirectoryHandle> {
     return this.root.getDirectoryHandle(galleryFolderName(galleryId), {
       create,
     });
   }
 
-  async putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     const dir = await this.galleryDir(galleryId, true);
     const fh = await dir.getFileHandle(imageFileName(index, ext), {
       create: true,
     });
     const writable = await fh.createWritable();
-    // Use ArrayBuffer (a valid BufferSource / BlobPart) to satisfy
-    // FileSystemWriteChunkType with the strict Uint8Array<ArrayBufferLike> type.
-    await writable.write(new Blob([bytes.buffer as ArrayBuffer]));
+    // `bytes` can be a sub-view of a larger response buffer. Copy the view so
+    // OPFS receives exactly byteOffset..byteLength, never unrelated prefix or
+    // suffix bytes from the backing ArrayBuffer.
+    const exactBuffer =
+      bytes.byteOffset === 0 &&
+      bytes.byteLength === bytes.buffer.byteLength &&
+      bytes.buffer instanceof ArrayBuffer
+        ? bytes.buffer
+        : (bytes.slice().buffer as ArrayBuffer);
+    await writable.write(new Blob([exactBuffer]));
     await writable.close();
   }
 
-  async getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null> {
+  async getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null> {
     try {
       const dir = await this.galleryDir(galleryId);
       const fh = await dir.getFileHandle(imageFileName(index, ext));
       const file = await fh.getFile();
       return new Uint8Array(await file.arrayBuffer());
-    } catch {
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
       return null;
     }
   }
 
-  async imageExists(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean> {
+  async imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
     try {
       const dir = await this.galleryDir(galleryId);
       const fh = await dir.getFileHandle(imageFileName(index, ext));
       // getFile() exposes the size without reading the bytes into the heap.
       const file = await fh.getFile();
       return file.size > 0;
-    } catch {
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
       return false;
     }
   }
@@ -85,10 +125,7 @@ class OpfsStore implements DownloadStore {
     // (entries() is not declared in this TypeScript version's lib.dom.d.ts).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for await (const [name, handle] of this.root as any) {
-      if (
-        handle &&
-        (handle.kind === 'directory' || handle.children !== undefined)
-      ) {
+      if (handle && (handle.kind === 'directory' || handle.children !== undefined)) {
         const id = parseInt(name, 10);
         if (!isNaN(id)) ids.push(id);
       }
@@ -101,7 +138,8 @@ class OpfsStore implements DownloadStore {
       await this.root.removeEntry(galleryFolderName(galleryId), {
         recursive: true,
       });
-    } catch {
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
       // Already gone — treat as success.
     }
   }
@@ -118,7 +156,8 @@ class OpfsStore implements DownloadStore {
         }
       }
       return total;
-    } catch {
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error;
       return 0;
     }
   }
@@ -165,12 +204,7 @@ class IdbStore implements DownloadStore {
     return this.db.transaction(IDB_STORE, mode).objectStore(IDB_STORE);
   }
 
-  async putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     const store = this.tx('readwrite');
     return new Promise((resolve, reject) => {
       const req = store.put(bytes, idbKey(galleryId, index, ext));
@@ -179,11 +213,7 @@ class IdbStore implements DownloadStore {
     });
   }
 
-  async getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null> {
+  async getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null> {
     const store = this.tx('readonly');
     return new Promise((resolve, reject) => {
       const req = store.get(idbKey(galleryId, index, ext));
@@ -192,21 +222,17 @@ class IdbStore implements DownloadStore {
     });
   }
 
-  async imageExists(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean> {
+  async imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
     // IndexedDB cannot report a stored value's size without retrieving it, so
     // read the value and check its byte length (treating empty as missing).
     const store = this.tx('readonly');
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const req = store.get(idbKey(galleryId, index, ext));
       req.onsuccess = () => {
         const val: Uint8Array | undefined = req.result;
         resolve(!!val && val.byteLength > 0);
       };
-      req.onerror = () => resolve(false);
+      req.onerror = () => reject(req.error);
     });
   }
 
@@ -257,9 +283,7 @@ class IdbStore implements DownloadStore {
       const store = tx.objectStore(IDB_STORE);
       const keysReq = store.getAllKeys();
       keysReq.onsuccess = () => {
-        const keys = (keysReq.result as string[]).filter((k) =>
-          k.startsWith(prefix),
-        );
+        const keys = (keysReq.result as string[]).filter((k) => k.startsWith(prefix));
         if (keys.length === 0) {
           resolve(0);
           return;
@@ -298,24 +322,59 @@ export class WebDownloadStore implements DownloadStore {
   }
 
   /**
-   * Create the adapter: try OPFS first; fall back to IndexedDB if OPFS is
-   * unavailable (older browsers, test environments).
+   * Create the adapter without allowing backend drift:
+   *
+   * 1. Honour a previously persisted choice. A selected OPFS backend fails
+   *    closed when OPFS is temporarily unavailable instead of exposing an empty
+   *    IndexedDB library.
+   * 2. For pre-marker installs, probe IndexedDB first. If it contains any
+   *    gallery, keep using it even when a browser update has added OPFS.
+   * 3. New installs use OPFS when the API exists, otherwise IndexedDB.
+   *
+   * An OPFS API rejection is intentionally not treated like API absence. A
+   * rejection can be transient, and falling back in that state can hide an
+   * existing OPFS library or split new downloads across two backends.
    */
   static async create(): Promise<WebDownloadStore> {
-    try {
-      if (
-        typeof navigator !== 'undefined' &&
-        navigator.storage &&
-        typeof navigator.storage.getDirectory === 'function'
-      ) {
-        const root = await navigator.storage.getDirectory();
-        return new WebDownloadStore(new OpfsStore(root));
+    const remembered = readBackendChoice();
+
+    if (remembered === 'opfs') {
+      if (!supportsOpfs()) {
+        throw new Error('The selected OPFS download storage backend is unavailable');
       }
-    } catch {
-      // OPFS not available — fall through to IndexedDB.
+      const root = await navigator.storage.getDirectory();
+      return new WebDownloadStore(new OpfsStore(root));
     }
-    const db = await openIDB();
-    return new WebDownloadStore(new IdbStore(db));
+
+    if (remembered === 'idb') {
+      const db = await openIDB();
+      return new WebDownloadStore(new IdbStore(db));
+    }
+
+    // Legacy installs predate the sticky marker. Probe the old IndexedDB store
+    // before considering OPFS so newly available OPFS cannot hide real data.
+    let idbBackend: IdbStore | null = null;
+    if (typeof indexedDB !== 'undefined') {
+      const db = await openIDB();
+      idbBackend = new IdbStore(db);
+      if ((await idbBackend.listGalleries()).length > 0) {
+        rememberBackendChoice('idb');
+        return new WebDownloadStore(idbBackend);
+      }
+    }
+
+    if (supportsOpfs()) {
+      const root = await navigator.storage.getDirectory();
+      rememberBackendChoice('opfs');
+      return new WebDownloadStore(new OpfsStore(root));
+    }
+
+    if (!idbBackend) {
+      const db = await openIDB();
+      idbBackend = new IdbStore(db);
+    }
+    rememberBackendChoice('idb');
+    return new WebDownloadStore(idbBackend);
   }
 
   /** Create with an explicit backend — used in tests. */
@@ -323,28 +382,15 @@ export class WebDownloadStore implements DownloadStore {
     return new WebDownloadStore(backend);
   }
 
-  putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     return this.backend.putImage(galleryId, index, bytes, ext);
   }
 
-  getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null> {
+  getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null> {
     return this.backend.getImage(galleryId, index, ext);
   }
 
-  imageExists(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean> {
+  imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
     // Both OPFS and IDB backends implement imageExists; the `?? false` keeps the
     // facade total even if a future backend omits it.
     return this.backend.imageExists?.(galleryId, index, ext) ?? Promise.resolve(false);

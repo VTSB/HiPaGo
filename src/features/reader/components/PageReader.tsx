@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { GalleryImage, GgConfig } from '@/lib/utils/types';
-import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
-import { getGgConfig } from '@/lib/api/client';
-import { useSettingsStore } from '@/lib/store/settings';
+import type { GalleryImage } from '@/lib/utils/types';
 import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
 import { OfflineImage } from './OfflineImage';
+import { ReaderLoadState } from './ReaderLoadState';
+import { useReaderImageSources } from '@/features/reader/hooks/useReaderImageSources';
 import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImages';
+import { useT } from '@/lib/i18n/useT';
 
 // High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
 // tags still get decoded by the browser, so a large mounted window pins
@@ -31,6 +31,8 @@ export function PageReader({
   onPageChange,
   offlineUrls,
   offlineSources,
+  dualPage = false,
+  onToggleChrome,
 }: {
   images: GalleryImage[];
   currentPage: number;
@@ -39,10 +41,12 @@ export function PageReader({
   offlineUrls?: string[];
   /** Fast offline sources from useOfflineImages. */
   offlineSources?: OfflineImageSource[];
+  /** Effective two-page state; callers disable it on narrow viewports. */
+  dualPage?: boolean;
+  /** Center-tap action that toggles the reader controls without turning a page. */
+  onToggleChrome?: () => void;
 }) {
-  const [ggConfig, setGgConfig] = useState<GgConfig | null>(null);
-  const imageFormat = useSettingsStore((s) => s.imageFormat);
-  const dualPage = useSettingsStore((s) => s.dualPage);
+  const t = useT();
   const step = dualPage ? 2 : 1;
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -55,6 +59,7 @@ export function PageReader({
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
   const [width, setWidth] = useState(0);
+  const resizePendingRef = useRef(false);
   // Mirror `width` so the once-attached scroll listener reads the current value
   // (and the SAME value the slides are sized with) without re-subscribing.
   const widthRef = useRef(0);
@@ -62,12 +67,8 @@ export function PageReader({
   // current values without re-subscribing on every page change.
   const currentPageRef = useRef(currentPage);
   const onPageChangeRef = useRef(onPageChange);
-  useEffect(() => {
-    currentPageRef.current = currentPage;
-  });
-  useEffect(() => {
-    onPageChangeRef.current = onPageChange;
-  });
+  currentPageRef.current = currentPage;
+  onPageChangeRef.current = onPageChange;
 
   // True while WE drive the scroll (button / key / tap / prop change) so the
   // scroll listener doesn't echo a redundant onPageChange back.
@@ -80,25 +81,23 @@ export function PageReader({
   const initPendingRef = useRef(false);
   const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
   const suppressClickRef = useRef(false);
+  const touchPointersRef = useRef(new Set<number>());
+  // A pinch can last arbitrarily long, so a deadline captured when the second
+  // finger lands cannot reliably identify its synthesized click. Instead keep
+  // the touch sequence itself as the source of truth and consume one click only
+  // after every pointer from a multi-touch sequence has ended.
+  const multiTouchSequenceRef = useRef(false);
+  const suppressNextTouchClickRef = useRef(false);
+  const wheelDeltaRef = useRef(0);
+  const wheelTurnAtRef = useRef(0);
 
-  useEffect(() => {
-    // Skip the gg.js network fetch when all images are served from local storage.
-    if (offlineSources || offlineUrls) return;
-    getGgConfig().then(setGgConfig);
-  }, [offlineSources, offlineUrls]);
-
-  const normalizedOfflineSources = useMemo<OfflineImageSource[] | undefined>(() => {
-    if (offlineSources) return offlineSources;
-    return offlineUrls?.map((url, index) => ({ index, ext: '', url }));
-  }, [offlineSources, offlineUrls]);
-
-  const urls = useMemo(() => {
-    if (normalizedOfflineSources) {
-      return normalizedOfflineSources.map((source) => source.url ?? `offline:${source.index}`);
-    }
-    if (!ggConfig) return [];
-    return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
-  }, [normalizedOfflineSources, images, ggConfig, imageFormat]);
+  const {
+    urls,
+    normalizedOfflineSources,
+    loading: imageSourcesLoading,
+    error: imageSourceError,
+    retry: retryImageSources,
+  } = useReaderImageSources({ images, offlineUrls, offlineSources });
 
   const hasUrls = urls.length > 0;
   const slideCount = Math.ceil(images.length / step);
@@ -116,6 +115,7 @@ export function PageReader({
     // on DPR 1 the value is already integer, so desktop is unchanged.
     const update = () => {
       const w = Math.ceil(el.getBoundingClientRect().width);
+      if (widthRef.current > 0 && widthRef.current !== w) resizePendingRef.current = true;
       widthRef.current = w;
       setWidth(w);
     };
@@ -325,7 +325,23 @@ export function PageReader({
     if (!el || !width) return;
     const targetSlide = Math.floor(currentPage / step);
     const currentSlide = Math.round(el.scrollLeft / width);
-    if (currentSlide === targetSlide) return;
+    if (resizePendingRef.current) {
+      const track = trackRef.current;
+      if (track) finishSlide(el, track);
+      resizePendingRef.current = false;
+      programmaticRef.current = true;
+      el.style.scrollSnapType = 'none';
+      virtualizer.scrollToIndex(targetSlide, { align: 'start' });
+      el.scrollLeft = targetSlide * width;
+      clearTimeout(programmaticTimerRef.current);
+      programmaticTimerRef.current = setTimeout(() => {
+        const node = scrollerRef.current;
+        if (node) node.style.scrollSnapType = 'x mandatory';
+        programmaticRef.current = false;
+      }, 0);
+      return;
+    }
+    if (currentSlide === targetSlide && Math.abs(el.scrollLeft - targetSlide * width) < 1) return;
     programmaticRef.current = true;
     clearTimeout(programmaticTimerRef.current);
     if (didInitRef.current) {
@@ -358,7 +374,7 @@ export function PageReader({
       programmaticRef.current = false;
       initPendingRef.current = false;
     }, 600);
-  }, [currentPage, width, step, animateScrollTo, virtualizer]);
+  }, [currentPage, width, step, animateScrollTo, finishSlide, virtualizer]);
 
   useEffect(
     () => () => {
@@ -383,6 +399,20 @@ export function PageReader({
   // Desktop mouse drag-to-pan: native scroll-snap responds to touch/trackpad but
   // not a click-drag, so add a minimal handler (no physics) that snaps on release.
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') {
+      // If the previous multi-touch sequence was cancelled without producing a
+      // click, a new real touch sequence must remain a normal tap. A browser's
+      // synthesized click arrives without another touch pointerdown.
+      if (touchPointersRef.current.size === 0) {
+        multiTouchSequenceRef.current = false;
+        suppressNextTouchClickRef.current = false;
+      }
+      touchPointersRef.current.add(e.pointerId);
+      if (touchPointersRef.current.size > 1) {
+        multiTouchSequenceRef.current = true;
+      }
+      return;
+    }
     if (e.pointerType !== 'mouse' || e.button !== 0) return;
     const el = scrollerRef.current;
     if (!el) return;
@@ -398,6 +428,14 @@ export function PageReader({
     el.scrollLeft = d.left - dx;
   };
   const endPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'touch') {
+      touchPointersRef.current.delete(e.pointerId);
+      if (touchPointersRef.current.size === 0 && multiTouchSequenceRef.current) {
+        suppressNextTouchClickRef.current = true;
+        multiTouchSequenceRef.current = false;
+      }
+      return;
+    }
     const d = dragRef.current;
     const el = scrollerRef.current;
     dragRef.current = null;
@@ -411,21 +449,48 @@ export function PageReader({
   };
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
+    const suppressMouseDragClick = suppressClickRef.current;
+    const suppressMultiTouchClick = suppressNextTouchClickRef.current;
+    suppressClickRef.current = false;
+    suppressNextTouchClickRef.current = false;
+    if (suppressMouseDragClick || suppressMultiTouchClick) {
       return;
     }
     const rect = e.currentTarget.getBoundingClientRect();
-    if (e.clientX - rect.left > rect.width / 2) navigate(currentPage + step);
-    else navigate(currentPage - step);
+    const x = e.clientX - rect.left;
+    const spreadStart = dualPage ? Math.floor(currentPage / 2) * 2 : currentPage;
+    if (x > rect.width * 0.65) navigate(spreadStart + step);
+    else if (x < rect.width * 0.35) navigate(spreadStart - step);
+    else onToggleChrome?.();
   };
 
-  if (!hasUrls)
+  // A vertical mouse wheel otherwise has no effect in the horizontal page
+  // scroller. Accumulate a small threshold and turn exactly one spread, while
+  // preserving horizontal trackpad gestures and Ctrl/Command browser zoom.
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const now = Date.now();
+    if (now - wheelTurnAtRef.current < 250) return;
+    wheelDeltaRef.current += e.deltaY;
+    if (Math.abs(wheelDeltaRef.current) < 60) return;
+    e.preventDefault();
+    const spreadStart = dualPage ? Math.floor(currentPage / 2) * 2 : currentPage;
+    navigate(spreadStart + (wheelDeltaRef.current > 0 ? step : -step));
+    wheelDeltaRef.current = 0;
+    wheelTurnAtRef.current = now;
+  };
+
+  if (imageSourceError) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/20 border-t-white/80" />
-      </div>
+      <ReaderLoadState
+        state="error"
+        onRetry={retryImageSources}
+        detail={imageSourceError.message}
+      />
     );
+  }
+  if (imageSourcesLoading) return <ReaderLoadState state="loading" />;
+  if (!hasUrls) return <ReaderLoadState state="empty" />;
 
   // The slide the reader is currently parked on. Its image gets fetchPriority
   // "high" so it wins CDN connection slots over the low-priority preloads of
@@ -442,7 +507,7 @@ export function PageReader({
       normalizedOfflineSources ? (
         <OfflineImage
           source={normalizedOfflineSources[idx]}
-          alt={`Page ${idx + 1}`}
+          alt={`${t('reader.page')} ${idx + 1}`}
           draggable={false}
           loading="eager"
           spinner
@@ -452,7 +517,7 @@ export function PageReader({
       ) : (
         <AbortableImage
           src={urls[idx]}
-          alt={`Page ${idx + 1}`}
+          alt={`${t('reader.page')} ${idx + 1}`}
           draggable={false}
           loading="eager"
           spinner
@@ -465,13 +530,13 @@ export function PageReader({
         {renderReaderImage(
           pageIdx,
           `pointer-events-none select-none object-contain ${
-            dualPage ? 'max-h-screen max-w-[50vw]' : 'max-w-full sm:max-h-screen'
+            dualPage ? 'max-h-dvh max-w-[50vw]' : 'max-w-full sm:max-h-dvh'
           }`,
         )}
         {hasSecond &&
           renderReaderImage(
             secondIdx,
-            'pointer-events-none max-h-screen max-w-[50vw] select-none object-contain',
+            'pointer-events-none max-h-dvh max-w-[50vw] select-none object-contain',
           )}
       </div>
     );
@@ -480,9 +545,13 @@ export function PageReader({
   return (
     <div
       ref={scrollerRef}
-      className="scrollbar-hide group relative h-screen w-screen cursor-pointer overflow-x-auto overflow-y-hidden"
+      className="scrollbar-hide group relative h-dvh w-screen cursor-pointer overflow-x-auto overflow-y-hidden"
       style={{ scrollSnapType: 'x mandatory' }}
+      role="region"
+      aria-label={t('reader.pages')}
+      tabIndex={0}
       onClick={handleClick}
+      onWheel={handleWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPointer}
@@ -498,6 +567,13 @@ export function PageReader({
           <div
             key={vi.key}
             data-slide-index={vi.index}
+            aria-current={vi.index === currentSlide ? 'page' : undefined}
+            aria-hidden={vi.index === currentSlide ? undefined : true}
+            inert={vi.index === currentSlide ? undefined : true}
+            role="group"
+            aria-label={`${t('reader.page')} ${vi.index * step + 1}${
+              dualPage ? `–${Math.min(vi.index * step + 2, images.length)}` : ''
+            }`}
             className="scrollbar-hide absolute top-0 flex h-full items-center justify-center overflow-y-auto"
             style={{
               left: 0,

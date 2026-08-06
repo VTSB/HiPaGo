@@ -120,7 +120,7 @@ describe('v4 migration — downloadBasePath → downloadTreeUri (SAF)', () => {
     expect(out.libraryInitialTab).toBe('favorites');
   });
 
-  it('v7: is a no-op (fields already present, same reference)', () => {
+  it('v7 -> v8 adds an empty metadata favorites list without touching prior fields', () => {
     const state = {
       blurTags: ['male:yaoi'],
       imageCacheMaxBytes: 0,
@@ -131,13 +131,40 @@ describe('v4 migration — downloadBasePath → downloadTreeUri (SAF)', () => {
       libraryInitialTab: 'downloads',
     };
     const out = migrateSettings(state, 7) as {
+      libraryInitialTab: string;
+      favoriteTags: string[];
+    };
+    expect(out.libraryInitialTab).toBe('downloads');
+    expect(out.favoriteTags).toEqual([]);
+  });
+
+  it('v7 -> v8 preserves an existing metadata favorites list', () => {
+    const favoriteTags = ['artist:sample_artist'];
+    const out = migrateSettings({ favoriteTags }, 7) as { favoriteTags: string[] };
+    expect(out.favoriteTags).toBe(favoriteTags);
+  });
+
+  it('v8: is a no-op (fields already present, same reference)', () => {
+    const state = {
+      blurTags: ['male:yaoi'],
+      imageCacheMaxBytes: 0,
+      downloadTreeUri: 'content://tree/x',
+      downloadTreeName: 'X',
+      defaultFilterQuery: '',
+      secureScreen: true,
+      libraryInitialTab: 'downloads',
+      favoriteTags: ['artist:sample_artist'],
+    };
+    const out = migrateSettings(state, 8) as {
       downloadTreeUri: string | null;
       secureScreen: boolean;
       libraryInitialTab: string;
+      favoriteTags: string[];
     };
     expect(out.downloadTreeUri).toBe('content://tree/x');
     expect(out.secureScreen).toBe(true);
     expect(out.libraryInitialTab).toBe('downloads');
+    expect(out.favoriteTags).toEqual(['artist:sample_artist']);
     expect(out).toBe(state);
   });
 });

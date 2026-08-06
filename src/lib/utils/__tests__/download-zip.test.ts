@@ -2,12 +2,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { GalleryFile, GgConfig } from '../types';
 import type { DownloadStore } from '@/lib/storage/download-store';
+import type { DBDownload } from '@/lib/db/schema';
 
 // Mock fflate before importing the module under test
-vi.mock('fflate', () => ({
-  zipSync: vi.fn(() => new Uint8Array([1, 2, 3])),
-  strToU8: vi.fn((s: string) => new TextEncoder().encode(s)),
+vi.mock('fflate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fflate')>();
+  return {
+    ...actual,
+    zipSync: vi.fn(() => new Uint8Array([1, 2, 3])),
+    strToU8: vi.fn((s: string) => new TextEncoder().encode(s)),
+  };
+});
+
+const nativeZip = vi.hoisted(() => ({
+  save: vi.fn(),
+  invoke: vi.fn(),
 }));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ save: nativeZip.save }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: nativeZip.invoke }));
 
 // Mock image-url module
 vi.mock('../image-url', () => ({
@@ -36,8 +49,12 @@ vi.mock('@/lib/api/client', () => {
 vi.mock('@/lib/db/download', () => ({
   upsertDownload: vi.fn().mockResolvedValue(undefined),
   updateDownloadProgress: vi.fn().mockResolvedValue(undefined),
+  updateNativeDownloadProgress: vi.fn().mockResolvedValue(true),
   setDownloadError: vi.fn().mockResolvedValue(undefined),
   updateDownloadStatus: vi.fn().mockResolvedValue(undefined),
+  resumeNativeDownloadRun: vi.fn().mockResolvedValue(true),
+  transitionNativeDownloadRun: vi.fn().mockResolvedValue(true),
+  completeNativeDownloadRun: vi.fn().mockResolvedValue(true),
   getDownload: vi.fn().mockResolvedValue(null),
   serializeTags: vi.fn((tags: Record<string, string[]>) => JSON.stringify(tags)),
 }));
@@ -79,17 +96,24 @@ import {
   downloadGalleryToLibrary,
   exportGalleryZip,
   getDownloadedGalleryPages,
+  getDownloadedGalleryTotalBytes,
   getDownloadedImage,
   hasCompleteDownloadedGallery,
+  StaleDownloadRunError,
+  type DownloadProgress,
 } from '../download-zip';
-import { zipSync } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import { getImageUrl } from '../image-url';
 import { apiClient, ApiError } from '@/lib/api/client';
 import {
   upsertDownload,
   setDownloadError,
   updateDownloadProgress,
+  updateNativeDownloadProgress,
   updateDownloadStatus,
+  resumeNativeDownloadRun,
+  transitionNativeDownloadRun,
+  completeNativeDownloadRun,
   getDownload,
 } from '@/lib/db/download';
 import { createDownloadStore, DownloadCancelledError } from '@/lib/storage/download-store';
@@ -183,13 +207,21 @@ function makeMemoryStoreWithCopy() {
 // ── downloadGalleryAsZip (legacy behaviour unchanged) ─────────────────────────
 
 describe('downloadGalleryAsZip', () => {
-  let anchorEl: { href: string; download: string; click: ReturnType<typeof vi.fn> };
+  let anchorEl: {
+    href: string;
+    download: string;
+    click: ReturnType<typeof vi.fn>;
+    remove: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    anchorEl = { href: '', download: '', click: vi.fn() };
+    anchorEl = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
 
-    vi.stubGlobal('document', { createElement: vi.fn(() => anchorEl) });
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchorEl),
+      body: { appendChild: vi.fn() },
+    });
     vi.stubGlobal(
       'Blob',
       class MockBlob {
@@ -377,6 +409,7 @@ describe('downloadGalleryAsZip', () => {
       expect(anchorEl.download).toBe('5 Gallery.zip');
       expect(anchorEl.click).toHaveBeenCalledOnce();
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:fake-url');
+      expect(anchorEl.remove).toHaveBeenCalledOnce();
     });
 
     it('passes level:0 to zipSync', async () => {
@@ -403,6 +436,27 @@ describe('downloadGalleryAsZip', () => {
 describe('downloadGalleryToLibrary', () => {
   let memStore: ReturnType<typeof makeMemoryStore>;
 
+  const nativeRow = (
+    galleryId: number,
+    nativeRunId: string,
+    overrides: Partial<DBDownload> = {},
+  ): DBDownload => ({
+    galleryId,
+    title: `Gallery ${galleryId}`,
+    thumbnail: 'thumb.jpg',
+    tags: '{}',
+    pageCount: 1,
+    totalBytes: 3,
+    downloadedAt: '2026-07-31T00:00:00.000Z',
+    status: 'downloading',
+    folderName: `${galleryId} Gallery ${galleryId}`,
+    queuePosition: 1,
+    retryCount: 0,
+    nextRetryAt: null,
+    nativeRunId,
+    ...overrides,
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     memStore = makeMemoryStore();
@@ -414,12 +468,17 @@ describe('downloadGalleryToLibrary', () => {
     vi.mocked(upsertDownload).mockResolvedValue(undefined);
     vi.mocked(setDownloadError).mockResolvedValue(undefined);
     vi.mocked(updateDownloadProgress).mockResolvedValue(undefined);
+    vi.mocked(updateNativeDownloadProgress).mockResolvedValue(true);
     vi.mocked(updateDownloadStatus).mockResolvedValue(undefined);
+    vi.mocked(resumeNativeDownloadRun).mockResolvedValue(true);
+    vi.mocked(transitionNativeDownloadRun).mockResolvedValue(true);
+    vi.mocked(completeNativeDownloadRun).mockResolvedValue(true);
     vi.mocked(getDownload).mockResolvedValue(null);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('writes each image to the store and stores a manifest', async () => {
@@ -484,8 +543,18 @@ describe('downloadGalleryToLibrary', () => {
 
     // updateDownloadProgress called for pages 2 and 3 (i+1 = 2, 3)
     expect(updateDownloadProgress).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(updateDownloadProgress).mock.calls[0]).toEqual([2, 2, expect.any(Number)]);
-    expect(vi.mocked(updateDownloadProgress).mock.calls[1]).toEqual([2, 3, expect.any(Number)]);
+    expect(vi.mocked(updateDownloadProgress).mock.calls[0]).toEqual([
+      2,
+      2,
+      expect.any(Number),
+      { persist: false },
+    ]);
+    expect(vi.mocked(updateDownloadProgress).mock.calls[1]).toEqual([
+      2,
+      3,
+      expect.any(Number),
+      { persist: true },
+    ]);
 
     const lastUpsert = vi.mocked(upsertDownload).mock.calls[1][0];
     expect(lastUpsert.status).toBe('complete');
@@ -680,6 +749,68 @@ describe('downloadGalleryToLibrary', () => {
     expect(upsertDownload).not.toHaveBeenCalled();
   });
 
+  it('(d) abort after the response body is read does not write a stale page', async () => {
+    const controller = new AbortController();
+    vi.mocked(apiClient.fetchUrl).mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: {
+        get: (h: string) => (h === 'content-type' ? 'image/webp' : null),
+      } as unknown as Headers,
+      arrayBuffer: () => {
+        controller.abort();
+        return Promise.resolve(new Uint8Array([4, 5, 6]).buffer as ArrayBuffer);
+      },
+    } as unknown as Response);
+
+    await expect(
+      downloadGalleryToLibrary(
+        32,
+        'G',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(await memStore.getImage(32, 0, 'webp')).toBeNull();
+    expect(await memStore.getImage(32, -1, 'json')).toBeNull();
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
+
+  it('(d) abort after page storage skips manifest and DB progress writes', async () => {
+    const controller = new AbortController();
+    const putImage = vi
+      .spyOn(memStore, 'putImage')
+      .mockImplementation(async (galleryId, index, bytes, ext) => {
+        memStore.store.set(`${galleryId}/${String(index + 1).padStart(4, '0')}.${ext}`, bytes);
+        controller.abort();
+      });
+
+    await expect(
+      downloadGalleryToLibrary(
+        33,
+        'G',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(putImage).toHaveBeenCalledWith(33, 0, expect.any(Uint8Array), 'webp', {
+      folderName: '33 G',
+    });
+    expect(await memStore.getImage(33, 0, 'webp')).toBeInstanceOf(Uint8Array);
+    expect(await memStore.getImage(33, -1, 'json')).toBeNull();
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
+
   it('(d) does not retry caller AbortError — rethrows immediately', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -754,6 +885,162 @@ describe('downloadGalleryToLibrary', () => {
     expect(lastUpsert.totalBytes).toBe(10); // 5 × 2
   });
 
+  it('throws StaleDownloadRunError when the exact-run completion CAS loses without recording a failure', async () => {
+    const nativeRunId = 'run-complete-aaaaaaaa';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(51, nativeRunId));
+    vi.mocked(completeNativeDownloadRun).mockResolvedValue(false);
+
+    await expect(
+      downloadGalleryToLibrary(
+        51,
+        'Gallery 51',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { nativeRunId },
+      ),
+    ).rejects.toBeInstanceOf(StaleDownloadRunError);
+
+    expect(completeNativeDownloadRun).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 51, status: 'complete', pageCount: 1 }),
+      nativeRunId,
+    );
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+    expect(updateDownloadStatus).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).not.toHaveBeenCalled();
+  });
+
+  it('observes an abort raised by final progress before committing the native run', async () => {
+    const nativeRunId = 'run-abort-aaaaaaaaaa';
+    const controller = new AbortController();
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(52, nativeRunId));
+
+    await expect(
+      downloadGalleryToLibrary(
+        52,
+        'Gallery 52',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        ({ current, total }) => {
+          if (current === total) controller.abort();
+        },
+        controller.signal,
+        { nativeRunId },
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).toHaveBeenCalledWith(52, nativeRunId, 'failed', null, {
+      clearRunId: false,
+    });
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+  });
+
+  it('uses exact-run CAS helpers for native resume, progress, and completion', async () => {
+    const nativeRunId = 'run-resume-aaaaaaaaa';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(53, nativeRunId));
+    await memStore.putImage(53, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(53, 0, new Uint8Array([7]), 'webp');
+
+    await downloadGalleryToLibrary(
+      53,
+      'Gallery 53',
+      'thumb.jpg',
+      [makeFile('first.jpg'), makeFile('second.jpg')],
+      makeGgConfig(),
+      {},
+      undefined,
+      undefined,
+      { resume: true, nativeRunId },
+    );
+
+    expect(resumeNativeDownloadRun).toHaveBeenCalledWith(53, nativeRunId);
+    expect(updateNativeDownloadProgress).toHaveBeenCalledWith(
+      53,
+      nativeRunId,
+      2,
+      expect.any(Number),
+      { persist: true },
+    );
+    expect(completeNativeDownloadRun).toHaveBeenCalledWith(
+      expect.objectContaining({ galleryId: 53, status: 'complete', pageCount: 2 }),
+      nativeRunId,
+    );
+    expect(setDownloadError).not.toHaveBeenCalled();
+    expect(updateDownloadProgress).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+  });
+
+  it('stops without lifecycle writes when a native progress CAS reports stale ownership', async () => {
+    const nativeRunId = 'run-progress-aaaaaaaa';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(54, nativeRunId));
+    vi.mocked(updateNativeDownloadProgress).mockResolvedValue(false);
+
+    await expect(
+      downloadGalleryToLibrary(
+        54,
+        'Gallery 54',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { nativeRunId },
+      ),
+    ).rejects.toBeInstanceOf(StaleDownloadRunError);
+
+    expect(updateNativeDownloadProgress).toHaveBeenCalledWith(
+      54,
+      nativeRunId,
+      1,
+      expect.any(Number),
+      { persist: true },
+    );
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+    expect(updateDownloadStatus).not.toHaveBeenCalled();
+  });
+
+  it('stops before network or DB progress when the native resume CAS reports stale ownership', async () => {
+    const nativeRunId = 'run-resume-bbbbbbbbb';
+    vi.mocked(getDownload).mockResolvedValue(nativeRow(55, nativeRunId));
+    vi.mocked(resumeNativeDownloadRun).mockResolvedValue(false);
+    await memStore.putImage(55, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(55, 0, new Uint8Array([7]), 'webp');
+
+    await expect(
+      downloadGalleryToLibrary(
+        55,
+        'Gallery 55',
+        'thumb.jpg',
+        [makeFile()],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { resume: true, nativeRunId },
+      ),
+    ).rejects.toBeInstanceOf(StaleDownloadRunError);
+
+    expect(apiClient.fetchUrl).not.toHaveBeenCalled();
+    expect(updateNativeDownloadProgress).not.toHaveBeenCalled();
+    expect(updateDownloadProgress).not.toHaveBeenCalled();
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+    expect(transitionNativeDownloadRun).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(setDownloadError).not.toHaveBeenCalled();
+  });
+
   it('calls onProgress once per image', async () => {
     const files = [makeFile('a.jpg'), makeFile('b.jpg'), makeFile('c.jpg')];
     const progress: Array<{ current: number; total: number }> = [];
@@ -820,6 +1107,102 @@ describe('downloadGalleryToLibrary', () => {
 
     const firstUpsert = vi.mocked(upsertDownload).mock.calls[0][0];
     expect(firstUpsert.folderName).toBe('42 My Title');
+  });
+
+  it('marks a new Android public row only when manifest-backed completion succeeds', async () => {
+    vi.stubGlobal('window', {
+      Capacitor: {
+        getPlatform: () => 'android',
+      },
+    });
+
+    await downloadGalleryToLibrary(
+      44,
+      'Public Library',
+      'thumb.jpg',
+      [makeFile()],
+      makeGgConfig(),
+      {},
+    );
+
+    const [activeRow, completedRow] = vi.mocked(upsertDownload).mock.calls.map(([row]) => row);
+    expect(activeRow).toMatchObject({
+      galleryId: 44,
+      status: 'downloading',
+      folderName: '44 Public Library',
+      migratedAt: null,
+    });
+    expect(completedRow).toMatchObject({
+      galleryId: 44,
+      status: 'complete',
+      folderName: '44 Public Library',
+      migratedAt: expect.any(String),
+    });
+  });
+
+  it('rejects an empty gallery without publishing storage or a completion watermark', async () => {
+    vi.stubGlobal('window', {
+      Capacitor: {
+        getPlatform: () => 'android',
+      },
+    });
+    const putImage = vi.spyOn(memStore, 'putImage');
+
+    await expect(
+      downloadGalleryToLibrary(46, 'Empty Gallery', 'thumb.jpg', [], makeGgConfig(), {}),
+    ).rejects.toThrow('Gallery has no downloadable files');
+
+    expect(getDownload).not.toHaveBeenCalled();
+    expect(createDownloadStore).not.toHaveBeenCalled();
+    expect(putImage).not.toHaveBeenCalled();
+    expect(upsertDownload).not.toHaveBeenCalled();
+    expect(completeNativeDownloadRun).not.toHaveBeenCalled();
+  });
+
+  it('keeps a zero-page Android failure unmarked when no public manifest was published', async () => {
+    vi.stubGlobal('window', {
+      Capacitor: {
+        getPlatform: () => 'android',
+      },
+    });
+    vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network unavailable'));
+
+    await expect(
+      downloadGalleryToLibrary(45, 'No Manifest', 'thumb.jpg', [makeFile()], makeGgConfig(), {}),
+    ).rejects.toThrow('Network unavailable');
+
+    expect(vi.mocked(upsertDownload).mock.calls.at(-1)?.[0]).toMatchObject({
+      galleryId: 45,
+      status: 'failed',
+      pageCount: 0,
+      migratedAt: null,
+    });
+  });
+
+  it('reuses an existing persisted folderName while resuming', async () => {
+    vi.mocked(getDownload).mockResolvedValue({
+      galleryId: 43,
+      title: 'Old',
+      thumbnail: 'thumb.jpg',
+      tags: '{}',
+      pageCount: 1,
+      totalBytes: 1,
+      downloadedAt: '2026-01-01T00:00:00.000Z',
+      status: 'failed',
+      folderName: '43 Persisted Folder',
+    });
+    const putImage = vi.spyOn(memStore, 'putImage');
+
+    await downloadGalleryToLibrary(43, 'New Title', 'thumb.jpg', [makeFile()], makeGgConfig(), {});
+
+    expect(putImage).toHaveBeenCalledWith(43, 0, expect.any(Uint8Array), 'webp', {
+      folderName: '43 Persisted Folder',
+    });
+    expect(vi.mocked(upsertDownload).mock.calls.at(-1)?.[0]).toMatchObject({
+      galleryId: 43,
+      status: 'complete',
+      folderName: '43 Persisted Folder',
+    });
   });
 
   // AC-003: user cancel (SAF picker backout via ensureReady) before any page is
@@ -1048,6 +1431,31 @@ describe('downloadGalleryToLibrary', () => {
     expect(lastUpsert.pageCount).toBe(3);
   });
 
+  it('resume propagates a manifest provider error instead of assuming an empty gallery', async () => {
+    const providerError = new Error('filesystem permission temporarily unavailable');
+    vi.mocked(createDownloadStore).mockResolvedValue({
+      ...memStore,
+      getImage: vi.fn(async () => {
+        throw providerError;
+      }),
+    });
+
+    await expect(
+      downloadGalleryToLibrary(
+        23,
+        'G',
+        'thumb.jpg',
+        [makeFile('a')],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { resume: true },
+      ),
+    ).rejects.toBe(providerError);
+    expect(apiClient.fetchUrl).not.toHaveBeenCalled();
+  });
+
   // resume-verify-all-pages: when the store exposes the cheap imageExists probe,
   // resume uses it (stat, no byte read) — and a size-0 page is treated missing.
   it('resume uses store.imageExists when available and refetches a torn (size-0) page', async () => {
@@ -1211,6 +1619,19 @@ describe('getDownloadedGalleryPages', () => {
       { index: 2, ext: 'jpg' },
     ]);
   });
+
+  it('sums verified page bytes and reports a page that disappeared', async () => {
+    await memStore.putImage(8, 0, new Uint8Array([1, 2, 3]), 'webp');
+    await memStore.putImage(8, 1, new Uint8Array([4, 5]), 'jpg');
+    const pages = [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'jpg' },
+    ];
+
+    await expect(getDownloadedGalleryTotalBytes(8, pages)).resolves.toBe(5);
+    memStore.store.delete('8/0002.jpg');
+    await expect(getDownloadedGalleryTotalBytes(8, pages)).resolves.toBeNull();
+  });
 });
 
 describe('getDownloadedImage', () => {
@@ -1242,6 +1663,105 @@ describe('getDownloadedImage', () => {
 
     const result = await getDownloadedImage(11, 1);
     expect(result).toEqual(imageBytes);
+  });
+
+  it('returns null for a zero-byte torn page', async () => {
+    await memStore.putImage(13, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(13, 0, new Uint8Array(), 'webp');
+
+    await expect(getDownloadedImage(13, 0)).resolves.toBeNull();
+  });
+});
+
+describe('hasCompleteDownloadedGallery', () => {
+  let memStore: ReturnType<typeof makeMemoryStore>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    memStore = makeMemoryStore();
+    vi.mocked(createDownloadStore).mockResolvedValue(memStore);
+  });
+
+  it('returns true when manifest covers expected pages and every file exists', async () => {
+    await memStore.putImage(
+      31,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(31, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(31, 1, new Uint8Array([2]), 'jpg');
+
+    await expect(hasCompleteDownloadedGallery(31, 2)).resolves.toBe(true);
+  });
+
+  it('uses an adapter batch existence check instead of probing pages one by one', async () => {
+    await memStore.putImage(
+      35,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    const allImagesExist = vi.fn(async () => true);
+    const imageExists = vi.fn(async () => {
+      throw new Error('per-page probe should not run');
+    });
+    vi.mocked(createDownloadStore).mockResolvedValue({
+      ...memStore,
+      allImagesExist,
+      imageExists,
+    });
+
+    await expect(hasCompleteDownloadedGallery(35, 2)).resolves.toBe(true);
+    expect(allImagesExist).toHaveBeenCalledWith(35, ['webp', 'jpg'], undefined);
+    expect(imageExists).not.toHaveBeenCalled();
+  });
+
+  it('returns false when manifest covers pageCount but a page file is missing', async () => {
+    await memStore.putImage(
+      32,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    await memStore.putImage(32, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(32, 2)).resolves.toBe(false);
+  });
+
+  it('propagates an unknown page read error instead of treating it as missing', async () => {
+    await memStore.putImage(36, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    const providerError = new Error('storage provider unavailable');
+    vi.mocked(createDownloadStore).mockResolvedValue({
+      ...memStore,
+      getImage: vi.fn(async (galleryId, index, ext) => {
+        if (index === -1) return memStore.getImage(galleryId, index, ext);
+        throw providerError;
+      }),
+    });
+
+    await expect(hasCompleteDownloadedGallery(36, 1)).rejects.toBe(providerError);
+  });
+
+  it('returns false when the manifest is shorter than the expected pageCount', async () => {
+    await memStore.putImage(33, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(33, 0, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(33, 2)).resolves.toBe(false);
+  });
+
+  it('returns false when the manifest has stale extra pages beyond the expected pageCount', async () => {
+    await memStore.putImage(
+      34,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'webp', 'webp'])),
+      'json',
+    );
+    await memStore.putImage(34, 0, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 1, new Uint8Array([1]), 'webp');
+    await memStore.putImage(34, 2, new Uint8Array([1]), 'webp');
+
+    await expect(hasCompleteDownloadedGallery(34, 2)).resolves.toBe(false);
   });
 });
 
@@ -1305,23 +1825,92 @@ describe('hasCompleteDownloadedGallery', () => {
 
 describe('exportGalleryZip', () => {
   let memStore: ReturnType<typeof makeMemoryStore>;
-  let anchorEl: { href: string; download: string; click: ReturnType<typeof vi.fn> };
+  let anchorEl: {
+    href: string;
+    download: string;
+    click: ReturnType<typeof vi.fn>;
+    remove: ReturnType<typeof vi.fn>;
+  };
+  let nativeChunks: Uint8Array[];
+  let blobParts: unknown[];
+
+  function downloadRow(
+    galleryId: number,
+    pageCount: number,
+    overrides: Partial<DBDownload> = {},
+  ): DBDownload {
+    return {
+      galleryId,
+      title: `Gallery ${galleryId}`,
+      thumbnail: '',
+      tags: '{}',
+      pageCount,
+      totalBytes: 0,
+      downloadedAt: '2026-07-31T00:00:00.000Z',
+      status: 'complete',
+      folderName: null,
+      ...overrides,
+    };
+  }
+
+  function configureNativeInvoke(options?: { writeError?: Error; commitError?: Error }) {
+    nativeZip.invoke.mockImplementation(
+      async (command: string, args?: Record<string, unknown>): Promise<unknown> => {
+        if (command === 'begin_zip_export') return 73;
+        if (command === 'write_zip_export') {
+          if (options?.writeError) throw options.writeError;
+          const data = args?.data as Uint8Array;
+          nativeChunks.push(data.slice());
+          return data.byteLength;
+        }
+        if (command === 'commit_zip_export') {
+          if (options?.commitError) throw options.commitError;
+          return undefined;
+        }
+        if (command === 'abort_zip_export') return undefined;
+        throw new Error(`Unexpected native command: ${command}`);
+      },
+    );
+  }
 
   beforeEach(() => {
     vi.clearAllMocks();
     memStore = makeMemoryStore();
     vi.mocked(createDownloadStore).mockResolvedValue(memStore);
     vi.mocked(zipSync).mockReturnValue(new Uint8Array([1, 2, 3]));
+    vi.mocked(getDownload).mockImplementation(async (galleryId) => {
+      const manifest = memStore.store.get(`${galleryId}/0000.json`);
+      let pageCount = 1;
+      if (manifest) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(manifest)) as unknown;
+          if (Array.isArray(parsed) && parsed.length > 0) pageCount = parsed.length;
+        } catch {
+          // Keep a positive DB page count so malformed-manifest tests reach
+          // the manifest validation path rather than metadata validation.
+        }
+      }
+      return downloadRow(galleryId, pageCount);
+    });
 
-    anchorEl = { href: '', download: '', click: vi.fn() };
-    vi.stubGlobal('document', { createElement: vi.fn(() => anchorEl) });
+    anchorEl = { href: '', download: '', click: vi.fn(), remove: vi.fn() };
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchorEl),
+      body: { appendChild: vi.fn() },
+    });
+    nativeChunks = [];
+    blobParts = [];
+    nativeZip.save.mockResolvedValue('C:\\Exports\\gallery.zip');
+    configureNativeInvoke();
     vi.stubGlobal(
       'Blob',
       class MockBlob {
         constructor(
           public parts: unknown[],
           public options: unknown,
-        ) {}
+        ) {
+          blobParts = parts;
+        }
       },
     );
     const origURL = globalThis.URL;
@@ -1351,6 +1940,87 @@ describe('exportGalleryZip', () => {
     );
   });
 
+  it('throws when the stored manifest is empty or corrupt instead of creating an empty zip', async () => {
+    await memStore.putImage(
+      999,
+      -1,
+      new TextEncoder().encode(JSON.stringify({ 0: 'webp' })),
+      'json',
+    );
+
+    await expect(exportGalleryZip(999, 'Corrupt')).rejects.toThrow(
+      'Downloaded manifest for gallery 999 is empty or corrupt',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(anchorEl.click).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsafe manifest extensions before reading pages or creating a zip', async () => {
+    await memStore.putImage(
+      996,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp/../../escape'])),
+      'json',
+    );
+
+    await expect(exportGalleryZip(996, 'Unsafe')).rejects.toThrow('unsafe file extension');
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(anchorEl.click).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manifest whose page count differs from the complete DB row', async () => {
+    await memStore.putImage(
+      995,
+      -1,
+      new TextEncoder().encode(JSON.stringify(['webp', 'jpg'])),
+      'json',
+    );
+    vi.mocked(getDownload).mockResolvedValue(downloadRow(995, 3));
+
+    await expect(exportGalleryZip(995, 'Mismatched')).rejects.toThrow(
+      'manifest page count 2 does not match database page count 3',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+  });
+
+  it('rejects a DB row that is no longer complete', async () => {
+    await memStore.putImage(994, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    vi.mocked(getDownload).mockResolvedValue(downloadRow(994, 1, { status: 'failed' }));
+
+    await expect(exportGalleryZip(994, 'Failed')).rejects.toThrow(
+      'gallery 994 is not complete (status: failed)',
+    );
+    expect(zipSync).not.toHaveBeenCalled();
+  });
+
+  it('uses caller metadata and exact folderName when the DB lookup fails', async () => {
+    const folderName = '993 Exact SAF Folder';
+    await memStore.putImage(993, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(993, 0, new Uint8Array([9, 9]), 'webp');
+    vi.mocked(getDownload).mockRejectedValue(new Error('database unavailable'));
+    const getImage = vi.spyOn(memStore, 'getImage');
+
+    await expect(
+      exportGalleryZip(993, 'Fallback', undefined, {
+        folderName,
+        pageCount: 1,
+        status: 'complete',
+      }),
+    ).resolves.toBe('started');
+
+    expect(getImage).toHaveBeenCalledWith(993, -1, 'json', { folderName });
+    expect(getImage).toHaveBeenCalledWith(993, 0, 'webp', { folderName });
+  });
+
+  it('throws when a manifest page exists as a zero-byte torn file', async () => {
+    await memStore.putImage(997, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(997, 0, new Uint8Array(), 'webp');
+
+    await expect(exportGalleryZip(997, 'Torn')).rejects.toThrow(
+      'Missing downloaded page 1 for gallery 997',
+    );
+  });
+
   it('builds a zip from stored images and triggers download', async () => {
     // Set up a gallery with 2 pages
     const exts = ['webp', 'jpg'];
@@ -1358,7 +2028,7 @@ describe('exportGalleryZip', () => {
     await memStore.putImage(42, 0, new Uint8Array([1, 2]), 'webp');
     await memStore.putImage(42, 1, new Uint8Array([3, 4, 5]), 'jpg');
 
-    await exportGalleryZip(42, 'My Gallery');
+    await expect(exportGalleryZip(42, 'My Gallery')).resolves.toBe('started');
 
     // zipSync should have been called with both pages
     expect(zipSync).toHaveBeenCalledOnce();
@@ -1371,6 +2041,87 @@ describe('exportGalleryZip', () => {
     expect(anchorEl.download).toBe('42 My Gallery.zip');
     expect(anchorEl.click).toHaveBeenCalledOnce();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:fake-url');
+    expect(anchorEl.remove).toHaveBeenCalledOnce();
+    expect(blobParts[0]).toBe(vi.mocked(zipSync).mock.results[0].value.buffer);
+  });
+
+  it('streams a valid ZIP to a native save-dialog path on Tauri', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    const exts = ['webp', 'jpg'];
+    await memStore.putImage(42, -1, new TextEncoder().encode(JSON.stringify(exts)), 'json');
+    await memStore.putImage(42, 0, new Uint8Array([1, 2]), 'webp');
+    await memStore.putImage(42, 1, new Uint8Array([3, 4, 5]), 'jpg');
+    const progress: DownloadProgress[] = [];
+
+    await expect(exportGalleryZip(42, 'My Gallery', (value) => progress.push(value))).resolves.toBe(
+      'saved',
+    );
+
+    expect(nativeZip.save).toHaveBeenCalledWith({
+      defaultPath: '42 My Gallery.zip',
+      filters: [{ name: 'ZIP archive', extensions: ['zip'] }],
+    });
+    expect(nativeZip.invoke).toHaveBeenCalledWith('begin_zip_export', {
+      destination: 'C:\\Exports\\gallery.zip',
+    });
+    expect(nativeZip.invoke).toHaveBeenCalledWith('commit_zip_export', {
+      exportId: 73,
+    });
+    expect(nativeZip.invoke).not.toHaveBeenCalledWith('abort_zip_export', expect.anything());
+    expect(zipSync).not.toHaveBeenCalled();
+    expect(document.createElement).not.toHaveBeenCalled();
+    expect(progress).toEqual([
+      { current: 1, total: 2 },
+      { current: 2, total: 2 },
+    ]);
+
+    const archiveLength = nativeChunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    const archive = new Uint8Array(archiveLength);
+    let offset = 0;
+    for (const chunk of nativeChunks) {
+      archive.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const files = unzipSync(archive);
+    expect(files['0001.webp']).toEqual(new Uint8Array([1, 2]));
+    expect(files['0002.jpg']).toEqual(new Uint8Array([3, 4, 5]));
+  });
+
+  it('treats cancelling the Tauri save dialog as a no-op', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    nativeZip.save.mockResolvedValue(null);
+    await memStore.putImage(7, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(7, 0, new Uint8Array([1]), 'webp');
+
+    await expect(exportGalleryZip(7, 'Cancelled')).resolves.toBe('cancelled');
+
+    expect(nativeZip.invoke).not.toHaveBeenCalled();
+    expect(document.createElement).not.toHaveBeenCalled();
+  });
+
+  it('propagates native ZIP write failures and aborts the staged file', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    configureNativeInvoke({ writeError: new Error('disk full') });
+    await memStore.putImage(8, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(8, 0, new Uint8Array([1]), 'webp');
+
+    await expect(exportGalleryZip(8, 'Write Failure')).rejects.toThrow('disk full');
+
+    expect(nativeZip.invoke).not.toHaveBeenCalledWith('commit_zip_export', expect.anything());
+    expect(nativeZip.invoke).toHaveBeenCalledWith('abort_zip_export', { exportId: 73 });
+    expect(document.createElement).not.toHaveBeenCalled();
+  });
+
+  it('aborts the staged file when the atomic commit fails', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    configureNativeInvoke({ commitError: new Error('permission denied') });
+    await memStore.putImage(9, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    await memStore.putImage(9, 0, new Uint8Array([1]), 'webp');
+
+    await expect(exportGalleryZip(9, 'Commit Failure')).rejects.toThrow('permission denied');
+
+    expect(nativeZip.invoke).toHaveBeenCalledWith('commit_zip_export', { exportId: 73 });
+    expect(nativeZip.invoke).toHaveBeenCalledWith('abort_zip_export', { exportId: 73 });
   });
 
   it('uses level:0 compression (images already compressed)', async () => {

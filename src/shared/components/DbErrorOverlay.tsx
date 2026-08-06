@@ -38,7 +38,7 @@ export function DbErrorOverlay() {
   return (
     <div
       role="alert"
-      className="fixed inset-x-0 bottom-0 z-[100] border-t border-amber-300 bg-amber-50 px-4 py-3 shadow-lg dark:border-amber-900/60 dark:bg-amber-950"
+      className="fixed inset-x-0 bottom-0 z-[100] border-t border-amber-300 bg-amber-50 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-lg dark:border-amber-900/60 dark:bg-amber-950"
     >
       <div className="mx-auto flex max-w-3xl items-start gap-2">
         <svg

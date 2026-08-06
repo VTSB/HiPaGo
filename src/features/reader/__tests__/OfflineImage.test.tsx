@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { OfflineImage } from '../components/OfflineImage';
 import type { OfflineImageSource } from '../hooks/useOfflineImages';
+
+vi.mock('@/lib/i18n/useT', () => ({
+  useT: () => (key: string) =>
+    ({
+      'reader.retry': 'Retry',
+      'reader.imageLoadFailed': 'Could not load this page',
+    })[key] ?? key,
+}));
 
 const mockRevokeObjectURL = vi.fn();
 
@@ -49,5 +57,34 @@ describe('OfflineImage', () => {
 
     await waitFor(() => expect(source.loadUrl).toHaveBeenCalledTimes(1));
     expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('releases the failed blob and invokes the source again when retry is clicked', async () => {
+    const loadUrl = vi
+      .fn<NonNullable<OfflineImageSource['loadUrl']>>()
+      .mockResolvedValueOnce('blob:page-0-failed')
+      .mockResolvedValueOnce('blob:page-0-retry');
+    const source: OfflineImageSource = {
+      index: 0,
+      ext: 'webp',
+      loadUrl,
+    };
+
+    render(<OfflineImage source={source} alt="Page 1" loading="eager" />);
+
+    const firstImage = screen.getByRole('img', { name: 'Page 1' });
+    await waitFor(() => expect(firstImage).toHaveAttribute('src', 'blob:page-0-failed'));
+    fireEvent.error(firstImage);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry: Page 1' }));
+
+    await waitFor(() => expect(loadUrl).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'Page 1' })).toHaveAttribute(
+        'src',
+        'blob:page-0-retry',
+      ),
+    );
+    expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:page-0-failed');
   });
 });

@@ -12,22 +12,26 @@ import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import {
   listLibraryDownloads,
   searchDownloads,
+  getDownload,
   deleteDownload,
   deserializeTags,
 } from '@/lib/db/download';
-import { enqueueDownload } from '@/lib/db/download-queue';
 import { clearAutoRetry, AUTO_RETRY_MAX } from '@/lib/db/download-retry';
 import {
   DOWNLOAD_LIBRARY_CHANGED_EVENT,
   processQueue,
   useDownloadProgressStore,
 } from '@/lib/store/download-progress';
+import { useZipExportStore } from '@/lib/store/zip-export';
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
 import type { TagType } from '@/lib/utils/types';
 import { galleryHref } from '@/lib/utils/routes';
 import { hasCompleteDownloadedGallery, type DownloadProgress } from '@/lib/utils/download-zip';
+import { useSettingsStore } from '@/lib/store/settings';
+import { prioritizeFavorites, toFavoriteTagKey } from '@/lib/utils/tag-favorites';
+import { downloadProgressPercent } from '@/lib/utils/download-progress-percent';
 
 // Match the gallery-list grid (GalleryGrid GRID_AUTO) so downloaded items read
 // as the same cover-forward cards.
@@ -36,6 +40,9 @@ const GRID_CLASS =
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 const INITIAL_RENDER_COUNT = 80;
 const RENDER_BATCH_SIZE = 80;
+const DOWNLOAD_STORAGE_USAGE_QUERY_KEY = ['download-storage-usage'] as const;
+
+type DownloadIntegrity = 'present' | 'missing' | 'unknown';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,7 +65,7 @@ function CoverBadge({
   progressLabel,
   autoRetryLabel,
 }: {
-  status: DBDownload['status'];
+  status: DBDownload['status'] | 'waiting';
   progressLabel?: string | null;
   /** When set on a failed row, shows the staged-auto-restart annotation
    *  ("Auto-retry in <time> (attempt k/3)") in amber instead of a red Failed. */
@@ -68,17 +75,22 @@ function CoverBadge({
   if (status === 'complete') return null;
 
   const isDownloading = status === 'downloading';
-  const isAutoRetry = !isDownloading && !!autoRetryLabel;
+  const isWaiting = status === 'waiting';
+  const isAutoRetry = !isDownloading && !isWaiting && !!autoRetryLabel;
   const colorClass = isDownloading
     ? 'bg-blue-600/90 text-white'
-    : isAutoRetry
-      ? 'bg-amber-500/90 text-white'
-      : 'bg-red-600/90 text-white';
+    : isWaiting
+      ? 'bg-zinc-700/90 text-white'
+      : isAutoRetry
+        ? 'bg-amber-500/90 text-white'
+        : 'bg-red-600/90 text-white';
   const label = isDownloading
     ? (progressLabel ?? t('library.status.downloading'))
-    : isAutoRetry
-      ? autoRetryLabel
-      : t('library.status.failed');
+    : isWaiting
+      ? t('library.queue.queued')
+      : isAutoRetry
+        ? autoRetryLabel
+        : t('library.status.failed');
 
   return (
     <span
@@ -149,10 +161,13 @@ interface LibraryCardProps {
   item: DBDownload;
   localCoverUrl?: string | null;
   onDelete: (item: DBDownload) => void;
-  onExport: (galleryId: number, title: string) => void;
+  onExport: (item: DBDownload) => void;
   onRetry: (item: DBDownload) => void;
   isRetrying: boolean;
+  isExporting: boolean;
+  isDeleting: boolean;
   retryProgress: DownloadProgress | null;
+  isNativeWaiting?: boolean;
   /** Live "auto-retry pending" state from the store, fresher than the DB row on
    *  a just-failed item (the library-list query may not have refetched yet). */
   retryOverride?: { retryAt?: string | null; attempt?: number | null } | null;
@@ -243,16 +258,20 @@ function LibraryCard({
   onExport,
   onRetry,
   isRetrying,
+  isExporting,
+  isDeleting,
   retryProgress,
+  isNativeWaiting = false,
   retryOverride,
   isMissingFiles = false,
   canExport = false,
 }: LibraryCardProps) {
   const t = useT();
+  const favoriteTags = useSettingsStore((state) => state.favoriteTags ?? []);
   const effectiveStatus: DBDownload['status'] =
     item.status === 'complete' && isMissingFiles ? 'failed' : item.status;
   const isFailed = effectiveStatus === 'failed';
-  const showDownloading = item.status === 'downloading' || isRetrying;
+  const showDownloading = (item.status === 'downloading' && !isNativeWaiting) || isRetrying;
 
   // The live store entry (retryOverride) is fresher than the DB row on a
   // just-failed item, so prefer it for the auto-retry annotation.
@@ -288,15 +307,11 @@ function LibraryCard({
       }
     }
     all.sort((a, b) => a.priority - b.priority);
-    return all;
-  }, [tagEntries]);
+    return prioritizeFavorites(all, favoriteTags, ({ tag, type }) => toFavoriteTagKey(type, tag));
+  }, [tagEntries, favoriteTags]);
 
   const progressLabel = retryProgress
-    ? `${retryProgress.current}/${retryProgress.total} · ${
-        retryProgress.total > 0
-          ? Math.round((retryProgress.current / retryProgress.total) * 100)
-          : 0
-      }%`
+    ? `${retryProgress.current}/${retryProgress.total} · ${downloadProgressPercent(retryProgress)}%`
     : null;
   const rememberCurrentListUrl = useCallback(() => {
     try {
@@ -317,7 +332,7 @@ function LibraryCard({
       items.push({
         key: 'export',
         label: t('library.exportZip'),
-        onClick: () => onExport(item.galleryId, item.title),
+        onClick: () => onExport(item),
       });
     }
     items.push({
@@ -353,10 +368,10 @@ function LibraryCard({
           )}
 
           {/* Status overlay (top-left) — a badge, not buttons. */}
-          {(showDownloading || isFailed) && (
+          {(showDownloading || isNativeWaiting || isFailed) && (
             <div className="absolute left-1.5 top-1.5">
               <CoverBadge
-                status={isFailed ? 'failed' : 'downloading'}
+                status={isFailed ? 'failed' : isNativeWaiting ? 'waiting' : 'downloading'}
                 progressLabel={progressLabel}
                 autoRetryLabel={isFailed && !isRetrying ? autoRetryLabel : null}
               />
@@ -389,7 +404,7 @@ function LibraryCard({
       </Link>
 
       {/* Overflow menu — sibling of the Link so taps don't navigate. Hidden mid-retry. */}
-      {!isRetrying && (
+      {!isRetrying && !isExporting && !isDeleting && (
         <div className="absolute right-1.5 top-1.5">
           <OverflowMenu label={t('library.more')} items={menuItems} />
         </div>
@@ -440,24 +455,16 @@ function SearchInputSimple({ value, onChange, placeholder }: SearchInputSimplePr
 
 function StorageIndicator() {
   const t = useT();
-  const [usageBytes, setUsageBytes] = useState<number | null>(null);
+  const { data: usageBytes } = useQuery({
+    queryKey: DOWNLOAD_STORAGE_USAGE_QUERY_KEY,
+    queryFn: async () => {
+      const store = await createDownloadStore();
+      return store.usage();
+    },
+    staleTime: Infinity,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    createDownloadStore()
-      .then((store) => store.usage())
-      .then((bytes) => {
-        if (!cancelled) setUsageBytes(bytes);
-      })
-      .catch(() => {
-        /* storage unavailable */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (usageBytes === null) return null;
+  if (usageBytes == null) return null;
 
   return (
     <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -483,12 +490,15 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_COUNT);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const exportingIdsRef = useRef<Set<number>>(new Set());
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const activeZipExport = useZipExportStore((state) => state.active);
+  const zipExportNotice = useZipExportStore((state) => state.notice);
+  const deletingGalleryIds = useZipExportStore((state) => state.deletingGalleryIds);
   // Live per-gallery download progress from the queue processor (store). The
   // processor is the SOLE download authority now — no second single-flight here.
   const storeEntries = useDownloadProgressStore((s) => s.entries);
-  const refreshQueue = useDownloadProgressStore((s) => s.refreshQueue);
+  const downloadedFlags = useDownloadProgressStore((s) => s.downloaded);
+  const hasQueuedWork = useDownloadProgressStore((s) => s.queue.length > 0);
 
   const handleQueryChange = useCallback((v: string) => {
     setRawQuery(v);
@@ -504,11 +514,14 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   );
 
   useEffect(() => {
-    const onLibraryChanged = () => {
+    const onLibraryChanged = (event: Event) => {
+      const structural = event instanceof CustomEvent ? event.detail?.structural === true : true;
+      if (!structural) return;
       void queryClient.invalidateQueries({ queryKey: ['library-list'] });
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
       void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       void queryClient.invalidateQueries({ queryKey: ['download-covers'] });
+      void queryClient.invalidateQueries({ queryKey: DOWNLOAD_STORAGE_USAGE_QUERY_KEY });
     };
     window.addEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
     return () => window.removeEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
@@ -551,12 +564,21 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const hasMoreRenderedItems = renderLimit < totalCount;
 
   const { data: coverUrls = {} } = useQuery({
-    queryKey: ['download-covers', visibleGalleryIds],
+    queryKey: [
+      'download-covers',
+      visibleItems.map((item) => `${item.galleryId}:${item.folderName ?? ''}`).join('|'),
+    ],
     queryFn: async () => {
       const store = await createDownloadStore();
       if (!store.coverUrl) return {};
       const pairs = await Promise.all(
-        visibleGalleryIds.map(async (id) => [id, await store.coverUrl?.(id)] as const),
+        visibleItems.map(
+          async (item) =>
+            [
+              item.galleryId,
+              await store.coverUrl?.(item.galleryId, { folderName: item.folderName ?? null }),
+            ] as const,
+        ),
       );
       return Object.fromEntries(pairs.filter(([, url]) => !!url)) as Record<number, string>;
     },
@@ -569,7 +591,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     [visibleItems],
   );
   const completeIntegrityKey = useMemo(
-    () => completeVisibleItems.map((item) => `${item.galleryId}:${item.pageCount}`).join('|'),
+    () =>
+      completeVisibleItems
+        .map((item) => `${item.galleryId}:${item.folderName ?? ''}:${item.pageCount}`)
+        .join('|'),
     [completeVisibleItems],
   );
 
@@ -578,16 +603,23 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     queryFn: async () => {
       const pairs = await Promise.all(
         completeVisibleItems.map(async (item) => {
-          const ok =
-            (item.pageCount ?? 0) > 0
-              ? await hasCompleteDownloadedGallery(item.galleryId, item.pageCount).catch(
-                  () => false,
-                )
-              : false;
-          return [item.galleryId, ok] as const;
+          let integrity: DownloadIntegrity = 'missing';
+          if ((item.pageCount ?? 0) > 0) {
+            try {
+              integrity = (await hasCompleteDownloadedGallery(item.galleryId, item.pageCount, {
+                folderName: item.folderName ?? null,
+              }))
+                ? 'present'
+                : 'missing';
+            } catch {
+              // Provider/IPC errors are not evidence that files are absent.
+              integrity = 'unknown';
+            }
+          }
+          return [item.galleryId, integrity] as const;
         }),
       );
-      return Object.fromEntries(pairs) as Record<number, boolean>;
+      return Object.fromEntries(pairs) as Record<number, DownloadIntegrity>;
     },
     enabled: completeVisibleItems.length > 0,
     staleTime: 0,
@@ -616,94 +648,136 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   // Delete handler: remove DB row + DownloadStore files, then invalidate queries
   const handleDelete = useCallback(
     async (item: DBDownload) => {
+      if (useZipExportStore.getState().active?.galleryId === item.galleryId) return;
       if (!window.confirm(t('library.confirmDelete'))) return;
       const galleryId = item.galleryId;
+      if (!useZipExportStore.getState().claimDelete(galleryId)) return;
+      setDeleteError(null);
       try {
         const liveEntry = useDownloadProgressStore.getState().entries[galleryId];
-        if (item.status === 'downloading' || !!liveEntry?.progress) {
-          useDownloadProgressStore.getState().cancel(galleryId);
+        // Capture the latest storage identity before cancel; an exact zero-page
+        // native cancel may legitimately remove its DB row.
+        const beforeCancelItem = await getDownload(galleryId);
+        // Always cross the store's cancellation barrier before touching files.
+        // This covers a queue claim/re-download that may have started after the
+        // rendered `item` snapshot was read. Complete idle rows are a safe no-op.
+        const cancelled = await useDownloadProgressStore.getState().cancel(galleryId);
+        if (!cancelled) {
+          throw new Error('download worker cancellation could not be confirmed');
         }
-        if (item.status === 'failed' && item.nextRetryAt) {
+        // Cancellation may have committed newer folder metadata than the
+        // rendered card snapshot. Read it only after all writers are quiescent;
+        // a read failure must not orphan the real folder by deleting only DB.
+        const latestItem = await getDownload(galleryId);
+        if (
+          (latestItem?.status ?? item.status) === 'failed' &&
+          (latestItem?.nextRetryAt || item.nextRetryAt || liveEntry?.retryAt)
+        ) {
           await clearAutoRetry(galleryId).catch(() => {});
           useDownloadProgressStore.getState().clearRetryPending(galleryId);
         }
+        // Keep the DB row until the physical folder has been removed.
+        const store = await createDownloadStore();
+        await store.deleteGallery(galleryId, {
+          folderName:
+            latestItem?.folderName ?? beforeCancelItem?.folderName ?? item.folderName ?? null,
+        });
         await deleteDownload(galleryId);
-        try {
-          const store = await createDownloadStore();
-          await store.deleteGallery(galleryId);
-        } catch {
-          // Storage adapter may not be present or files already gone — DB row is still removed
-        }
-      } catch {
-        // DB delete failed — nothing to do
+        await useDownloadProgressStore.getState().refreshQueue();
+        const zipExportState = useZipExportStore.getState();
+        if (zipExportState.notice?.galleryId === galleryId) zipExportState.clearNotice();
+      } catch (e) {
+        console.error('Delete download failed:', e);
+        setDeleteError(t('library.deleteFailed'));
+        return;
+      } finally {
+        useZipExportStore.getState().releaseDelete(galleryId);
+        // A deletion claim temporarily blocks this gallery from being claimed
+        // by the download processor. Resume the queue once the filesystem/DB
+        // transaction has either committed or failed closed.
+        void processQueue();
       }
-      queryClient.invalidateQueries({ queryKey: ['library-list'] });
-      queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      void queryClient.invalidateQueries({ queryKey: ['library-list'] });
+      void queryClient.invalidateQueries({ queryKey: ['library-search'] });
+      void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
+      void queryClient.invalidateQueries({ queryKey: ['download-covers'] });
+      void queryClient.invalidateQueries({ queryKey: DOWNLOAD_STORAGE_USAGE_QUERY_KEY });
     },
     [t, queryClient],
   );
 
   // Export a downloaded gallery's stored images back out as a ZIP.
   const handleExport = useCallback(
-    async (galleryId: number, title: string) => {
-      if (exportingIdsRef.current.has(galleryId)) return;
-      exportingIdsRef.current.add(galleryId);
-      setExportError(null);
+    async (item: DBDownload) => {
+      const { galleryId, title } = item;
+      const token = useZipExportStore.getState().begin(galleryId, title);
+      if (token === null) return;
       try {
         const { exportGalleryZip } = await import('@/lib/utils/download-zip');
-        await exportGalleryZip(galleryId, title);
+        const result = await exportGalleryZip(
+          galleryId,
+          title,
+          (progress) => {
+            useZipExportStore.getState().updateProgress(token, progress);
+          },
+          {
+            folderName: item.folderName ?? null,
+            pageCount: item.pageCount,
+            status: item.status,
+          },
+        );
+        const zipExportState = useZipExportStore.getState();
+        if (result === 'cancelled') zipExportState.cancel(token);
+        else zipExportState.finish(token, result);
       } catch (e) {
         console.error('Export failed:', e);
-        setExportError(t('library.exportFailed'));
+        useZipExportStore
+          .getState()
+          .fail(
+            token,
+            e instanceof Error && e.name === 'ZipExportSourceError' ? 'source' : 'storage',
+          );
         void queryClient.invalidateQueries({ queryKey: ['library-list'] });
         void queryClient.invalidateQueries({ queryKey: ['library-search'] });
-      } finally {
-        exportingIdsRef.current.delete(galleryId);
+        void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       }
     },
-    [t, queryClient],
+    [queryClient],
   );
 
-  // Retry a failed download by RESUMING it THROUGH THE QUEUE: enqueue the row
-  // (userInitiated → front of queue) and kick the processor. The processor
-  // re-fetches the gallery's file list (not stored on the row), resumes from the
-  // partial pages, and pushes live progress into the store. This unifies retry
-  // with the single download authority — no separate single-flight here.
+  // Retry one exact failed snapshot. The store proves any native owner stopped,
+  // then uses a lifecycle CAS (or insert-if-absent for a cancelled zero-page
+  // row), so a stale menu action cannot overwrite a newer queued/native run.
   const handleRetry = useCallback(
     async (item: DBDownload) => {
       // The processor already single-flights per gallery; a live entry means it's
       // in flight, so ignore a duplicate tap.
       if (storeEntries[item.galleryId]?.progress) return;
       try {
-        // Manual retry resets the auto-restart attempt counter — a fresh set of
-        // automatic attempts thereafter. enqueueDownload (default path) also
-        // resets it, but clear explicitly so the reset holds even if the enqueue
-        // is later changed, and clear the store's "retry pending" entry now.
-        await clearAutoRetry(item.galleryId);
-        await enqueueDownload(
-          {
-            galleryId: item.galleryId,
-            title: item.title,
-            thumbnail: item.thumbnail,
-            tags: deserializeTags(item.tags),
-          },
-          { userInitiated: true },
-        );
-        useDownloadProgressStore.getState().clearRetryPending(item.galleryId);
-        void refreshQueue();
-        void processQueue({ onlyGalleryId: item.galleryId });
+        let retried: boolean;
+        if (item.status === 'failed') {
+          retried = await useDownloadProgressStore.getState().retryFailed(item);
+        } else {
+          // A complete row with missing physical pages is a re-download, not a
+          // failed retry. The store reserves the same enqueue/delete barrier as
+          // every other lifecycle mutation and requires this exact complete row
+          // to still exist, so a stale card cannot recreate a deleted gallery.
+          retried = await useDownloadProgressStore.getState().retryMissing(item);
+        }
+        if (!retried) throw new Error('download row changed before retry');
       } catch (e) {
-        console.error('Retry failed to enqueue:', e);
+        console.error('Retry failed:', e);
       } finally {
         queryClient.invalidateQueries({ queryKey: ['library-list'] });
         queryClient.invalidateQueries({ queryKey: ['library-search'] });
         queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       }
     },
-    [storeEntries, queryClient, refreshQueue],
+    [storeEntries, queryClient],
   );
 
   const showSearchBar = !activeLoading && (totalCount > 0 || hasQuery);
+  const showQueueOnly = !hasQuery && totalCount === 0 && hasQueuedWork;
 
   return (
     <>
@@ -725,12 +799,56 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           list. Hidden (renders null) when nothing is active or queued. */}
       <DownloadQueueView />
 
-      {exportError && (
+      {deleteError && (
         <div
           role="alert"
           className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
         >
-          {exportError}
+          {deleteError}
+        </div>
+      )}
+
+      {zipExportNotice?.kind === 'error' && (
+        <div
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+        >
+          {zipExportNotice.reason === 'source'
+            ? t('library.exportSourceFailed')
+            : t('library.exportFailed')}
+          : {zipExportNotice.title}
+        </div>
+      )}
+
+      {zipExportNotice && zipExportNotice.kind !== 'error' && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+        >
+          {zipExportNotice.kind === 'saved'
+            ? t('library.exportSucceeded')
+            : t('library.exportStarted')}
+          : {zipExportNotice.title}
+        </div>
+      )}
+
+      {activeZipExport && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-4 flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300"
+        >
+          <span
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700 dark:border-blue-800 dark:border-t-blue-300"
+          />
+          <span className="min-w-0 truncate">
+            {t('library.exportingZip')}
+            {activeZipExport.total > 0
+              ? ` (${activeZipExport.current}/${activeZipExport.total})`
+              : ''}
+            : {activeZipExport.title}
+          </span>
         </div>
       )}
 
@@ -749,7 +867,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         <div className="flex justify-center py-12">
           <Spinner size="md" />
         </div>
-      ) : totalCount === 0 ? (
+      ) : totalCount === 0 && !showQueueOnly ? (
         <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -778,11 +896,16 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
             </Link>
           )}
         </div>
-      ) : (
+      ) : showQueueOnly ? null : (
         <div className={GRID_CLASS}>
           {visibleItems.map((item) => {
             const entry = storeEntries[item.galleryId];
-            const isRetrying = !!entry?.progress;
+            const progress = entry?.progress ?? null;
+            const activeRedownload =
+              item.status === 'complete' && downloadedFlags[item.galleryId] === false;
+            const staleCompleteProgress = item.status === 'complete' && !activeRedownload;
+            const isNativeWaiting = entry?.nativePending === true;
+            const isRetrying = !!progress && !staleCompleteProgress && !isNativeWaiting;
             return (
               <LibraryCard
                 key={item.galleryId}
@@ -792,14 +915,22 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 onExport={handleExport}
                 onRetry={handleRetry}
                 isRetrying={isRetrying}
-                retryProgress={entry?.progress ?? null}
+                isExporting={activeZipExport?.galleryId === item.galleryId}
+                isDeleting={deletingGalleryIds.has(item.galleryId)}
+                retryProgress={isRetrying ? progress : null}
+                isNativeWaiting={isNativeWaiting}
                 retryOverride={
                   entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
                 }
                 isMissingFiles={
-                  item.status === 'complete' && completeIntegrity[item.galleryId] === false
+                  item.status === 'complete' && completeIntegrity[item.galleryId] === 'missing'
                 }
-                canExport={item.status === 'complete' && completeIntegrity[item.galleryId] === true}
+                canExport={
+                  !activeZipExport &&
+                  !deletingGalleryIds.has(item.galleryId) &&
+                  item.status === 'complete' &&
+                  completeIntegrity[item.galleryId] === 'present'
+                }
               />
             );
           })}

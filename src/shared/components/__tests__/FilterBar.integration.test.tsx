@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import { FilterBar } from '../FilterBar';
 import { useDbStatusStore } from '@/lib/store/db-status';
+import { useSettingsStore } from '@/lib/store/settings';
 import type { Suggestion } from '@/lib/utils/types';
 
 const { mockSearchLocalTags, mockGetSuggestionsForQuery } = vi.hoisted(() => ({
@@ -11,13 +12,17 @@ const { mockSearchLocalTags, mockGetSuggestionsForQuery } = vi.hoisted(() => ({
 }));
 
 let onSuggestionSelect: ((tag: string, tagType: string, localName?: string) => void) | null = null;
+let onSuggestionHover: ((index: number) => void) | null = null;
 let lastDropdownSuggestions: Suggestion[] | null = null;
+let lastSelectedIndex = -1;
 let lastKoreanDisplay: boolean | undefined = undefined;
 
 /** A manually-resolvable promise, for deterministic race tests. */
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => { resolve = r; });
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
   return { promise, resolve };
 }
 
@@ -61,11 +66,15 @@ vi.mock('@/shared/components/SearchInput', () => {
     });
 
     const clearBtn = onClear
-      ? React.createElement('button', {
-          key: 'clear',
-          'data-testid': 'clear-all',
-          onClick: () => onClear(),
-        }, '×')
+      ? React.createElement(
+          'button',
+          {
+            key: 'clear',
+            'data-testid': 'clear-all',
+            onClick: () => onClear(),
+          },
+          '×',
+        )
       : null;
 
     return React.createElement('div', null, inputEl, clearBtn);
@@ -106,13 +115,23 @@ vi.mock('@/shared/hooks/useClickOutside', () => ({
 vi.mock('@/features/search/components/SuggestionDropdown', () => ({
   SuggestionDropdown: (props: {
     onSelect: (tag: string, tagType: string, localName?: string) => void;
+    onHover: (index: number) => void;
     suggestions: Suggestion[];
+    selectedIndex: number;
     koreanDisplay?: boolean;
   }) => {
     onSuggestionSelect = props.onSelect;
+    onSuggestionHover = props.onHover;
     lastDropdownSuggestions = props.suggestions;
+    lastSelectedIndex = props.selectedIndex;
     lastKoreanDisplay = props.koreanDisplay;
-    return <div data-testid="suggestion-dropdown" />;
+    return (
+      <div data-testid="suggestion-dropdown">
+        <button type="button" data-testid="filter-dropdown-favorite">
+          favorite
+        </button>
+      </div>
+    );
   },
 }));
 
@@ -125,24 +144,31 @@ describe('FilterBar integration', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     onSuggestionSelect = null;
+    onSuggestionHover = null;
     lastDropdownSuggestions = null;
+    lastSelectedIndex = -1;
     lastKoreanDisplay = undefined;
     mockSearchLocalTags.mockResolvedValue([]);
     mockGetSuggestionsForQuery.mockResolvedValue([]);
+    useSettingsStore.setState({ favoriteTags: [] });
     // Default to a ready tag DB so the local-search path is exercised.
     useDbStatusStore.setState({ dbReady: true });
   });
 
   afterEach(() => {
+    act(() => {
+      useDbStatusStore.setState({ dbReady: false });
+      useSettingsStore.setState({ favoriteTags: [] });
+    });
+    vi.clearAllTimers();
     vi.useRealTimers();
-    useDbStatusStore.setState({ dbReady: false });
   });
 
   it('selecting a suggestion inserts tag into value and calls onFilterChange', async () => {
     mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
     const onFilterChange = vi.fn();
     const { container, getByTestId } = render(
-      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
     );
     const mainInput = getMainInput(container);
 
@@ -173,10 +199,180 @@ describe('FilterBar integration', () => {
     expect(lastCall.titleQuery).toBe('');
   });
 
+  it('reorders an open suggestion list immediately when favorites change', async () => {
+    mockSearchLocalTags.mockResolvedValue([
+      { tagType: 'artist', tag: 'regular artist', amount: 100 },
+      { tagType: 'artist', tag: 'favorite artist', amount: 1 },
+    ]);
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'artist:ar' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(lastDropdownSuggestions?.map((suggestion) => suggestion.tag)).toEqual([
+      'regular artist',
+      'favorite artist',
+    ]);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:favorite_artist'] });
+    });
+
+    expect(lastDropdownSuggestions?.map((suggestion) => suggestion.tag)).toEqual([
+      'favorite artist',
+      'regular artist',
+    ]);
+  });
+
+  it('refetches local suggestions so a newly favored limited-out item can join', async () => {
+    mockSearchLocalTags
+      .mockResolvedValueOnce([{ tagType: 'artist', tag: 'regular artist', amount: 100 }])
+      .mockResolvedValueOnce([
+        { tagType: 'artist', tag: 'hidden favorite', amount: 1 },
+        { tagType: 'artist', tag: 'regular artist', amount: 100 },
+      ]);
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'artist:ar' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockSearchLocalTags).toHaveBeenCalledTimes(1);
+    expect(lastDropdownSuggestions?.map((suggestion) => suggestion.tag)).toEqual([
+      'regular artist',
+    ]);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:hidden_favorite'] });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockSearchLocalTags).toHaveBeenCalledTimes(2);
+    expect(lastDropdownSuggestions?.map((suggestion) => suggestion.tag)).toEqual([
+      'hidden favorite',
+      'regular artist',
+    ]);
+  });
+
+  it('does not refetch remote suggestions when favorites change', async () => {
+    useDbStatusStore.setState({ dbReady: false });
+    mockGetSuggestionsForQuery.mockResolvedValue([
+      { tagType: 'artist', tag: 'remote regular', amount: 100 },
+      { tagType: 'artist', tag: 'remote favorite', amount: 1 },
+    ]);
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'artist:ar' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:remote_favorite'] });
+    });
+    expect(lastDropdownSuggestions?.map((suggestion) => suggestion.tag)).toEqual([
+      'remote favorite',
+      'remote regular',
+    ]);
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
+    expect(mockGetSuggestionsForQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears a stale hovered index when its item moves after becoming a favorite', async () => {
+    mockSearchLocalTags.mockResolvedValue([
+      { tagType: 'artist', tag: 'regular artist', amount: 100 },
+      { tagType: 'artist', tag: 'selected artist', amount: 1 },
+    ]);
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'artist:ar' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      onSuggestionHover?.(1);
+    });
+    expect(lastSelectedIndex).toBe(1);
+
+    act(() => {
+      useSettingsStore.setState({ favoriteTags: ['artist:selected_artist'] });
+    });
+    expect(lastDropdownSuggestions?.map((suggestion) => suggestion.tag)).toEqual([
+      'selected artist',
+      'regular artist',
+    ]);
+    expect(lastSelectedIndex).toBe(-1);
+
+    act(() => {
+      fireEvent.keyDown(mainInput, { key: 'Enter', code: 'Enter' });
+    });
+
+    expect(mainInput).toHaveValue('artist:ar');
+  });
+
+  it('keeps the dropdown open when Tab moves focus from the input into it', async () => {
+    mockSearchLocalTags.mockResolvedValue([{ tagType: 'artist', tag: 'focus artist', amount: 1 }]);
+    const { container, getByTestId } = render(
+      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />,
+    );
+    const mainInput = getMainInput(container);
+
+    act(() => {
+      fireEvent.change(mainInput, { target: { value: 'artist:fo' } });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(120);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const favoriteButton = getByTestId('filter-dropdown-favorite');
+    fireEvent.keyDown(mainInput, { key: 'Tab', code: 'Tab' });
+    fireEvent.blur(mainInput);
+    favoriteButton.focus();
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    expect(favoriteButton).toHaveFocus();
+    expect(getByTestId('suggestion-dropdown')).toBeInTheDocument();
+  });
+
   it('typing plain text calls onFilterChange with titleQuery', () => {
     const onFilterChange = vi.fn();
     const { container } = render(
-      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
     );
     const mainInput = getMainInput(container);
 
@@ -197,7 +393,7 @@ describe('FilterBar integration', () => {
   it('typing mixed tag and plain text produces correct tags and titleQuery', () => {
     const onFilterChange = vi.fn();
     const { container } = render(
-      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
     );
     const mainInput = getMainInput(container);
 
@@ -219,7 +415,7 @@ describe('FilterBar integration', () => {
     mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
     const onFilterChange = vi.fn();
     const { container } = render(
-      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
     );
     const mainInput = getMainInput(container);
 
@@ -258,7 +454,7 @@ describe('FilterBar integration', () => {
     mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
     const onFilterChange = vi.fn();
     const { container, getByTestId } = render(
-      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
     );
     const mainInput = getMainInput(container);
 
@@ -289,7 +485,7 @@ describe('FilterBar integration', () => {
 
     const onFilterChange = vi.fn();
     const { container, getByTestId } = render(
-      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
     );
     const mainInput = getMainInput(container);
 
@@ -325,9 +521,7 @@ describe('FilterBar integration', () => {
     useDbStatusStore.setState({ dbReady: false });
     mockGetSuggestionsForQuery.mockResolvedValue([{ tagType: 'female', tag: 'remote', amount: 7 }]);
 
-    const { container } = render(
-      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
-    );
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
     const mainInput = getMainInput(container);
 
     act(() => {
@@ -349,9 +543,7 @@ describe('FilterBar integration', () => {
   it('skips remote getSuggestionsForQuery for Hangul input when the tag DB is not ready', async () => {
     useDbStatusStore.setState({ dbReady: false });
 
-    const { container } = render(
-      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
-    );
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
     const mainInput = getMainInput(container);
 
     act(() => {
@@ -369,9 +561,7 @@ describe('FilterBar integration', () => {
     useDbStatusStore.setState({ dbReady: false });
     mockGetSuggestionsForQuery.mockResolvedValue([{ tagType: 'female', tag: 'remote', amount: 7 }]);
 
-    const { container } = render(
-      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
-    );
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
     const mainInput = getMainInput(container);
 
     act(() => {
@@ -392,9 +582,7 @@ describe('FilterBar integration', () => {
     mockGetSuggestionsForQuery.mockResolvedValue([]);
     mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'loli', amount: 10 }]);
 
-    const { container } = render(
-      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
-    );
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
     const mainInput = getMainInput(container);
 
     // Query typed while the DB is still syncing — remote path runs.
@@ -429,9 +617,7 @@ describe('FilterBar integration', () => {
     mockGetSuggestionsForQuery.mockReturnValue(remote.promise);
     mockSearchLocalTags.mockResolvedValue([{ tagType: 'female', tag: 'localtag', amount: 5 }]);
 
-    const { container } = render(
-      <FilterBar onFilterChange={vi.fn()} placeholder="Search..." />
-    );
+    const { container } = render(<FilterBar onFilterChange={vi.fn()} placeholder="Search..." />);
     const mainInput = getMainInput(container);
 
     // Remote request fires and stays in-flight (deferred not yet resolved).
@@ -510,7 +696,9 @@ describe('FilterBar integration', () => {
       { tagType: 'female', tag: 'loli', amount: 10, localName: '로리' },
     ]);
     const onFilterChange = vi.fn();
-    const { container } = render(<FilterBar onFilterChange={onFilterChange} placeholder="Search..." />);
+    const { container } = render(
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
+    );
     const mainInput = getMainInput(container);
 
     act(() => {
@@ -535,7 +723,9 @@ describe('FilterBar integration', () => {
       { tagType: 'female', tag: 'loli', amount: 10, localName: '로리' },
     ]);
     const onFilterChange = vi.fn();
-    const { container } = render(<FilterBar onFilterChange={onFilterChange} placeholder="Search..." />);
+    const { container } = render(
+      <FilterBar onFilterChange={onFilterChange} placeholder="Search..." />,
+    );
     const mainInput = getMainInput(container);
 
     act(() => {

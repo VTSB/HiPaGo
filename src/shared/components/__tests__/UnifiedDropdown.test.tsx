@@ -2,6 +2,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UnifiedDropdown, buildDropdownItems, type FlatItem } from '../UnifiedDropdown';
+import { useSettingsStore } from '@/lib/store/settings';
+import { prioritizeSuggestions } from '@/lib/utils/tag-favorites';
 import type { Suggestion } from '@/lib/utils/types';
 import { TagType } from '@/lib/utils/types';
 
@@ -10,11 +12,6 @@ vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
-}));
-
-// Mock useSettingsStore so useT works without localStorage
-vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (selector: (s: { locale: 'en' }) => unknown) => selector({ locale: 'en' }),
 }));
 
 const mockSuggestions: Suggestion[] = [
@@ -159,6 +156,7 @@ describe('UnifiedDropdown', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    useSettingsStore.setState({ locale: 'en', favoriteTags: [] });
   });
 
   it('shows recent searches section header', () => {
@@ -186,38 +184,88 @@ describe('UnifiedDropdown', () => {
       <UnifiedDropdown {...baseProps} flatItems={recentItems} selectedIndex={0} />,
     );
     // The selected row gets dark:bg-zinc-700 — check for the class string substring
-    const rows = container.querySelectorAll('[role="button"]');
-    expect(rows[0].className).toMatch(/bg-zinc-700/);
+    const option = container.querySelector('[data-search-option]') as HTMLElement;
+    expect(option.parentElement?.className).toMatch(/bg-zinc-700/);
+    expect(option).toHaveAttribute('aria-current', 'true');
   });
 
-  it('uses onMouseDown on the clear-all button (not onClick)', () => {
+  it('keeps focus on mouse-down and clears on native click activation', () => {
     render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
-    // Find clear-all button: it should NOT have an onClick handler
     const clearBtn = screen.getByText('Clear all');
-    // Verify it responds to mousedown
     fireEvent.mouseDown(clearBtn);
+    expect(baseProps.onClearRecents).not.toHaveBeenCalled();
+    fireEvent.click(clearBtn);
     expect(baseProps.onClearRecents).toHaveBeenCalledTimes(1);
   });
 
   it('clicking recent search calls onSelectRecent', () => {
     const { container } = render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
-    // Recent rows are div[role="button"], not <button> elements
-    const rows = container.querySelectorAll('[role="button"]');
+    const rows = container.querySelectorAll('[data-search-option]');
     fireEvent.mouseDown(rows[0]);
+    expect(baseProps.onSelectRecent).not.toHaveBeenCalled();
+    fireEvent.click(rows[0]);
     const firstRecent = recentItems[0] as { kind: 'recent'; query: string };
     expect(baseProps.onSelectRecent).toHaveBeenCalledWith(firstRecent.query);
   });
 
   it('clicking suggestion calls onSelectSuggestion', () => {
-    render(<UnifiedDropdown {...baseProps} flatItems={suggestionItems} />);
-    // Suggestion buttons have role="option" (inside a listbox)
-    const options = screen.getAllByRole('option');
+    const { container } = render(<UnifiedDropdown {...baseProps} flatItems={suggestionItems} />);
+    const options = container.querySelectorAll('[data-search-option]');
     fireEvent.mouseDown(options[0]);
+    expect(baseProps.onSelectSuggestion).not.toHaveBeenCalled();
+    fireEvent.click(options[0]);
     expect(baseProps.onSelectSuggestion).toHaveBeenCalledWith(
       mockSuggestions[0].tag,
       mockSuggestions[0].tagType,
       mockSuggestions[0].localName,
     );
+  });
+
+  it('keeps favorite toggling separate from suggestion selection', () => {
+    render(<UnifiedDropdown {...baseProps} flatItems={suggestionItems} />);
+
+    const option = document.querySelector('[data-search-option]') as HTMLElement;
+    const favoriteButton = screen.getByRole('button', {
+      name: 'Add to Favorites: loli',
+    });
+
+    expect(option.parentElement).toContainElement(favoriteButton);
+    expect(option).not.toContainElement(favoriteButton);
+    expect(favoriteButton).toHaveAttribute('aria-pressed', 'false');
+
+    favoriteButton.focus();
+    expect(favoriteButton).toHaveFocus();
+    fireEvent.keyDown(favoriteButton, { key: 'Enter', code: 'Enter' });
+    fireEvent.mouseDown(favoriteButton);
+    fireEvent.click(favoriteButton);
+
+    expect(baseProps.onSelectSuggestion).not.toHaveBeenCalled();
+    expect(favoriteButton).toHaveAttribute('aria-pressed', 'true');
+    expect(option).toBeInTheDocument();
+  });
+
+  it('preserves favorite-button focus when its row moves to the front', () => {
+    function FavoriteSortedDropdown() {
+      const favoriteTags = useSettingsStore((state) => state.favoriteTags);
+      const sorted = prioritizeSuggestions(mockSuggestions, favoriteTags);
+      return (
+        <UnifiedDropdown
+          {...baseProps}
+          flatItems={sorted.map((suggestion) => ({ kind: 'suggestion', suggestion }))}
+        />
+      );
+    }
+
+    const { container } = render(<FavoriteSortedDropdown />);
+    const favoriteButton = screen.getByRole('button', {
+      name: 'Add to Favorites: stockings',
+    });
+    favoriteButton.focus();
+    fireEvent.keyDown(favoriteButton, { key: ' ', code: 'Space' });
+    fireEvent.click(favoriteButton);
+
+    expect(favoriteButton).toHaveFocus();
+    expect(container.querySelectorAll('[data-search-option]')[0]).toHaveTextContent('stockings');
   });
 
   it('allows long suggestion labels to wrap without widening the dropdown', () => {
@@ -239,8 +287,9 @@ describe('UnifiedDropdown', () => {
       />,
     );
 
-    const option = screen.getByRole('option');
-    expect(option).toHaveClass('min-w-0');
+    const option = document.querySelector('[data-search-option]') as HTMLElement;
+    expect(option.parentElement).toHaveClass('min-w-0');
+    expect(option.parentElement?.querySelector('[data-tag-favorite-chip]')).not.toBeNull();
     expect(screen.getByText('1,444')).toHaveClass('shrink-0', 'tabular-nums');
 
     const chip = screen.getByText('러브 라이브! 니지가사키 학원 스쿨 아이돌 동호회');
@@ -250,17 +299,18 @@ describe('UnifiedDropdown', () => {
 
   it('clear all button calls onClearRecents', () => {
     render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
-    fireEvent.mouseDown(screen.getByText('Clear all'));
+    fireEvent.click(screen.getByText('Clear all'));
     expect(baseProps.onClearRecents).toHaveBeenCalledTimes(1);
   });
 
   it('recent search delete button calls onRemoveRecent', () => {
-    const { container } = render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
-    // Each recent row div[role="button"] contains a child <button> (the delete X)
-    const recentRows = container.querySelectorAll('[role="button"]');
-    const deleteBtn = recentRows[0].querySelector('button');
-    expect(deleteBtn).not.toBeNull();
-    fireEvent.mouseDown(deleteBtn!);
+    render(<UnifiedDropdown {...baseProps} flatItems={recentItems} />);
+    const deleteBtn = screen.getByRole('button', {
+      name: 'Clear all: female:loli artist:yam',
+    });
+    fireEvent.mouseDown(deleteBtn);
+    expect(baseProps.onRemoveRecent).not.toHaveBeenCalled();
+    fireEvent.click(deleteBtn);
     const firstRecent2 = recentItems[0] as { kind: 'recent'; query: string };
     expect(baseProps.onRemoveRecent).toHaveBeenCalledWith(firstRecent2.query);
   });
@@ -270,5 +320,14 @@ describe('UnifiedDropdown', () => {
     const dropdown = container.firstChild as HTMLElement;
     expect(dropdown.className).toMatch(/bg-white/);
     expect(dropdown.className).toMatch(/dark:bg-zinc-800/);
+  });
+
+  it('uses a region with native sibling buttons instead of a composite listbox', () => {
+    const { container } = render(<UnifiedDropdown {...baseProps} flatItems={suggestionItems} />);
+
+    expect(screen.getByRole('region', { name: 'Search' })).toBeInTheDocument();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[data-search-option]')).toHaveLength(2);
   });
 });

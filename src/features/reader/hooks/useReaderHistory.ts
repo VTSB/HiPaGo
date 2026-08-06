@@ -2,17 +2,38 @@
 
 import { useCallback } from 'react';
 
+function detailHref(galleryId: number): string {
+  // Static native builds use query routes; the web route keeps the gallery id
+  // in the path. Return to the matching detail route in either deployment.
+  if (window.location.pathname === '/reader' || window.location.pathname === '/reader/') {
+    return `/gallery?id=${galleryId}`;
+  }
+  return `/gallery/${galleryId}`;
+}
+
+function replaceAndNotify(href: string): void {
+  window.history.replaceState(window.history.state, '', href);
+  window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
+}
+
 /**
- * Reader-internal back navigation. One reader session corresponds to one
- * history entry (the navigation that opened the reader), so a single back
- * press exits to the detail page. Page flips are pure store mutations and
- * are not reflected in the URL — the reader's own reading-progress save
- * handles resume across sessions.
+ * Reader-internal back navigation. Normal reader sessions consume their one
+ * app-history entry. Cold/direct reader entries replace themselves with the
+ * matching gallery detail so Back never becomes a no-op or exits the app.
  */
-export function useReaderHistory() {
+export function useReaderHistory(galleryId: number) {
   const goBack = useCallback(() => {
-    window.history.back();
-  }, []);
+    const nativeCanGoBack = window.__hipagoCanGoBack?.();
+    const hasBackEntry =
+      nativeCanGoBack !== undefined ? nativeCanGoBack : window.history.length > 1;
+
+    if (hasBackEntry) {
+      window.history.back();
+      return;
+    }
+
+    replaceAndNotify(detailHref(galleryId));
+  }, [galleryId]);
 
   return { goBack };
 }

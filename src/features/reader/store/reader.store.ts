@@ -10,6 +10,7 @@ interface ReaderStoreState {
   scrollPosition: number;
   isLoading: boolean;
   error: string | null;
+  progressReadyGalleryId: number | null;
   setGallery: (id: number, images: GalleryImage[]) => void;
   setCurrentPage: (page: number) => void;
   setMode: (mode: 'page' | 'scroll') => void;
@@ -18,6 +19,7 @@ interface ReaderStoreState {
   setError: (error: string | null) => void;
   nextPage: (step?: number) => void;
   prevPage: (step?: number) => void;
+  markProgressReady: (galleryId: number) => void;
   reset: () => void;
 }
 
@@ -30,6 +32,7 @@ export const useReaderStore = create<ReaderStoreState>((set) => ({
   scrollPosition: 0,
   isLoading: false,
   error: null,
+  progressReadyGalleryId: null,
   setGallery: (id, images) =>
     set({
       galleryId: id,
@@ -39,6 +42,7 @@ export const useReaderStore = create<ReaderStoreState>((set) => ({
       scrollPosition: 0,
       isLoading: false,
       error: null,
+      progressReadyGalleryId: null,
     }),
   setCurrentPage: (page) => set({ currentPage: page }),
   setMode: (mode) => set({ mode }),
@@ -47,8 +51,13 @@ export const useReaderStore = create<ReaderStoreState>((set) => ({
   setError: (error) => set({ error }),
   nextPage: (step = 1) =>
     set((s) => ({ currentPage: Math.min(s.currentPage + step, s.totalPages - 1) })),
-  prevPage: (step = 1) =>
-    set((s) => ({ currentPage: Math.max(s.currentPage - step, 0) })),
+  prevPage: (step = 1) => set((s) => ({ currentPage: Math.max(s.currentPage - step, 0) })),
+  markProgressReady: (galleryId) =>
+    set((state) =>
+      state.galleryId === galleryId && state.progressReadyGalleryId !== galleryId
+        ? { progressReadyGalleryId: galleryId }
+        : {},
+    ),
   reset: () =>
     set({
       galleryId: null,
@@ -59,5 +68,6 @@ export const useReaderStore = create<ReaderStoreState>((set) => ({
       scrollPosition: 0,
       isLoading: false,
       error: null,
+      progressReadyGalleryId: null,
     }),
 }));

@@ -143,4 +143,3 @@ async fn proxy_returns_error_for_unreachable_host() {
 
     handle.shutdown().await;
 }
-

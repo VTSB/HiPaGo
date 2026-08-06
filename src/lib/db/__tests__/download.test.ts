@@ -12,6 +12,16 @@ import {
   deserializeTags,
   setDownloadFolderName,
   markDownloadMigrated,
+  restoreDownloadIfUnchanged,
+  deleteDownloadIfUnchanged,
+  commitDownloadMigrationIfUnchanged,
+  completeDownloadIfUnchanged,
+  completeNativeDownloadRun,
+  prepareNativeDownloadRun,
+  adoptDiscoveredNativeRunIfUnchanged,
+  rebindNativeRunIfUnchanged,
+  clearNativeRunIfUnchanged,
+  transitionNativeDownloadRun,
 } from '../download';
 import type { DBDownload } from '../schema';
 
@@ -152,6 +162,14 @@ describe('upsertDownload + getDownload', () => {
     expect(retrieved!.folderName).toBe('Gallery_3001');
     expect(retrieved!.migratedAt).toBe('2025-01-15T12:00:00Z');
   });
+
+  it('round-trips nativeRunId and stores NULL when it is omitted', async () => {
+    await upsertDownload(makeRow({ galleryId: 3002, nativeRunId: 'run-aaaaaaaaaaaa' }));
+    await upsertDownload(makeRow({ galleryId: 3003 }));
+
+    expect((await getDownload(3002))!.nativeRunId).toBe('run-aaaaaaaaaaaa');
+    expect((await getDownload(3003))!.nativeRunId).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -193,7 +211,9 @@ describe('updateDownloadStatus', () => {
 
 describe('lastError column + setDownloadError', () => {
   it('round-trips lastError through upsert + getDownload', async () => {
-    await upsertDownload(makeRow({ status: 'failed', lastError: 'download folder unavailable: NO_TREE' }));
+    await upsertDownload(
+      makeRow({ status: 'failed', lastError: 'download folder unavailable: NO_TREE' }),
+    );
     const row = await getDownload(1001);
     expect(row!.status).toBe('failed');
     expect(row!.lastError).toBe('download folder unavailable: NO_TREE');
@@ -230,6 +250,330 @@ describe('lastError column + setDownloadError', () => {
     const rows = await listDownloads();
     const failed = rows.find((r) => r.galleryId === 1003);
     expect(failed!.lastError).toBe('net down');
+  });
+});
+
+describe('completeDownloadIfUnchanged', () => {
+  it('marks the exact existing snapshot complete without inserting a replacement row', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1010,
+        status: 'downloading',
+        pageCount: 3,
+        queuePosition: 7,
+        retryCount: 1,
+      }),
+    );
+    const snapshot = await getDownload(1010);
+
+    expect(await completeDownloadIfUnchanged(snapshot!, 3, '2026-08-04T01:00:00.000Z', 4567)).toBe(
+      true,
+    );
+    expect(await getDownload(1010)).toMatchObject({
+      status: 'complete',
+      pageCount: 3,
+      totalBytes: 4567,
+      queuePosition: null,
+      retryCount: 0,
+      nextRetryAt: null,
+      lastError: null,
+      nativeRunId: null,
+      migratedAt: '2026-08-04T01:00:00.000Z',
+    });
+  });
+
+  it('does not resurrect a row deleted after the completion snapshot was read', async () => {
+    await upsertDownload(makeRow({ galleryId: 1011, status: 'downloading', pageCount: 2 }));
+    const snapshot = await getDownload(1011);
+    await deleteDownload(1011);
+
+    expect(await completeDownloadIfUnchanged(snapshot!, 2)).toBe(false);
+    expect(await getDownload(1011)).toBeNull();
+  });
+
+  it('does not overwrite a newer lifecycle state', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 1012, status: 'downloading', pageCount: 2, queuePosition: 3 }),
+    );
+    const snapshot = await getDownload(1012);
+    await setDownloadError(1012, 'paused', null);
+
+    expect(await completeDownloadIfUnchanged(snapshot!, 2)).toBe(false);
+    expect(await getDownload(1012)).toMatchObject({ status: 'paused', queuePosition: 3 });
+  });
+
+  it('rejects an ABA replacement whose lifecycle fields match but nativeRunId changed', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1013,
+        status: 'downloading',
+        pageCount: 4,
+        queuePosition: 2,
+        retryCount: 0,
+        nativeRunId: 'run-aaaaaaaaaaaa',
+      }),
+    );
+    const snapshot = await getDownload(1013);
+    await upsertDownload({ ...snapshot!, nativeRunId: 'run-bbbbbbbbbbbb' });
+
+    expect(await completeDownloadIfUnchanged(snapshot!, 4)).toBe(false);
+    expect(await getDownload(1013)).toMatchObject({
+      status: 'downloading',
+      nativeRunId: 'run-bbbbbbbbbbbb',
+    });
+  });
+});
+
+describe('restoreDownloadIfUnchanged', () => {
+  it('inserts a restored row only while the catalog row is still absent', async () => {
+    const restored = makeRow({ galleryId: 1020, title: 'Restored from disk' });
+
+    expect(await restoreDownloadIfUnchanged(null, restored)).toBe(true);
+    expect(await getDownload(1020)).toMatchObject({ title: 'Restored from disk' });
+  });
+
+  it('does not overwrite a row created after the absent snapshot', async () => {
+    const replacement = makeRow({
+      galleryId: 1021,
+      title: 'Live replacement',
+      status: 'downloading',
+      nativeRunId: 'run-liveeeeeeeee',
+    });
+    await upsertDownload(replacement);
+
+    expect(
+      await restoreDownloadIfUnchanged(
+        null,
+        makeRow({ galleryId: 1021, title: 'Stale disk scan', status: 'complete' }),
+      ),
+    ).toBe(false);
+    expect(await getDownload(1021)).toMatchObject({
+      title: 'Live replacement',
+      status: 'downloading',
+      nativeRunId: 'run-liveeeeeeeee',
+    });
+  });
+
+  it('updates an inactive exact snapshot but rejects a concurrent replacement', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 1022, title: 'Old failed row', status: 'failed', lastError: 'old' }),
+    );
+    const snapshot = (await getDownload(1022))!;
+    const restored = makeRow({ galleryId: 1022, title: 'Recovered from disk', status: 'complete' });
+
+    expect(await restoreDownloadIfUnchanged(snapshot, restored)).toBe(true);
+    expect(await getDownload(1022)).toMatchObject({ title: 'Recovered from disk' });
+
+    const staleSnapshot = (await getDownload(1022))!;
+    await upsertDownload({
+      ...staleSnapshot,
+      title: 'New active lifecycle',
+      status: 'downloading',
+      nativeRunId: 'run-newwwwwwwwww',
+    });
+
+    expect(
+      await restoreDownloadIfUnchanged(staleSnapshot, {
+        ...restored,
+        title: 'Late stale restore',
+      }),
+    ).toBe(false);
+    expect(await getDownload(1022)).toMatchObject({
+      title: 'New active lifecycle',
+      status: 'downloading',
+      nativeRunId: 'run-newwwwwwwwww',
+    });
+  });
+});
+
+describe('completeNativeDownloadRun', () => {
+  it('commits the Android public-storage watermark with the owned native run', async () => {
+    const nativeRunId = 'run-publicpublic1';
+    await upsertDownload(
+      makeRow({ galleryId: 1015, status: 'downloading', nativeRunId, migratedAt: null }),
+    );
+
+    expect(
+      await completeNativeDownloadRun(
+        makeRow({
+          galleryId: 1015,
+          status: 'complete',
+          nativeRunId,
+          migratedAt: '2026-08-04T02:00:00.000Z',
+        }),
+        nativeRunId,
+      ),
+    ).toBe(true);
+    expect(await getDownload(1015)).toMatchObject({
+      status: 'complete',
+      migratedAt: '2026-08-04T02:00:00.000Z',
+      nativeRunId,
+    });
+  });
+
+  it('does not mark a native run public before its manifest-backed completion', async () => {
+    const nativeRunId = 'run-preparepublic';
+    await upsertDownload(
+      makeRow({ galleryId: 1016, status: 'downloading', nativeRunId, migratedAt: null }),
+    );
+
+    expect(
+      await prepareNativeDownloadRun(1016, nativeRunId, {
+        pageCount: 4,
+        totalBytes: 0,
+        folderName: '1016 Public',
+      }),
+    ).toBe(true);
+    expect(await getDownload(1016)).toMatchObject({
+      status: 'downloading',
+      folderName: '1016 Public',
+      migratedAt: null,
+      nativeRunId,
+    });
+  });
+
+  it.each(['paused', 'failed'] as const)(
+    'does not complete a same-token row after its lifecycle changed to %s',
+    async (status) => {
+      const nativeRunId = 'run-cccccccccccc';
+      await upsertDownload(
+        makeRow({
+          galleryId: 1014,
+          status,
+          pageCount: 2,
+          queuePosition: 4,
+          lastError: status === 'failed' ? 'stopped' : null,
+          nativeRunId,
+        }),
+      );
+      const current = await getDownload(1014);
+
+      expect(
+        await completeNativeDownloadRun(
+          {
+            ...current!,
+            status: 'complete',
+            pageCount: 3,
+            totalBytes: 4096,
+          },
+          nativeRunId,
+        ),
+      ).toBe(false);
+      expect(await getDownload(1014)).toMatchObject({
+        status,
+        pageCount: 2,
+        queuePosition: 4,
+        nativeRunId,
+      });
+    },
+  );
+});
+
+describe('native reconciliation snapshot CAS', () => {
+  it('atomically gives a stopped native run a tail queue position when pausing it', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 1090, status: 'queued', queuePosition: 4, nativeRunId: null }),
+    );
+    await upsertDownload(
+      makeRow({
+        galleryId: 1091,
+        status: 'downloading',
+        queuePosition: null,
+        nativeRunId: 'run-pausepause12',
+      }),
+    );
+
+    expect(
+      await transitionNativeDownloadRun(1091, 'run-pausepause12', 'paused', null, {
+        clearQueuePosition: false,
+        ensureQueuePosition: true,
+      }),
+    ).toBe(true);
+    expect(await getDownload(1091)).toMatchObject({
+      status: 'paused',
+      queuePosition: 5,
+      nativeRunId: null,
+    });
+  });
+
+  it('adopts the discovered native writer only from the exact queued snapshot', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1015,
+        status: 'queued',
+        queuePosition: 4,
+        lastError: 'stale',
+        nextRetryAt: '2026-07-31T00:00:00.000Z',
+        nativeRunId: 'run-oldoldoldold',
+      }),
+    );
+    const snapshot = await getDownload(1015);
+
+    expect(await adoptDiscoveredNativeRunIfUnchanged(snapshot!, 'run-newnewnewnew')).toBe(true);
+    expect(await getDownload(1015)).toMatchObject({
+      status: 'downloading',
+      queuePosition: null,
+      lastError: null,
+      nextRetryAt: null,
+      nativeRunId: 'run-newnewnewnew',
+    });
+  });
+
+  it('cannot adopt over a concurrent lifecycle replacement', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 1016, status: 'queued', nativeRunId: 'run-oldoldoldold' }),
+    );
+    const snapshot = await getDownload(1016);
+    await upsertDownload({ ...snapshot!, status: 'paused' });
+
+    expect(await adoptDiscoveredNativeRunIfUnchanged(snapshot!, 'run-newnewnewnew')).toBe(false);
+    expect(await getDownload(1016)).toMatchObject({
+      status: 'paused',
+      nativeRunId: 'run-oldoldoldold',
+    });
+  });
+
+  it('clears a stopped native token only while the full snapshot is unchanged', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 1017, status: 'failed', nativeRunId: 'run-stopstopstop' }),
+    );
+    const snapshot = await getDownload(1017);
+
+    expect(await clearNativeRunIfUnchanged(snapshot!)).toBe(true);
+    expect((await getDownload(1017))?.nativeRunId).toBeNull();
+  });
+
+  it('rebinds a failed row to the discovered native identity without reviving it', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1019,
+        status: 'failed',
+        lastError: 'Cancelled',
+        nativeRunId: 'run-oldoldoldold',
+      }),
+    );
+    const snapshot = await getDownload(1019);
+
+    expect(await rebindNativeRunIfUnchanged(snapshot!, 'run-realrealreal')).toBe(true);
+    expect(await getDownload(1019)).toMatchObject({
+      status: 'failed',
+      lastError: 'Cancelled',
+      nativeRunId: 'run-realrealreal',
+    });
+  });
+
+  it('cannot clear a token after the same run was paused concurrently', async () => {
+    await upsertDownload(
+      makeRow({ galleryId: 1018, status: 'failed', nativeRunId: 'run-stopstopstop' }),
+    );
+    const snapshot = await getDownload(1018);
+    await upsertDownload({ ...snapshot!, status: 'paused' });
+
+    expect(await clearNativeRunIfUnchanged(snapshot!)).toBe(false);
+    expect(await getDownload(1018)).toMatchObject({
+      status: 'paused',
+      nativeRunId: 'run-stopstopstop',
+    });
   });
 });
 
@@ -280,11 +624,13 @@ describe('markDownloadMigrated', () => {
   });
 
   it('overwrites existing folderName and migratedAt', async () => {
-    await upsertDownload(makeRow({
-      galleryId: 5002,
-      folderName: 'old-folder',
-      migratedAt: '2024-01-01T00:00:00Z',
-    }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 5002,
+        folderName: 'old-folder',
+        migratedAt: '2024-01-01T00:00:00Z',
+      }),
+    );
     await markDownloadMigrated(5002, 'new-folder', '2025-06-01T00:00:00Z');
     const row = await getDownload(5002);
     expect(row!.folderName).toBe('new-folder');
@@ -304,6 +650,122 @@ describe('markDownloadMigrated', () => {
     const row = await getDownload(5003);
     expect(row!.status).toBe('complete');
     expect(row!.title).toBe('Stable Title');
+  });
+});
+
+describe('commitDownloadMigrationIfUnchanged', () => {
+  it('commits the watermark only after storage succeeds for the exact snapshot', async () => {
+    await upsertDownload(makeRow({ galleryId: 5010, migratedAt: null }));
+    const snapshot = (await getDownload(5010))!;
+    let storageCommitted = false;
+
+    expect(
+      await commitDownloadMigrationIfUnchanged(
+        snapshot,
+        '5010 Migrated',
+        '2026-08-04T00:00:00.000Z',
+        async () => {
+          storageCommitted = true;
+          return true;
+        },
+      ),
+    ).toBe(true);
+    expect(storageCommitted).toBe(true);
+    expect(await getDownload(5010)).toMatchObject({
+      folderName: '5010 Migrated',
+      migratedAt: '2026-08-04T00:00:00.000Z',
+    });
+  });
+
+  it('does not enter storage when the catalog snapshot was replaced', async () => {
+    await upsertDownload(makeRow({ galleryId: 5011, status: 'complete', migratedAt: null }));
+    const snapshot = (await getDownload(5011))!;
+    await upsertDownload({
+      ...snapshot,
+      status: 'downloading',
+      nativeRunId: 'run-replacement-5011',
+    });
+    let storageCalled = false;
+
+    expect(
+      await commitDownloadMigrationIfUnchanged(
+        snapshot,
+        '5011 Stale',
+        '2026-08-04T00:00:00.000Z',
+        async () => {
+          storageCalled = true;
+          return true;
+        },
+      ),
+    ).toBe(false);
+    expect(storageCalled).toBe(false);
+    expect(await getDownload(5011)).toMatchObject({
+      status: 'downloading',
+      nativeRunId: 'run-replacement-5011',
+      migratedAt: null,
+    });
+  });
+
+  it('rolls the watermark back when storage cannot finish', async () => {
+    await upsertDownload(makeRow({ galleryId: 5012, folderName: null, migratedAt: null }));
+    const snapshot = (await getDownload(5012))!;
+
+    expect(
+      await commitDownloadMigrationIfUnchanged(
+        snapshot,
+        '5012 Not Committed',
+        '2026-08-04T00:00:00.000Z',
+        async () => false,
+      ),
+    ).toBe(false);
+    expect(await getDownload(5012)).toMatchObject({ folderName: null, migratedAt: null });
+  });
+
+  it('keeps a new lifecycle behind the storage lease until migration commits', async () => {
+    await upsertDownload(makeRow({ galleryId: 5013, migratedAt: null }));
+    const snapshot = (await getDownload(5013))!;
+    let signalStorageStarted!: () => void;
+    let releaseStorage!: () => void;
+    const storageStarted = new Promise<void>((resolve) => {
+      signalStorageStarted = resolve;
+    });
+    const storageGate = new Promise<void>((resolve) => {
+      releaseStorage = resolve;
+    });
+
+    const migration = commitDownloadMigrationIfUnchanged(
+      snapshot,
+      '5013 Migrated',
+      '2026-08-04T00:00:00.000Z',
+      async () => {
+        signalStorageStarted();
+        await storageGate;
+        return true;
+      },
+    );
+    await storageStarted;
+
+    let replacementSettled = false;
+    const replacement = upsertDownload({
+      ...snapshot,
+      title: 'New lifecycle',
+      status: 'downloading',
+      nativeRunId: 'run-new-lifecycle-5013',
+    }).then(() => {
+      replacementSettled = true;
+    });
+    await Promise.resolve();
+    expect(replacementSettled).toBe(false);
+
+    releaseStorage();
+    await expect(migration).resolves.toBe(true);
+    await replacement;
+    expect(await getDownload(5013)).toMatchObject({
+      title: 'New lifecycle',
+      status: 'downloading',
+      nativeRunId: 'run-new-lifecycle-5013',
+      migratedAt: null,
+    });
   });
 });
 
@@ -330,6 +792,80 @@ describe('deleteDownload', () => {
 
     expect(await getDownload(1001)).toBeNull();
     expect(await getDownload(1002)).not.toBeNull();
+  });
+});
+
+describe('deleteDownloadIfUnchanged', () => {
+  it('deletes a row while its complete persisted snapshot is unchanged', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1003,
+        folderName: '1003 Snapshot',
+        migratedAt: '2026-01-01T00:00:00.000Z',
+        lastError: 'missing manifest',
+        retryCount: 2,
+      }),
+    );
+    const snapshot = (await getDownload(1003))!;
+
+    expect(await deleteDownloadIfUnchanged(snapshot)).toBe(true);
+    expect(await getDownload(1003)).toBeNull();
+  });
+
+  it('does not delete a replacement lifecycle that starts after the snapshot', async () => {
+    await upsertDownload(
+      makeRow({
+        galleryId: 1004,
+        migratedAt: '2026-01-01T00:00:00.000Z',
+        status: 'failed',
+        lastError: 'old failure',
+      }),
+    );
+    const snapshot = (await getDownload(1004))!;
+    await upsertDownload({
+      ...snapshot,
+      title: 'Replacement lifecycle',
+      status: 'downloading',
+      lastError: null,
+      retryCount: 0,
+      nativeRunId: 'run-replacement-1004',
+    });
+
+    expect(await deleteDownloadIfUnchanged(snapshot)).toBe(false);
+    expect(await getDownload(1004)).toMatchObject({
+      title: 'Replacement lifecycle',
+      status: 'downloading',
+      nativeRunId: 'run-replacement-1004',
+    });
+  });
+
+  it('rejects every independently changed persisted field in the snapshot', async () => {
+    const changes: Partial<DBDownload>[] = [
+      { title: 'Changed title' },
+      { thumbnail: '/changed-thumbnail' },
+      { tags: '{"tag":["changed"]}' },
+      { pageCount: 43 },
+      { totalBytes: 123456 },
+      { downloadedAt: '2026-08-04T03:00:00.000Z' },
+      { status: 'failed' },
+      { folderName: 'Changed folder' },
+      { migratedAt: '2026-08-04T03:01:00.000Z' },
+      { lastError: 'Changed error' },
+      { queuePosition: 9 },
+      { retryCount: 3 },
+      { nextRetryAt: '2026-08-04T03:02:00.000Z' },
+      { nativeRunId: 'run-changed-snapshot' },
+    ];
+
+    for (const [index, change] of changes.entries()) {
+      const galleryId = 1100 + index;
+      await upsertDownload(makeRow({ galleryId }));
+      const snapshot = (await getDownload(galleryId))!;
+      await upsertDownload({ ...snapshot, ...change });
+
+      expect(await deleteDownloadIfUnchanged(snapshot)).toBe(false);
+      expect(await getDownload(galleryId)).toMatchObject(change);
+    }
   });
 });
 
@@ -372,11 +908,13 @@ describe('listDownloads', () => {
   });
 
   it('returns folderName and migratedAt in listed rows', async () => {
-    await upsertDownload(makeRow({
-      galleryId: 6001,
-      folderName: 'list-folder',
-      migratedAt: '2025-03-01T00:00:00Z',
-    }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 6001,
+        folderName: 'list-folder',
+        migratedAt: '2025-03-01T00:00:00Z',
+      }),
+    );
     const results = await listDownloads();
     expect(results).toHaveLength(1);
     expect(results[0].folderName).toBe('list-folder');
@@ -472,13 +1010,15 @@ describe('searchDownloads', () => {
 
   it('returns folderName and migratedAt in search results', async () => {
     // Add a row with folderName set
-    await upsertDownload(makeRow({
-      galleryId: 7001,
-      title: 'Searchable Folder Gallery',
-      folderName: 'search-folder',
-      migratedAt: '2025-04-01T00:00:00Z',
-      downloadedAt: '2024-06-01T00:00:00Z',
-    }));
+    await upsertDownload(
+      makeRow({
+        galleryId: 7001,
+        title: 'Searchable Folder Gallery',
+        folderName: 'search-folder',
+        migratedAt: '2025-04-01T00:00:00Z',
+        downloadedAt: '2024-06-01T00:00:00Z',
+      }),
+    );
     const results = await searchDownloads({ query: 'Searchable' });
     expect(results).toHaveLength(1);
     expect(results[0].folderName).toBe('search-folder');

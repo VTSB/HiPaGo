@@ -11,7 +11,8 @@
  *  - Plain web (no Tauri, no Capacitor)                          → no-op.
  *
  * The service is intentionally side-effect-light: `checkForUpdate()` only
- * reads remote state; mutation happens inside the returned `applyFn`.
+ * reads remote state and rejects when that check fails; mutation happens
+ * inside the returned `applyFn`.
  */
 import { registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 import packageJson from '../../package.json';
@@ -46,6 +47,8 @@ interface AndroidUpdaterPlugin {
     version?: string;
     notes?: string;
     apkUrl?: string;
+    error?: string;
+    reason?: string;
   }>;
   install(opts: { apkUrl: string }): Promise<ApplyResult>;
   addListener(
@@ -103,7 +106,12 @@ async function checkTauri(): Promise<CheckResult> {
 
 async function checkAndroid(): Promise<CheckResult> {
   const res = await AndroidUpdater.check({ owner: OWNER, repo: REPO });
-  if (!res.available || !res.apkUrl) return { available: false };
+  if (res.error) throw new Error(`Android update check failed: ${res.error}`);
+  if (res.reason) throw new Error(`Android update check failed: ${res.reason}`);
+  if (!res.available) return { available: false };
+  if (!res.apkUrl) {
+    throw new Error('Android updater reported an available update without an APK URL');
+  }
   const apkUrl = res.apkUrl;
   return {
     available: true,
@@ -124,7 +132,11 @@ async function checkAndroid(): Promise<CheckResult> {
       try {
         return await AndroidUpdater.install({ apkUrl });
       } finally {
-        await handle.remove();
+        try {
+          await handle.remove();
+        } catch (error) {
+          console.warn('[UpdateService] failed to remove Android update listener', error);
+        }
       }
     },
   };
@@ -144,17 +156,36 @@ async function checkIos(): Promise<CheckResult> {
     cache: 'no-store',
     headers: { Accept: 'application/vnd.github+json', 'Cache-Control': 'no-cache' },
   });
-  if (!res.ok) return { available: false };
+  if (!res.ok) {
+    throw new Error(`GitHub release check failed with HTTP ${res.status}`);
+  }
   const json = (await res.json()) as { tag_name?: string; html_url?: string; body?: string };
   const tag = json.tag_name;
-  if (!tag) return { available: false };
+  if (!tag) throw new Error('GitHub release response is missing tag_name');
   const remoteVer = tag.startsWith('v') ? tag.slice(1) : tag;
   if (!isNewer(remoteVer, APP_VERSION)) return { available: false };
+  if (!json.html_url) throw new Error('GitHub release response is missing html_url');
+  let releaseUrl: URL;
+  try {
+    releaseUrl = new URL(json.html_url);
+  } catch {
+    throw new Error('GitHub release response contains an invalid html_url');
+  }
+  const expectedPath = `/${OWNER}/${REPO}/releases/`.toLowerCase();
+  if (
+    releaseUrl.protocol !== 'https:' ||
+    releaseUrl.hostname.toLowerCase() !== 'github.com' ||
+    releaseUrl.username !== '' ||
+    releaseUrl.password !== '' ||
+    !releaseUrl.pathname.toLowerCase().startsWith(expectedPath)
+  ) {
+    throw new Error('GitHub release response contains an invalid html_url');
+  }
   return {
     available: true,
     version: remoteVer,
     notes: json.body || undefined,
-    releaseUrl: json.html_url,
+    releaseUrl: releaseUrl.href,
   };
 }
 
@@ -177,10 +208,10 @@ export const UpdateService = {
       if (plat === 'ios') return await checkIos();
       return { available: false };
     } catch (err) {
-      // Offline launch, plugin missing, malformed response, etc. — always
-      // resolve to "no update". A broken banner is worse than no banner.
+      // A failed check is not evidence that the app is up to date. Preserve
+      // the diagnostic and reject so callers can surface a real failure.
       console.warn('[UpdateService] check failed', err);
-      return { available: false };
+      throw err;
     }
   },
 };
