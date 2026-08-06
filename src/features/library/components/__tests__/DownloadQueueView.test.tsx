@@ -190,6 +190,26 @@ describe('DownloadQueueView', () => {
     expect(state.cancel).toHaveBeenCalledWith(10);
   });
 
+  it('renders native-owned waiting rows without an active spinner or drag handle', () => {
+    state.queue = [
+      {
+        id: 11,
+        title: 'Native pending download',
+        thumbnail: '',
+        status: 'waiting',
+        position: null,
+        progress: { current: 0, total: 10 },
+      },
+    ];
+
+    render(<DownloadQueueView />);
+
+    expect(screen.getByText('Native pending download')).toBeTruthy();
+    expect(screen.getByText('library.queue.queued')).toBeTruthy();
+    expect(screen.queryByTestId('spinner')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'library.queue.reorder' })).toBeNull();
+  });
+
   it('routes queued pause and paused resume buttons to the store actions', () => {
     state.queue = [
       {

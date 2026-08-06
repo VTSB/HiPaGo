@@ -76,13 +76,49 @@ describe('iOS native background downloads', () => {
     const source = readFileSync(backgroundTaskFile, 'utf8');
 
     expect(source).toContain('switch readCommittedManifest(');
-    expect(source).toContain('if i < committedCount && isNonEmptyFile(dest) {');
+    expect(source).toContain('for i in 0..<manifestCommittedCount {');
+    expect(source).toContain('let committedCount = completedPages');
+    expect(source).toContain('if i < committedCount { continue }');
     expect(source).toContain('manifest.count <= pages.count');
     expect(source).toContain('ext == pages[index].ext');
-    expect(source).not.toContain('if isNonEmptyFile(dest) {');
     expect(source).toContain('let manifest = writeManifest(');
     expect(source).toContain('run: order.run,');
     expect(source).toContain('exts: Array(exts.prefix(i + 1))');
+  });
+
+  it('persists verified page and byte totals through terminal native completion', () => {
+    const task = readFileSync(backgroundTaskFile, 'utf8');
+    const plugin = readFileSync(downloadWorkerPluginFile, 'utf8');
+    const finishStart = task.indexOf('private func finishRunIfCurrent(');
+    const finishEnd = task.indexOf('// MARK: - Work-order parsing', finishStart);
+    const finish = task.slice(finishStart, finishEnd);
+
+    expect(task).toContain('private func nonEmptyFileSize(');
+    expect(task).toContain('private func readCommittedCompletion(');
+    expect(task).toContain('let nextBytes = addingBytes(completedBytes, pageBytes)');
+    expect(task).toContain('downloadedBytes: completedBytes');
+    expect(task).toContain('guard let completion = readCommittedCompletion(');
+
+    expect(finish).toContain('"state": "completed"');
+    expect(finish).toContain('"completed": true');
+    expect(finish).toContain('"manifestPageCount": completion.current');
+    expect(finish).toContain('"downloadedBytes": completion.downloadedBytes');
+    expect(finish).toContain('"completedAt": completedAt');
+    expect(finish).toContain('preserveTerminalRecord = completedProgressMatches(');
+    expect(finish).toContain('if !preserveTerminalRecord {');
+    expect(finish).toContain('try data.write(to: progress, options: .atomic)');
+    expect(finish).toContain('try fileManager.removeItem(at: orderFile)');
+    expect(finish).not.toContain('removeItem(at: progress)');
+    expect(finish.indexOf('try data.write(to: progress')).toBeLessThan(
+      finish.indexOf('try fileManager.removeItem(at: orderFile)'),
+    );
+    expect(task).toContain('if document.root["state"] as? String == "completed" { return }');
+
+    expect(plugin).toContain('private func exactNonNegativeInt64(');
+    expect(plugin).toContain('case "completed":');
+    expect(plugin).toContain('payload["completed"] = true');
+    expect(plugin).toContain('"downloadedBytes": downloadedBytes');
+    expect(plugin).toContain('payload["completedAt"]');
   });
 
   it('keeps the BGProcessingTask identifier aligned across Swift and Info.plist', () => {
@@ -147,7 +183,7 @@ describe('iOS native background downloads', () => {
     expect(task).toContain('private func publishPage(');
     expect(task).toContain('private func writeManifest(');
     expect(task).toContain('private func finishRunIfCurrent(');
-    expect(task).toContain('switch NativeDownloadRunIdentity.progressFileState(at: progress)');
+    expect(task).toContain('switch readNativeJSONDocument(progress)');
     expect(task).not.toContain('private func deleteMalformedOrderIfStillMalformed(');
   });
 

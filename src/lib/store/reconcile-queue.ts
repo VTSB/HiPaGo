@@ -28,14 +28,20 @@ import {
 import {
   processQueue,
   armAutoRetryTimer,
-  finalizeDownloadIfComplete,
+  finalizeNativeDownloadIfComplete,
   confirmNativeRunStopped,
+  notifyDownloadLibraryChanged,
   tryBeginDownloadLifecycleReconciliation,
   requeueDueRetryWithLifecycleBarrier,
   useDownloadProgressStore,
 } from './download-progress';
 
 let started = false;
+
+async function publishStructuralReconciliationChange(): Promise<void> {
+  await useDownloadProgressStore.getState().refreshQueue();
+  notifyDownloadLibraryChanged(true);
+}
 
 /**
  * Native background-download reconcile (Android Task C AC-006; iOS Task D).
@@ -76,6 +82,8 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
   }
 
   let completed = 0;
+  let structuralChanged = false;
+  const rehydrateIds = new Set<number>();
   for (const row of rows) {
     const reconciliation = tryBeginDownloadLifecycleReconciliation(row.galleryId);
     if (!reconciliation) continue;
@@ -121,13 +129,20 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
         // Native state is the actual writer. Adopt it from the exact launch
         // snapshot; never cancel a run merely because an older DB read
         // disagreed, since a concurrent replacement may already own it.
-        await adoptDiscoveredNativeRunIfUnchanged(row, nativeRunId).catch(() => false);
+        const adopted = await adoptDiscoveredNativeRunIfUnchanged(row, nativeRunId).catch(
+          () => false,
+        );
+        if (adopted && row.status === 'queued') {
+          structuralChanged = true;
+          rehydrateIds.add(row.galleryId);
+        }
         continue;
       }
       if (
-        await finalizeDownloadIfComplete(row.galleryId, reconciliation.isCurrent, {
-          nativeRunId: expectedRunId,
+        await finalizeNativeDownloadIfComplete(row.galleryId, {
+          runId: expectedRunId ?? undefined,
           snapshot: row,
+          isCurrent: reconciliation.isCurrent,
         })
       ) {
         completed++;
@@ -152,7 +167,13 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
       if (expectedRunId && nativeRunId === expectedRunId && row.status === 'queued') {
         // Native is still the authoritative writer. Remove a stale queue slot
         // and surface the row as active instead of letting processQueue create B.
-        await adoptDiscoveredNativeRunIfUnchanged(row, expectedRunId).catch(() => false);
+        const adopted = await adoptDiscoveredNativeRunIfUnchanged(row, expectedRunId).catch(
+          () => false,
+        );
+        if (adopted) {
+          structuralChanged = true;
+          rehydrateIds.add(row.galleryId);
+        }
         continue;
       }
 
@@ -168,6 +189,14 @@ export async function reconcileNativeBackgroundDownloads(): Promise<number> {
       reconciliation.release();
     }
   }
+
+  // A queued row adopted by native reconciliation has no live entry in a fresh
+  // renderer. Rehydrate it only after releasing the lifecycle reservations so
+  // refreshDownloaded() can publish the matching poll/queue state.
+  for (const galleryId of rehydrateIds) {
+    await useDownloadProgressStore.getState().refreshDownloaded(galleryId);
+  }
+  if (structuralChanged) await publishStructuralReconciliationChange();
   return completed;
 }
 
@@ -182,6 +211,7 @@ export async function reconcileQueue(): Promise<void> {
 
   try {
     const db = await ensureDb();
+    let structuralChanged = false;
 
     // Native workers are DB-decoupled; rows carry the target page count before
     // handoff, so completed native work can be finalized from the manifest.
@@ -201,7 +231,18 @@ export async function reconcileQueue(): Promise<void> {
       if (!reconciliation) continue;
       try {
         if (!isAndroid() && !isIos()) {
-          await requeueInterruptedDownload(z);
+          // A foreground/Tauri process can die after the manifest commit but
+          // before the terminal DB write. Prefer the shared manifest-backed
+          // completion contract over blindly turning that durable download back
+          // into queued work.
+          if (
+            await finalizeNativeDownloadIfComplete(z.galleryId, {
+              snapshot: z,
+              isCurrent: reconciliation.isCurrent,
+            })
+          )
+            continue;
+          if (await requeueInterruptedDownload(z)) structuralChanged = true;
           continue;
         }
 
@@ -233,7 +274,7 @@ export async function reconcileQueue(): Promise<void> {
             const stopped = await confirmNativeRunStopped(z.galleryId, expectedRunId, cancelled);
             if (!reconciliation.isCurrent()) continue;
             if (stopped) {
-              await requeueInterruptedDownload(z);
+              if (await requeueInterruptedDownload(z)) structuralChanged = true;
             }
           }
           continue;
@@ -265,19 +306,22 @@ export async function reconcileQueue(): Promise<void> {
           if (!reconciliation.isCurrent()) continue;
           if (!stopped) continue;
           if (expectedRunId) {
-            await transitionNativeDownloadRun(
+            const failed = await transitionNativeDownloadRun(
               z.galleryId,
               nativeRunId,
               'failed',
               'Background download identity conflict',
             ).catch(() => false);
+            if (failed) structuralChanged = true;
             continue;
           }
-          await requeueInterruptedDownload(adoptedSnapshot);
+          if (await requeueInterruptedDownload(adoptedSnapshot)) structuralChanged = true;
           continue;
         }
 
-        if (reconciliation.isCurrent()) await requeueInterruptedDownload(z);
+        if (reconciliation.isCurrent() && (await requeueInterruptedDownload(z))) {
+          structuralChanged = true;
+        }
       } finally {
         reconciliation.release();
       }
@@ -295,8 +339,14 @@ export async function reconcileQueue(): Promise<void> {
       } catch {
         due = [];
       }
-      for (const d of due) await requeueDueRetryWithLifecycleBarrier(d);
+      for (const d of due) {
+        if ((await requeueDueRetryWithLifecycleBarrier(d)) === 'requeued') {
+          structuralChanged = true;
+        }
+      }
     }
+
+    if (structuralChanged) await publishStructuralReconciliationChange();
 
     // Auto-resume on Android only requires connectivity because the native
     // WorkManager worker uses NetworkType.CONNECTED. Other platforms keep the

@@ -266,12 +266,13 @@ describe('completeDownloadIfUnchanged', () => {
     );
     const snapshot = await getDownload(1010);
 
-    expect(
-      await completeDownloadIfUnchanged(snapshot!, 3, '2026-08-04T01:00:00.000Z'),
-    ).toBe(true);
+    expect(await completeDownloadIfUnchanged(snapshot!, 3, '2026-08-04T01:00:00.000Z', 4567)).toBe(
+      true,
+    );
     expect(await getDownload(1010)).toMatchObject({
       status: 'complete',
       pageCount: 3,
+      totalBytes: 4567,
       queuePosition: null,
       retryCount: 0,
       nextRetryAt: null,

@@ -729,18 +729,24 @@ final class DownloadBackgroundTask {
             let outcome = processGallery(order, orderFile: orderFile, shouldStop: shouldStop)
             if shouldStop() { return .stopped }
             switch outcome {
-            case .completed:
-                if finishRunIfCurrent(order.run, at: orderFile, shouldStop: shouldStop) == .failed {
+            case .completed(let completion):
+                if finishRunIfCurrent(
+                    order.run,
+                    at: orderFile,
+                    completion: completion,
+                    shouldStop: shouldStop
+                ) == .failed {
                     hasRetryableState = true
                 }
             case .stale:
                 continue
-            case .partial:
+            case .partial(let progress):
                 switch runs.orderOwnership(order.run, at: orderFile) {
                 case .current:
                     writeProgressFailure(
                         order.run,
                         orderFile: orderFile,
+                        progress: progress,
                         shouldStop: shouldStop
                     )
                     hasRetryableState = true
@@ -758,10 +764,16 @@ final class DownloadBackgroundTask {
         return hasParkedLegacy ? .parkedOnly : .drained
     }
 
+    private struct ProgressSnapshot {
+        let current: Int
+        let total: Int
+        let downloadedBytes: Int64
+    }
+
     private enum GalleryOutcome {
-        case completed
+        case completed(ProgressSnapshot)
         case stale
-        case partial
+        case partial(ProgressSnapshot)
         case stopped
     }
 
@@ -791,24 +803,34 @@ final class DownloadBackgroundTask {
         orderFile: URL,
         shouldStop: () -> Bool
     ) -> GalleryOutcome {
+        let pages = order.pages
+        var completedPages = 0
+        var completedBytes: Int64 = 0
+        func progressSnapshot() -> ProgressSnapshot {
+            ProgressSnapshot(
+                current: completedPages,
+                total: pages.count,
+                downloadedBytes: completedBytes
+            )
+        }
+
         switch runs.orderOwnership(order.run, at: orderFile) {
         case .current:
             break
         case .absent, .stale:
             return .stale
         case .malformed, .unreadable(_):
-            return .partial
+            return .partial(progressSnapshot())
         }
-        let pages = order.pages
         if pages.isEmpty {
             // Nothing to download — treat as complete so the work-order clears.
-            return .completed
+            return .completed(progressSnapshot())
         }
 
         guard let galleryDir = galleryDir(galleryId: order.galleryId) else {
             // Could not resolve the Data dir — leave partial (do not lose the
             // work-order); extremely unlikely on a real device.
-            return .partial
+            return .partial(progressSnapshot())
         }
 
         let directoryResult = runs.withLock { () -> PublishResult in
@@ -827,19 +849,56 @@ final class DownloadBackgroundTask {
         }
         if directoryResult == .stale { return .stale }
         if directoryResult == .failed {
-            return .partial
+            return .partial(progressSnapshot())
         }
 
         // Only a valid manifest prefix proves that an existing destination was
         // fully committed. A non-zero file without that commit may be a torn
         // foreground write left by suspension/termination and must be replaced.
         var exts = pages.map { $0.ext }
-        let committedCount: Int
+        let manifestCommittedCount: Int
         switch readCommittedManifest(galleryDir: galleryDir, pages: pages, exts: &exts) {
         case .committed(let count):
-            committedCount = count
+            manifestCommittedCount = count
         case .unreadable:
-            return .partial
+            return .partial(progressSnapshot())
+        }
+
+        // Reconstruct the whole durable prefix before publishing any retry
+        // progress. Publishing one page at a time from zero would transiently
+        // regress an already-observed same-run snapshot after process restart.
+        for i in 0..<manifestCommittedCount {
+            if shouldStop() { return .stopped }
+            switch runs.orderOwnership(order.run, at: orderFile) {
+            case .current:
+                break
+            case .absent, .stale:
+                return .stale
+            case .malformed, .unreadable(_):
+                return .partial(progressSnapshot())
+            }
+
+            let page = pages[i]
+            let destination = galleryDir.appendingPathComponent(
+                pageFileName(index: page.index, ext: exts[i])
+            )
+            guard
+                let pageBytes = nonEmptyFileSize(destination),
+                let nextBytes = addingBytes(completedBytes, pageBytes)
+            else { break }
+            completedPages = i + 1
+            completedBytes = nextBytes
+        }
+        let committedCount = completedPages
+        if committedCount > 0 {
+            writeProgress(
+                order.run,
+                orderFile: orderFile,
+                current: committedCount,
+                total: pages.count,
+                downloadedBytes: completedBytes,
+                shouldStop: shouldStop
+            )
         }
 
         for (i, page) in pages.enumerated() {
@@ -850,7 +909,7 @@ final class DownloadBackgroundTask {
             case .absent, .stale:
                 return .stale
             case .malformed, .unreadable(_):
-                return .partial
+                return .partial(progressSnapshot())
             }
 
             exts[i] = page.ext
@@ -860,16 +919,7 @@ final class DownloadBackgroundTask {
 
             // Resume: a page already on disk is skipped (idempotent overlap with
             // the foreground downloader, which suspends while backgrounded).
-            if i < committedCount && isNonEmptyFile(dest) {
-                writeProgress(
-                    order.run,
-                    orderFile: orderFile,
-                    current: i + 1,
-                    total: pages.count,
-                    shouldStop: shouldStop
-                )
-                continue
-            }
+            if i < committedCount { continue }
 
             // Download via the Rust bypass core to a temp file in the caches dir,
             // then move it into place. The image never enters the JS heap (this is
@@ -890,9 +940,9 @@ final class DownloadBackgroundTask {
                     try? fileManager.removeItem(at: temp)
                     return .stopped
                 }
-                guard isNonEmptyFile(temp) else {
+                guard nonEmptyFileSize(temp) != nil else {
                     try? fileManager.removeItem(at: temp)
-                    return .partial
+                    return .partial(progressSnapshot())
                 }
                 let pagePublish = publishPage(
                     run: order.run,
@@ -907,13 +957,13 @@ final class DownloadBackgroundTask {
                 }
                 if pagePublish == .failed {
                     try? fileManager.removeItem(at: temp)
-                    return .partial
+                    return .partial(progressSnapshot())
                 }
             } catch {
                 // Page hard-failure (URL/gg expiry, network). Leave the gallery
                 // partial; TS re-resolves / reconciles on next open.
                 try? fileManager.removeItem(at: temp)
-                return .partial
+                return .partial(progressSnapshot())
             }
 
             // Incremental manifest write (first i+1 exts) after each placed page.
@@ -925,12 +975,19 @@ final class DownloadBackgroundTask {
                 shouldStop: shouldStop
             )
             if manifest == .stale { return .stale }
-            if manifest == .failed { return .partial }
+            if manifest == .failed { return .partial(progressSnapshot()) }
+            guard
+                let pageBytes = nonEmptyFileSize(dest),
+                let nextBytes = addingBytes(completedBytes, pageBytes)
+            else { return .partial(progressSnapshot()) }
+            completedPages = i + 1
+            completedBytes = nextBytes
             writeProgress(
                 order.run,
                 orderFile: orderFile,
                 current: i + 1,
                 total: pages.count,
+                downloadedBytes: completedBytes,
                 shouldStop: shouldStop
             )
         }
@@ -944,15 +1001,11 @@ final class DownloadBackgroundTask {
             shouldStop: shouldStop
         )
         if finalManifest == .stale { return .stale }
-        if finalManifest == .failed { return .partial }
-        writeProgress(
-            order.run,
-            orderFile: orderFile,
-            current: pages.count,
-            total: pages.count,
-            shouldStop: shouldStop
-        )
-        return .completed
+        if finalManifest == .failed { return .partial(progressSnapshot()) }
+        guard let completion = readCommittedCompletion(galleryDir: galleryDir, pages: pages) else {
+            return .partial(progressSnapshot())
+        }
+        return .completed(completion)
     }
 
     /// Publish one downloaded temp file only while this run still owns the order.
@@ -1001,13 +1054,19 @@ final class DownloadBackgroundTask {
         }
     }
 
-    private func isNonEmptyFile(_ url: URL) -> Bool {
-        guard fileManager.fileExists(atPath: url.path) else { return false }
+    private func nonEmptyFileSize(_ url: URL) -> Int64? {
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
         guard
             let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
-            let size = values.fileSize
-        else { return false }
-        return size > 0
+            let size = values.fileSize,
+            size > 0
+        else { return nil }
+        return Int64(size)
+    }
+
+    private func addingBytes(_ accumulated: Int64, _ pageBytes: Int64) -> Int64? {
+        let (sum, overflow) = accumulated.addingReportingOverflow(pageBytes)
+        return overflow ? nil : sum
     }
 
     /// Treat the manifest as the page commit log. Only an exact, valid prefix
@@ -1040,6 +1099,41 @@ final class DownloadBackgroundTask {
             }
             return .committed(manifest.count)
         }
+    }
+
+    /// Re-read the final manifest and stat every referenced page before a
+    /// terminal progress record is published. This makes `completed` a durable
+    /// storage claim rather than an inference from a loop counter.
+    private func readCommittedCompletion(
+        galleryDir: URL,
+        pages: [WorkPage]
+    ) -> ProgressSnapshot? {
+        guard !pages.isEmpty else {
+            return ProgressSnapshot(current: 0, total: 0, downloadedBytes: 0)
+        }
+        var extensions = pages.map { $0.ext }
+        guard case .committed(let count) = readCommittedManifest(
+            galleryDir: galleryDir,
+            pages: pages,
+            exts: &extensions
+        ), count == pages.count else { return nil }
+
+        var totalBytes: Int64 = 0
+        for (index, page) in pages.enumerated() {
+            let pageURL = galleryDir.appendingPathComponent(
+                pageFileName(index: page.index, ext: extensions[index])
+            )
+            guard
+                let pageBytes = nonEmptyFileSize(pageURL),
+                let nextBytes = addingBytes(totalBytes, pageBytes)
+            else { return nil }
+            totalBytes = nextBytes
+        }
+        return ProgressSnapshot(
+            current: pages.count,
+            total: pages.count,
+            downloadedBytes: totalBytes
+        )
     }
 
     /// Write `<galleryDir>/0000.json` as a JSON array of exts, e.g.
@@ -1084,9 +1178,11 @@ final class DownloadBackgroundTask {
     private func writeProgress(
         _ run: NativeDownloadRunIdentity,
         orderFile: URL,
-        current: Int?,
-        total: Int? = nil,
+        current: Int,
+        total: Int,
+        downloadedBytes: Int64,
         error: String? = nil,
+        state: String = "running",
         shouldStop: () -> Bool
     ) {
         runs.withLock {
@@ -1095,38 +1191,60 @@ final class DownloadBackgroundTask {
                 orderFile: orderFile,
                 shouldStop: shouldStop
             ) == .published else { return }
-            let currentValue: Any = current.map { $0 as Any } ?? NSNull()
+            let progress = progressFile(for: run)
+            switch readNativeJSONDocument(progress) {
+            case .absent:
+                break
+            case .valid(let document):
+                guard document.root["runId"] as? String == run.runId else { return }
+                // Once durable completion has been published, a retry that only
+                // needs to remove the order must never downgrade it to running
+                // or failed while it rescans the committed files.
+                if document.root["state"] as? String == "completed" { return }
+            case .malformed, .unreadable(_):
+                return
+            }
+
             var payload: [String: Any] = [
                 "runId": run.runId,
-                "current": currentValue
+                "state": state,
+                "current": current,
+                "total": total,
+                "downloadedBytes": downloadedBytes
             ]
-            if let total { payload["total"] = total }
             if let error { payload["error"] = error }
             guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
-            try? data.write(to: progressFile(for: run), options: .atomic)
+            try? data.write(to: progress, options: .atomic)
         }
     }
 
     private func writeProgressFailure(
         _ run: NativeDownloadRunIdentity,
         orderFile: URL,
+        progress: ProgressSnapshot,
         shouldStop: () -> Bool
     ) {
         writeProgress(
             run,
             orderFile: orderFile,
-            current: nil,
+            current: progress.current,
+            total: progress.total,
+            downloadedBytes: progress.downloadedBytes,
             error: "Background download failed",
+            state: "failed",
             shouldStop: shouldStop
         )
     }
 
-    /// Remove the matching progress sentinel and work order as one generation-
-    /// locked completion boundary. Ambiguous state or cleanup errors are never
-    /// reported as success.
+    /// Publish a durable terminal record and remove the work order as one
+    /// generation-locked completion boundary. The terminal progress file is
+    /// intentionally retained until JS reconciles/cancels this exact run, so a
+    /// foregrounded WebView can recover page and byte totals after the order has
+    /// been consumed. Ambiguous state or cleanup errors are never success.
     private func finishRunIfCurrent(
         _ run: NativeDownloadRunIdentity,
         at orderFile: URL,
+        completion: ProgressSnapshot,
         shouldStop: () -> Bool
     ) -> CompletedCleanupResult {
         runs.withLock {
@@ -1141,29 +1259,76 @@ final class DownloadBackgroundTask {
             }
 
             let progress = progressFile(for: run)
-            switch NativeDownloadRunIdentity.progressFileState(at: progress) {
+            var preserveTerminalRecord = false
+            switch readNativeJSONDocument(progress) {
             case .absent:
                 break
-            case .valid(let progressRunId):
-                guard progressRunId == run.runId else { return .failed }
-                do {
-                    try fileManager.removeItem(at: progress)
-                } catch {
-                    NSLog("[DownloadBackgroundTask] progress cleanup failed: \(error.localizedDescription)")
-                    return .failed
-                }
+            case .valid(let document):
+                guard document.root["runId"] as? String == run.runId else { return .failed }
+                preserveTerminalRecord = completedProgressMatches(
+                    document.root,
+                    run: run,
+                    completion: completion
+                )
             case .malformed, .unreadable(_):
                 return .failed
             }
 
             do {
+                if !preserveTerminalRecord {
+                    let completedAt = ISO8601DateFormatter().string(from: Date())
+                    let payload: [String: Any] = [
+                        "runId": run.runId,
+                        "state": "completed",
+                        "completed": true,
+                        "current": completion.current,
+                        "total": completion.total,
+                        "manifestPageCount": completion.current,
+                        "downloadedBytes": completion.downloadedBytes,
+                        "completedAt": completedAt
+                    ]
+                    let data = try JSONSerialization.data(withJSONObject: payload)
+                    try data.write(to: progress, options: .atomic)
+                }
                 try fileManager.removeItem(at: orderFile)
                 return .completed
             } catch {
-                NSLog("[DownloadBackgroundTask] order cleanup failed: \(error.localizedDescription)")
+                NSLog("[DownloadBackgroundTask] completion publish failed: \(error.localizedDescription)")
                 return .failed
             }
         }
+    }
+
+    private func completedProgressMatches(
+        _ root: [String: Any],
+        run: NativeDownloadRunIdentity,
+        completion: ProgressSnapshot
+    ) -> Bool {
+        guard
+            root["runId"] as? String == run.runId,
+            root["state"] as? String == "completed",
+            root["completed"] as? Bool == true,
+            exactJSONInteger(root["current"], equals: Int64(completion.current)),
+            exactJSONInteger(root["total"], equals: Int64(completion.total)),
+            exactJSONInteger(root["manifestPageCount"], equals: Int64(completion.current)),
+            exactJSONInteger(root["downloadedBytes"], equals: completion.downloadedBytes),
+            let completedAt = root["completedAt"] as? String,
+            ISO8601DateFormatter().date(from: completedAt) != nil,
+            root["error"] == nil || root["error"] is NSNull
+        else { return false }
+        return true
+    }
+
+    private func exactJSONInteger(_ raw: Any?, equals expected: Int64) -> Bool {
+        guard
+            expected >= 0,
+            let number = raw as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID(),
+            number.doubleValue.isFinite,
+            number.doubleValue == Double(expected),
+            number.int64Value == expected
+        else { return false }
+        return true
     }
 
     // MARK: - Work-order parsing
@@ -1277,7 +1442,10 @@ final class DownloadBackgroundTask {
             return nil
         }
 
-        guard let rawPages = root["pages"] as? [[String: Any]] else { return nil }
+        guard
+            let rawPages = root["pages"] as? [[String: Any]],
+            !rawPages.isEmpty
+        else { return nil }
         var pages: [WorkPage] = []
         pages.reserveCapacity(rawPages.count)
         for (expectedIndex, rawPage) in rawPages.enumerated() {

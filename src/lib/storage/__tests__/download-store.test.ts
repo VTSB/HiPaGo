@@ -28,28 +28,15 @@ class MemoryDownloadStore implements DownloadStore {
     return `${galleryFolderName(galleryId)}/${imageFileName(index, ext)}`;
   }
 
-  async putImage(
-    galleryId: number,
-    index: number,
-    bytes: Uint8Array,
-    ext: string,
-  ): Promise<void> {
+  async putImage(galleryId: number, index: number, bytes: Uint8Array, ext: string): Promise<void> {
     this.store.set(this.key(galleryId, index, ext), bytes);
   }
 
-  async getImage(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<Uint8Array | null> {
+  async getImage(galleryId: number, index: number, ext: string): Promise<Uint8Array | null> {
     return this.store.get(this.key(galleryId, index, ext)) ?? null;
   }
 
-  async imageExists(
-    galleryId: number,
-    index: number,
-    ext: string,
-  ): Promise<boolean> {
+  async imageExists(galleryId: number, index: number, ext: string): Promise<boolean> {
     const v = this.store.get(this.key(galleryId, index, ext));
     return !!v && v.byteLength > 0;
   }
@@ -103,10 +90,7 @@ function makeBytes(size: number, fill = 0xab): Uint8Array {
  *
  * Exported so native adapter tests can reuse it with a mocked adapter.
  */
-export function runDownloadStoreContract(
-  label: string,
-  factory: () => DownloadStore,
-): void {
+export function runDownloadStoreContract(label: string, factory: () => DownloadStore): void {
   describe(`DownloadStore contract — ${label}`, () => {
     let store: DownloadStore;
 
@@ -284,7 +268,10 @@ runDownloadStoreContract('MemoryDownloadStore', () => new MemoryDownloadStore())
 class FakeFileHandle {
   kind = 'file' as const;
   bytes: Uint8Array;
-  constructor(public name: string, bytes: Uint8Array = new Uint8Array(0)) {
+  constructor(
+    public name: string,
+    bytes: Uint8Array = new Uint8Array(0),
+  ) {
     this.bytes = bytes;
   }
   async getFile(): Promise<{ size: number; arrayBuffer(): Promise<ArrayBuffer> }> {
@@ -309,9 +296,12 @@ class FakeDirHandle {
   kind = 'directory' as const;
   files = new Map<string, FakeFileHandle>();
   dirs = new Map<string, FakeDirHandle>();
+  removeError: unknown = null;
+  lookupError: unknown = null;
   constructor(public name = '') {}
 
   async getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FakeDirHandle> {
+    if (this.lookupError) throw this.lookupError;
     let d = this.dirs.get(name);
     if (!d) {
       if (!opts?.create) throw new DOMException('NotFound', 'NotFoundError');
@@ -330,6 +320,160 @@ class FakeDirHandle {
     }
     return f;
   }
+
+  async removeEntry(name: string): Promise<void> {
+    if (this.removeError) throw this.removeError;
+    if (!this.dirs.has(name) && !this.files.has(name)) {
+      throw new DOMException('NotFound', 'NotFoundError');
+    }
+    this.dirs.delete(name);
+    this.files.delete(name);
+  }
+}
+
+class FakeIdbRequest<T> {
+  result!: T;
+  error: DOMException | null = null;
+  onsuccess: ((event: Event) => unknown) | null = null;
+  onerror: ((event: Event) => unknown) | null = null;
+}
+
+class FakeIdbTransaction {
+  error: DOMException | null = null;
+  oncomplete: ((event: Event) => unknown) | null = null;
+  onerror: ((event: Event) => unknown) | null = null;
+  private pending = 0;
+
+  constructor(private readonly values: Map<IDBValidKey, unknown>) {}
+
+  objectStore(): IDBObjectStore {
+    return new FakeIdbObjectStore(this, this.values) as unknown as IDBObjectStore;
+  }
+
+  request<T>(operation: () => T): IDBRequest<T> {
+    const request = new FakeIdbRequest<T>();
+    this.pending++;
+    queueMicrotask(() => {
+      try {
+        request.result = operation();
+        request.onsuccess?.(new Event('success'));
+      } catch (error) {
+        const domError =
+          error instanceof DOMException
+            ? error
+            : new DOMException(
+                error instanceof Error ? error.message : String(error),
+                'UnknownError',
+              );
+        request.error = domError;
+        this.error = domError;
+        request.onerror?.(new Event('error'));
+        this.onerror?.(new Event('error'));
+      } finally {
+        this.pending--;
+        if (this.pending === 0) {
+          queueMicrotask(() => {
+            if (this.pending === 0 && !this.error) this.oncomplete?.(new Event('complete'));
+          });
+        }
+      }
+    });
+    return request as unknown as IDBRequest<T>;
+  }
+}
+
+class FakeIdbObjectStore {
+  constructor(
+    private readonly transaction: FakeIdbTransaction,
+    private readonly values: Map<IDBValidKey, unknown>,
+  ) {}
+
+  put(value: unknown, key: IDBValidKey): IDBRequest<IDBValidKey> {
+    return this.transaction.request(() => {
+      this.values.set(key, value instanceof Uint8Array ? value.slice() : value);
+      return key;
+    });
+  }
+
+  get(key: IDBValidKey): IDBRequest<unknown> {
+    return this.transaction.request(() => {
+      const value = this.values.get(key);
+      return value instanceof Uint8Array ? value.slice() : value;
+    });
+  }
+
+  getAllKeys(): IDBRequest<IDBValidKey[]> {
+    return this.transaction.request(() => [...this.values.keys()]);
+  }
+
+  delete(key: IDBValidKey): IDBRequest<undefined> {
+    return this.transaction.request(() => {
+      this.values.delete(key);
+      return undefined;
+    });
+  }
+}
+
+class FakeIdbDatabase {
+  private readonly stores = new Map<string, Map<IDBValidKey, unknown>>();
+
+  createObjectStore(name: string): IDBObjectStore {
+    const values = new Map<IDBValidKey, unknown>();
+    this.stores.set(name, values);
+    return new FakeIdbObjectStore(
+      new FakeIdbTransaction(values),
+      values,
+    ) as unknown as IDBObjectStore;
+  }
+
+  transaction(name: string): IDBTransaction {
+    const values = this.stores.get(name);
+    if (!values) throw new DOMException(`Missing object store: ${name}`, 'NotFoundError');
+    return new FakeIdbTransaction(values) as unknown as IDBTransaction;
+  }
+}
+
+class FakeIdbFactory {
+  readonly databases = new Map<string, FakeIdbDatabase>();
+  openCalls = 0;
+
+  open(name: string): IDBOpenDBRequest {
+    this.openCalls++;
+    const request = new FakeIdbRequest<IDBDatabase>() as FakeIdbRequest<IDBDatabase> & {
+      onupgradeneeded: ((event: Event) => unknown) | null;
+    };
+    request.onupgradeneeded = null;
+    queueMicrotask(() => {
+      let db = this.databases.get(name);
+      const created = !db;
+      if (!db) {
+        db = new FakeIdbDatabase();
+        this.databases.set(name, db);
+      }
+      request.result = db as unknown as IDBDatabase;
+      if (created) request.onupgradeneeded?.(new Event('upgradeneeded'));
+      request.onsuccess?.(new Event('success'));
+    });
+    return request as unknown as IDBOpenDBRequest;
+  }
+}
+
+function createMemoryStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => [...values.keys()][index] ?? null,
+    removeItem: (key) => {
+      values.delete(key);
+    },
+    setItem: (key, value) => {
+      values.set(key, String(value));
+    },
+  };
 }
 
 describe('WebDownloadStore (OPFS) imageExists', () => {
@@ -379,6 +523,98 @@ describe('WebDownloadStore (OPFS) imageExists', () => {
   it('reports a page missing when the ext does not match the stored file', async () => {
     await store.putImage(100, 2, makeBytes(8), 'webp');
     expect(await store.imageExists(100, 2, 'jpg')).toBe(false);
+  });
+
+  it('treats deletion of an already-missing gallery as success', async () => {
+    await expect(store.deleteGallery(404)).resolves.toBeUndefined();
+  });
+
+  it('propagates OPFS permission and I/O failures during deletion', async () => {
+    await store.putImage(100, 0, makeBytes(8), 'webp');
+    const error = new DOMException('Permission denied', 'NotAllowedError');
+    root.removeError = error;
+
+    await expect(store.deleteGallery(100)).rejects.toBe(error);
+    expect(root.dirs.has('100')).toBe(true);
+  });
+
+  it('propagates OPFS lookup failures from read, existence, and size checks', async () => {
+    const error = new DOMException('Storage handle is unavailable', 'InvalidStateError');
+    root.lookupError = error;
+
+    await expect(store.getImage(100, 0, 'webp')).rejects.toBe(error);
+    await expect(store.imageExists(100, 0, 'webp')).rejects.toBe(error);
+    await expect(store.gallerySize(100)).rejects.toBe(error);
+  });
+});
+
+describe('WebDownloadStore backend selection', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', createMemoryStorage());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps a pre-marker IndexedDB library when OPFS becomes available', async () => {
+    const indexedDb = new FakeIdbFactory();
+    vi.stubGlobal('indexedDB', indexedDb as unknown as IDBFactory);
+    vi.stubGlobal('navigator', {});
+    const { WebDownloadStore } = await import('../adapters/web');
+
+    const legacy = await WebDownloadStore.create();
+    const bytes = makeBytes(12, 0x5a);
+    await legacy.putImage(321, 0, bytes, 'webp');
+
+    // Simulate an installation created before the sticky marker shipped, then
+    // a browser update that adds OPFS support.
+    localStorage.clear();
+    const opfsRoot = new FakeDirHandle();
+    vi.stubGlobal('navigator', {
+      storage: {
+        getDirectory: vi.fn(async () => opfsRoot as unknown as FileSystemDirectoryHandle),
+      },
+    });
+
+    const reopened = await WebDownloadStore.create();
+    expect(await reopened.getImage(321, 0, 'webp')).toEqual(bytes);
+    expect(opfsRoot.dirs.size).toBe(0);
+  });
+
+  it('fails closed when a remembered OPFS backend is temporarily unavailable', async () => {
+    const indexedDb = new FakeIdbFactory();
+    const opfsRoot = new FakeDirHandle();
+    const getDirectory = vi.fn(async () => opfsRoot as unknown as FileSystemDirectoryHandle);
+    vi.stubGlobal('indexedDB', indexedDb as unknown as IDBFactory);
+    vi.stubGlobal('navigator', { storage: { getDirectory } });
+    const { WebDownloadStore } = await import('../adapters/web');
+
+    const first = await WebDownloadStore.create();
+    await first.putImage(654, 0, makeBytes(6), 'jpg');
+    const idbOpenCallsAfterSelection = indexedDb.openCalls;
+    const opfsError = new DOMException('OPFS temporarily unavailable', 'InvalidStateError');
+    getDirectory.mockRejectedValueOnce(opfsError);
+
+    await expect(WebDownloadStore.create()).rejects.toBe(opfsError);
+    expect(indexedDb.openCalls).toBe(idbOpenCallsAfterSelection);
+  });
+
+  it('does not fall back to empty IndexedDB after a markerless OPFS failure', async () => {
+    const indexedDb = new FakeIdbFactory();
+    const opfsRoot = new FakeDirHandle();
+    const getDirectory = vi.fn(async () => opfsRoot as unknown as FileSystemDirectoryHandle);
+    vi.stubGlobal('indexedDB', indexedDb as unknown as IDBFactory);
+    vi.stubGlobal('navigator', { storage: { getDirectory } });
+    const { WebDownloadStore } = await import('../adapters/web');
+
+    const legacyOpfs = await WebDownloadStore.create();
+    await legacyOpfs.putImage(777, 0, makeBytes(9), 'webp');
+    localStorage.clear();
+    const opfsError = new DOMException('Transient OPFS failure', 'InvalidStateError');
+    getDirectory.mockRejectedValueOnce(opfsError);
+
+    await expect(WebDownloadStore.create()).rejects.toBe(opfsError);
   });
 });
 

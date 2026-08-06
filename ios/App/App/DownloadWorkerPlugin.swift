@@ -351,6 +351,30 @@ public class DownloadWorkerPlugin: CAPPlugin, CAPBridgedPlugin {
         )
     }
 
+    private func exactNonNegativeInt(_ raw: Any?) -> Int? {
+        guard
+            let number = raw as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID(),
+            number.doubleValue.isFinite,
+            number.doubleValue >= 0,
+            number.doubleValue.rounded(.towardZero) == number.doubleValue,
+            number.doubleValue <= Double(Int.max)
+        else { return nil }
+        return number.intValue
+    }
+
+    private func exactNonNegativeInt64(_ raw: Any?) -> Int64? {
+        guard
+            let number = raw as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID(),
+            number.doubleValue.isFinite,
+            number.doubleValue >= 0,
+            number.doubleValue.rounded(.towardZero) == number.doubleValue,
+            number.doubleValue <= 9_007_199_254_740_991
+        else { return nil }
+        return number.int64Value
+    }
+
     private func progressIdentityState(at file: URL) -> ProgressIdentityState {
         switch readNativeJSONDocument(file) {
         case .absent:
@@ -522,6 +546,61 @@ public class DownloadWorkerPlugin: CAPPlugin, CAPBridgedPlugin {
         guard actualRunId == requested.runId else {
             return ["runId": actualRunId, "current": NSNull(), "stale": true]
         }
+
+        if let state = root["state"] as? String {
+            guard
+                let current = exactNonNegativeInt(root["current"]),
+                let total = exactNonNegativeInt(root["total"]),
+                current <= total,
+                let downloadedBytes = exactNonNegativeInt64(root["downloadedBytes"])
+            else {
+                return ["runId": actualRunId, "current": NSNull(), "unknown": true]
+            }
+
+            var payload: [String: Any] = [
+                "runId": actualRunId,
+                "state": state,
+                "current": current,
+                "total": total,
+                "downloadedBytes": downloadedBytes
+            ]
+            switch state {
+            case "running":
+                guard root["error"] == nil || root["error"] is NSNull else {
+                    return ["runId": actualRunId, "current": NSNull(), "unknown": true]
+                }
+                return payload
+            case "failed":
+                guard let error = root["error"] as? String, !error.isEmpty else {
+                    return ["runId": actualRunId, "current": NSNull(), "unknown": true]
+                }
+                payload["error"] = error
+                return payload
+            case "completed":
+                guard
+                    root["completed"] as? Bool == true,
+                    total > 0,
+                    current == total,
+                    downloadedBytes > 0,
+                    exactNonNegativeInt(root["manifestPageCount"]) == total,
+                    let completedAt = root["completedAt"] as? String,
+                    ISO8601DateFormatter().date(from: completedAt) != nil,
+                    root["error"] == nil || root["error"] is NSNull
+                else {
+                    return ["runId": actualRunId, "current": NSNull(), "unknown": true]
+                }
+                payload["completed"] = true
+                payload["manifestPageCount"] = total
+                payload["completedAt"] = completedAt
+                return payload
+            default:
+                return ["runId": actualRunId, "current": NSNull(), "unknown": true]
+            }
+        }
+
+        // Backward-compatible read of a pre-state progress document. New native
+        // writes always include state + downloadedBytes, but an app update can
+        // legitimately encounter one legacy file from the prior version.
         if let rawError = root["error"] {
             guard let error = rawError as? String else {
                 return ["runId": actualRunId, "current": NSNull(), "unknown": true]

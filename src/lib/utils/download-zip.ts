@@ -235,7 +235,7 @@ async function storedPageSize(
 ): Promise<number> {
   const size = store.imageSize ? await store.imageSize(galleryId, index, ext, options) : null;
   if (size !== null) return size;
-  const bytes = await store.getImage(galleryId, index, ext, options).catch(() => null);
+  const bytes = await store.getImage(galleryId, index, ext, options);
   return bytes?.byteLength ?? 0;
 }
 
@@ -406,6 +406,26 @@ export async function getDownloadedGalleryPages(
 }
 
 /**
+ * Sum the durable image bytes described by a verified gallery manifest.
+ * Returns null when a page disappeared between verification and sizing, while
+ * storage/provider failures propagate so callers never commit a false size.
+ */
+export async function getDownloadedGalleryTotalBytes(
+  galleryId: number,
+  pages: readonly { index: number; ext: string }[],
+  options: DownloadStoreLookupOptions = {},
+): Promise<number | null> {
+  const store = await createDownloadStore();
+  let total = 0;
+  for (const page of pages) {
+    const size = await storedPageSize(store, galleryId, page.index, page.ext, options);
+    if (size <= 0) return null;
+    total += size;
+  }
+  return total;
+}
+
+/**
  * Read one downloaded image by gallery + page index.
  * Resolves the ext via the stored manifest; returns null when missing.
  *
@@ -452,7 +472,7 @@ export async function hasCompleteDownloadedGallery(
     const ext = exts[i];
     const exists = store.imageExists
       ? await store.imageExists(galleryId, i, ext, options)
-      : (await store.getImage(galleryId, i, ext, options).catch(() => null)) !== null;
+      : (await store.getImage(galleryId, i, ext, options)) !== null;
     if (!exists) return false;
   }
 
@@ -571,12 +591,8 @@ export async function downloadGalleryToLibrary(
   // torn page), instead of continuing past the last stored page only.
   let manifestExts: string[] = [];
   if (opts?.resume) {
-    try {
-      const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, lookup);
-      if (manifestBytes) manifestExts = decodeManifest(manifestBytes);
-    } catch {
-      // No manifest / unreadable — manifestExts stays empty (full re-download).
-    }
+    const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, lookup);
+    if (manifestBytes) manifestExts = decodeManifest(manifestBytes);
     if (manifestExts.length > 0) {
       // A row already exists from the prior attempt. Flip it back to
       // 'downloading' and clear the stale error; seed totalBytes only from
@@ -584,9 +600,7 @@ export async function downloadGalleryToLibrary(
       // files on disk that are not in the manifest yet; those pages will be
       // re-fetched and must not be counted twice.
       rowCreated = true;
-      totalBytes = await manifestBackedGallerySize(store, galleryId, manifestExts, lookup).catch(
-        () => 0,
-      );
+      totalBytes = await manifestBackedGallerySize(store, galleryId, manifestExts, lookup);
       if (opts?.nativeRunId) {
         if (!(await resumeNativeDownloadRun(galleryId, opts.nativeRunId))) {
           throw new StaleDownloadRunError();
@@ -601,7 +615,7 @@ export async function downloadGalleryToLibrary(
   // store.imageExists (stat, size>0) and fall back to reading the bytes.
   const pageIsPresent = async (index: number, ext: string): Promise<boolean> => {
     if (store.imageExists) return store.imageExists(galleryId, index, ext, lookup);
-    return (await store.getImage(galleryId, index, ext, lookup).catch(() => null)) !== null;
+    return (await store.getImage(galleryId, index, ext, lookup)) !== null;
   };
 
   try {

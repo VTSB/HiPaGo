@@ -9,6 +9,9 @@ const boot = vi.hoisted(() => ({
   restore: vi.fn(async () => undefined),
   migrate: vi.fn(async () => ({ migrated: 0, reconciled: 0 })),
   reconcile: vi.fn(async () => undefined),
+  reconcileLiveNative: vi.fn(async () => 0),
+  reconcileDormantNative: vi.fn(async () => 0),
+  notifyLibrary: vi.fn(),
   start: vi.fn(),
 }));
 
@@ -53,6 +56,18 @@ vi.mock('@/lib/store/reconcile-queue', () => ({
     boot.calls.push('reconcile');
     return boot.reconcile();
   }),
+  reconcileNativeBackgroundDownloads: vi.fn(async () => {
+    boot.calls.push('reconcile-dormant-native');
+    return boot.reconcileDormantNative();
+  }),
+}));
+
+vi.mock('@/lib/store/download-progress', () => ({
+  reconcileLiveNativeDownloadCompletions: vi.fn(async () => {
+    boot.calls.push('reconcile-live-native');
+    return boot.reconcileLiveNative();
+  }),
+  notifyDownloadLibraryChanged: vi.fn((force?: boolean) => boot.notifyLibrary(force)),
 }));
 
 vi.mock('@/lib/db/init', () => ({
@@ -94,6 +109,9 @@ describe('DbInitializer Android public backup ordering', () => {
     boot.restore.mockReset().mockResolvedValue(undefined);
     boot.migrate.mockReset().mockResolvedValue({ migrated: 0, reconciled: 0 });
     boot.reconcile.mockReset().mockResolvedValue(undefined);
+    boot.reconcileLiveNative.mockReset().mockResolvedValue(0);
+    boot.reconcileDormantNative.mockReset().mockResolvedValue(0);
+    boot.notifyLibrary.mockReset();
     boot.start.mockReset();
     dbStatusState.setDbError.mockReset();
   });
@@ -115,5 +133,25 @@ describe('DbInitializer Android public backup ordering', () => {
 
     await waitFor(() => expect(boot.calls).toContain('ready'));
     expect(boot.calls).toEqual(['database', 'restore', 'migrate', 'reconcile', 'start', 'ready']);
+  });
+
+  it('publishes a structural refresh when startup reconciliation prunes the library', async () => {
+    boot.migrate.mockResolvedValueOnce({ migrated: 0, reconciled: 1 });
+    render(<DbInitializer />);
+
+    await waitFor(() => expect(boot.calls).toContain('ready'));
+    expect(boot.notifyLibrary).toHaveBeenCalledOnce();
+    expect(boot.notifyLibrary).toHaveBeenCalledWith(true);
+  });
+
+  it('reconciles live native completions before dormant rows on foreground focus', async () => {
+    render(<DbInitializer />);
+    await waitFor(() => expect(boot.calls).toContain('ready'));
+    boot.calls.length = 0;
+
+    window.dispatchEvent(new Event('focus'));
+
+    await waitFor(() => expect(boot.calls).toContain('reconcile-dormant-native'));
+    expect(boot.calls).toEqual(['database', 'reconcile-live-native', 'reconcile-dormant-native']);
   });
 });

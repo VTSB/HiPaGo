@@ -192,8 +192,8 @@ export async function migrateDownloadsToPublic(): Promise<{
             const targetExts = targetManifest ? decodeManifest(targetManifest) : null;
             return Boolean(
               targetExts &&
-                targetExts.length === row.pageCount &&
-                (await targetGalleryIsComplete(newStore, galleryId, targetExts, targetLookup)),
+              targetExts.length === row.pageCount &&
+              (await targetGalleryIsComplete(newStore, galleryId, targetExts, targetLookup)),
             );
           }
 
@@ -360,6 +360,7 @@ export async function restoreDownloadsFromPublicFolder(
         continue;
       }
       if (
+        complete &&
         existing?.status === 'complete' &&
         existing.pageCount === exts.length &&
         existing.folderName === folder.folderName

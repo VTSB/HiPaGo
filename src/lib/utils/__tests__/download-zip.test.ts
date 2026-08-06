@@ -96,6 +96,7 @@ import {
   downloadGalleryToLibrary,
   exportGalleryZip,
   getDownloadedGalleryPages,
+  getDownloadedGalleryTotalBytes,
   getDownloadedImage,
   hasCompleteDownloadedGallery,
   StaleDownloadRunError,
@@ -1167,14 +1168,7 @@ describe('downloadGalleryToLibrary', () => {
     vi.mocked(apiClient.fetchUrl).mockRejectedValue(new Error('Network unavailable'));
 
     await expect(
-      downloadGalleryToLibrary(
-        45,
-        'No Manifest',
-        'thumb.jpg',
-        [makeFile()],
-        makeGgConfig(),
-        {},
-      ),
+      downloadGalleryToLibrary(45, 'No Manifest', 'thumb.jpg', [makeFile()], makeGgConfig(), {}),
     ).rejects.toThrow('Network unavailable');
 
     expect(vi.mocked(upsertDownload).mock.calls.at(-1)?.[0]).toMatchObject({
@@ -1437,6 +1431,31 @@ describe('downloadGalleryToLibrary', () => {
     expect(lastUpsert.pageCount).toBe(3);
   });
 
+  it('resume propagates a manifest provider error instead of assuming an empty gallery', async () => {
+    const providerError = new Error('filesystem permission temporarily unavailable');
+    vi.mocked(createDownloadStore).mockResolvedValue({
+      ...memStore,
+      getImage: vi.fn(async () => {
+        throw providerError;
+      }),
+    });
+
+    await expect(
+      downloadGalleryToLibrary(
+        23,
+        'G',
+        'thumb.jpg',
+        [makeFile('a')],
+        makeGgConfig(),
+        {},
+        undefined,
+        undefined,
+        { resume: true },
+      ),
+    ).rejects.toBe(providerError);
+    expect(apiClient.fetchUrl).not.toHaveBeenCalled();
+  });
+
   // resume-verify-all-pages: when the store exposes the cheap imageExists probe,
   // resume uses it (stat, no byte read) — and a size-0 page is treated missing.
   it('resume uses store.imageExists when available and refetches a torn (size-0) page', async () => {
@@ -1600,6 +1619,19 @@ describe('getDownloadedGalleryPages', () => {
       { index: 2, ext: 'jpg' },
     ]);
   });
+
+  it('sums verified page bytes and reports a page that disappeared', async () => {
+    await memStore.putImage(8, 0, new Uint8Array([1, 2, 3]), 'webp');
+    await memStore.putImage(8, 1, new Uint8Array([4, 5]), 'jpg');
+    const pages = [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'jpg' },
+    ];
+
+    await expect(getDownloadedGalleryTotalBytes(8, pages)).resolves.toBe(5);
+    memStore.store.delete('8/0002.jpg');
+    await expect(getDownloadedGalleryTotalBytes(8, pages)).resolves.toBeNull();
+  });
 });
 
 describe('getDownloadedImage', () => {
@@ -1695,6 +1727,20 @@ describe('hasCompleteDownloadedGallery', () => {
     await memStore.putImage(32, 0, new Uint8Array([1]), 'webp');
 
     await expect(hasCompleteDownloadedGallery(32, 2)).resolves.toBe(false);
+  });
+
+  it('propagates an unknown page read error instead of treating it as missing', async () => {
+    await memStore.putImage(36, -1, new TextEncoder().encode(JSON.stringify(['webp'])), 'json');
+    const providerError = new Error('storage provider unavailable');
+    vi.mocked(createDownloadStore).mockResolvedValue({
+      ...memStore,
+      getImage: vi.fn(async (galleryId, index, ext) => {
+        if (index === -1) return memStore.getImage(galleryId, index, ext);
+        throw providerError;
+      }),
+    });
+
+    await expect(hasCompleteDownloadedGallery(36, 1)).rejects.toBe(providerError);
   });
 
   it('returns false when the manifest is shorter than the expected pageCount', async () => {

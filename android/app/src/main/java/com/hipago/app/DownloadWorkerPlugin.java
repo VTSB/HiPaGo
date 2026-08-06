@@ -191,6 +191,20 @@ public class DownloadWorkerPlugin extends Plugin {
         }
     }
 
+    private static Integer exactNonNegativeProgressInt(JSONObject obj, String key) {
+        Object raw = obj.opt(key);
+        if (!(raw instanceof Number)) return null;
+        double value = ((Number) raw).doubleValue();
+        if (Double.isNaN(value)
+                || Double.isInfinite(value)
+                || value < 0
+                || value > Integer.MAX_VALUE
+                || Math.rint(value) != value) {
+            return null;
+        }
+        return (int) value;
+    }
+
     static JSObject readProgressFile(File f, String expectedRunId) {
         JSObject ret = new JSObject();
         ret.put("runId", expectedRunId);
@@ -210,26 +224,47 @@ public class DownloadWorkerPlugin extends Plugin {
             }
             JSONObject obj = new JSONObject(new String(bytes, "UTF-8"));
             String actualRunId = obj.optString("runId", null);
-            if (!NativeDownloadRun.isValidRunId(actualRunId)
-                    || !expectedRunId.equals(actualRunId)) {
+            if (!NativeDownloadRun.isValidRunId(actualRunId)) {
+                ret.put("current", JSObject.NULL);
+                ret.put("unknown", true);
+                return ret;
+            }
+            if (!expectedRunId.equals(actualRunId)) {
                 ret.put("current", JSObject.NULL);
                 ret.put("stale", true);
-                if (NativeDownloadRun.isValidRunId(actualRunId)) {
-                    ret.put("runId", actualRunId);
-                }
+                ret.put("runId", actualRunId);
                 return ret;
             }
             if (obj.has("error")) {
+                Object rawError = obj.opt("error");
+                if (!obj.isNull("current")
+                        || !(rawError instanceof String)
+                        || ((String) rawError).isEmpty()) {
+                    ret.put("current", JSObject.NULL);
+                    ret.put("unknown", true);
+                    return ret;
+                }
                 ret.put("current", JSObject.NULL);
-                ret.put("error", obj.optString("error", "Background download failed"));
+                ret.put("error", rawError);
                 return ret;
             }
-            ret.put("current", obj.getInt("current"));
-            ret.put("total", obj.getInt("total"));
+            Integer current = exactNonNegativeProgressInt(obj, "current");
+            Integer total = exactNonNegativeProgressInt(obj, "total");
+            if (current == null || total == null || total <= 0 || current > total) {
+                ret.put("current", JSObject.NULL);
+                ret.put("unknown", true);
+                return ret;
+            }
+            ret.put("current", current);
+            ret.put("total", total);
             return ret;
         } catch (Throwable t) {
-            // Unparseable / torn write → treat as no progress this tick.
+            // A present but unreadable/torn file is not the same as an absent
+            // progress file. Surface indeterminate state so the renderer keeps
+            // the exact native lifecycle alive and retries this read instead of
+            // eventually cancelling a WorkManager retry on a false absence.
             ret.put("current", JSObject.NULL);
+            ret.put("unknown", true);
             return ret;
         }
     }
@@ -237,7 +272,9 @@ public class DownloadWorkerPlugin extends Plugin {
     /**
      * Read progress only while the requested identity still owns the order path.
      * Checking the order first closes the replacement gap before a new run has
-     * emitted its first progress file.
+     * emitted its first progress file. A confirmed replacement is stale; a
+     * present order whose identity cannot be proven is unknown so the plugin can
+     * reject this tick and let the renderer retry instead of stopping its poll.
      */
     static JSObject readProgressForRun(
             String galleryId,
@@ -245,13 +282,26 @@ public class DownloadWorkerPlugin extends Plugin {
             File progressFile,
             String expectedRunId
     ) {
-        if (orderFile != null && orderFile.isFile()) {
+        if (orderFile != null && orderFile.exists()) {
             NativeDownloadRun current = NativeDownloadRun.fromOrderFile(orderFile);
-            if (current == null
-                    || !galleryId.equals(current.galleryId)
-                    || !expectedRunId.equals(current.runId)) {
+            if (current == null || !galleryId.equals(current.galleryId)) {
+                // A present-but-unreadable order is not proof that another run
+                // replaced this one. The same is true for a readable order whose
+                // embedded gallery id does not match its filename: that state is
+                // corrupt, not a confirmed replacement generation. Report an
+                // indeterminate read so the bridge can reject this tick: the
+                // existing JS poller retries rejected reads (and may still
+                // finalize from the durable manifest), while `stale:true` would
+                // permanently stop that poll.
+                JSObject unknown = new JSObject();
+                unknown.put("runId", expectedRunId);
+                unknown.put("current", JSObject.NULL);
+                unknown.put("unknown", true);
+                return unknown;
+            }
+            if (!expectedRunId.equals(current.runId)) {
                 JSObject stale = new JSObject();
-                stale.put("runId", current == null ? expectedRunId : current.runId);
+                stale.put("runId", current.runId);
                 stale.put("current", JSObject.NULL);
                 stale.put("stale", true);
                 return stale;
@@ -313,6 +363,14 @@ public class DownloadWorkerPlugin extends Plugin {
                 progressRunId = progress.optString("runId", null);
                 if (!NativeDownloadRun.isValidRunId(progressRunId)) {
                     return CurrentRunResolution.unknown();
+                }
+                if (!hasOrder && isConfirmedTerminalProgress(progress)) {
+                    // UNRECOVERABLE worker failures remove the work order after
+                    // publishing this sentinel. With no order left there is no
+                    // native writer or re-enqueueable payload, so treating the
+                    // sentinel as an active run strands restart recovery on an
+                    // enqueue that can never pass its ownership check.
+                    return CurrentRunResolution.absent();
                 }
             }
         } catch (Throwable readError) {
@@ -405,6 +463,20 @@ public class DownloadWorkerPlugin extends Plugin {
 
     static boolean isConfirmedLegacyProgress(JSONObject progress) {
         return progress != null && !progress.has("runId") && progress.has("current");
+    }
+
+    /** A worker-published terminal failure sentinel, validated without coercion. */
+    static boolean isConfirmedTerminalProgress(JSONObject progress) {
+        if (progress == null) return false;
+        Object rawRunId = progress.opt("runId");
+        if (!(rawRunId instanceof String)
+                || !NativeDownloadRun.isValidRunId((String) rawRunId)
+                || !progress.has("current")
+                || !progress.isNull("current")) {
+            return false;
+        }
+        Object error = progress.opt("error");
+        return error instanceof String && !((String) error).isEmpty();
     }
 
     static void deleteConfirmedLegacyProgress(File progressFile) throws Exception {
@@ -646,7 +718,9 @@ public class DownloadWorkerPlugin extends Plugin {
      * {"runId":"...","current":N,"total":M}}. Resolves progress only when
      * the file belongs to the requested runId; a replacement run is reported as
      * {@code {current: null, stale: true, runId}}. The in-app poller only runs on
-     * Android, so iOS omits this method (the TS caller is isAndroid-gated).
+     * Android, so iOS omits this method (the TS caller is isAndroid-gated). A
+     * present but unreadable/corrupt order rejects the call as indeterminate;
+     * this is recoverable under the renderer's existing retry-on-rejection path.
      *
      * DEVICE-PENDING: verified by code review here; smoke-test on a device that the
      * advancing values reach the in-app card and that a completed gallery reads
@@ -659,12 +733,20 @@ public class DownloadWorkerPlugin extends Plugin {
         if (!isValidGalleryId(galleryId)) { call.reject("galleryId must be numeric"); return; }
         if (!NativeDownloadRun.isValidRunId(runId)) { call.reject("runId is invalid"); return; }
         synchronized (NativeDownloadRun.lockFor(galleryId)) {
-            call.resolve(readProgressForRun(
+            JSObject progress = readProgressForRun(
                     galleryId,
                     orderFile(galleryId),
                     progressFile(galleryId),
                     runId
-            ));
+            );
+            if (progress.optBoolean("unknown", false)) {
+                // Rejection is intentionally recoverable in the existing JS
+                // contract: it retries on the next poll instead of interpreting
+                // an unreadable identity as a confirmed replacement lifecycle.
+                call.reject("native download order is unreadable or malformed");
+                return;
+            }
+            call.resolve(progress);
         }
     }
 

@@ -92,6 +92,20 @@ describe('buildWorkOrder (Task C handoff)', () => {
     expect(order.pages).toHaveLength(2);
   });
 
+  it('keeps an existing physical folder name when a retry sees a changed title', () => {
+    const order = buildWorkOrder(
+      12345,
+      'New Title',
+      [file()],
+      ggConfig,
+      'run-aaaaaaaaaaaaaaaa',
+      '12345 Old Title',
+    );
+
+    expect(order.folderName).toBe('12345 Old Title');
+    expect(order.pages[0].relPath).toContain(`${LIBRARY_ROOT}/12345 Old Title/0001.`);
+  });
+
   it('relPath is HiPaGo/<folder>/<1-based zero-padded>.<ext> (matches imageFileName)', () => {
     const files = [file({ haswebp: 1 }), file({ hash: 'b'.repeat(64) })];
     const order = buildWorkOrder(777, 'T', files, ggConfig);

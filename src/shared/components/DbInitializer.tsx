@@ -53,9 +53,9 @@ export function DbInitializer() {
             .catch((e) => console.warn('[download] tree restore failed:', e));
           await import('@/lib/storage/migrate-downloads')
             .then(async ({ migrateDownloadsToPublic, restoreDownloadsFromPublicFolder }) => {
-              await migrateDownloadsToPublic();
+              const migration = await migrateDownloadsToPublic();
               const restored = await restoreDownloadsFromPublicFolder();
-              if (restored.imported > 0) {
+              if (migration.reconciled > 0 || restored.imported > 0) {
                 const { notifyDownloadLibraryChanged } =
                   await import('@/lib/store/download-progress');
                 notifyDownloadLibraryChanged(true);
@@ -109,6 +109,13 @@ export function DbInitializer() {
       inFlight = true;
       try {
         await initializeDatabase();
+        // A suspended iOS foreground controller still counts as a live
+        // lifecycle, so ordinary launch reconciliation deliberately skips it.
+        // Let the live-aware completion path publish/abort that owner first,
+        // then reconcile dormant native rows left by app death or reload.
+        await import('@/lib/store/download-progress').then(
+          ({ reconcileLiveNativeDownloadCompletions }) => reconcileLiveNativeDownloadCompletions(),
+        );
         await import('@/lib/store/reconcile-queue').then(({ reconcileNativeBackgroundDownloads }) =>
           reconcileNativeBackgroundDownloads(),
         );

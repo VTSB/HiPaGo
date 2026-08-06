@@ -14,7 +14,11 @@
  *     processor only when unmetered.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DownloadPausedError, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
+import {
+  DownloadPausedError,
+  StaleDownloadRunError,
+  hasCompleteDownloadedGallery,
+} from '@/lib/utils/download-zip';
 import { DownloadCancelledError } from '@/lib/storage/download-store';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -30,6 +34,9 @@ vi.mock('@/lib/utils/download-zip', async () => {
     ...actual,
     downloadGalleryToLibrary: (...a: unknown[]) => dl(...a),
     getDownloadedGalleryPages: vi.fn(async (id: number) => manifestPages.get(id) ?? []),
+    getDownloadedGalleryTotalBytes: vi.fn(
+      async (_id: number, pages: { index: number; ext: string }[]) => pages.length * 100,
+    ),
     hasCompleteDownloadedGallery: vi.fn(async (id: number, expectedPageCount: number) => {
       const pages = manifestPages.get(id) ?? [];
       return pages.length > 0 && (expectedPageCount <= 0 || pages.length === expectedPageCount);
@@ -91,6 +98,7 @@ vi.mock('@/lib/db/download-queue', () => ({
         status: 'downloading',
         queuePosition: item.pos ?? item.id,
         nativeRunId,
+        folderName: downloadRows.get(item.id)?.folderName ?? null,
       };
     },
   ),
@@ -251,7 +259,12 @@ vi.mock('@/lib/db/download', () => ({
     // reconcile query are one consistent source for a table; else old defaults.
     const o = downloadRows.get(id);
     const fromAdapter = adapterRows.find((r) => (r as { galleryId: number }).galleryId === id) as
-      | { pageCount?: number; status?: string }
+      | {
+          pageCount?: number;
+          status?: string;
+          lastError?: string | null;
+          folderName?: string | null;
+        }
       | undefined;
     return {
       galleryId: id,
@@ -262,9 +275,9 @@ vi.mock('@/lib/db/download', () => ({
       totalBytes: 0,
       downloadedAt: '',
       status: o?.status ?? fromAdapter?.status ?? 'failed',
-      folderName: o?.folderName ?? null,
+      folderName: o?.folderName ?? fromAdapter?.folderName ?? null,
       migratedAt: o?.migratedAt ?? null,
-      lastError: o?.lastError ?? null,
+      lastError: o?.lastError ?? fromAdapter?.lastError ?? null,
       retryCount: o?.retryCount ?? 0,
       queuePosition: o?.queuePosition ?? null,
       nativeRunId:
@@ -303,6 +316,7 @@ vi.mock('@/lib/db/download', () => ({
       expected: { galleryId: number; status: string; pageCount: number },
       pageCount: number,
       migratedAt?: string | null,
+      totalBytes?: number,
     ) => {
       const fromAdapter = adapterRows.find(
         (row) => (row as { galleryId: number }).galleryId === expected.galleryId,
@@ -310,6 +324,7 @@ vi.mock('@/lib/db/download', () => ({
         | {
             status?: string;
             pageCount?: number;
+            totalBytes?: number;
             nativeRunId?: string | null;
             migratedAt?: string | null;
           }
@@ -327,6 +342,7 @@ vi.mock('@/lib/db/download', () => ({
       const completed = {
         ...expected,
         pageCount,
+        totalBytes: totalBytes ?? current.totalBytes ?? 0,
         status: 'complete',
         queuePosition: null,
         retryCount: 0,
@@ -340,6 +356,7 @@ vi.mock('@/lib/db/download', () => ({
         ...(downloadRows.get(expected.galleryId) ?? {}),
         status: 'complete',
         pageCount,
+        totalBytes: totalBytes ?? current.totalBytes ?? 0,
         queuePosition: null,
         retryCount: 0,
         lastError: null,
@@ -349,6 +366,7 @@ vi.mock('@/lib/db/download', () => ({
       return true;
     },
   ),
+  updateNativeDownloadProgress: vi.fn(async () => true),
   setDownloadError: vi.fn(async (galleryId: number, status: string, lastError: string | null) => {
     errorRows.push({ galleryId, status, lastError });
     const prev = downloadRows.get(galleryId) ?? {};
@@ -551,7 +569,15 @@ const workerCancelThrows = { value: false };
 // Steers DownloadWorker.getProgress for the poller tests (in-app progress bridge).
 // Default: no progress file yet ({current:null}) so handoff tests' polls are inert.
 const workerProgress: {
-  value: { current: number; total: number } | { current: null; error?: string };
+  value:
+    | {
+        current: number;
+        total: number;
+        downloadedBytes?: number;
+        state?: 'running' | 'failed' | 'completed';
+        completed?: boolean;
+      }
+    | { current: null; error?: string; unknown?: boolean; stale?: boolean };
 } = {
   value: { current: null },
 };
@@ -701,6 +727,7 @@ import {
   startAndroidProgressPoll,
   stopAndroidProgressPoll,
   finalizeDownloadIfComplete,
+  reconcileLiveNativeDownloadCompletions,
   confirmNativeRunStopped,
 } from '../download-progress';
 import { DownloadWorker } from '@/lib/plugins/downloadWorker';
@@ -1221,6 +1248,26 @@ describe('Android worker handoff (Task C, AC-005)', () => {
     expect(page).toHaveProperty('headers');
   });
 
+  it('retries an Android partial download in its persisted physical folder', async () => {
+    androidFlag = true;
+    queue.push({ id: 201, pageCount: 1, pos: 8 });
+    downloadRows.set(201, {
+      status: 'queued',
+      pageCount: 1,
+      queuePosition: 8,
+      folderName: '201 Previous Title',
+    });
+
+    await processQueue();
+
+    const write = workOrderWrites.find((candidate) => candidate.galleryId === '201');
+    expect(write).toBeTruthy();
+    const order = JSON.parse(write!.json);
+    expect(order.folderName).toBe('201 Previous Title');
+    expect(order.pages[0].relPath).toMatch(/^HiPaGo\/201 Previous Title\/0001\./);
+    expect(downloadRows.get(201)?.folderName).toBe('201 Previous Title');
+  });
+
   it('drains the whole queue, handing every gallery to the worker', async () => {
     androidFlag = true;
     queue.push({ id: 1, pageCount: 0 }, { id: 2, pageCount: 0 }, { id: 3, pageCount: 0 });
@@ -1238,8 +1285,21 @@ describe('Android worker handoff (Task C, AC-005)', () => {
 
     const managerRows = useDownloadProgressStore.getState().queue;
     expect(managerRows.map((q) => q.id).sort()).toEqual([1, 2, 3]);
-    expect(managerRows.every((q) => q.status === 'downloading')).toBe(true);
+    expect(managerRows.every((q) => q.status === 'waiting')).toBe(true);
     expect(managerRows.every((q) => q.progress?.total === 1)).toBe(true);
+  });
+
+  it('keeps native waiting rows in persisted worker queue order', async () => {
+    androidFlag = true;
+    queue.push({ id: 10, pageCount: 0, pos: 20 }, { id: 30, pageCount: 0, pos: 10 });
+
+    await processQueue();
+    await useDownloadProgressStore.getState().refreshQueue();
+
+    expect(useDownloadProgressStore.getState().queue.map((item) => item.id)).toEqual([30, 10]);
+    expect(useDownloadProgressStore.getState().queue.map((item) => item.position)).toEqual([
+      10, 20,
+    ]);
   });
 
   it('marks Android handoff failures failed without an unscoped queue mutation', async () => {
@@ -1642,6 +1702,243 @@ describe('Android live-progress poller (AC-003)', () => {
     }
   });
 
+  it('keeps polling when native progress exists but is temporarily unreadable', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const runId = testRunId(511);
+      downloadRows.set(511, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: runId,
+      });
+      useDownloadProgressStore.setState({
+        entries: { 511: { progress: { current: 3, total: 8 }, error: null } },
+      });
+      workerProgress.value = { current: null, unknown: true };
+
+      startAndroidProgressPoll(511, { runId });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(errorRows).toEqual([]);
+      expect(scheduled).toEqual([]);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+      expect(DownloadWorker.getCurrentRun).not.toHaveBeenCalled();
+      expect(useDownloadProgressStore.getState().entries[511]?.progress).toEqual({
+        current: 3,
+        total: 8,
+      });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { current: -1, total: 8 },
+    { current: 9, total: 8 },
+    { current: 1.5, total: 8 },
+    { current: 1, total: 0 },
+    { current: Number.NaN, total: 8 },
+  ])('ignores invalid native progress without clearing waiting ownership: %j', async (invalid) => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const runId = testRunId(512, String(invalid.current));
+      downloadRows.set(512, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: runId,
+      });
+      useDownloadProgressStore.setState({
+        entries: {
+          512: {
+            progress: { current: 0, total: 8 },
+            error: null,
+            nativePending: true,
+          },
+        },
+      });
+      workerProgress.value = invalid;
+
+      startAndroidProgressPoll(512, { runId });
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      expect(errorRows).toEqual([]);
+      expect(scheduled).toEqual([]);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+      expect(useDownloadProgressStore.getState().entries[512]).toMatchObject({
+        progress: { current: 0, total: 8 },
+        nativePending: true,
+      });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an incomplete row alive across repeated native progress read failures', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const runId = testRunId(513);
+      downloadRows.set(513, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: runId,
+      });
+      useDownloadProgressStore.setState({
+        entries: { 513: { progress: { current: 2, total: 8 }, error: null } },
+      });
+      vi.mocked(DownloadWorker.getProgress).mockRejectedValue(new Error('native state unreadable'));
+
+      startAndroidProgressPoll(513, { runId });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(DownloadWorker.getProgress).toHaveBeenCalledTimes(11);
+      expect(errorRows).toEqual([]);
+      expect(scheduled).toEqual([]);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+      expect(downloadRows.get(513)).toMatchObject({
+        status: 'downloading',
+        nativeRunId: runId,
+      });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps polling a stale tick when the exact native run still owns the order', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const runId = testRunId(514);
+      downloadRows.set(514, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: runId,
+      });
+      workerCurrentRuns.set('514', runId);
+      workerProgress.value = { current: null, stale: true };
+      useDownloadProgressStore.setState({
+        entries: { 514: { progress: { current: 2, total: 8 }, error: null } },
+      });
+
+      startAndroidProgressPoll(514, { runId });
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(DownloadWorker.getCurrentRun).toHaveBeenCalledWith({ galleryId: '514' });
+      expect(DownloadWorker.getProgress).toHaveBeenCalledTimes(3);
+      expect(errorRows).toEqual([]);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops only the old poll when a stale tick discovers a replacement run', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const runId = testRunId(515, 'old');
+      const replacementRunId = testRunId(515, 'replacement');
+      downloadRows.set(515, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: replacementRunId,
+      });
+      workerCurrentRuns.set('515', replacementRunId);
+      workerProgress.value = { current: null, stale: true };
+      useDownloadProgressStore.setState({
+        entries: { 515: { progress: { current: 2, total: 8 }, error: null } },
+      });
+
+      startAndroidProgressPoll(515, { runId });
+      await vi.advanceTimersByTimeAsync(0);
+      const callsAfterReplacement = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      expect(DownloadWorker.getCurrentRun).toHaveBeenCalledWith({ galleryId: '515' });
+      expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBe(callsAfterReplacement);
+      expect(errorRows).toEqual([]);
+      expect(scheduled).toEqual([]);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+      expect(downloadRows.get(515)).toMatchObject({ nativeRunId: replacementRunId });
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a delayed old-run absence lookup mutate a replacement poll', async () => {
+    androidFlag = true;
+    const oldRunId = testRunId(516, 'old');
+    const replacementRunId = testRunId(516, 'replacement');
+    downloadRows.set(516, {
+      status: 'downloading',
+      pageCount: 8,
+      retryCount: 0,
+      nativeRunId: oldRunId,
+    });
+    useDownloadProgressStore.setState({
+      entries: { 516: { progress: { current: 2, total: 8 }, error: null } },
+    });
+    workerProgress.value = { current: null, error: 'Background download failed' };
+
+    let resolveLookup!: (value: { runId: string | null }) => void;
+    let reportLookupStarted!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      reportLookupStarted = resolve;
+    });
+    const lookupResult = new Promise<{ runId: string | null }>((resolve) => {
+      resolveLookup = resolve;
+    });
+    vi.mocked(DownloadWorker.getCurrentRun).mockImplementationOnce(async () => {
+      reportLookupStarted();
+      return lookupResult;
+    });
+
+    try {
+      startAndroidProgressPoll(516, { runId: oldRunId });
+      await lookupStarted;
+
+      downloadRows.set(516, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: replacementRunId,
+      });
+      workerCurrentRuns.set('516', replacementRunId);
+      workerProgress.value = { current: 1, total: 8 };
+      startAndroidProgressPoll(516, { runId: replacementRunId });
+      resolveLookup({ runId: null });
+
+      await vi.waitFor(() =>
+        expect(useDownloadProgressStore.getState().entries[516]?.progress).toEqual({
+          current: 1,
+          total: 8,
+        }),
+      );
+      expect(errorRows).toEqual([]);
+      expect(scheduled).toEqual([]);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+      expect(downloadRows.get(516)).toMatchObject({
+        status: 'downloading',
+        nativeRunId: replacementRunId,
+      });
+    } finally {
+      resolveLookup({ runId: null });
+      stopAndroidProgressPoll();
+    }
+  });
+
   it('fails a rehydrated Android row only after native state confirms absence', async () => {
     vi.useFakeTimers();
     try {
@@ -1657,12 +1954,6 @@ describe('Android live-progress poller (AC-003)', () => {
         entries: { 508: { progress: { current: 0, total: 8 }, error: null } },
       });
       workerProgress.value = { current: null };
-      vi.mocked(DownloadWorker.cancel).mockResolvedValueOnce({
-        runId,
-        cancelled: false,
-        stale: false,
-        remaining: 0,
-      });
 
       startAndroidProgressPoll(508, { runId, rehydrated: true });
       await vi.advanceTimersByTimeAsync(15_000);
@@ -1674,6 +1965,7 @@ describe('Android live-progress poller (AC-003)', () => {
         lastError: 'Background download stopped before completion',
       });
       expect(scheduled).toHaveLength(1);
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -1729,7 +2021,7 @@ describe('Android live-progress poller (AC-003)', () => {
         'Background download stopped before completion',
       );
       expect(useDownloadProgressStore.getState().entries[503]?.retryAt).toBe(scheduled[0].dueAt);
-      expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '503', runId });
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
       const callsAfterFailure = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
       await vi.advanceTimersByTimeAsync(3000);
       expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBe(callsAfterFailure);
@@ -1768,7 +2060,43 @@ describe('Android live-progress poller (AC-003)', () => {
       expect(useDownloadProgressStore.getState().entries[504]?.error).toBe(
         'Background download failed',
       );
-      expect(DownloadWorker.cancel).toHaveBeenCalledWith({ galleryId: '504', runId });
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+    } finally {
+      stopAndroidProgressPoll();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps polling a retryable Android error while exact native ownership remains active', async () => {
+    vi.useFakeTimers();
+    try {
+      androidFlag = true;
+      const runId = testRunId(510);
+      downloadRows.set(510, {
+        status: 'downloading',
+        pageCount: 8,
+        retryCount: 0,
+        nativeRunId: runId,
+      });
+      workerCurrentRuns.set('510', runId);
+      workerProgress.value = { current: null, error: 'Background download failed' };
+      useDownloadProgressStore.setState({
+        entries: { 510: { progress: { current: 0, total: 8 }, error: null } },
+      });
+
+      startAndroidProgressPoll(510, { runId });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(errorRows).toEqual([]);
+      expect(scheduled).toEqual([]);
+      expect(downloadRows.get(510)).toMatchObject({
+        status: 'downloading',
+        nativeRunId: runId,
+      });
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
+      const calls = vi.mocked(DownloadWorker.getProgress).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(vi.mocked(DownloadWorker.getProgress).mock.calls.length).toBeGreaterThan(calls);
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -1789,12 +2117,6 @@ describe('Android live-progress poller (AC-003)', () => {
       useDownloadProgressStore.setState({
         entries: { 506: { progress: { current: 0, total: 8 }, error: null } },
       });
-      vi.mocked(DownloadWorker.cancel).mockResolvedValueOnce({
-        runId,
-        cancelled: false,
-        stale: false,
-        remaining: 0,
-      });
       vi.mocked(DownloadWorker.getCurrentRun).mockResolvedValueOnce({ runId: null });
 
       workerProgress.value = { current: null, error: 'Background download failed' };
@@ -1809,6 +2131,7 @@ describe('Android live-progress poller (AC-003)', () => {
       expect(scheduled).toHaveLength(1);
       expect(scheduled[0]).toMatchObject({ id: 506, attempt: 1 });
       expect(downloadRows.get(506)?.nativeRunId).toBeNull();
+      expect(DownloadWorker.cancel).not.toHaveBeenCalled();
     } finally {
       stopAndroidProgressPoll();
       vi.useRealTimers();
@@ -2219,10 +2542,12 @@ describe('finalizeDownloadIfComplete (shared completion rule)', () => {
       galleryId: number;
       status: string;
       pageCount: number;
+      totalBytes: number;
       retryCount: number;
       nextRetryAt: string | null;
     };
     expect(upsert).toMatchObject({ galleryId: 900, status: 'complete', pageCount: 3 });
+    expect(upsert.totalBytes).toBe(300);
     expect(upsert.retryCount).toBe(0);
     expect(upsert.nextRetryAt).toBeNull();
   });
@@ -2654,6 +2979,83 @@ describe('iOS background backstop (Task D)', () => {
     // not re-download an already-complete gallery.
     expect(workerCancels).toContain('402');
     expect(useDownloadProgressStore.getState().downloaded[402]).toBe(true);
+  });
+
+  it('foreground reconciliation consumes iOS native completion and stops the stale controller', async () => {
+    iosFlag = true;
+    queue.push({ id: 414, pageCount: 0 });
+    dl.mockImplementation(
+      async (...args: unknown[]) =>
+        new Promise<void>((_resolve, reject) => {
+          const signal = args[7] as AbortSignal;
+          signal.addEventListener('abort', () => reject(new StaleDownloadRunError()), {
+            once: true,
+          });
+        }),
+    );
+
+    const processor = processQueue();
+    await vi.waitFor(() => expect(workerEnqueues).toContain('414'));
+    const runId = workerEnqueueCalls.find((call) => call.galleryId === '414')!.runId;
+    manifestPages.set(414, [{ index: 0, ext: 'webp' }]);
+    workerProgress.value = {
+      current: 1,
+      total: 1,
+      downloadedBytes: 100,
+      state: 'completed',
+      completed: true,
+    };
+
+    await expect(reconcileLiveNativeDownloadCompletions()).resolves.toBe(1);
+    await processor;
+
+    expect(DownloadWorker.getProgress).toHaveBeenCalledWith({ galleryId: '414', runId });
+    expect(vi.mocked(downloadDb.updateNativeDownloadProgress)).toHaveBeenCalledWith(
+      414,
+      runId,
+      1,
+      100,
+    );
+    expect(downloadRows.get(414)).toMatchObject({
+      status: 'complete',
+      pageCount: 1,
+      totalBytes: 100,
+      nativeRunId: null,
+    });
+    expect(useDownloadProgressStore.getState().downloaded[414]).toBe(true);
+    expect(useDownloadProgressStore.getState().entries[414]).toBeUndefined();
+  });
+
+  it('foreground reconciliation refreshes partial iOS native page and byte progress', async () => {
+    iosFlag = true;
+    queue.push({ id: 415, pageCount: 2 });
+    mockForegroundUntilAbort();
+
+    const processor = processQueue();
+    await vi.waitFor(() => expect(workerEnqueues).toContain('415'));
+    const runId = workerEnqueueCalls.find((call) => call.galleryId === '415')!.runId;
+    workerProgress.value = {
+      current: 1,
+      total: 2,
+      downloadedBytes: 75,
+      state: 'running',
+    };
+
+    await expect(reconcileLiveNativeDownloadCompletions()).resolves.toBe(0);
+
+    expect(useDownloadProgressStore.getState().entries[415]?.progress).toEqual({
+      current: 1,
+      total: 2,
+    });
+    expect(vi.mocked(downloadDb.updateNativeDownloadProgress)).toHaveBeenCalledWith(
+      415,
+      runId,
+      1,
+      75,
+    );
+
+    expect(await useDownloadProgressStore.getState().cancel(415)).toBe(true);
+    await processor;
   });
 
   it('a backstop scheduling failure does NOT fail the foreground download', async () => {
@@ -4032,6 +4434,41 @@ describe('reconcileQueue (AC-007)', () => {
     expect(interruptedRequeued).toContain(11);
   });
 
+  it('finalizes a non-mobile crash-window row from its complete manifest instead of requeueing', async () => {
+    adapterRows.push({
+      galleryId: 19,
+      title: 'Committed before crash',
+      thumbnail: '/tn',
+      tags: '{}',
+      pageCount: 3,
+      status: 'downloading',
+      queuePosition: 2,
+    });
+    downloadRows.set(19, {
+      status: 'downloading',
+      pageCount: 3,
+      queuePosition: 2,
+      nativeRunId: null,
+    });
+    manifestPages.set(19, [
+      { index: 0, ext: 'webp' },
+      { index: 1, ext: 'webp' },
+      { index: 2, ext: 'webp' },
+    ]);
+    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+    __resetReconcileQueueForTests();
+
+    await reconcileQueue();
+
+    expect(downloadRows.get(19)).toMatchObject({
+      status: 'complete',
+      pageCount: 3,
+      queuePosition: null,
+    });
+    expect(useDownloadProgressStore.getState().downloaded[19]).toBe(true);
+    expect(interruptedRequeued).not.toContain(19);
+  });
+
   it('replaces a confirmed Android pre-runId order through the restart queue', async () => {
     androidFlag = true;
     // Even a fully committed manifest must not finalize first: doing so would
@@ -4273,6 +4710,8 @@ describe('reconcileQueue (AC-007)', () => {
 
   it('Android: marks a gallery complete when its manifest covers all pages', async () => {
     androidFlag = true;
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal('window', { dispatchEvent });
     // A 'downloading' row targeting 3 pages; the worker finished while away.
     adapterRows.push({
       galleryId: 55,
@@ -4289,17 +4728,46 @@ describe('reconcileQueue (AC-007)', () => {
       { index: 1, ext: 'webp' },
       { index: 2, ext: 'webp' },
     ]);
-    const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
-    __resetReconcileQueueForTests();
+    useDownloadProgressStore.setState({
+      entries: {
+        55: { progress: null, error: null, queued: true, position: 5 },
+      },
+      queue: [
+        {
+          id: 55,
+          title: 'W',
+          thumbnail: '/tn',
+          status: 'queued',
+          position: 5,
+          progress: null,
+        },
+      ],
+    });
+    const { reconcileNativeBackgroundDownloads } = await import('../reconcile-queue');
 
-    await reconcileQueue();
-    await new Promise((r) => setTimeout(r, 5));
+    try {
+      await reconcileNativeBackgroundDownloads();
+      await new Promise((r) => setTimeout(r, 5));
 
-    const completed = upsertedRows.find((r) => (r as { galleryId: number }).galleryId === 55) as
-      | { status: string; queuePosition: number | null }
-      | undefined;
-    expect(completed?.status).toBe('complete');
-    expect(completed?.queuePosition).toBeNull();
+      const completed = upsertedRows.find((r) => (r as { galleryId: number }).galleryId === 55) as
+        | { status: string; queuePosition: number | null }
+        | undefined;
+      expect(completed?.status).toBe('complete');
+      expect(completed?.queuePosition).toBeNull();
+      expect(useDownloadProgressStore.getState().entries[55]).toBeUndefined();
+      expect(useDownloadProgressStore.getState().downloaded[55]).toBe(true);
+      expect(useDownloadProgressStore.getState().queue).not.toContainEqual(
+        expect.objectContaining({ id: 55 }),
+      );
+      expect(dispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'hipago:download-library-changed',
+          detail: { structural: true },
+        }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('Android: recovers a failed row when native retry later completed on disk', async () => {
@@ -4435,6 +4903,42 @@ describe('reconcileQueue (AC-007)', () => {
     // Zombie was requeued, but download was not driven (processor not kicked).
     expect(interruptedRequeued).toContain(13);
     expect(dl).not.toHaveBeenCalled();
+  });
+
+  it('publishes a structural library change after restoring a crash-window row to the queue', async () => {
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal('window', { dispatchEvent });
+    try {
+      adapterRows.push({
+        galleryId: 20,
+        title: 'Interrupted',
+        thumbnail: '/tn',
+        tags: '{}',
+        pageCount: 2,
+        status: 'downloading',
+        queuePosition: 3,
+      });
+      downloadRows.set(20, {
+        status: 'downloading',
+        pageCount: 2,
+        queuePosition: 3,
+      });
+      unmetered.mockResolvedValue(false);
+      const { reconcileQueue, __resetReconcileQueueForTests } = await import('../reconcile-queue');
+      __resetReconcileQueueForTests();
+
+      await reconcileQueue();
+
+      expect(interruptedRequeued).toContain(20);
+      expect(dispatchEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'hipago:download-library-changed',
+          detail: { structural: true },
+        }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('Android: kicks the processor on a metered network so CONNECTED WorkManager can run', async () => {

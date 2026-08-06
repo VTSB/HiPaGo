@@ -67,12 +67,27 @@ export interface DownloadWorkerPlugin {
    * `{current: null, stale: true, runId}`; absence/completion is `{current: null}`.
    * A native terminal failure is `{current: null, error}`.
    */
-  getProgress(options: {
-    galleryId: string;
-    runId: string;
-  }): Promise<
-    | { runId: string; current: number; total: number; stale?: false }
-    | { runId: string; current: null; error?: string; stale?: boolean }
+  getProgress(options: { galleryId: string; runId: string }): Promise<
+    | {
+        runId: string;
+        current: number;
+        total: number;
+        downloadedBytes?: number;
+        state?: 'running' | 'failed' | 'completed';
+        completed?: boolean;
+        manifestPageCount?: number;
+        completedAt?: string;
+        error?: string;
+        stale?: false;
+        unknown?: false;
+      }
+    | {
+        runId: string;
+        current: null;
+        error?: string;
+        stale?: boolean;
+        unknown?: boolean;
+      }
   >;
 
   /**

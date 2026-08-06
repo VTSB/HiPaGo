@@ -106,8 +106,12 @@ export function buildWorkOrder(
   files: GalleryFile[],
   ggConfig: GgConfig,
   runId = createDownloadRunId(),
+  existingFolderName?: string | null,
 ): WorkOrder {
-  const folderName = galleryFolderName(galleryId, title);
+  // Keep retries in the exact physical folder recorded by the DB. A gallery's
+  // title can change between attempts; deriving a new name would split one
+  // logical download across two directories and hide reusable partial pages.
+  const folderName = existingFolderName || galleryFolderName(galleryId, title);
   const headers = getNativeHeaders();
   const items = resolveWorkOrder(files, ggConfig);
   const pages: WorkOrderPage[] = items.map((item) => ({

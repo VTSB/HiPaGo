@@ -295,11 +295,13 @@ export async function completeDownloadIfUnchanged(
   expected: DBDownload,
   completedPageCount: number,
   migratedAt?: string | null,
+  completedTotalBytes?: number,
 ): Promise<boolean> {
   const db = await ensureDb();
   const result = await db.execute(
     `UPDATE download
         SET pageCount = ?,
+            totalBytes = COALESCE(?, totalBytes),
             status = 'complete',
             queuePosition = NULL,
             retryCount = 0,
@@ -319,6 +321,7 @@ export async function completeDownloadIfUnchanged(
         AND nativeRunId IS ?`,
     [
       completedPageCount,
+      completedTotalBytes ?? null,
       migratedAt ?? null,
       expected.galleryId,
       expected.status,

@@ -1008,10 +1008,9 @@ describe('restoreDownloadsFromPublicFolder', () => {
     expect(mockRows[0]).toMatchObject({ status: 'failed', pageCount: 3 });
   });
 
-  it('preserves an already-complete DB row when the on-disk folder is momentarily incomplete', async () => {
-    // The DB says the gallery is complete and points at this folder, but the
-    // scan sees a missing page (e.g. a transient SAF stat failure on boot).
-    // The complete row must not be downgraded to failed by the boot-time scan.
+  it('downgrades an already-complete DB row when a page is confirmed missing', async () => {
+    // Unknown provider/stat failures throw and abort the scan. A successful
+    // missing result is therefore evidence that the completed row is stale.
     mockRows = [
       makeRow({
         galleryId: 1450,
@@ -1029,8 +1028,15 @@ describe('restoreDownloadsFromPublicFolder', () => {
 
     const result = await restoreDownloadsFromPublicFolder(mockNewStore);
 
-    expect(result).toEqual({ imported: 0, skipped: 1, failed: 0 });
-    expect(upsertedRows).toHaveLength(0);
+    expect(result).toEqual({ imported: 1, skipped: 0, failed: 0 });
+    expect(upsertedRows).toHaveLength(1);
+    expect(mockRows[0]).toMatchObject({
+      galleryId: 1450,
+      status: 'failed',
+      pageCount: 2,
+      totalBytes: 10,
+      lastError: 'Recovered partial download',
+    });
   });
 
   it.each([

@@ -3,6 +3,7 @@ import { getGgConfig, ApiError } from '@/lib/api/client';
 import {
   downloadGalleryToLibrary,
   getDownloadedGalleryPages,
+  getDownloadedGalleryTotalBytes,
   hasCompleteDownloadedGallery,
   DownloadPausedError,
   StaleDownloadRunError,
@@ -14,6 +15,7 @@ import {
   listDownloads,
   deserializeTags,
   setDownloadError,
+  updateNativeDownloadProgress,
   completeDownloadIfUnchanged,
   prepareNativeDownloadRun,
   adoptNativeRunIfUnchanged,
@@ -72,6 +74,9 @@ interface DownloadEntry {
   retryAt?: string | null;
   /** Which automatic attempt (1-based) the pending retryAt represents. */
   attempt?: number | null;
+  /** Android has accepted the native run, but its sequential worker has not
+   *  published durable page progress for this gallery yet. */
+  nativePending?: boolean;
 }
 
 /**
@@ -84,9 +89,9 @@ export interface QueueItem {
   id: number;
   title: string;
   thumbnail: string;
-  /** 'downloading' for the active item, else the DB status ('queued'|'paused'). */
-  status: Extract<DownloadStatus, 'downloading' | 'queued' | 'paused'>;
-  /** Queue position (from the DB). null for the active item. */
+  /** 'waiting' is a native-owned Android run that has not started transferring. */
+  status: Extract<DownloadStatus, 'downloading' | 'queued' | 'paused'> | 'waiting';
+  /** Queue position (from the DB). Retained for native waiting order; null once active. */
   position: number | null;
   /** Live progress for the active item only; null for queued/paused rows. */
   progress: DownloadProgress | null;
@@ -532,6 +537,7 @@ export async function fireDueAutoRetries(): Promise<void> {
   }
   if (requeued > 0) {
     storeApi?.refreshQueue();
+    notifyDownloadLibraryChanged(true);
     void processQueue();
   }
 
@@ -562,6 +568,25 @@ const LIBRARY_CHANGE_THROTTLE_MS = 750;
 export const DOWNLOAD_LIBRARY_CHANGED_EVENT = 'hipago:download-library-changed';
 
 let lastLibraryChangeEventAt = 0;
+
+type NativeProgressResult = Awaited<ReturnType<typeof DownloadWorker.getProgress>>;
+type NativeNumericProgress = Extract<NativeProgressResult, { current: number }>;
+
+function isValidNativeProgress(progress: NativeProgressResult): progress is NativeNumericProgress {
+  const { current } = progress;
+  const total = 'total' in progress ? progress.total : undefined;
+  return (
+    Number.isSafeInteger(current) &&
+    Number.isSafeInteger(total) &&
+    (current as number) >= 0 &&
+    (total as number) > 0 &&
+    (current as number) <= (total as number)
+  );
+}
+
+function isValidNativeByteCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
 
 export function notifyDownloadLibraryChanged(force = false): void {
   if (typeof window === 'undefined') return;
@@ -662,6 +687,8 @@ export async function finalizeDownloadIfComplete(
     if (!isCurrent()) return false;
     const pages = await getDownloadedGalleryPages(galleryId, lookup);
     if (!isCurrent()) return false;
+    const totalBytes = await getDownloadedGalleryTotalBytes(galleryId, pages, lookup);
+    if (totalBytes === null || !isCurrent()) return false;
     const nativeRunId = current.nativeRunId ?? null;
     if (nativeRunId) {
       const cancelled = await DownloadWorker.cancel({
@@ -675,6 +702,7 @@ export async function finalizeDownloadIfComplete(
       current,
       pages.length,
       isAndroid() ? new Date().toISOString() : current.migratedAt,
+      totalBytes,
     );
     return committed && isCurrent();
   }
@@ -712,15 +740,21 @@ async function runNativeFinalization(
 
 export async function finalizeNativeDownloadIfComplete(
   id: number,
-  options: { generation?: number; runId?: string; snapshot?: DBDownload } = {},
+  options: {
+    generation?: number;
+    runId?: string;
+    snapshot?: DBDownload;
+    isCurrent?: () => boolean;
+  } = {},
 ): Promise<boolean> {
   const generation = options.generation;
   const runId = options.runId;
   const key = `${id}:${generation ?? 'manual'}:${runId ?? 'unscoped'}`;
   const isCurrent =
-    generation === undefined || runId === undefined
+    options.isCurrent ??
+    (generation === undefined || runId === undefined
       ? () => true
-      : () => isCurrentProgressPoll(id, generation, runId);
+      : () => isCurrentProgressPoll(id, generation, runId));
   const existing = nativeFinalizationRuns.get(key);
   if (existing) return existing;
 
@@ -737,6 +771,67 @@ export async function finalizeNativeDownloadIfComplete(
   }
 }
 
+/**
+ * Foregrounding iOS can reveal that its native backstop completed while the
+ * suspended JS controller still exists. Finalize the shared run from the
+ * durable manifest first, publish the normal completion contract, then abort
+ * the stale controller so it cannot resume network work over a complete row.
+ */
+export async function reconcileLiveNativeDownloadCompletions(): Promise<number> {
+  let completed = 0;
+  for (const [id, runId] of [...foregroundNativeRunIds]) {
+    const controller = controllers.get(id);
+    if (!controller || controller.signal.aborted) continue;
+    const snapshot = await getDownload(id).catch(() => null);
+    if (!snapshot || snapshot.nativeRunId !== runId) continue;
+    const isCurrent = () =>
+      controllers.get(id) === controller &&
+      foregroundNativeRunIds.get(id) === runId &&
+      !controller.signal.aborted &&
+      !cancellingActions.has(id) &&
+      !pausingActions.has(id) &&
+      !isGalleryDeleting(id);
+    try {
+      const nativeProgress = await DownloadWorker.getProgress({ galleryId: String(id), runId });
+      if (
+        isCurrent() &&
+        nativeProgress.runId === runId &&
+        !nativeProgress.stale &&
+        !nativeProgress.unknown &&
+        isValidNativeProgress(nativeProgress)
+      ) {
+        storeApi?.setEntry(id, {
+          progress: { current: nativeProgress.current, total: nativeProgress.total },
+          error: null,
+          queued: false,
+          position: null,
+        });
+        if (isValidNativeByteCount(nativeProgress.downloadedBytes)) {
+          await updateNativeDownloadProgress(
+            id,
+            runId,
+            nativeProgress.current,
+            nativeProgress.downloadedBytes,
+          ).catch(() => false);
+        }
+        notifyDownloadLibraryChanged();
+      }
+    } catch {
+      // A bridge read is advisory; the manifest-backed completion check below
+      // remains authoritative and will be retried on the next focus event.
+    }
+    const done = await finalizeNativeDownloadIfComplete(id, {
+      runId,
+      snapshot,
+      isCurrent,
+    });
+    if (!done) continue;
+    completed++;
+    controller.abort();
+  }
+  return completed;
+}
+
 async function finalizeAndroidDownloadIfComplete(
   id: number,
   generation = progressPollGenerations.get(id),
@@ -750,40 +845,38 @@ async function failAndroidDownloadIfWorkerStopped(
   message: string,
   generation: number,
   runId: string,
-  nativeAlreadyStopped = false,
 ): Promise<void> {
   const isCurrent = () => isCurrentProgressPoll(id, generation, runId);
   if (!isCurrent()) return;
-  const cancelled = await DownloadWorker.cancel({ galleryId: String(id), runId }).catch(() => null);
-  if (cancelled?.stale || (cancelled && cancelled.runId !== runId)) return;
-  const cancellationConfirmed = exactNativeCancellationConfirmed(cancelled, runId);
-  const workerStopped =
-    cancellationConfirmed || (await confirmNativeRunStopped(id, runId, cancelled));
-  if (!nativeAlreadyStopped && !workerStopped) return;
+  let currentRun: Awaited<ReturnType<typeof DownloadWorker.getCurrentRun>>;
+  try {
+    currentRun = await DownloadWorker.getCurrentRun({ galleryId: String(id) });
+  } catch {
+    return;
+  }
+  if (!isCurrent()) return;
+  // A retryable WorkManager failure deliberately retains the exact order. This
+  // path is observational: it must never manufacture "stopped" by cancelling
+  // that order just because a progress/error tick was missing or terminal.
+  if (isNativeRunLookupUncertain(currentRun) || currentRun.legacy === true) return;
+  if (currentRun.runId === runId) return;
+  if (currentRun.runId !== null) {
+    stopAndroidProgressPoll(id, runId);
+    return;
+  }
   // A terminal sentinel can race the worker's final manifest commit/order
   // cleanup. Once absence is proven, prefer the shared completion rule before
   // publishing a failed row and scheduling another attempt.
-  if (workerStopped && (await finalizeAndroidDownloadIfComplete(id, generation, runId))) return;
+  if (await finalizeAndroidDownloadIfComplete(id, generation, runId)) return;
   if (!isCurrent()) return;
   const failed = await transitionNativeDownloadRun(id, runId, 'failed', message, {
     clearRunId: false,
   }).catch(() => false);
   if (!failed) return;
   if (!isCurrent()) return;
-  if (workerStopped) {
-    await scheduleFailureRetry(id, message);
-    const cleared = await clearNativeRunIfMatches(id, runId).catch(() => false);
-    if (cleared) armAutoRetryTimer();
-  } else {
-    const entry = useDownloadProgressStore.getState().entries[id];
-    storeApi?.setEntry(id, {
-      ...entry,
-      progress: entry?.progress ?? null,
-      error: message,
-      queued: false,
-      position: null,
-    });
-  }
+  await scheduleFailureRetry(id, message);
+  const cleared = await clearNativeRunIfMatches(id, runId).catch(() => false);
+  if (cleared) armAutoRetryTimer();
   if (!isCurrent()) return;
   storeApi?.markNotDownloaded(id);
   storeApi?.refreshQueue();
@@ -942,16 +1035,49 @@ async function pollAndroidProgressOnce(
     }
     // A still-active poller may have been stopped for this id while we awaited.
     if (!isCurrentProgressPoll(id, generation, runId)) return;
-    if (!res || res.runId !== runId || res.stale) {
+    if (!res || res.runId !== runId) {
       if (isCurrentProgressPoll(id, generation, runId)) stopAndroidProgressPoll(id, runId);
       return;
     }
-    if (res && 'error' in res && res.error) {
-      await failAndroidDownloadIfWorkerStopped(id, res.error, generation, runId, true);
+    if (res.unknown) {
+      // Native state exists but could not be read safely this tick. Preserve the
+      // lifecycle and retry instead of counting this as a missing progress file.
       return;
     }
-    if (res && typeof (res as { current: number | null }).current === 'number') {
-      const { current, total } = res as { current: number; total: number };
+    if (res.stale) {
+      // A same-run stale response is ambiguous (for example, a transiently
+      // unreadable order). Confirm identity independently instead of stopping
+      // the only foreground bridge on a guess.
+      let currentRun: Awaited<ReturnType<typeof DownloadWorker.getCurrentRun>>;
+      try {
+        currentRun = await DownloadWorker.getCurrentRun({ galleryId: String(id) });
+      } catch {
+        return;
+      }
+      if (!isCurrentProgressPoll(id, generation, runId)) return;
+      if (
+        isNativeRunLookupUncertain(currentRun) ||
+        currentRun.legacy === true ||
+        currentRun.runId === runId
+      ) {
+        return;
+      }
+      if (currentRun.runId !== null) stopAndroidProgressPoll(id, runId);
+      else
+        await failAndroidDownloadIfWorkerStopped(
+          id,
+          'Background download stopped',
+          generation,
+          runId,
+        );
+      return;
+    }
+    if (res && 'error' in res && res.error) {
+      await failAndroidDownloadIfWorkerStopped(id, res.error, generation, runId);
+      return;
+    }
+    if (isValidNativeProgress(res)) {
+      const { current, total } = res;
       missingProgressAfterStartCount.delete(id);
       rehydratedAndroidPollIds.delete(id);
       storeApi?.setEntry(id, {
@@ -1161,9 +1287,10 @@ async function handOffToAndroidWorker(
   files: GalleryFile[],
   runId: string,
   queuePosition?: number | null,
+  folderName?: string | null,
 ): Promise<string> {
   const config = await getGgConfig();
-  const order = buildWorkOrder(id, title, files, config, runId);
+  const order = buildWorkOrder(id, title, files, config, runId, folderName);
   order.locale = useSettingsStore.getState().locale;
   order.queuePosition = queuePosition ?? null;
   const galleryId = String(id);
@@ -1311,6 +1438,10 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
         thumbnail: next.thumbnail,
       });
       storeApi?.refreshQueue();
+      // dequeueNextQueued already moved this row into the library-visible
+      // `downloading` state. Publish that structural transition immediately so
+      // a cached failed/queued card cannot survive while the retry is active.
+      notifyDownloadLibraryChanged(true);
 
       // The candidate identity is published before the DB UPDATE awaits. A
       // cancel/pause can therefore finish while dequeue is still persisting the
@@ -1436,11 +1567,12 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
           // Persist the tracked 'downloading' row BEFORE native enqueue. If the
           // app is killed immediately after WorkManager accepts the work, launch
           // reconcile still has a DB row to match against the manifest.
+          const targetFolderName = claimedRow.folderName || galleryFolderName(id, next.title);
           if (
             !(await prepareNativeDownloadRun(id, nativeRunId, {
               pageCount: files.length,
               totalBytes: next.totalBytes ?? 0,
-              folderName: galleryFolderName(id, next.title),
+              folderName: targetFolderName,
             }))
           ) {
             // Ownership moved while the prepare CAS awaited. A pause/cancel may
@@ -1457,7 +1589,14 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
             clearStoppedClaimedRun(id);
             continue;
           }
-          await handOffToAndroidWorker(id, next.title, files, nativeRunId, next.queuePosition);
+          await handOffToAndroidWorker(
+            id,
+            next.title,
+            files,
+            nativeRunId,
+            next.queuePosition,
+            targetFolderName,
+          );
           // From this point the native order exists. Keep its DB token intact;
           // the delete handler's awaited cancel() owns exact native shutdown.
           if (isGalleryDeleting(id)) {
@@ -1487,7 +1626,8 @@ export async function processQueue(options: { onlyGalleryId?: number } = {}): Pr
             progress: { current: 0, total: files.length },
             error: null,
             queued: false,
-            position: null,
+            position: next.queuePosition ?? null,
+            nativePending: true,
             title: next.title,
             thumbnail: next.thumbnail,
           });
@@ -1914,14 +2054,20 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       .map(({ id }) => id);
     const activeItems: QueueItem[] = activeRows
       .filter(({ activeRow }) => activeRow?.status === 'downloading')
-      .map(({ id, active, activeRow }) => ({
+      .map<QueueItem>(({ id, active, activeRow }) => ({
         id,
         title: activeRow?.title ?? '',
         thumbnail: activeRow?.thumbnail ?? '',
-        status: 'downloading',
-        position: null,
+        status: active?.nativePending ? 'waiting' : 'downloading',
+        position: active?.nativePending ? (active.position ?? null) : null,
         progress: active?.progress ?? null,
-      }));
+      }))
+      .sort((left, right) => {
+        if (left.status !== right.status) return left.status === 'downloading' ? -1 : 1;
+        return (
+          (left.position ?? Number.MAX_SAFE_INTEGER) - (right.position ?? Number.MAX_SAFE_INTEGER)
+        );
+      });
     const activeIdSet = new Set(activeItems.map(({ id }) => id));
     const queue: QueueItem[] = [...activeItems, ...pending.filter((p) => !activeIdSet.has(p.id))];
     set((state) => {
@@ -1966,7 +2112,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
             (row.pageCount ?? 0) > 0
               ? await hasCompleteDownloadedGallery(id, row.pageCount, {
                   folderName: row.folderName ?? null,
-                }).catch(() => false)
+                })
               : true;
         }
         if (deletionChanged(id, deleteGeneration) || isLiveDownloadLifecycle(id)) return;
@@ -2084,7 +2230,8 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
               progress: { current: 0, total: snapshot.pageCount },
               error: null,
               queued: false,
-              position: null,
+              position: snapshot.queuePosition ?? null,
+              nativePending: true,
               title: snapshot.title,
               thumbnail: snapshot.thumbnail,
             });
@@ -2400,6 +2547,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           if (!inserted) return false;
           clearRetryPendingEntry(id, pendingEntry?.retryAt, pendingEntry?.attempt);
           void refreshQueue();
+          notifyDownloadLibraryChanged(true);
           if (!globalPaused) void processQueue({ onlyGalleryId: id });
           return true;
         }
@@ -2407,6 +2555,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         if (!queued) return false;
         clearRetryPendingEntry(id, pendingEntry?.retryAt, pendingEntry?.attempt);
         void refreshQueue();
+        notifyDownloadLibraryChanged(true);
         if (!globalPaused) void processQueue({ onlyGalleryId: id });
         return true;
       } finally {
@@ -2470,6 +2619,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       }
       if (!queued || deletionChanged(id, deleteGeneration)) return false;
       void refreshQueue();
+      notifyDownloadLibraryChanged(true);
       if (!globalPaused) void processQueue({ onlyGalleryId: id });
       return true;
     },
@@ -2574,6 +2724,7 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
           }
         }
         await refreshQueue();
+        notifyDownloadLibraryChanged(true);
         return true;
       } finally {
         finishQueueAction(pausingActions, id, intent);

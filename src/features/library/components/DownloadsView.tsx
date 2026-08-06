@@ -40,6 +40,9 @@ const GRID_CLASS =
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 const INITIAL_RENDER_COUNT = 80;
 const RENDER_BATCH_SIZE = 80;
+const DOWNLOAD_STORAGE_USAGE_QUERY_KEY = ['download-storage-usage'] as const;
+
+type DownloadIntegrity = 'present' | 'missing' | 'unknown';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,7 +65,7 @@ function CoverBadge({
   progressLabel,
   autoRetryLabel,
 }: {
-  status: DBDownload['status'];
+  status: DBDownload['status'] | 'waiting';
   progressLabel?: string | null;
   /** When set on a failed row, shows the staged-auto-restart annotation
    *  ("Auto-retry in <time> (attempt k/3)") in amber instead of a red Failed. */
@@ -72,17 +75,22 @@ function CoverBadge({
   if (status === 'complete') return null;
 
   const isDownloading = status === 'downloading';
-  const isAutoRetry = !isDownloading && !!autoRetryLabel;
+  const isWaiting = status === 'waiting';
+  const isAutoRetry = !isDownloading && !isWaiting && !!autoRetryLabel;
   const colorClass = isDownloading
     ? 'bg-blue-600/90 text-white'
-    : isAutoRetry
-      ? 'bg-amber-500/90 text-white'
-      : 'bg-red-600/90 text-white';
+    : isWaiting
+      ? 'bg-zinc-700/90 text-white'
+      : isAutoRetry
+        ? 'bg-amber-500/90 text-white'
+        : 'bg-red-600/90 text-white';
   const label = isDownloading
     ? (progressLabel ?? t('library.status.downloading'))
-    : isAutoRetry
-      ? autoRetryLabel
-      : t('library.status.failed');
+    : isWaiting
+      ? t('library.queue.queued')
+      : isAutoRetry
+        ? autoRetryLabel
+        : t('library.status.failed');
 
   return (
     <span
@@ -159,6 +167,7 @@ interface LibraryCardProps {
   isExporting: boolean;
   isDeleting: boolean;
   retryProgress: DownloadProgress | null;
+  isNativeWaiting?: boolean;
   /** Live "auto-retry pending" state from the store, fresher than the DB row on
    *  a just-failed item (the library-list query may not have refetched yet). */
   retryOverride?: { retryAt?: string | null; attempt?: number | null } | null;
@@ -252,6 +261,7 @@ function LibraryCard({
   isExporting,
   isDeleting,
   retryProgress,
+  isNativeWaiting = false,
   retryOverride,
   isMissingFiles = false,
   canExport = false,
@@ -261,7 +271,7 @@ function LibraryCard({
   const effectiveStatus: DBDownload['status'] =
     item.status === 'complete' && isMissingFiles ? 'failed' : item.status;
   const isFailed = effectiveStatus === 'failed';
-  const showDownloading = item.status === 'downloading' || isRetrying;
+  const showDownloading = (item.status === 'downloading' && !isNativeWaiting) || isRetrying;
 
   // The live store entry (retryOverride) is fresher than the DB row on a
   // just-failed item, so prefer it for the auto-retry annotation.
@@ -358,10 +368,10 @@ function LibraryCard({
           )}
 
           {/* Status overlay (top-left) — a badge, not buttons. */}
-          {(showDownloading || isFailed) && (
+          {(showDownloading || isNativeWaiting || isFailed) && (
             <div className="absolute left-1.5 top-1.5">
               <CoverBadge
-                status={isFailed ? 'failed' : 'downloading'}
+                status={isFailed ? 'failed' : isNativeWaiting ? 'waiting' : 'downloading'}
                 progressLabel={progressLabel}
                 autoRetryLabel={isFailed && !isRetrying ? autoRetryLabel : null}
               />
@@ -445,24 +455,16 @@ function SearchInputSimple({ value, onChange, placeholder }: SearchInputSimplePr
 
 function StorageIndicator() {
   const t = useT();
-  const [usageBytes, setUsageBytes] = useState<number | null>(null);
+  const { data: usageBytes } = useQuery({
+    queryKey: DOWNLOAD_STORAGE_USAGE_QUERY_KEY,
+    queryFn: async () => {
+      const store = await createDownloadStore();
+      return store.usage();
+    },
+    staleTime: Infinity,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    createDownloadStore()
-      .then((store) => store.usage())
-      .then((bytes) => {
-        if (!cancelled) setUsageBytes(bytes);
-      })
-      .catch(() => {
-        /* storage unavailable */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (usageBytes === null) return null;
+  if (usageBytes == null) return null;
 
   return (
     <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -519,6 +521,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
       void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       void queryClient.invalidateQueries({ queryKey: ['download-covers'] });
+      void queryClient.invalidateQueries({ queryKey: DOWNLOAD_STORAGE_USAGE_QUERY_KEY });
     };
     window.addEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
     return () => window.removeEventListener(DOWNLOAD_LIBRARY_CHANGED_EVENT, onLibraryChanged);
@@ -600,16 +603,23 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
     queryFn: async () => {
       const pairs = await Promise.all(
         completeVisibleItems.map(async (item) => {
-          const ok =
-            (item.pageCount ?? 0) > 0
-              ? await hasCompleteDownloadedGallery(item.galleryId, item.pageCount, {
-                  folderName: item.folderName ?? null,
-                }).catch(() => false)
-              : false;
-          return [item.galleryId, ok] as const;
+          let integrity: DownloadIntegrity = 'missing';
+          if ((item.pageCount ?? 0) > 0) {
+            try {
+              integrity = (await hasCompleteDownloadedGallery(item.galleryId, item.pageCount, {
+                folderName: item.folderName ?? null,
+              }))
+                ? 'present'
+                : 'missing';
+            } catch {
+              // Provider/IPC errors are not evidence that files are absent.
+              integrity = 'unknown';
+            }
+          }
+          return [item.galleryId, integrity] as const;
         }),
       );
-      return Object.fromEntries(pairs) as Record<number, boolean>;
+      return Object.fromEntries(pairs) as Record<number, DownloadIntegrity>;
     },
     enabled: completeVisibleItems.length > 0,
     staleTime: 0,
@@ -691,6 +701,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
       void queryClient.invalidateQueries({ queryKey: ['library-search'] });
       void queryClient.invalidateQueries({ queryKey: ['download-integrity'] });
       void queryClient.invalidateQueries({ queryKey: ['download-covers'] });
+      void queryClient.invalidateQueries({ queryKey: DOWNLOAD_STORAGE_USAGE_QUERY_KEY });
     },
     [t, queryClient],
   );
@@ -893,7 +904,8 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
             const activeRedownload =
               item.status === 'complete' && downloadedFlags[item.galleryId] === false;
             const staleCompleteProgress = item.status === 'complete' && !activeRedownload;
-            const isRetrying = !!progress && !staleCompleteProgress;
+            const isNativeWaiting = entry?.nativePending === true;
+            const isRetrying = !!progress && !staleCompleteProgress && !isNativeWaiting;
             return (
               <LibraryCard
                 key={item.galleryId}
@@ -906,17 +918,18 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 isExporting={activeZipExport?.galleryId === item.galleryId}
                 isDeleting={deletingGalleryIds.has(item.galleryId)}
                 retryProgress={isRetrying ? progress : null}
+                isNativeWaiting={isNativeWaiting}
                 retryOverride={
                   entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
                 }
                 isMissingFiles={
-                  item.status === 'complete' && completeIntegrity[item.galleryId] === false
+                  item.status === 'complete' && completeIntegrity[item.galleryId] === 'missing'
                 }
                 canExport={
                   !activeZipExport &&
                   !deletingGalleryIds.has(item.galleryId) &&
                   item.status === 'complete' &&
-                  completeIntegrity[item.galleryId] === true
+                  completeIntegrity[item.galleryId] === 'present'
                 }
               />
             );

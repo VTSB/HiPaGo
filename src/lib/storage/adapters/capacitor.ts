@@ -11,12 +11,55 @@ import { imageFileName, galleryFolderName } from '../download-store';
 
 const DOWNLOADS_DIR = 'downloads';
 
-function isMissingDirectoryError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  // Capacitor Filesystem's Android implementation uses this exact rejection
-  // for both readdir and rmdir. Keep the allowlist narrow: every other native
-  // failure is indeterminate and must propagate at destructive boundaries.
-  return message === 'Directory does not exist';
+function isMissingEntryError(error: unknown): boolean {
+  const record =
+    typeof error === 'object' && error !== null
+      ? (error as { code?: unknown; name?: unknown; message?: unknown })
+      : null;
+  const code = record?.code;
+  const name = record?.name;
+  const message =
+    typeof record?.message === 'string'
+      ? record.message
+      : error instanceof Error
+        ? error.message
+        : String(error);
+
+  // Preserve the native missing-entry contract across Capacitor platforms:
+  // Android rejects with fixed messages, while iOS/Web may expose the standard
+  // file-system code/name or an NSError-localized "no such file" message.
+  // Keep this allowlist narrow: permission, IPC, and provider failures are
+  // indeterminate and must propagate to cancellation/integrity callers.
+  if (
+    code === 'ENOENT' ||
+    code === 'NSFileNoSuchFileError' ||
+    code === 'NSFileReadNoSuchFileError' ||
+    code === 2 ||
+    code === 4 ||
+    code === 260 ||
+    name === 'NotFoundError'
+  ) {
+    return true;
+  }
+
+  if (
+    message === 'File does not exist' ||
+    message === 'File does not exist.' ||
+    message === 'Directory does not exist' ||
+    message === 'Directory does not exist.' ||
+    message === 'Folder does not exist' ||
+    message === 'Folder does not exist.' ||
+    message === 'Entry does not exist' ||
+    message === 'Entry does not exist.'
+  ) {
+    return true;
+  }
+
+  return (
+    /\bno such file or directory\b/i.test(message) ||
+    /\bthere is no such file\b/i.test(message) ||
+    /^The (?:file|folder) .+ doesn[\u2019']t exist\.?$/i.test(message)
+  );
 }
 
 export class CapacitorDownloadStore implements DownloadStore {
@@ -115,8 +158,9 @@ export class CapacitorDownloadStore implements DownloadStore {
         directory: this.Directory.Data,
       });
       return this.fromBase64(result.data as string);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingEntryError(error)) return null;
+      throw error;
     }
   }
 
@@ -129,8 +173,23 @@ export class CapacitorDownloadStore implements DownloadStore {
         directory: this.Directory.Data,
       });
       return (stat?.size ?? 0) > 0;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isMissingEntryError(error)) return false;
+      throw error;
+    }
+  }
+
+  async imageSize(galleryId: number, index: number, ext: string): Promise<number | null> {
+    try {
+      const stat = await this.Filesystem.stat({
+        path: this.imagePath(galleryId, index, ext),
+        directory: this.Directory.Data,
+      });
+      const size = stat?.size ?? 0;
+      return size > 0 ? size : null;
+    } catch (error) {
+      if (isMissingEntryError(error)) return null;
+      throw error;
     }
   }
 
@@ -143,8 +202,9 @@ export class CapacitorDownloadStore implements DownloadStore {
       });
       const { Capacitor } = await import('@capacitor/core');
       return Capacitor.convertFileSrc(uri);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingEntryError(error)) return null;
+      throw error;
     }
   }
 
@@ -164,8 +224,9 @@ export class CapacitorDownloadStore implements DownloadStore {
       });
       const { Capacitor } = await import('@capacitor/core');
       return Capacitor.convertFileSrc(uri);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingEntryError(error)) return null;
+      throw error;
     }
   }
 
@@ -183,7 +244,7 @@ export class CapacitorDownloadStore implements DownloadStore {
       }
       return ids;
     } catch (error) {
-      if (isMissingDirectoryError(error)) return [];
+      if (isMissingEntryError(error)) return [];
       throw error;
     }
   }
@@ -196,7 +257,7 @@ export class CapacitorDownloadStore implements DownloadStore {
         recursive: true,
       });
     } catch (error) {
-      if (!isMissingDirectoryError(error)) throw error;
+      if (!isMissingEntryError(error)) throw error;
       // Already gone — treat as success.
     }
   }
@@ -216,13 +277,16 @@ export class CapacitorDownloadStore implements DownloadStore {
             directory: this.Directory.Data,
           });
           total += stat.size ?? 0;
-        } catch {
-          // Skip unreadable entries.
+        } catch (error) {
+          // An entry can disappear between readdir and stat. Other failures are
+          // not evidence that its bytes are absent and must remain observable.
+          if (!isMissingEntryError(error)) throw error;
         }
       }
       return total;
-    } catch {
-      return 0;
+    } catch (error) {
+      if (isMissingEntryError(error)) return 0;
+      throw error;
     }
   }
 

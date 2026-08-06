@@ -316,6 +316,41 @@ describe('LibraryPage', () => {
     expect(screen.getByText('library.empty')).toBeTruthy();
   });
 
+  it('refreshes storage usage after a structural library change', async () => {
+    mockListDownloads.mockResolvedValue([]);
+    const usage = vi.fn().mockResolvedValueOnce(1024).mockResolvedValueOnce(2048);
+    mockCreateDownloadStore.mockResolvedValue({
+      usage,
+      deleteGallery: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await act(async () => {
+      await renderPage();
+    });
+    expect(await screen.findByText('1.0 KB')).toBeTruthy();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('hipago:download-library-changed', {
+          detail: { structural: false },
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(usage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('hipago:download-library-changed', {
+          detail: { structural: true },
+        }),
+      );
+    });
+
+    await waitFor(() => expect(usage).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('2.0 KB')).toBeTruthy();
+  });
+
   it('renders a card for each downloaded item', async () => {
     const items: DBDownload[] = [
       makeItem({ galleryId: 1001, title: 'Gallery One' }),
@@ -404,6 +439,29 @@ describe('LibraryPage', () => {
     expect(screen.getByText('Re-downloading')).toBeTruthy();
     expect(screen.getByText('7/20 · 35%')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'library.more' })).toBeNull();
+  });
+
+  it('shows a native handoff as queued until the sequential worker reports progress', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1015, title: 'Waiting For Native Worker', status: 'downloading' }),
+    ]);
+    mockDownloadProgressState.entries = {
+      1015: {
+        progress: { current: 0, total: 20 },
+        error: null,
+        nativePending: true,
+      },
+    };
+
+    await act(async () => {
+      await renderPage();
+    });
+    await waitFor(() => expect(screen.queryByText('library.loading')).toBeNull());
+
+    expect(screen.getByText('Waiting For Native Worker')).toBeTruthy();
+    expect(screen.getByText('library.queue.queued')).toBeTruthy();
+    expect(screen.queryByText('0/20 쨌 0%')).toBeNull();
+    expect(screen.queryByTestId('spinner')).toBeNull();
   });
 
   it('does not show the empty library CTA when only queued downloads exist', async () => {
@@ -918,6 +976,29 @@ describe('LibraryPage', () => {
     expect(mockQueueOps.enqueueDownload).not.toHaveBeenCalled();
     expect(mockProcessQueue).not.toHaveBeenCalledWith({ onlyGalleryId: 4003 });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['download-integrity'] });
+  });
+
+  it('keeps integrity unknown when the storage provider cannot be read', async () => {
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 4008, title: 'Temporarily Unreadable' }),
+    ]);
+    mockHasCompleteDownloadedGallery.mockRejectedValue(new Error('SAF provider unavailable'));
+
+    let qc: Awaited<ReturnType<typeof renderPage>>['qc'];
+    await act(async () => {
+      ({ qc } = await renderPage());
+    });
+    await waitFor(() =>
+      expect(qc!.getQueryData(['download-integrity', '4008::20'])).toEqual({
+        4008: 'unknown',
+      }),
+    );
+
+    expect(screen.queryByText('library.status.failed')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
+    expect(screen.queryByRole('menuitem', { name: 'library.retry' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
   });
 
   it('does not fall back to a metadata upsert when a stale missing-files retry loses CAS', async () => {

@@ -86,7 +86,7 @@ public class DownloadWorkerPluginTest {
     }
 
     @Test
-    public void returnsNullCurrentWhenProgressFileIsAbsentOrMalformed() throws Exception {
+    public void distinguishesAbsentProgressFromMalformedProgress() throws Exception {
         JSObject absent = DownloadWorkerPlugin.readProgressFile(
                 new File(temp.getRoot(), "missing.json"),
                 RUN_A
@@ -99,9 +99,53 @@ public class DownloadWorkerPluginTest {
         assertEquals(RUN_A, absent.getString("runId"));
         assertTrue(absent.isNull("current"));
         assertTrue(!absent.has("error"));
+        assertTrue(!absent.has("unknown"));
         assertEquals(RUN_A, malformed.getString("runId"));
         assertTrue(malformed.isNull("current"));
         assertTrue(!malformed.has("error"));
+        assertTrue(malformed.getBool("unknown"));
+    }
+
+    @Test
+    public void rejectsInvalidProgressNumbersAsUnknown() throws Exception {
+        String[] invalidPayloads = new String[] {
+                "{\"runId\":\"" + RUN_A + "\",\"current\":-1,\"total\":10}",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":11,\"total\":10}",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":1.5,\"total\":10}",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":1,\"total\":0}",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":\"1\",\"total\":10}"
+        };
+
+        for (int i = 0; i < invalidPayloads.length; i++) {
+            JSObject progress = DownloadWorkerPlugin.readProgressFile(
+                    writeProgress("invalid-progress-" + i + ".json", invalidPayloads[i]),
+                    RUN_A
+            );
+            assertEquals(RUN_A, progress.getString("runId"));
+            assertTrue(progress.isNull("current"));
+            assertTrue(progress.getBool("unknown"));
+            assertTrue(!progress.has("stale"));
+        }
+    }
+
+    @Test
+    public void rejectsMalformedProgressIdentityAndErrorAsUnknown() throws Exception {
+        JSObject missingRun = DownloadWorkerPlugin.readProgressFile(
+                writeProgress("missing-progress-run.json", "{\"current\":1,\"total\":10}"),
+                RUN_A
+        );
+        JSObject malformedError = DownloadWorkerPlugin.readProgressFile(
+                writeProgress(
+                        "malformed-progress-error.json",
+                        "{\"runId\":\"" + RUN_A + "\",\"current\":null,\"error\":7}"
+                ),
+                RUN_A
+        );
+
+        assertTrue(missingRun.getBool("unknown"));
+        assertTrue(missingRun.isNull("current"));
+        assertTrue(malformedError.getBool("unknown"));
+        assertTrue(malformedError.isNull("current"));
     }
 
     @Test
@@ -160,6 +204,54 @@ public class DownloadWorkerPluginTest {
     }
 
     @Test
+    public void unreadableExistingOrderIsUnknownInsteadOfStale() throws Exception {
+        File corruptOrder = writeProgress(
+                "corrupt-active-order.json",
+                "{\"galleryId\":123,\"runId\":"
+        );
+        File matchingProgress = writeProgress(
+                "corrupt-active-progress.json",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":4,\"total\":10}"
+        );
+
+        JSObject progress = DownloadWorkerPlugin.readProgressForRun(
+                "123",
+                corruptOrder,
+                matchingProgress,
+                RUN_A
+        );
+
+        assertEquals(RUN_A, progress.getString("runId"));
+        assertTrue(progress.isNull("current"));
+        assertTrue(progress.getBool("unknown"));
+        assertTrue(!progress.has("stale"));
+    }
+
+    @Test
+    public void crossGalleryOrderIsUnknownInsteadOfReplacementStale() throws Exception {
+        File corruptOrder = writeProgress(
+                "cross-gallery-active-order.json",
+                "{\"galleryId\":999,\"runId\":\"" + RUN_B + "\"}"
+        );
+        File matchingProgress = writeProgress(
+                "cross-gallery-active-progress.json",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":4,\"total\":10}"
+        );
+
+        JSObject progress = DownloadWorkerPlugin.readProgressForRun(
+                "123",
+                corruptOrder,
+                matchingProgress,
+                RUN_A
+        );
+
+        assertEquals(RUN_A, progress.getString("runId"));
+        assertTrue(progress.isNull("current"));
+        assertTrue(progress.getBool("unknown"));
+        assertTrue(!progress.has("stale"));
+    }
+
+    @Test
     public void discoversCurrentRunFromOrderBeforeProgressStarts() throws Exception {
         File order = writeProgress(
                 "123-order.json",
@@ -185,6 +277,61 @@ public class DownloadWorkerPluginTest {
                 RUN_A,
                 DownloadWorkerPlugin.resolveCurrentRunId("123", missingOrder, progress)
         );
+    }
+
+    @Test
+    public void terminalFailureWithoutOrderIsConfirmedStoppedForRestartRecovery() throws Exception {
+        File missingOrder = new File(temp.getRoot(), "terminal-missing-order.json");
+        File terminalProgress = writeProgress(
+                "terminal-progress.json",
+                "{\"runId\":\"" + RUN_A
+                        + "\",\"current\":null,\"error\":\"Invalid background download order\"}"
+        );
+
+        DownloadWorkerPlugin.CurrentRunResolution resolution =
+                DownloadWorkerPlugin.resolveCurrentRun("123", missingOrder, terminalProgress);
+
+        assertNull(resolution.runId);
+        assertTrue(!resolution.conflict);
+        assertTrue(!resolution.unknown);
+        assertTrue(!resolution.legacy);
+    }
+
+    @Test
+    public void terminalFailureWithOrderStillOwnsRetryableRun() throws Exception {
+        File order = writeProgress(
+                "terminal-live-order.json",
+                "{\"galleryId\":123,\"runId\":\"" + RUN_A + "\"}"
+        );
+        File terminalProgress = writeProgress(
+                "terminal-live-progress.json",
+                "{\"runId\":\"" + RUN_A
+                        + "\",\"current\":null,\"error\":\"Background download failed\"}"
+        );
+
+        DownloadWorkerPlugin.CurrentRunResolution resolution =
+                DownloadWorkerPlugin.resolveCurrentRun("123", order, terminalProgress);
+
+        assertEquals(RUN_A, resolution.runId);
+        assertTrue(!resolution.conflict);
+        assertTrue(!resolution.unknown);
+        assertTrue(!resolution.legacy);
+    }
+
+    @Test
+    public void malformedOrderlessFailureIsNotMistakenForConfirmedStop() throws Exception {
+        File missingOrder = new File(temp.getRoot(), "malformed-terminal-missing-order.json");
+        File malformedProgress = writeProgress(
+                "malformed-terminal-progress.json",
+                "{\"runId\":\"" + RUN_A + "\",\"current\":null,\"error\":7}"
+        );
+
+        DownloadWorkerPlugin.CurrentRunResolution resolution =
+                DownloadWorkerPlugin.resolveCurrentRun("123", missingOrder, malformedProgress);
+
+        assertEquals(RUN_A, resolution.runId);
+        assertTrue(!resolution.conflict);
+        assertTrue(!resolution.unknown);
     }
 
     @Test
