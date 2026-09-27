@@ -18,6 +18,13 @@ const hash = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const positiveId = (id) => Number.isSafeInteger(Number(id)) && Number(id) > 0;
 
+function supportedVersionCode(tag) {
+  if (!canonical.test(tag)) return 0;
+  // Rejected manual names remain in Git/release history, but cannot reserve
+  // a supported version. Managed reservation metadata is validated separately.
+  try { return parseTag(tag).versionCode; } catch { return 0; }
+}
+
 function metadata(text) {
   if (text == null) return null;
   const matches = [...text.matchAll(/<!-- hipago-beta-v([0-9]+) ([^\n]+) -->/g)];
@@ -113,6 +120,8 @@ export class ReleaseAutomation {
       if (!object || !SHA.test(object.sha)) throw new Error(`Invalid tag object: ${tag}`);
     }
     if (object.type !== 'commit' || !SHA.test(object.sha)) throw new Error(`Tag ${tag} does not resolve to a commit.`);
+    // A commit-only push payload cannot identify earlier annotation changes;
+    // verifyIdentity pins the object first observed during preparation.
     if (this.eventAfter !== undefined && this.eventAfter !== tagRefSha && this.eventAfter !== object.sha) throw new Error('Push event SHA does not match the tag object or commit.');
     return { sha: object.sha, tagRefSha };
   }
@@ -175,14 +184,7 @@ export class ReleaseAutomation {
     const tags = await this.list('/tags');
     const code = parseTag(this.tag).versionCode;
     const reserved = [...tags.map(({ name }) => name), ...releases.map(({ tag_name }) => tag_name)];
-    if (reserved.some((name) => {
-      if (name === this.tag || !canonical.test(name)) return false;
-      // Rejected manual tags remain in Git. Only supported release versions
-      // reserve a number; an invalid tag must not poison every later release.
-      let versionCode;
-      try { ({ versionCode } = parseTag(name)); } catch { return false; }
-      return versionCode >= code;
-    })) {
+    if (reserved.some((name) => name !== this.tag && supportedVersionCode(name) >= code)) {
       throw new Error('Pushed tag must be newer than every other reserved numeric tag or release.');
     }
     // Manual tags are never created or changed here. Preserve both the direct
@@ -325,8 +327,8 @@ export class ReleaseAutomation {
     const candidate = candidates[0];
     const assets = await this.verifyPublished(candidate);
     const code = parseTag(candidate.tag_name).versionCode;
-    const stable = releases.filter((release) => !release.draft && !release.prerelease && canonical.test(release.tag_name));
-    if (stable.some((release) => release.id !== candidate.id && parseTag(release.tag_name).versionCode >= code)) throw new Error('Candidate is not newer than every published stable release.');
+    const stable = releases.filter((release) => !release.draft && !release.prerelease);
+    if (stable.some((release) => release.id !== candidate.id && supportedVersionCode(release.tag_name) >= code)) throw new Error('Candidate is not newer than every published stable release.');
     if (!candidate.prerelease) {
       if ((await this.request('GET', '/releases/latest')).id !== candidate.id) throw new Error('Already stable candidate is not latest.');
       return this.outputs(candidate, true);

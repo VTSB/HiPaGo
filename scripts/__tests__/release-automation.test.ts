@@ -174,6 +174,19 @@ describe('manual numeric tag reservation', () => {
     expect(api.releases[0].body).toContain(`"tagRefSha":"${OTHER_SHA}"`);
   });
 
+  it('pins the first observed annotation for a commit-only event, then rejects replacement', async () => {
+    const api = new FakeGitHub();
+    api.addTag('v0.0.1', SHA, true);
+    const observed = api.addTag('v0.0.1', SHA, true);
+    const automation = api.automation(10, 'v0.0.1', SHA);
+    await automation.prepare();
+    expect(api.releases[0].body).toContain(`"tagRefSha":"${observed}"`);
+    api.addTag('v0.0.1', SHA, true);
+    api.calls = [];
+    await expect(automation.prepare()).rejects.toThrow('original tag object changed');
+    expect(api.writes()).toEqual([]);
+  });
+
   it.each(['missing', 'moved', 'noncommit', 'deep', 'event'])('rejects %s tag identity before mutation', async (failure) => {
     const api = new FakeGitHub();
     if (failure === 'missing') api.refs.delete('v0.0.1');
@@ -205,11 +218,11 @@ describe('manual numeric tag reservation', () => {
     expect(api.writes()).toEqual([]);
   });
 
-  it.each(['tag', 'release'])('can prepare after rejected numeric names remain in %s history', async (source) => {
+  it.each(['tag', 'draft release', 'stable release'])('can prepare after rejected numeric names remain in %s history', async (source) => {
     const api = new FakeGitHub();
     for (const name of ['v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v256.0.0', 'v1.256.0', 'v9007199254740992.0.0']) {
       if (source === 'tag') api.addTag(name, OTHER_SHA);
-      else api.releases.push({ id: ++api.nextId, tag_name: name, body: null, draft: true, prerelease: true, created_at: '' });
+      else api.releases.push({ id: ++api.nextId, tag_name: name, body: null, draft: source === 'draft release', prerelease: source === 'draft release', created_at: '' });
     }
     await expect(api.automation().prepare()).resolves.toMatchObject({ tag: 'v0.0.1' });
     expect(api.writes()).toHaveLength(1);
@@ -320,6 +333,21 @@ describe('beta publication and immutable uploads', () => {
 });
 
 describe('stable promotion', () => {
+  it('ignores unsupported unmanaged stable history during promotion and its no-op retry', async () => {
+    const { api, id } = await publishedFixture();
+    for (const tag_name of ['v0.0.0', 'v256.0.0', 'v1.256.0', 'v1.0.1000']) {
+      api.releases.push({ id: ++api.nextId, tag_name, body: null, draft: false, prerelease: false, created_at: '' });
+    }
+    const before = structuredClone(api.assets.get(id));
+    await expect(api.automation(11).promote()).resolves.toMatchObject({ skip: 'false' });
+    expect(api.latest).toBe(id);
+    expect(api.assets.get(id)).toEqual(before);
+    expect(api.writes()).toHaveLength(1);
+    api.calls = [];
+    await expect(api.automation(12).promote()).resolves.toMatchObject({ skip: 'true' });
+    expect(api.writes()).toEqual([]);
+  });
+
   it('changes only release metadata, preserving release ID, asset IDs and hashes; retry is a no-op', async () => {
     const { api, id, release } = await publishedFixture();
     const before = structuredClone(api.assets.get(id));
