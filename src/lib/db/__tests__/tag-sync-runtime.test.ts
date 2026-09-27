@@ -5,6 +5,7 @@ import { useDbStatusStore } from '@/lib/store/db-status';
 import { getSyncStatus } from '../sync-status';
 import { SYNC_KEY_TAGS } from '../init';
 import { TAG_TYPES } from '@/lib/api/tag-parser';
+import { getDb, withTransaction } from '../adapter';
 
 // ---------------------------------------------------------------------------
 // Mock createTagFetcher to SUCCEED — exercises the runtime path
@@ -122,6 +123,85 @@ afterEach(() => {
 // ===========================================================================
 
 describe('runTagSync — runtime path', () => {
+  it('claims a sync before the loading-status write resolves', async () => {
+    mockFetchPage.mockResolvedValue(
+      makeTagPageHtml([{ name: 'one-run', count: 1 }]),
+    );
+
+    const first = runTagSync();
+    expect(useDbStatusStore.getState().isSyncing).toBe(true);
+    const second = runTagSync();
+    await Promise.all([first, second, vi.runAllTimersAsync()]);
+
+    expect(mockFetchPage).toHaveBeenCalledTimes(TAG_TYPES.length);
+    expect(mockDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports loading-status errors and permits a later retry', async () => {
+    const db = getDb();
+    vi.spyOn(db, 'execute').mockRejectedValueOnce(new Error('status write failed'));
+
+    await expect(runTagSync()).resolves.toBeUndefined();
+    expect(useDbStatusStore.getState().syncError).toBe('status write failed');
+    expect(useDbStatusStore.getState().isSyncing).toBe(false);
+    expect(mockFetchPage).not.toHaveBeenCalled();
+
+    mockFetchPage.mockResolvedValue(makeTagPageHtml([{ name: 'after-retry', count: 1 }]));
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+    expect(useDbStatusStore.getState().dbReady).toBe(true);
+    expect(useDbStatusStore.getState().syncError).toBeNull();
+  });
+
+  it('keeps one sync in flight while post-sync locale loading finishes', async () => {
+    let finishLocale!: () => void;
+    let enteredLocale!: () => void;
+    const localeEntered = new Promise<void>((resolve) => { enteredLocale = resolve; });
+    mockLoadLocale.mockImplementation(() => {
+      enteredLocale();
+      return new Promise<void>((resolve) => { finishLocale = resolve; });
+    });
+    mockFetchPage.mockResolvedValue(makeTagPageHtml([{ name: 'locale-pending', count: 1 }]));
+
+    const first = runTagSync();
+    await Promise.all([localeEntered, vi.runAllTimersAsync()]);
+    await runTagSync();
+    expect(mockFetchPage).toHaveBeenCalledTimes(TAG_TYPES.length);
+    finishLocale();
+    await first;
+  });
+
+  it('upserts bounded batches while preserving IDs inserted by a gallery transaction', async () => {
+    const db = getDb();
+    let existingId = 0;
+    const tags = Array.from({ length: 650 }, (_, i) => ({ name: `batch-${i}`, count: i + 1 }));
+    mockFetchPage.mockImplementation(async (url: string) => {
+      if (url !== 'alltags-a.html') return EMPTY_PAGE;
+      await withTransaction(async () => {
+        const inserted = await db.execute(
+          'INSERT INTO tag (type, name, count) VALUES (?, ?, ?)',
+          [TAG_TYPE_TO_BYTE[TagType.TAG], 'batch-0', 0],
+        );
+        existingId = inserted.lastInsertRowId;
+      });
+      return makeTagPageHtml(tags);
+    });
+    const execute = vi.spyOn(db, 'execute');
+    const query = vi.spyOn(db, 'query');
+
+    await Promise.all([runTagSync(), vi.runAllTimersAsync()]);
+
+    const upserts = execute.mock.calls.filter(([sql]) => sql.includes('ON CONFLICT(type, name)'));
+    expect(upserts).toHaveLength(3);
+    expect(upserts.every(([, params]) => params!.length <= 999)).toBe(true);
+    expect(query.mock.calls.some(([sql]) => sql.includes('FROM tag WHERE type = ?'))).toBe(false);
+    expect(await queryOne('SELECT tagId, count FROM tag WHERE name = ?', ['batch-0']))
+      .toEqual({ tagId: existingId, count: 1 });
+    expect(await queryOne('SELECT COUNT(*) AS count FROM tag')).toEqual({ count: 650 });
+    expect(await queryOne('SELECT count FROM tag WHERE name = ?', ['batch-649']))
+      .toEqual({ count: 650 });
+    expect(useDbStatusStore.getState().syncError).toBeNull();
+  });
+
   // -------------------------------------------------------------------------
   // 1. Basic runtime sync success
   // -------------------------------------------------------------------------

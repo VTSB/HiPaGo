@@ -71,10 +71,15 @@ export interface DownloadStore {
   /**
    * A WebView-loadable URL for one stored page. Implemented by adapters that can
    * expose native file URLs without copying bytes through JS. Returns null when
-   * the page is missing. Adapters backed by SAF/content URIs may omit this and
-   * callers should fall back to lazy getImage reads for visible pages only.
+   * the page is missing. Adapters without native URLs fall back to lazy
+   * getImage reads for visible pages only.
    */
-  imageUrl?(galleryId: number, index: number, ext: string): Promise<string | null>;
+  imageUrl?(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<string | null>;
 
   /**
    * Cheap existence check for a single stored page — true only when the file
@@ -89,6 +94,13 @@ export interface DownloadStore {
     galleryId: number,
     index: number,
     ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean>;
+
+  /** Verify a whole manifest with one directory listing where supported. */
+  imagesExist?(
+    galleryId: number,
+    pages: Array<{ index: number; ext: string }>,
     options?: DownloadStoreLookupOptions,
   ): Promise<boolean>;
 

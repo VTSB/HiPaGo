@@ -232,28 +232,72 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     }
   }
 
-  // ── coverUrl ──────────────────────────────────────────────────────────────
+  async imagesExist(
+    galleryId: number,
+    pages: Array<{ index: number; ext: string }>,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<boolean> {
+    try {
+      const folder = await this.resolveFolder(galleryId, options);
+      if (!folder) return false;
+      const libDir = await resolveLibraryDir();
+      const { files } = await PublicLibrary.readdir({ path: `${libDir}/${folder}` });
+      const present = new Set(files.filter((file) => file.size > 0).map((file) => file.name));
+      return pages.every(({ index, ext }) => present.has(imageFileName(index, ext)));
+    } catch {
+      return false;
+    }
+  }
+
+  // ── Native image URLs ─────────────────────────────────────────────────────
+
+  async imageUrl(
+    galleryId: number,
+    index: number,
+    ext: string,
+    options?: DownloadStoreLookupOptions,
+  ): Promise<string | null> {
+    try {
+      const folder = await this.resolveFolder(galleryId, options);
+      if (!folder) return null;
+      const libDir = await resolveLibraryDir();
+      const path = `${libDir}/${folder}/${imageFileName(index, ext)}`;
+      const { exists, size } = await PublicLibrary.stat({ path });
+      if (!exists || size <= 0) return null;
+      const { uri } = await PublicLibrary.getUri({ path });
+      if (!uri) return null;
+      const { Capacitor } = await import('@capacitor/core');
+      // Capacitor's /_capacitor_content_ handler opens the SAF document stream
+      // using the existing persisted grant; no image bytes cross the JS bridge.
+      return Capacitor.convertFileSrc(uri);
+    } catch {
+      return null;
+    }
+  }
 
   async coverUrl(galleryId: number, options?: DownloadStoreLookupOptions): Promise<string | null> {
     const folder = await this.resolveFolder(galleryId, options);
     if (!folder) return null;
     const libDir = await resolveLibraryDir();
     try {
-      const { files } = await PublicLibrary.readdir({ path: `${libDir}/${folder}` });
-      const first = files
-        .map((f) => f.name)
-        .filter((n) => /^0001\./.test(n))
-        .sort()[0];
+      // Probe only supported first-page filenames. A directory listing fetches
+      // metadata for every page through SAF, delaying covers of large works.
+      let first: string | null = null;
+      for (const ext of ['webp', 'avif', 'jpg', 'jpeg', 'png', 'gif']) {
+        const name = imageFileName(0, ext);
+        const { exists, size } = await PublicLibrary.stat({ path: `${libDir}/${folder}/${name}` });
+        if (exists && size > 0) {
+          first = name;
+          break;
+        }
+      }
       if (!first) return null;
-      // SAF documents are content:// URIs, which do NOT load in the WebView via
-      // convertFileSrc. Read the single cover image and hand back a data URL.
-      // It is one small thumbnail per gallery, so the JS-heap cost is fine.
-      const { dataBase64 } = await PublicLibrary.readFile({
+      const { uri } = await PublicLibrary.getUri({
         path: `${libDir}/${folder}/${first}`,
       });
-      const ext = first.slice(first.lastIndexOf('.') + 1).toLowerCase();
-      const mime = ext === 'jpg' ? 'jpeg' : ext;
-      return `data:image/${mime};base64,${dataBase64}`;
+      if (!uri) return null;
+      const { Capacitor } = await import('@capacitor/core');
+      return Capacitor.convertFileSrc(uri);
     } catch {
       return null;
     }

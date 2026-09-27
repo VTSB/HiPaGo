@@ -1690,6 +1690,46 @@ describe('queue actions (AC-001 / Task B)', () => {
     expect(dl.mock.calls[0][3]).toHaveLength(2);
   });
 
+  it.each([false, true])('re-resolves equal-length synthetic files before download (Android=%s)', async (android) => {
+    androidFlag = android;
+    const id = 72;
+    downloadRows.set(id, { status: 'complete', pageCount: 1 });
+    const realFiles = [{
+      name: 'actual.webp', hash: 'a'.repeat(64), width: 800, height: 1200,
+      haswebp: 1, hasavif: 0, hasavifsmalltn: 0,
+    }];
+    vi.mocked(resolveGalleryDetail).mockImplementationOnce(async () => {
+      // A completed row would still return local synthetic detail. Enqueue must
+      // happen first so the resolver can fetch usable remote file metadata.
+      expect(downloadRows.get(id)?.status).toBe('queued');
+      return { files: realFiles } as Awaited<ReturnType<typeof resolveGalleryDetail>>;
+    });
+    dl.mockResolvedValue(undefined);
+
+    await useDownloadProgressStore.getState().start({
+      id, title: 'Saved gallery', thumbnail: '/tn', tags: {},
+      files: [{ ...realFiles[0], name: '', hash: '' }],
+    });
+
+    await vi.waitFor(() => {
+      if (android) {
+        expect(workerEnqueues).toContain(String(id));
+        expect(downloadRows.get(id)?.status).toBe('downloading');
+      } else {
+        expect(removed).toContain(id);
+      }
+    });
+    expect(resolveGalleryDetail).toHaveBeenCalledWith(id);
+    if (android) {
+      const order = JSON.parse(workOrderWrites.find((item) => item.galleryId === String(id))!.json);
+      expect(order.pages).toHaveLength(1);
+      expect(order.pages[0].url).toContain(realFiles[0].hash);
+      expect(dl).not.toHaveBeenCalled();
+    } else {
+      expect(dl.mock.calls[0][3]).toEqual(realFiles);
+    }
+  });
+
   it('pause(active) marks the row paused (not failed) and retains its pages', async () => {
     queue.push({ id: 7, pageCount: 3 });
     let paused = false;

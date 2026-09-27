@@ -1,18 +1,17 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { getRecentlyViewedWithDates } from '@/lib/db/gallery';
 import { filterHistoryByTags } from '@/lib/db/search-local';
-import { GalleryGridById } from '@/features/gallery-list/components/GalleryGrid';
+import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
+import { SavedGalleryGrid, type SavedGalleryGridHandle } from '@/features/gallery-list/components/SavedGalleryGrid';
 import { Spinner } from '@/shared/components/Spinner';
 import { FilterBar } from '@/shared/components/FilterBar';
-import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { DbErrorBanner } from '@/shared/components/DbErrorBanner';
 import { DbStageSpinner } from '@/shared/components/DbStageSpinner';
-import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { useT } from '@/lib/i18n/useT';
 import { useSettingsStore } from '@/lib/store/settings';
 import type { TagType } from '@/lib/utils/types';
@@ -72,22 +71,12 @@ function groupByDate(
   return order.map((dateKey) => ({ dateKey, ids: map.get(dateKey)! }));
 }
 
-function DateDivider({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-3 pb-2 pt-4 first:pt-0">
-      <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-      <span className="shrink-0 text-sm font-medium text-zinc-500 dark:text-zinc-400">{label}</span>
-      <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-    </div>
-  );
-}
-
 const PAGE_SIZE = 25;
 
 export function HistoryView({ embedded = false }: { embedded?: boolean }) {
   const t = useT();
   const locale = useSettingsStore((s) => s.locale);
-  const [renderLimit, setRenderLimit] = useState(PAGE_SIZE);
+  const gridRef = useRef<SavedGalleryGridHandle>(null);
 
   const [filters, setFilters] = useState<{
     tags: Array<{ type: TagType; name: string }>;
@@ -108,19 +97,18 @@ export function HistoryView({ embedded = false }: { embedded?: boolean }) {
     staleTime: 0,
   });
 
-  const { visibleIds, hasNextPage, isFetchingNextPage, fetchNextPage } = usePaginatedIds(
-    hasFilters && filteredIds && filteredIds.length > 0 ? filteredIds : undefined,
-    PAGE_SIZE,
-    ['history-filtered-pages', filters],
-  );
-
   const totalCount = entries?.length ?? 0;
-  const visibleEntries = useMemo(
-    () => (entries ?? []).slice(0, renderLimit),
-    [entries, renderLimit],
+  const groups = useMemo(
+    () => hasFilters
+      ? [{ key: 'filtered', items: filteredIds ?? [] }]
+      : groupByDate(entries ?? []).map(({ dateKey, ids }) => ({
+          key: dateKey, label: formatDateLabel(dateKey, locale), items: ids,
+        })),
+    [entries, filteredIds, hasFilters, locale],
   );
-  const groups = useMemo(() => groupByDate(visibleEntries), [visibleEntries]);
-  const hasMoreHistory = !hasFilters && renderLimit < totalCount;
+  const renderGrid = () => (
+    <SavedGalleryGrid ref={gridRef} groups={groups} getItemKey={(id) => id} renderItem={(id) => <GalleryCardById id={id} />} />
+  );
   const showFilterBar = !isLoading && (totalCount > 0 || hasFilters);
 
   return (
@@ -157,20 +145,12 @@ export function HistoryView({ embedded = false }: { embedded?: boolean }) {
             <p className="mb-3 text-sm text-zinc-500">
               {filteredIds.length.toLocaleString()} {t('search.results')}
             </p>
-            <GalleryGridById ids={visibleIds} isLoading={false} />
-            <InfiniteScrollTrigger
-              hasMore={hasNextPage}
-              isFetching={isFetchingNextPage}
-              onLoadMore={() => {
-                if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-              }}
-            />
+            {renderGrid()}
             <FloatingPageNav
               totalItems={filteredIds.length}
-              loadedItems={visibleIds.length}
+              loadedItems={filteredIds.length}
               pageSize={PAGE_SIZE}
-              hasMore={hasNextPage}
-              onLoadMore={fetchNextPage}
+              onJumpToPage={(page) => gridRef.current?.scrollToItem((page - 1) * PAGE_SIZE)}
             />
           </>
         ) : (
@@ -205,25 +185,12 @@ export function HistoryView({ embedded = false }: { embedded?: boolean }) {
         </div>
       ) : (
         <>
-          <div className="space-y-4">
-            {groups.map(({ dateKey, ids }) => (
-              <div key={dateKey}>
-                <DateDivider label={formatDateLabel(dateKey, locale)} />
-                <GalleryGridById ids={ids} isLoading={false} />
-              </div>
-            ))}
-          </div>
-          <InfiniteScrollTrigger
-            hasMore={hasMoreHistory}
-            isFetching={false}
-            onLoadMore={() => setRenderLimit((n) => Math.min(n + PAGE_SIZE, totalCount))}
-          />
+          {renderGrid()}
           <FloatingPageNav
             totalItems={totalCount}
-            loadedItems={Math.min(renderLimit, totalCount)}
+            loadedItems={totalCount}
             pageSize={PAGE_SIZE}
-            hasMore={hasMoreHistory}
-            onLoadMore={() => setRenderLimit((n) => Math.min(n + PAGE_SIZE, totalCount))}
+            onJumpToPage={(page) => gridRef.current?.scrollToItem((page - 1) * PAGE_SIZE)}
           />
         </>
       )}

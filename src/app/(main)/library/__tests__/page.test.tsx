@@ -2,6 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import type { DBDownload } from '@/lib/db/schema';
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import LibraryPage from '../page';
 
 // Stub matchMedia (jsdom doesn't ship it) so the useIsMobile branch in the new
 // LibraryHub wrapper resolves deterministically to "desktop" — on desktop the
@@ -64,9 +67,10 @@ const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownlo
 const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
 const mockCreateDownloadStore = vi.fn();
 const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
-const mockHasCompleteDownloadedGallery =
-  vi.fn<(galleryId: number, expectedPageCount: number) => Promise<boolean>>();
-const mockProcessQueue = vi.fn(async (_opts?: { onlyGalleryId?: number }) => {});
+const mockGetDownloadedGalleryPages = vi.fn();
+const mockProcessQueue = vi.hoisted(() =>
+  vi.fn<(opts?: { onlyGalleryId?: number }) => Promise<void>>().mockResolvedValue(undefined),
+);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockNavigation.replace }),
@@ -127,8 +131,22 @@ vi.mock('@/lib/storage/download-store', () => ({
 
 vi.mock('@/lib/utils/download-zip', () => ({
   exportGalleryZip: (galleryId: number, title: string) => mockExportGalleryZip(galleryId, title),
-  hasCompleteDownloadedGallery: (galleryId: number, expectedPageCount: number) =>
-    mockHasCompleteDownloadedGallery(galleryId, expectedPageCount),
+  getDownloadedGalleryPages: (...args: unknown[]) => mockGetDownloadedGalleryPages(...args),
+}));
+
+// Grid scrolling/DOM bounds use the real virtualizer in SavedGalleryGrid.test.
+// These tests exercise each mounted download card's loading/actions.
+vi.mock('@/features/gallery-list/components/SavedGalleryGrid', () => ({
+  SavedGalleryGrid: ({ groups, renderItem }: {
+    groups: Array<{ items: DBDownload[] }>;
+    renderItem: (item: DBDownload) => React.ReactNode;
+  }) => <>{groups.flatMap((group) => group.items).map(renderItem)}</>,
+}));
+
+vi.mock('@/shared/components/AbortableImage', () => ({
+  // Image loading has its own tests; this suite observes the chosen source.
+  // eslint-disable-next-line @next/next/no-img-element
+  AbortableImage: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
 }));
 
 // Mock next/link as a plain anchor
@@ -199,10 +217,6 @@ function makeItem(overrides: Partial<DBDownload> = {}): DBDownload {
 // ---------------------------------------------------------------------------
 
 async function renderPage() {
-  const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
-  const { default: LibraryPage } = await import('../page');
-  const React = await import('react');
-
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   const result = render(
@@ -231,7 +245,9 @@ describe('LibraryPage', () => {
       deleteGallery: vi.fn().mockResolvedValue(undefined),
     });
     mockExportGalleryZip.mockResolvedValue(undefined);
-    mockHasCompleteDownloadedGallery.mockResolvedValue(true);
+    mockGetDownloadedGalleryPages.mockResolvedValue(
+      Array.from({ length: 20 }, (_, index) => ({ index, ext: 'webp' })),
+    );
   });
 
   afterEach(() => {
@@ -239,6 +255,36 @@ describe('LibraryPage', () => {
   });
 
   // ── AC-004: list renders ──────────────────────────────────────────────────
+
+  it('shows recorded download sizes without scanning storage on entry', async () => {
+    const usage = vi.fn().mockResolvedValue(999);
+    mockCreateDownloadStore.mockResolvedValue({ usage });
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1001, totalBytes: 1024 * 1024 }),
+      makeItem({ galleryId: 1002, totalBytes: 2 * 1024 * 1024 }),
+    ]);
+    await act(async () => { await renderPage(); });
+    expect(await screen.findByText('3.0 MB')).toBeInTheDocument();
+    expect(usage).not.toHaveBeenCalled();
+  });
+
+  it('paints each local cover independently and uses its exact folder identity', async () => {
+    const coverUrl = vi.fn((id: number) => id === 1001
+      ? new Promise<string | null>(() => {})
+      : Promise.resolve('https://localhost/_capacitor_content_/second.webp'));
+    mockCreateDownloadStore.mockResolvedValue({ usage: async () => 0, coverUrl });
+    mockListDownloads.mockResolvedValue([
+      makeItem({ galleryId: 1001, title: 'Slow cover', folderName: '1001 Exact' }),
+      makeItem({ galleryId: 1002, title: 'Ready cover', folderName: '1002 Exact' }),
+    ]);
+    await act(async () => { await renderPage(); });
+    expect(await screen.findByAltText('Ready cover')).toHaveAttribute(
+      'src', 'https://localhost/_capacitor_content_/second.webp',
+    );
+    expect(coverUrl).toHaveBeenCalledWith(1002, { folderName: '1002 Exact' });
+    expect(mockGetDownloadedGalleryPages).toHaveBeenCalledWith(1002, { folderName: '1002 Exact' });
+    expect(screen.queryByAltText('Slow cover')).toBeNull();
+  });
 
   it('shows a spinner while loading', async () => {
     mockListDownloads.mockReturnValue(new Promise(() => {}));
@@ -415,7 +461,7 @@ describe('LibraryPage', () => {
     });
 
     expect(mockDeleteDownload).toHaveBeenCalledWith(2001);
-    expect(mockDeleteGallery).toHaveBeenCalledWith(2001);
+    expect(mockDeleteGallery).toHaveBeenCalledWith(2001, undefined);
     expect(mockDownloadProgressState.cancel).not.toHaveBeenCalled();
   });
 
@@ -504,6 +550,7 @@ describe('LibraryPage', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
     });
+    await screen.findByRole('menuitem', { name: 'library.exportZip' });
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
     });
@@ -515,14 +562,14 @@ describe('LibraryPage', () => {
 
   it('shows a failed badge and hides export when a complete DB row is missing files', async () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4003, title: 'Missing Files' })]);
-    mockHasCompleteDownloadedGallery.mockResolvedValue(false);
+    mockGetDownloadedGalleryPages.mockResolvedValue([]);
 
     let qc: Awaited<ReturnType<typeof renderPage>>['qc'];
     await act(async () => {
       ({ qc } = await renderPage());
     });
     await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-    await waitFor(() => expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(4003, 20));
+    await waitFor(() => expect(mockGetDownloadedGalleryPages).toHaveBeenCalledWith(4003, undefined));
     const invalidate = vi.spyOn(qc!, 'invalidateQueries');
 
     expect(screen.getByText('library.status.failed')).toBeTruthy();
@@ -602,7 +649,7 @@ describe('LibraryPage', () => {
 
   it('hides export while complete-row integrity is still being checked', async () => {
     mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4004, title: 'Pending Check' })]);
-    mockHasCompleteDownloadedGallery.mockReturnValue(new Promise(() => {}));
+    mockGetDownloadedGalleryPages.mockReturnValue(new Promise(() => {}));
 
     await act(async () => {
       await renderPage();
@@ -630,12 +677,14 @@ describe('LibraryPage', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
     });
+    await screen.findByRole('menuitem', { name: 'library.exportZip' });
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
     });
+    await screen.findByRole('menuitem', { name: 'library.exportZip' });
     await act(async () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
     });

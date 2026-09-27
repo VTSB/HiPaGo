@@ -101,7 +101,7 @@ class FakePublicLibrary {
   }
 
   async getUri({ path }: { path: string }) {
-    return { uri: `file://${path}` };
+    return { uri: this.files.has(path) ? `content://test.documents/${encodeURIComponent(path)}` : null };
   }
 
   async deleteDir({ path }: { path: string }) {
@@ -415,16 +415,79 @@ describe('AndroidPublicDownloadStore — Android-specific behaviour', () => {
     expect(fakeLib.files.has(`${LIB}/42/0001.webp`)).toBe(true);
   });
 
-  it('coverUrl returns a data URL for the first page (content:// not WebView-loadable)', async () => {
+  it('streams the first page through a native content URL without reading image bytes', async () => {
     await store.ensureGallery(777, 'Cover Test');
     const img = makeBytes(8, 0x77);
     await store.putImage(777, 0, img, 'webp');
 
+    const read = vi.spyOn(fakeLib, 'readFile');
     const url = await store.coverUrl(777);
     expect(url).not.toBeNull();
-    expect(url).toMatch(/^data:image\/webp;base64,/);
-    // The base64 payload round-trips to the stored cover bytes.
-    expect(fromBase64(url!.split(',')[1])).toEqual(img);
+    expect(url).toContain('content%3A%2F%2Ftest.documents');
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('streams exact-folder pages without stale prefix reads or base64 copies', async () => {
+    await store.ensureGallery(777, 'Old');
+    await store.putImage(777, 0, makeBytes(9), 'webp');
+    await store.ensureGallery(777, 'New');
+    await store.putImage(777, 0, makeBytes(12), 'webp');
+    const read = vi.spyOn(fakeLib, 'readFile');
+    const options = { folderName: '777 New' };
+    const uri = (await fakeLib.getUri({ path: `${LIB}/777 New/0001.webp` })).uri!;
+    expect(await store.imageUrl(777, 0, 'webp', options)).toBe(
+      `capacitor://localhost/${encodeURIComponent(uri)}`,
+    );
+    expect(await store.coverUrl(777, options)).toBe(
+      `capacitor://localhost/${encodeURIComponent(uri)}`,
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(await store.imageUrl(777, 0, 'webp', { folderName: '777 Missing' })).toBeNull();
+    expect(await store.imageUrl(777, 0, 'webp', { folderName: '../777 Old' })).toBeNull();
+  });
+
+  it('does not stream missing, empty or inaccessible pages', async () => {
+    await store.putImage(42, 0, makeBytes(0), 'webp');
+    expect(await store.imageUrl(42, 0, 'webp')).toBeNull();
+    expect(await store.imageUrl(42, 1, 'webp')).toBeNull();
+    await store.putImage(42, 0, makeBytes(9), 'webp');
+    vi.spyOn(fakeLib, 'getUri').mockRejectedValueOnce(new Error('permission revoked'));
+    expect(await store.imageUrl(42, 0, 'webp')).toBeNull();
+  });
+
+  it('resolves a cover with bounded probes instead of listing every stored page', async () => {
+    await store.ensureGallery(42, 'Large');
+    await store.putImage(42, 0, makeBytes(0), 'webp');
+    await store.putImage(42, 0, makeBytes(8), 'png');
+    for (let index = 1; index < 120; index++) {
+      await store.putImage(42, index, makeBytes(3), 'webp');
+    }
+    const list = vi.spyOn(fakeLib, 'readdir');
+    const stat = vi.spyOn(fakeLib, 'stat');
+    const read = vi.spyOn(fakeLib, 'readFile');
+    const uri = (await fakeLib.getUri({ path: `${LIB}/42 Large/0001.png` })).uri!;
+    expect(await store.coverUrl(42, { folderName: '42 Large' })).toBe(
+      `capacitor://localhost/${encodeURIComponent(uri)}`,
+    );
+    expect(list).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(stat.mock.calls.length).toBeLessThanOrEqual(7);
+    expect(stat.mock.calls.every(([arg]) => !/000[2-9]\./.test(arg.path))).toBe(true);
+  });
+
+  it('checks a whole exact-folder manifest with one listing and rejects missing or empty pages', async () => {
+    await store.ensureGallery(42, 'Bulk');
+    const pages = Array.from({ length: 120 }, (_, index) => ({ index, ext: 'webp' }));
+    for (const page of pages) await store.putImage(42, page.index, makeBytes(3), page.ext);
+    const list = vi.spyOn(fakeLib, 'readdir');
+    const read = vi.spyOn(fakeLib, 'readFile');
+    const options = { folderName: '42 Bulk' };
+    expect(await store.imagesExist(42, pages, options)).toBe(true);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+    await store.putImage(42, 119, makeBytes(0), 'webp');
+    expect(await store.imagesExist(42, pages, options)).toBe(false);
+    expect(await store.imagesExist(42, pages, { folderName: '42 Missing' })).toBe(false);
   });
 
   it('coverUrl returns null when gallery does not exist', async () => {

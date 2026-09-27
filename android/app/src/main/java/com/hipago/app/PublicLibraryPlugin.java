@@ -15,6 +15,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -37,16 +38,15 @@ import java.util.concurrent.Executors;
  * No MANAGE_EXTERNAL_STORAGE, no WRITE_EXTERNAL_STORAGE — the only grant is the
  * single persisted tree the user chose.
  *
- * Performance: directory DocumentFile handles are cached inside SafLibrary, so a
- * download of N images resolves the gallery directory once.
+ * Performance: SafLibrary projects child names and entry metadata in single
+ * cursor queries, without per-child metadata round trips.
  *
  * Atomicity: image writes go straight to the final document via {@code "wt"} so
  * overwrites (the per-page manifest rewrite) truncate in place instead of piling
  * up as "0000 (1).json".
  *
- * DEVICE-PENDING: Java is not compiled in the sandbox; this file is verified by
- * code review here and must be smoke-tested on a physical/emulator Android
- * device (the activity-result + persisted-permission path especially).
+ * DEVICE-PENDING: smoke-test the activity-result and persisted-permission path
+ * on an Android device.
  */
 @CapacitorPlugin(name = "PublicLibrary")
 public class PublicLibraryPlugin extends Plugin {
@@ -60,7 +60,7 @@ public class PublicLibraryPlugin extends Plugin {
     /**
      * All file ops run on ONE background thread, not a new thread per call. This
      * serializes directory/file resolution + creation so concurrent downloads
-     * cannot corrupt the SafLibrary dir cache or race {@code findFile→createFile}
+     * cannot race {@code findChild→createFile}
      * into a duplicate "name (1)". It also bounds thread churn.
      */
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -221,15 +221,13 @@ public class PublicLibraryPlugin extends Plugin {
         io.execute(() -> {
             try {
                 if (!saf().hasTree()) { call.reject("NO_TREE"); return; }
-                DocumentFile[] entries = saf().listDir(path);
+                List<SafLibrary.DirectoryEntry> entries = saf().listDir(path);
                 if (entries == null) { call.reject("directory not found: " + path); return; }
                 JSArray files = new JSArray();
-                for (DocumentFile entry : entries) {
-                    String name = entry.getName();
-                    if (name == null) continue; // keep the DirEntry.name: string contract honest
+                for (SafLibrary.DirectoryEntry entry : entries) {
                     JSObject item = new JSObject();
-                    item.put("name", name);
-                    item.put("size", entry.isFile() ? entry.length() : 0);
+                    item.put("name", entry.name);
+                    item.put("size", entry.size);
                     files.put(item);
                 }
                 JSObject ret = new JSObject();

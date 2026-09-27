@@ -1025,12 +1025,12 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
       if (existing?.progress || existing?.queued || files.length === 0) return;
 
       // Cache the supplied file list so the processor doesn't re-fetch the
-      // detail. Exception: offline detail fallback can synthesize `files` from a
-      // short local manifest. If the DB says a completed gallery should have
-      // more pages, force a fresh detail resolve so "re-download missing files"
-      // cannot turn a partial manifest into a smaller completed gallery.
+      // detail. Manifest-only fallback files have no remote name/hash, even
+      // when their count matches. Resolve real metadata after enqueue changes
+      // the row to queued, so re-download cannot reuse synthetic/partial files.
       const existingRow = await getDownload(id).catch(() => null);
       if (
+        files.every((file) => file.name && file.hash) &&
         !(
           existingRow?.status === 'complete' &&
           (existingRow.pageCount ?? 0) > 0 &&
@@ -1038,6 +1038,8 @@ export const useDownloadProgressStore = create<DownloadProgressState>()((set, ge
         )
       ) {
         fileCache.set(id, { files, tags });
+      } else {
+        fileCache.delete(id);
       }
 
       try {

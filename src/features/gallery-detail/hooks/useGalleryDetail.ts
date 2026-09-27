@@ -5,22 +5,20 @@ import { fetchGalleryInfo, filesToGalleryImages } from '@/lib/api/gallery';
 import { galleryInfoToBlock, galleryInfoToImages } from '@/lib/api/parser';
 import { getGalleryBlock, saveGalleryBlock, getGalleryImages, saveGalleryImages } from '@/lib/db/gallery';
 import { getDownload, deserializeTags } from '@/lib/db/download';
-import { getDownloadedGalleryPages, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
+import { getDownloadedGalleryPages } from '@/lib/utils/download-zip';
 import { GalleryBlockType } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile, GalleryImages, TagType } from '@/lib/utils/types';
 
 /**
- * Last-resort offline fallback for a DOWNLOADED gallery: when the network
- * gallery-info fetch fails (offline / hitomi down) AND the gallery-cache tables
- * are also empty, build a minimal detail from the `download` row + the on-disk
+ * Local fallback for a DOWNLOADED gallery: when the gallery-cache tables
+ * are empty, build a minimal detail from the `download` row + the on-disk
  * page manifest so the detail page renders (title, tags, page count, working
- * Read button) instead of spinning forever. Returns null when there is no
- * download row or no pages on disk (nothing to show), so the caller re-throws
- * the original network error.
+ * Read button) without waiting for the network. Returns null when there is no
+ * completed download row or valid page manifest, so the caller tries the API.
  *
  * Thumbnails need hitomi hashes we don't have offline, so the synthesized files
- * carry empty name/hash — the per-page thumbnail grid is blank offline, but the
- * reader serves the real images from disk (useOfflineImages). Marked
+ * carry empty name/hash. Detail previews and the reader serve these pages from
+ * the download store through useOfflineImages. Marked
  * NOT_DETAILED so the detail page hides the network-only mediaType/language line.
  */
 async function offlineDownloadFallback(
@@ -35,29 +33,23 @@ async function offlineDownloadFallback(
   if (!row) return null;
   if (row.status !== 'complete') return null;
 
-  let completeOnDisk = false;
-  try {
-    completeOnDisk = await hasCompleteDownloadedGallery(id, row.pageCount);
-  } catch {
-    completeOnDisk = false;
-  }
-  if (!completeOnDisk) return null;
-
   let pages: { index: number; ext: string }[] = [];
   try {
-    pages = await getDownloadedGalleryPages(id);
+    pages = await getDownloadedGalleryPages(id, row.folderName ? { folderName: row.folderName } : undefined);
   } catch {
     pages = [];
   }
   if (pages.length === 0) return null;
-  if (row.pageCount > 0 && pages.length < row.pageCount) return null;
+  if (row.pageCount > 0 && pages.length !== row.pageCount) return null;
 
   const files: GalleryFile[] = pages
     .slice()
     .sort((a, b) => a.index - b.index)
     .map((p) => ({
-      width: 0,
-      height: 0,
+      // Match ReaderView's offline fallback so scroll rows reserve space before
+      // an image loads. Real cached dimensions take the normal detail path.
+      width: 800,
+      height: 1200,
       haswebp: p.ext === 'webp' ? 1 : 0,
       hasavif: p.ext === 'avif' ? 1 : 0,
       hasavifsmalltn: 0,
@@ -104,18 +96,15 @@ export async function resolveGalleryDetail(id: number): Promise<{
     // DB not initialized - fall through to API
   }
 
-  // Fetch from API
-  let info;
-  try {
-    info = await fetchGalleryInfo(id);
-  } catch (e) {
-    // Network/parse failed (e.g. offline). For a downloaded gallery whose
-    // gallery-cache is also gone, fall back to the download row + on-disk
-    // manifest so the detail still renders instead of spinning/erroring forever.
-    const fallback = await offlineDownloadFallback(id);
-    if (fallback) return fallback;
-    throw e;
-  }
+  // A saved work must open without waiting for network timeouts/retries.
+  const fallback = await offlineDownloadFallback(id);
+  if (fallback) return fallback;
+
+  return fetchAndCacheDetail(id);
+}
+
+async function fetchAndCacheDetail(id: number) {
+  const info = await fetchGalleryInfo(id);
   const block = galleryInfoToBlock(info);
   const images = galleryInfoToImages(info);
 
@@ -135,18 +124,11 @@ function isDetailStale(block: GalleryBlock): boolean {
 }
 
 function revalidateDetail(id: number): void {
-  fetchGalleryInfo(id)
-    .then((info) => {
-      const block = galleryInfoToBlock(info);
-      if (block.type === GalleryBlockType.DETAILED) {
-        saveGalleryBlock(block).catch(() => {});
-        saveGalleryImages(id, info.files).catch(() => {});
-      }
-    })
+  fetchAndCacheDetail(id)
     .catch((e) => console.warn('[detail] Revalidation failed:', e));
 }
 
-export function useGalleryDetail(id: number) {
+export function useGalleryDetail(id: number, { refreshDownloadedMetadata = false } = {}) {
   const query = useQuery({
     queryKey: ['gallery-detail', id],
     queryFn: () => resolveGalleryDetail(id),
@@ -160,10 +142,27 @@ export function useGalleryDetail(id: number) {
     },
   });
 
+  const needsMetadata = query.data?.files.some((file) => !file.hash) ?? false;
+  // Detail can enrich a manifest-only result in the background. Keep this opt-in:
+  // the reader's image list must not change underneath the current reading page.
+  // React Query deduplicates requests across renders and retains successful data.
+  const refreshed = useQuery({
+    queryKey: ['gallery-detail-metadata', id],
+    queryFn: () => fetchAndCacheDetail(id),
+    enabled: refreshDownloadedMetadata && needsMetadata,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const data = refreshDownloadedMetadata && needsMetadata
+    ? refreshed.data ?? query.data
+    : query.data;
+
   return {
-    block: query.data?.block ?? null,
-    images: query.data?.images ?? null,
-    files: query.data?.files ?? [],
+    block: data?.block ?? null,
+    images: data?.images ?? null,
+    files: data?.files ?? [],
     isLoading: query.isLoading,
     error: query.error,
   };

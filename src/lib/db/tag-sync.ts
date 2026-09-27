@@ -44,22 +44,6 @@ async function reloadCurrentLocale(): Promise<void> {
 }
 
 /**
- * Build a lookup map of existing tags for a given type byte.
- */
-async function buildExistingTagMap(typeByte: number): Promise<Map<string, { tagId: number; count: number }>> {
-  const db = await ensureDb();
-  const existing = await db.query<{ tagId: number; name: string; count: number }>(
-    'SELECT tagId, name, count FROM tag WHERE type = ?',
-    [typeByte],
-  );
-  const map = new Map<string, { tagId: number; count: number }>();
-  for (const tag of existing) {
-    map.set(tag.name, { tagId: tag.tagId, count: tag.count });
-  }
-  return map;
-}
-
-/**
  * Upsert tags into DB for a single tag type.
  */
 async function upsertTagsForType(
@@ -67,48 +51,21 @@ async function upsertTagsForType(
   tags: Array<[string, number]>,
 ): Promise<number> {
   const db = await ensureDb();
-  const existingMap = await buildExistingTagMap(typeByte);
 
-  const toInsert: Array<{ type: number; name: string; count: number }> = [];
-  const toUpdate: Array<{ tagId: number; count: number }> = [];
-
-  for (const [name, count] of tags) {
-    const existing = existingMap.get(name);
-    if (existing) {
-      if (existing.count !== count) {
-        toUpdate.push({ tagId: existing.tagId, count });
-      }
-    } else {
-      toInsert.push({ type: typeByte, name, count });
-      existingMap.set(name, { tagId: -1, count });
-    }
-  }
-
-  // Insert/update in batches to avoid blocking the UI thread
-  const BATCH_SIZE = 500;
-
-  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-    const batch = toInsert.slice(i, i + BATCH_SIZE);
+  // Keep each bridge call below SQLite's older 999-variable limit. Resolving
+  // conflicts in SQL preserves tag IDs even when gallery saves add tags while
+  // sync is fetching, without rescanning the whole type for every page.
+  const BATCH_SIZE = 300;
+  for (let i = 0; i < tags.length; i += BATCH_SIZE) {
+    const batch = tags.slice(i, i + BATCH_SIZE);
+    const placeholders = batch.map(() => '(?, ?, ?)').join(', ');
+    const params = batch.flatMap(([name, count]) => [typeByte, name, count]);
     await withTransaction(async () => {
-      for (const { type, name, count } of batch) {
-        await db.execute(
-          'INSERT INTO tag (type, name, count) VALUES (?, ?, ?)',
-          [type, name, count],
-        );
-      }
-    });
-    await yieldToMain();
-  }
-
-  for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
-    const batch = toUpdate.slice(i, i + BATCH_SIZE);
-    await withTransaction(async () => {
-      for (const { tagId, count } of batch) {
-        await db.execute(
-          'UPDATE tag SET count = ? WHERE tagId = ?',
-          [count, tagId],
-        );
-      }
+      await db.execute(
+        `INSERT INTO tag (type, name, count) VALUES ${placeholders}
+         ON CONFLICT(type, name) DO UPDATE SET count = excluded.count`,
+        params,
+      );
     });
     await yieldToMain();
   }
@@ -157,7 +114,6 @@ async function saveCheckpoint(typeIndex: number, letterIndex: number, tagCount: 
 
 /**
  * Runtime tag sync: fetches hitomi.la tag pages directly, page by page.
- * Falls back to bundled JSON if this fails.
  */
 async function runRuntimeTagSync(): Promise<void> {
   const store = useDbStatusStore.getState();
@@ -252,25 +208,30 @@ async function runRuntimeTagSync(): Promise<void> {
   }
 }
 
+let syncInFlight = false;
+
 /**
  * Main tag sync entry point.
  * Fetches tag pages from hitomi.la directly, page by page.
  */
 export async function runTagSync(): Promise<void> {
   const store = useDbStatusStore.getState();
-  if (store.isSyncing) return;
+  if (syncInFlight || store.isSyncing) return;
 
-  await markTagSyncLoading();
+  syncInFlight = true;
   useDbStatusStore.getState().setIsSyncing(true);
   useDbStatusStore.getState().setSyncError(null);
 
   try {
+    await markTagSyncLoading();
     useDbStatusStore.getState().setSyncProgress(5);
     await runRuntimeTagSync();
   } catch (error) {
     console.error('[tag-sync] Sync failed:', error);
     const message = errorMessage(error);
     useDbStatusStore.getState().setSyncError(message);
+  } finally {
+    syncInFlight = false;
     useDbStatusStore.getState().setIsSyncing(false);
   }
 }

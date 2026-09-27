@@ -70,16 +70,38 @@ export async function persistDb(): Promise<void> {
   }
 }
 
-/** Execute multiple statements inside a transaction. */
+const transactionTurns = new WeakMap<DbAdapter, Promise<void>>();
+
+/**
+ * Execute multiple statements inside a transaction, serializing explicit
+ * transactions on the same connection. Callbacks must not nest withTransaction.
+ * Direct adapter operations still share the active transaction; callers needing
+ * their own commit/rollback boundary must use this helper.
+ */
 export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
   const db = await ensureDb();
-  await db.exec('BEGIN');
+  const previousTurn = transactionTurns.get(db) ?? Promise.resolve();
+  let releaseTurn!: () => void;
+  const turn = new Promise<void>((resolve) => { releaseTurn = resolve; });
+  transactionTurns.set(db, turn);
+
+  await previousTurn;
   try {
-    const result = await fn();
-    await db.exec('COMMIT');
-    return result;
-  } catch (e) {
-    await db.exec('ROLLBACK');
-    throw e;
+    await db.exec('BEGIN');
+    try {
+      const result = await fn();
+      await db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await db.exec('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('[db] Rollback failed:', rollbackError);
+      }
+      throw error;
+    }
+  } finally {
+    releaseTurn();
+    if (transactionTurns.get(db) === turn) transactionTurns.delete(db);
   }
 }

@@ -41,9 +41,10 @@ function LocalBlobImage({
   const imgRef = useRef<HTMLImageElement>(null);
   const objectUrlRef = useRef<string | null>(null);
   const [visible, setVisible] = useState(loading === 'eager');
-  const [url, setUrl] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(source.url ?? null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>();
 
   useEffect(() => {
     if (loading === 'eager') return;
@@ -106,6 +107,34 @@ function LocalBlobImage({
     [],
   );
 
+  useEffect(() => {
+    if (!failed || !source.loadFallbackUrl) return;
+    let cancelled = false;
+    source.loadFallbackUrl()
+      .then((nextUrl) => { if (!cancelled) setFallbackUrl(nextUrl); })
+      .catch(() => { if (!cancelled) setFallbackUrl(null); });
+    return () => { cancelled = true; };
+  }, [failed, source]);
+
+  if (failed && fallbackUrl) {
+    return (
+      <AbortableImage
+        src={fallbackUrl}
+        alt={alt}
+        className={className}
+        loading={loading}
+        style={style}
+        draggable={draggable}
+        spinner={spinner}
+        fetchPriority={fetchPriority}
+      />
+    );
+  }
+
+  if (failed && source.loadFallbackUrl && fallbackUrl === undefined) {
+    return <div className={className} style={style}><Spinner size="md" /></div>;
+  }
+
   if (failed) {
     return (
       <div
@@ -131,6 +160,22 @@ function LocalBlobImage({
           />
         </svg>
       </div>
+    );
+  }
+
+  if (source.url) {
+    return (
+      <AbortableImage
+        src={source.url}
+        alt={alt}
+        className={className}
+        loading={loading}
+        style={style}
+        draggable={draggable}
+        spinner={spinner}
+        fetchPriority={fetchPriority}
+        onPermanentError={() => setFailed(true)}
+      />
     );
   }
 
@@ -164,8 +209,5 @@ function LocalBlobImage({
 }
 
 export function OfflineImage({ source, ...props }: OfflineImageProps) {
-  if (source.url) {
-    return <AbortableImage {...props} src={source.url} />;
-  }
   return <LocalBlobImage key={getSourceKey(source)} source={source} {...props} />;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   ImageCacheStore,
   DEFAULT_IMAGE_CACHE_MAX_BYTES,
@@ -51,7 +51,22 @@ function fakeBackend(initial: ImageCacheIndexEntry[] = []) {
 
 const url = (size: number) => `https://cdn/img?size=${size}`;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe('ImageCacheStore LRU core (file-backed)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   it('default cap is 250MB', () => {
     expect(DEFAULT_IMAGE_CACHE_MAX_BYTES).toBe(250 * 1024 * 1024);
   });
@@ -146,7 +161,7 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
   });
 
   it('clear empties both the index and the backend files', async () => {
-    const { backend, files } = fakeBackend();
+    const { backend, files, getIndex } = fakeBackend();
     const s = new ImageCacheStore(backend, null);
     await s.init();
     await s.ensureCached('a', url(100), {});
@@ -154,6 +169,8 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
     expect(s.count()).toBe(0);
     expect(s.usage()).toBe(0);
     expect(files.size).toBe(0);
+    await vi.runAllTimersAsync();
+    expect(getIndex()).toEqual([]);
   });
 
   it('reload from the persisted index preserves LRU order across restart', async () => {
@@ -163,6 +180,7 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
     await s1.ensureCached('a', url(100), {});
     await s1.ensureCached('b', url(100), {});
     await s1.fileUrl('a'); // a is most recently used
+    await vi.runAllTimersAsync(); // recency persistence is coalesced
 
     // Fresh store over the SAME backend simulates an app restart.
     const s2 = new ImageCacheStore(backend, 250);
@@ -172,6 +190,271 @@ describe('ImageCacheStore LRU core (file-backed)', () => {
     expect(s2.has('b')).toBe(false);
     expect(s2.has('a')).toBe(true);
     expect(s2.has('c')).toBe(true);
+    await vi.runAllTimersAsync();
     expect(getIndex().some((e) => e.key === 'b')).toBe(false);
+  });
+
+  it('serves warm URLs and native paths without waiting for index persistence', async () => {
+    const { backend, files } = fakeBackend([{ key: 'a', size: 100, lastAccess: 1 }]);
+    files.set('a', 100);
+    const pendingSave = deferred<void>();
+    const save = vi.spyOn(backend, 'saveIndex').mockReturnValue(pendingSave.promise);
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+
+    expect(await s.fileUrl('a')).toBe('file://cache/a');
+    expect(await s.cachedFilePath('a')).toBe('/cache/a');
+    expect(save).not.toHaveBeenCalled();
+    await vi.runOnlyPendingTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(await s.fileUrl('a')).toBe('file://cache/a');
+    pendingSave.resolve();
+    await vi.runAllTimersAsync();
+  });
+
+  it('coalesces hit bursts and serializes saves while retaining latest recency', async () => {
+    const { backend, files, getIndex } = fakeBackend([
+      { key: 'a', size: 100, lastAccess: 1 },
+      { key: 'b', size: 100, lastAccess: 2 },
+    ]);
+    files.set('a', 100);
+    files.set('b', 100);
+    const pendingSave = deferred<void>();
+    const originalSave = backend.saveIndex;
+    const save = vi.spyOn(backend, 'saveIndex').mockImplementationOnce(async (entries) => {
+      await pendingSave.promise;
+      await originalSave(entries);
+    });
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await Promise.all(Array.from({ length: 50 }, () => s.fileUrl('a')));
+    expect(save).not.toHaveBeenCalled();
+    await vi.runOnlyPendingTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+
+    await Promise.all(Array.from({ length: 50 }, () => s.fileUrl('b')));
+    await vi.runOnlyPendingTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    pendingSave.resolve();
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(getIndex().find((e) => e.key === 'b')!.lastAccess).toBeGreaterThan(
+      getIndex().find((e) => e.key === 'a')!.lastAccess,
+    );
+  });
+
+  it('shares one native download across concurrent requests for the same key', async () => {
+    const { backend, files } = fakeBackend();
+    const started = deferred<void>();
+    const finish = deferred<number>();
+    const download = vi.spyOn(backend, 'download').mockImplementation(async (key) => {
+      started.resolve();
+      const size = await finish.promise;
+      files.set(key, size);
+      return size;
+    });
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    const requests = Array.from({ length: 20 }, () => s.ensureCached('a', url(100), {}));
+    await started.promise;
+    finish.resolve(100);
+    expect(await Promise.all(requests)).toEqual(Array(20).fill('file://cache/a'));
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(s.usage()).toBe(100);
+  });
+
+  it('clear waits for an old native download and discards it before new requests resume', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    const started = deferred<void>();
+    const finish = deferred<number>();
+    const download = vi.spyOn(backend, 'download').mockImplementationOnce(async (key) => {
+      started.resolve();
+      const size = await finish.promise;
+      files.set(key, size);
+      return size;
+    });
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    const oldRequest = s.ensureCached('a', url(100), {});
+    await started.promise;
+    const clearing = s.clear();
+    const freshRequest = s.ensureCached('a', url(200), {});
+    expect(s.usage()).toBe(0);
+    finish.resolve(100);
+    expect(await oldRequest).toBeNull();
+    await clearing;
+    expect(await freshRequest).toBe('file://cache/a');
+    await vi.runAllTimersAsync();
+    expect(download).toHaveBeenCalledTimes(2);
+    expect(files.get('a')).toBe(200);
+    expect(s.usage()).toBe(200);
+    expect(getIndex()).toEqual([{ key: 'a', size: 200, lastAccess: expect.any(Number) }]);
+  });
+
+  it('clear invalidates a request before its native download has started', async () => {
+    const { backend, files } = fakeBackend();
+    const download = vi.spyOn(backend, 'download');
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    const pending = s.ensureCached('a', url(100), {});
+    await s.clear();
+    expect(await pending).toBeNull();
+    expect(download).not.toHaveBeenCalled();
+    expect(files.size).toBe(0);
+    expect(s.count()).toBe(0);
+  });
+
+  it('clear drains an already running save and cancels delayed saves', async () => {
+    const { backend, files, getIndex } = fakeBackend([{ key: 'a', size: 100, lastAccess: 1 }]);
+    files.set('a', 100);
+    const finish = deferred<void>();
+    const originalSave = backend.saveIndex;
+    const save = vi.spyOn(backend, 'saveIndex').mockImplementationOnce(async (entries) => {
+      await finish.promise;
+      await originalSave(entries);
+    });
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await s.fileUrl('a');
+    await vi.runOnlyPendingTimersAsync();
+    await s.fileUrl('a');
+    const clearing = s.clear();
+    finish.resolve();
+    await clearing;
+    await vi.runAllTimersAsync();
+    expect(files.size).toBe(0);
+    expect(getIndex()).toEqual([]);
+    expect(s.usage()).toBe(0);
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps hits usable after a save failure and retries on later activity', async () => {
+    const { backend, files, getIndex } = fakeBackend([{ key: 'a', size: 100, lastAccess: 1 }]);
+    files.set('a', 100);
+    const save = vi.spyOn(backend, 'saveIndex').mockRejectedValueOnce(new Error('disk busy'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    expect(await s.fileUrl('a')).toBe('file://cache/a');
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(await s.cachedFilePath('a')).toBe('/cache/a');
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(getIndex()[0].lastAccess).toBeGreaterThan(1);
+  });
+
+  it('accounts a reclaimed file only once across concurrent stale hits', async () => {
+    const { backend } = fakeBackend([{ key: 'a', size: 100, lastAccess: 1 }]);
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    expect(await Promise.all([s.fileUrl('a'), s.cachedFilePath('a')])).toEqual([null, null]);
+    expect(s.usage()).toBe(0);
+    expect(s.count()).toBe(0);
+    expect(await s.ensureCached('a', url(200), {})).toBe('file://cache/a');
+    expect(s.usage()).toBe(200);
+  });
+
+  it('serializes concurrent cap changes so each evicted file is accounted once', async () => {
+    const { backend, files } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    for (const key of ['a', 'b', 'c']) await s.ensureCached(key, url(100), {});
+    const started = deferred<void>();
+    const finish = deferred<void>();
+    const remove = backend.remove;
+    vi.spyOn(backend, 'remove').mockImplementationOnce(async (key) => {
+      started.resolve();
+      await finish.promise;
+      await remove(key);
+    });
+    const first = s.setMaxBytes(200);
+    await started.promise;
+    const second = s.setMaxBytes(100);
+    finish.resolve();
+    await Promise.all([first, second]);
+    expect(s.usage()).toBe(100);
+    expect(s.count()).toBe(1);
+    expect([...files.keys()]).toEqual(['c']);
+  });
+
+  it('clear during an eviction leaves empty files and nonnegative accounting', async () => {
+    const { backend, files, getIndex } = fakeBackend();
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    await s.ensureCached('a', url(100), {});
+    const started = deferred<void>();
+    const finish = deferred<void>();
+    const remove = backend.remove;
+    vi.spyOn(backend, 'remove').mockImplementationOnce(async (key) => {
+      started.resolve();
+      await finish.promise;
+      await remove(key);
+    });
+    const eviction = s.setMaxBytes(0);
+    await started.promise;
+    const clearing = s.clear();
+    finish.resolve();
+    await Promise.all([eviction, clearing]);
+    await vi.runAllTimersAsync();
+    expect(s.usage()).toBe(0);
+    expect(s.count()).toBe(0);
+    expect(files.size).toBe(0);
+    expect(getIndex()).toEqual([]);
+  });
+
+  it('finishes an old eviction before replacing a reclaimed file with the same key', async () => {
+    const { backend, files } = fakeBackend([{ key: 'a', size: 100, lastAccess: 1 }]);
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    const started = deferred<void>();
+    const finish = deferred<void>();
+    const remove = backend.remove;
+    vi.spyOn(backend, 'remove').mockImplementationOnce(async (key) => {
+      started.resolve();
+      await finish.promise;
+      await remove(key);
+    });
+    const eviction = s.setMaxBytes(0);
+    await started.promise;
+    const replacement = s.ensureCached('a', url(200), {});
+    // Let the cache lookup complete while the old remove is still pending.
+    await vi.advanceTimersByTimeAsync(0);
+    finish.resolve();
+    await eviction;
+    expect(await replacement).toBe('file://cache/a');
+    expect(files.get('a')).toBe(200);
+    expect(s.usage()).toBe(200);
+  });
+
+  it('clear does not reload an index whose initialization was already in flight', async () => {
+    const { backend, getIndex } = fakeBackend([{ key: 'a', size: 100, lastAccess: 1 }]);
+    const loaded = deferred<ImageCacheIndexEntry[]>();
+    const load = vi.spyOn(backend, 'loadIndex').mockReturnValueOnce(loaded.promise);
+    const s = new ImageCacheStore(backend, null);
+    const first = s.init();
+    const second = s.init();
+    const clearing = s.clear();
+    loaded.resolve([{ key: 'a', size: 100, lastAccess: 1 }]);
+    await Promise.all([first, second, clearing]);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(s.usage()).toBe(0);
+    expect(s.count()).toBe(0);
+    expect(getIndex()).toEqual([]);
+  });
+
+  it('allows another download attempt after a shared native failure', async () => {
+    const { backend } = fakeBackend();
+    const download = vi.spyOn(backend, 'download').mockRejectedValueOnce(new Error('offline'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const s = new ImageCacheStore(backend, null);
+    await s.init();
+    expect(
+      await Promise.all([s.ensureCached('a', url(100), {}), s.ensureCached('a', url(100), {})]),
+    ).toEqual([null, null]);
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(await s.ensureCached('a', url(100), {})).toBe('file://cache/a');
+    expect(download).toHaveBeenCalledTimes(2);
+    expect(s.usage()).toBe(100);
   });
 });

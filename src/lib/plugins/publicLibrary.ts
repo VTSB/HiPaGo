@@ -83,9 +83,9 @@ export interface PublicLibraryPlugin {
   deleteDir(options: { path: string }): Promise<void>;
 
   /**
-   * Return the content:// document URI for a relative path (or null). Note:
-   * content URIs do NOT load in the WebView via convertFileSrc — read the
-   * bytes instead when you need a displayable image source.
+   * Return the content:// document URI for a relative path (or null).
+   * Capacitor.convertFileSrc maps it to the existing native content stream
+   * handler, allowing images to display without base64 transfers through JS.
    */
   getUri(options: { path: string }): Promise<{ uri: string | null }>;
 }

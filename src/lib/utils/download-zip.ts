@@ -74,7 +74,12 @@ function encodeManifest(exts: string[]): Uint8Array {
 /** Decode the per-page ext array from stored bytes. Returns [] on error. */
 function decodeManifest(bytes: Uint8Array): string[] {
   try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as string[];
+    const value: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    // Manifests are externally stored. Reject malformed entries and path-like
+    // extensions before constructing any page filename.
+    return Array.isArray(value) && value.every(
+      (ext) => typeof ext === 'string' && /^(?:avif|webp|jpe?g|png|gif)$/i.test(ext),
+    ) ? value : [];
   } catch {
     return [];
   }
@@ -252,6 +257,10 @@ export async function hasCompleteDownloadedGallery(
   const exts = decodeManifest(manifestBytes);
   if (exts.length === 0) return false;
   if (expectedPageCount > 0 && exts.length !== expectedPageCount) return false;
+
+  if (store.imagesExist) {
+    return store.imagesExist(galleryId, exts.map((ext, index) => ({ index, ext })), options);
+  }
 
   for (let i = 0; i < exts.length; i++) {
     const ext = exts[i];
@@ -542,19 +551,24 @@ export async function downloadGalleryToLibrary(
  */
 export async function exportGalleryZip(galleryId: number, title: string): Promise<void> {
   const store = await createDownloadStore();
+  const row = await getDownload(galleryId);
+  const options = row?.folderName ? { folderName: row.folderName } : undefined;
 
   // Load the manifest to know how many pages and their exts.
-  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT);
+  const manifestBytes = await store.getImage(galleryId, MANIFEST_INDEX, MANIFEST_EXT, options);
   if (!manifestBytes) {
     throw new Error(`No manifest found for gallery ${galleryId}. Is it fully downloaded?`);
   }
   const exts = decodeManifest(manifestBytes);
+  if (exts.length === 0 || (row?.pageCount && exts.length !== row.pageCount)) {
+    throw new Error(`Invalid downloaded manifest for gallery ${galleryId}`);
+  }
 
   const entries: Record<string, Uint8Array> = {};
   for (let i = 0; i < exts.length; i++) {
     const ext = exts[i];
-    const bytes = await store.getImage(galleryId, i, ext);
-    if (bytes) {
+    const bytes = await store.getImage(galleryId, i, ext, options);
+    if (bytes && bytes.byteLength > 0) {
       // Use the same zero-padded name that the store used, e.g. "0001.webp"
       const name = String(i + 1).padStart(4, '0') + '.' + ext;
       entries[name] = bytes;

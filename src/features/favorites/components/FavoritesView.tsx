@@ -1,13 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { GalleryGridById } from '@/features/gallery-list/components/GalleryGrid';
-import { InfiniteScrollTrigger } from '@/shared/components/InfiniteScrollTrigger';
+import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
+import { SavedGalleryGrid, type SavedGalleryGridHandle } from '@/features/gallery-list/components/SavedGalleryGrid';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { DbErrorBanner } from '@/shared/components/DbErrorBanner';
-import { usePaginatedIds } from '@/shared/hooks/usePaginatedIds';
 import { DbStageSpinner } from '@/shared/components/DbStageSpinner';
 import { FilterBar } from '@/shared/components/FilterBar';
 import { getFavoriteIds } from '@/lib/db/gallery';
@@ -38,14 +37,11 @@ export function FavoritesView({ embedded = false }: { embedded?: boolean }) {
   const activeIds = hasFilters ? filteredIds : allIds;
   const activeLoading = hasFilters ? isFilterLoading : isLoading;
 
-  const { visibleIds, hasNextPage, isFetchingNextPage, fetchNextPage } = usePaginatedIds(
-    activeIds && activeIds.length > 0 ? activeIds : undefined,
-    PAGE_SIZE,
-    hasFilters ? ['favorites-filtered-pages', filters] : ['favorites-pages'],
-  );
+  const gridRef = useRef<SavedGalleryGridHandle>(null);
+  const groups = useMemo(() => [{ key: 'favorites', items: activeIds ?? [] }], [activeIds]);
 
   const totalCount = activeIds?.length ?? 0;
-  const showFilterBar = !activeLoading && (totalCount > 0 || hasFilters);
+  const showFilterBar = !isLoading && ((allIds?.length ?? 0) > 0 || hasFilters);
 
   return (
     <>
@@ -97,19 +93,13 @@ export function FavoritesView({ embedded = false }: { embedded?: boolean }) {
           )}
         </div>
       ) : (
-        <GalleryGridById ids={visibleIds} isLoading={false} />
+        <SavedGalleryGrid ref={gridRef} groups={groups} getItemKey={(id) => id} renderItem={(id) => <GalleryCardById id={id} />} />
       )}
-      <InfiniteScrollTrigger
-        hasMore={hasNextPage}
-        isFetching={isFetchingNextPage}
-        onLoadMore={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
-      />
       <FloatingPageNav
         totalItems={totalCount}
-        loadedItems={visibleIds.length}
+        loadedItems={totalCount}
         pageSize={PAGE_SIZE}
-        hasMore={hasNextPage}
-        onLoadMore={fetchNextPage}
+        onJumpToPage={(page) => gridRef.current?.scrollToItem((page - 1) * PAGE_SIZE)}
       />
     </>
   );

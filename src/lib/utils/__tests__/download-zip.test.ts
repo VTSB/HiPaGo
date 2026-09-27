@@ -1309,6 +1309,7 @@ describe('exportGalleryZip', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getDownload).mockResolvedValue(null);
     memStore = makeMemoryStore();
     vi.mocked(createDownloadStore).mockResolvedValue(memStore);
     vi.mocked(zipSync).mockReturnValue(new Uint8Array([1, 2, 3]));
@@ -1350,6 +1351,26 @@ describe('exportGalleryZip', () => {
       'No manifest found for gallery 999',
     );
   });
+
+  it('uses the persisted folder for the manifest and every exported page', async () => {
+    const row = { folderName: '42 Exact', pageCount: 1 } as NonNullable<Awaited<ReturnType<typeof getDownload>>>;
+    vi.mocked(getDownload).mockResolvedValue(row);
+    await memStore.putImage(42, -1, new TextEncoder().encode('["webp"]'), 'json');
+    await memStore.putImage(42, 0, new Uint8Array([1]), 'webp');
+    const read = vi.spyOn(memStore, 'getImage');
+    await exportGalleryZip(42, 'Exact');
+    expect(read).toHaveBeenCalledWith(42, -1, 'json', { folderName: '42 Exact' });
+    expect(read).toHaveBeenCalledWith(42, 0, 'webp', { folderName: '42 Exact' });
+  });
+
+  it.each(['null', '{}', '["../other"]', '[null]', '[]'])(
+    'rejects malformed manifest %s without exporting an empty archive', async (manifest) => {
+      await memStore.putImage(42, -1, new TextEncoder().encode(manifest), 'json');
+      expect(await getDownloadedGalleryPages(42)).toEqual([]);
+      await expect(exportGalleryZip(42, 'Invalid')).rejects.toThrow('Invalid downloaded manifest');
+      expect(zipSync).not.toHaveBeenCalled();
+    },
+  );
 
   it('builds a zip from stored images and triggers download', async () => {
     // Set up a gallery with 2 pages

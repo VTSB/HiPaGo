@@ -4,7 +4,9 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.UriPermission;
+import android.database.Cursor;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 
 import androidx.documentfile.provider.DocumentFile;
 
@@ -12,10 +14,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Shared Storage Access Framework (SAF) file helper.
@@ -35,12 +36,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * long-lived instance; the worker creates a fresh one per run). Each instance is
  * single-thread-disciplined by its caller: {@link PublicLibraryPlugin} serializes
  * all ops on its single-thread executor, and {@link GalleryDownloadWorker} is
- * itself sequential (one gallery, one page at a time). The {@link #dirCache} is a
- * ConcurrentHashMap so it stays safe even if a caller ever parallelizes.
+ * itself sequential (one gallery, one page at a time). Child names are queried
+ * together so resolving a path never needs a metadata query for every sibling.
  *
- * DEVICE-PENDING: Java is not compiled in the sandbox; this file is verified by
- * code review here and must be smoke-tested on a physical/emulator Android
- * device (the persisted-permission + DocumentFile resolution path especially).
+ * DEVICE-PENDING: provider performance and persisted permissions must still be
+ * smoke-tested on an Android device; JVM provider tests do not measure them.
  */
 public class SafLibrary {
 
@@ -48,9 +48,6 @@ public class SafLibrary {
     static final String KEY_TREE_URI = "tree_uri";
 
     private final Context context;
-
-    /** relative dir path ("HiPaGo/12345 Title") → resolved DocumentFile. */
-    private final Map<String, DocumentFile> dirCache = new ConcurrentHashMap<>();
 
     /** Cached tree root DocumentFile so per-file ops skip repeated resolution. */
     private volatile DocumentFile cachedRoot;
@@ -94,7 +91,6 @@ public class SafLibrary {
 
     /** Drop cached handles — call after the tree changes. */
     public void invalidate() {
-        dirCache.clear();
         cachedRoot = null;
     }
 
@@ -105,11 +101,13 @@ public class SafLibrary {
      */
     public DocumentFile rootDir() {
         Uri tree = getTreeUri();
-        if (tree == null) return null;
-        if (!hasPersistedWritePermission(tree)) {
+        if (tree == null || !hasPersistedWritePermission(tree)) {
             cachedRoot = null;
             return null;
         }
+        Uri rootUri = DocumentsContract.buildDocumentUriUsingTree(
+                tree, DocumentsContract.getTreeDocumentId(tree));
+        if (cachedRoot != null && !cachedRoot.getUri().equals(rootUri)) cachedRoot = null;
         if (cachedRoot != null) {
             if (cachedRoot.canWrite()) return cachedRoot;
             cachedRoot = null;
@@ -167,32 +165,50 @@ public class SafLibrary {
         if (cur == null) return null;
         if (relDirPath == null || relDirPath.isEmpty()) return cur;
 
-        DocumentFile cached = dirCache.get(relDirPath);
-        if (cached != null && cached.exists()) return cached;
-
-        StringBuilder built = new StringBuilder();
+        assertSafe(relDirPath);
         for (String seg : relDirPath.split("/")) {
             if (seg.isEmpty() || seg.equals(".")) continue;
-            if (seg.equals("..")) return null;
-            if (built.length() > 0) built.append("/");
-            built.append(seg);
-            String key = built.toString();
-
-            DocumentFile next = dirCache.get(key);
-            if (next == null || !next.exists()) {
-                next = cur.findFile(seg);
-                if (next == null) {
-                    if (!create) return null;
-                    next = cur.createDirectory(seg);
-                    if (next == null) return null;
-                } else if (!next.isDirectory()) {
-                    return null;
-                }
-                dirCache.put(key, next);
+            DocumentFile next = findChild(cur, seg);
+            if (next == null) {
+                if (!create) return null;
+                next = cur.createDirectory(seg);
+                if (next == null) return null;
+            } else if (!next.isDirectory()) {
+                return null;
             }
             cur = next;
         }
         return cur;
+    }
+
+    private Uri childrenUri(DocumentFile dir) {
+        Uri uri = dir.getUri();
+        return DocumentsContract.buildChildDocumentsUriUsingTree(
+                uri, DocumentsContract.getDocumentId(uri));
+    }
+
+    /** Resolve exact names in one provider query, without caching mutable paths. */
+    private DocumentFile findChild(DocumentFile dir, String name) {
+        String[] projection = {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        };
+        try (Cursor cursor = context.getContentResolver().query(
+                childrenUri(dir), projection, null, null, null)) {
+            if (cursor == null) throw new IllegalStateException("Unable to query directory");
+            int idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            while (cursor.moveToNext()) {
+                if (!name.equals(cursor.getString(nameColumn))) continue;
+                String documentId = cursor.getString(idColumn);
+                if (documentId == null) continue;
+                Uri uri = DocumentsContract.buildDocumentUriUsingTree(dir.getUri(), documentId);
+                // AndroidX 1.0.1 retains the document ID for a document URI from
+                // a DocumentsProvider, giving directory children tree operations.
+                return DocumentFile.fromTreeUri(context, uri);
+            }
+            return null;
+        }
     }
 
     private static int lastSlash(String p) {
@@ -216,7 +232,7 @@ public class SafLibrary {
         String name = idx < 0 ? relPath : relPath.substring(idx + 1);
         DocumentFile dir = resolveDir(dirPart, false);
         if (dir == null) return null;
-        return dir.findFile(name);
+        return findChild(dir, name);
     }
 
     private static String mimeFor(String name) {
@@ -242,7 +258,7 @@ public class SafLibrary {
         String name = idx < 0 ? relPath : relPath.substring(idx + 1);
         DocumentFile dir = resolveDir(dirPart, true);
         if (dir == null) return null;
-        DocumentFile existing = dir.findFile(name);
+        DocumentFile existing = findChild(dir, name);
         if (existing != null) return existing.getUri();
         DocumentFile created = dir.createFile(mimeFor(name), name);
         return created != null ? created.getUri() : null;
@@ -321,7 +337,7 @@ public class SafLibrary {
         if (dir == null) throw new Exception("copy create failed: " + toRelPath);
 
         String tempName = tempNameForPublish(finalName, System.nanoTime());
-        DocumentFile existingTemp = dir.findFile(tempName);
+        DocumentFile existingTemp = findChild(dir, tempName);
         if (existingTemp != null && !existingTemp.delete()) {
             throw new Exception("copy temp cleanup failed: " + tempName);
         }
@@ -349,7 +365,7 @@ public class SafLibrary {
                 throw new Exception("incomplete temp SAF write");
             }
 
-            DocumentFile existingFinal = dir.findFile(finalName);
+            DocumentFile existingFinal = findChild(dir, finalName);
             if (existingFinal != null) {
                 if (!existingFinal.isFile()) throw new Exception("destination is not a file: " + toRelPath);
                 if (!existingFinal.delete()) throw new Exception("destination delete failed: " + toRelPath);
@@ -357,14 +373,14 @@ public class SafLibrary {
             if (!temp.renameTo(finalName)) {
                 throw new Exception("copy publish failed: " + toRelPath);
             }
-            DocumentFile published = dir.findFile(finalName);
+            DocumentFile published = findChild(dir, finalName);
             if (published == null || !published.isFile() || published.length() != sourceSize) {
                 throw new Exception("copy publish verification failed: " + toRelPath);
             }
             return written;
         } catch (Throwable t) {
             try {
-                DocumentFile staleTemp = dir.findFile(tempName);
+                DocumentFile staleTemp = findChild(dir, tempName);
                 if (staleTemp != null && staleTemp.exists()) {
                     //noinspection ResultOfMethodCallIgnored
                     staleTemp.delete();
@@ -395,7 +411,7 @@ public class SafLibrary {
         return true;
     }
 
-    /** Recursively delete a relative directory and drop any cached handles under it. */
+    /** Recursively delete a relative directory. */
     public void deleteDir(String relPath) {
         assertSafe(relPath);
         if (rootDir() == null) return;
@@ -403,19 +419,49 @@ public class SafLibrary {
         if (dir != null && dir.exists() && dir.isDirectory()) {
             dir.delete(); // DocumentFile.delete removes the subtree.
         }
-        dirCache.keySet().removeIf(k -> k.equals(relPath) || k.startsWith(relPath + "/"));
+    }
+
+    static final class DirectoryEntry {
+        final String name;
+        final long size;
+
+        DirectoryEntry(String name, long size) {
+            this.name = name;
+            this.size = size;
+        }
     }
 
     /**
      * List the entries of a relative directory, or null when the directory does
-     * not exist / is not a directory. Returns the raw DocumentFile[] so the
-     * caller can read each entry's name + length.
+     * not exist / is not a directory. All entry metadata comes from one query.
      */
-    public DocumentFile[] listDir(String relDirPath) {
+    List<DirectoryEntry> listDir(String relDirPath) {
         if (rootDir() == null) return null;
         DocumentFile dir = resolveDir(relDirPath, false);
         if (dir == null || !dir.isDirectory()) return null;
-        return dir.listFiles();
+        String[] projection = {
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE
+        };
+        List<DirectoryEntry> entries = new ArrayList<>();
+        try (Cursor cursor = context.getContentResolver().query(
+                childrenUri(dir), projection, null, null, null)) {
+            if (cursor == null) throw new IllegalStateException("Unable to query directory");
+            int nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            int mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE);
+            int sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE);
+            while (cursor.moveToNext()) {
+                String name = cursor.getString(nameColumn);
+                if (name == null) continue;
+                String mime = cursor.getString(mimeColumn);
+                boolean isFile = mime != null && !mime.isEmpty()
+                        && !DocumentsContract.Document.MIME_TYPE_DIR.equals(mime);
+                entries.add(new DirectoryEntry(name,
+                        isFile && !cursor.isNull(sizeColumn) ? cursor.getLong(sizeColumn) : 0));
+            }
+        }
+        return entries;
     }
 
     /** Returns the content:// document URI for a relative path (or null). */

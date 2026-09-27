@@ -21,7 +21,7 @@ vi.mock('@/lib/api/parser', () => ({
   galleryInfoToImages: vi.fn(),
 }));
 
-// Offline download-row fallback deps (used when the network fetch fails).
+// Offline download-row fallback deps (checked before a network request).
 vi.mock('@/lib/db/download', () => ({
   getDownload: vi.fn(),
   deserializeTags: (raw: string) => {
@@ -189,7 +189,7 @@ describe('resolveGalleryDetail', () => {
   });
 
   // ── Offline download-row fallback (hole 2) ──────────────────────────────────
-  it('falls back to the download row + manifest when the network fetch fails for a downloaded gallery', async () => {
+  it('opens the exact downloaded manifest before attempting a network request', async () => {
     vi.mocked(getGalleryBlock).mockResolvedValue(null);
     vi.mocked(getGalleryImages).mockResolvedValue(null);
     vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
@@ -203,6 +203,7 @@ describe('resolveGalleryDetail', () => {
       totalBytes: 0,
       downloadedAt: '2024-05-05T00:00:00.000Z',
       status: 'complete',
+      folderName: '12345-exact-folder',
     } as unknown as Awaited<ReturnType<typeof getDownload>>);
     vi.mocked(getDownloadedGalleryPages).mockResolvedValue([
       { index: 2, ext: 'webp' },
@@ -223,7 +224,10 @@ describe('resolveGalleryDetail', () => {
     expect(result.files[1].hasavif).toBe(1);
     expect(result.files[0].haswebp).toBe(1);
     expect(result.images).toBe(synthImages);
-    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3);
+    expect(getDownloadedGalleryPages).toHaveBeenCalledWith(12345, { folderName: '12345-exact-folder' });
+    expect(getDownloadedGalleryPages).toHaveBeenCalledTimes(1);
+    expect(hasCompleteDownloadedGallery).not.toHaveBeenCalled();
+    expect(fetchGalleryInfo).not.toHaveBeenCalled();
     // It must NOT pollute the gallery cache with the synthetic block.
     expect(saveGalleryBlock).not.toHaveBeenCalled();
   });
@@ -255,8 +259,8 @@ describe('resolveGalleryDetail', () => {
     vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
 
     await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
-    expect(hasCompleteDownloadedGallery).toHaveBeenCalledWith(12345, 3);
-    expect(getDownloadedGalleryPages).not.toHaveBeenCalled();
+    expect(hasCompleteDownloadedGallery).not.toHaveBeenCalled();
+    expect(getDownloadedGalleryPages).toHaveBeenCalledTimes(1);
   });
 
   it('re-throws the network error when the download row is partial', async () => {
@@ -282,7 +286,7 @@ describe('resolveGalleryDetail', () => {
     await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
   });
 
-  it('re-throws the network error when the manifest exists but files are incomplete', async () => {
+  it('opens a valid manifest without waiting for individual page integrity checks', async () => {
     vi.mocked(getGalleryBlock).mockResolvedValue(null);
     vi.mocked(getGalleryImages).mockResolvedValue(null);
     vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));
@@ -303,11 +307,14 @@ describe('resolveGalleryDetail', () => {
     ]);
     vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
 
-    await expect(resolveGalleryDetail(12345)).rejects.toThrow('offline');
-    expect(getDownloadedGalleryPages).not.toHaveBeenCalled();
+    const result = await resolveGalleryDetail(12345);
+    expect(result.files).toHaveLength(3);
+    expect(getDownloadedGalleryPages).toHaveBeenCalledTimes(1);
+    expect(hasCompleteDownloadedGallery).not.toHaveBeenCalled();
+    expect(fetchGalleryInfo).not.toHaveBeenCalled();
   });
 
-  it('re-throws when completeness passes but the second manifest read is short', async () => {
+  it('uses the network when the manifest is shorter than the completed row page count', async () => {
     vi.mocked(getGalleryBlock).mockResolvedValue(null);
     vi.mocked(getGalleryImages).mockResolvedValue(null);
     vi.mocked(fetchGalleryInfo).mockRejectedValue(new Error('offline'));

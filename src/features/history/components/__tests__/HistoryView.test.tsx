@@ -8,6 +8,7 @@ import { HistoryView } from '../HistoryView';
 
 const mockEntries = vi.hoisted(() => ({
   rows: [] as Array<{ galleryId: number; viewedAt: string }>,
+  filtered: [] as number[],
 }));
 
 vi.mock('@/lib/db/gallery', () => ({
@@ -15,28 +16,27 @@ vi.mock('@/lib/db/gallery', () => ({
 }));
 
 vi.mock('@/lib/db/search-local', () => ({
-  filterHistoryByTags: vi.fn(async () => []),
+  filterHistoryByTags: vi.fn(async () => mockEntries.filtered),
 }));
 
-vi.mock('@/features/gallery-list/components/GalleryGrid', () => ({
-  GalleryGridById: ({ ids }: { ids: number[] }) => (
+vi.mock('@/features/gallery-list/components/GalleryCard', () => ({
+  GalleryCardById: ({ id }: { id: number }) => <span data-testid="gallery-id">{id}</span>,
+}));
+
+vi.mock('@/features/gallery-list/components/SavedGalleryGrid', () => ({
+  SavedGalleryGrid: ({ groups, renderItem }: {
+    groups: Array<{ key: string; label?: string; items: number[] }>;
+    renderItem: (id: number, index: number) => React.ReactNode;
+  }) => (
     <div>
-      {ids.map((id) => (
-        <span key={id} data-testid="gallery-id">
-          {id}
-        </span>
+      {groups.map((group) => (
+        <section key={group.key}>
+          {group.label && <h2>{group.label}</h2>}
+          {group.items.map((id, index) => <React.Fragment key={id}>{renderItem(id, index)}</React.Fragment>)}
+        </section>
       ))}
     </div>
   ),
-}));
-
-vi.mock('@/shared/components/InfiniteScrollTrigger', () => ({
-  InfiniteScrollTrigger: ({ hasMore, onLoadMore }: { hasMore: boolean; onLoadMore: () => void }) =>
-    hasMore ? (
-      <button type="button" onClick={onLoadMore}>
-        load more
-      </button>
-    ) : null,
 }));
 
 vi.mock('@/shared/components/FloatingPageNav', () => ({
@@ -56,7 +56,9 @@ vi.mock('@/shared/components/Spinner', () => ({
 }));
 
 vi.mock('@/shared/components/FilterBar', () => ({
-  FilterBar: () => <input aria-label="filter" />,
+  FilterBar: ({ onFilterChange }: { onFilterChange: (filters: { tags: []; titleQuery: string }) => void }) => (
+    <input aria-label="filter" onChange={(event) => onFilterChange({ tags: [], titleQuery: event.target.value })} />
+  ),
 }));
 
 vi.mock('@/lib/i18n/useT', () => ({
@@ -82,15 +84,24 @@ describe('HistoryView performance rendering', () => {
       galleryId: i + 1,
       viewedAt: '2026-06-20T12:00:00.000Z',
     }));
+    mockEntries.filtered = [4, 7];
   });
 
-  it('renders history in batches instead of mounting every saved card at once', async () => {
+  it('passes all ordered history groups to the single bounded grid', async () => {
     renderHistory();
-
-    await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(25));
-
-    fireEvent.click(screen.getByRole('button', { name: 'load more' }));
-
     await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(30));
+    expect(screen.getByRole('heading', { name: 'June 20, 2026' })).toBeInTheDocument();
+    expect(screen.getAllByTestId('gallery-id').map((element) => element.textContent)).toEqual(mockEntries.rows.map((row) => String(row.galleryId)));
+  });
+
+  it('switches between date groups and filtered IDs without retaining previous results', async () => {
+    renderHistory();
+    await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(30));
+    fireEvent.change(screen.getByLabelText('filter'), { target: { value: 'saved' } });
+    await waitFor(() => expect(screen.getAllByTestId('gallery-id').map((element) => element.textContent)).toEqual(['4', '7']));
+    expect(screen.queryByRole('heading', { name: 'June 20, 2026' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('filter'), { target: { value: '' } });
+    await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(30));
+    expect(screen.getByRole('heading', { name: 'June 20, 2026' })).toBeInTheDocument();
   });
 });

@@ -52,7 +52,9 @@ export function useDownloadedFilesPresent(id: number): DownloadedFilesPresence {
           setState({ filesMissing: false, checking: false });
           return;
         }
-        const completeOnDisk = await hasCompleteDownloadedGallery(id, row.pageCount);
+        const completeOnDisk = await hasCompleteDownloadedGallery(
+          id, row.pageCount, row.folderName ? { folderName: row.folderName } : undefined,
+        );
         if (cancelled) return;
         setState({ filesMissing: !completeOnDisk, checking: false });
       } catch {

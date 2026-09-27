@@ -7,6 +7,7 @@ import { Spinner } from '@/shared/components/Spinner';
 import { AbortableImage } from '@/shared/components/AbortableImage';
 import { TagChip } from '@/shared/components/TagChip';
 import { DownloadQueueView } from '@/features/library/components/DownloadQueueView';
+import { SavedGalleryGrid } from '@/features/gallery-list/components/SavedGalleryGrid';
 import { useT } from '@/lib/i18n/useT';
 import { useTagI18n } from '@/lib/i18n/useTagI18n';
 import {
@@ -27,15 +28,9 @@ import { resolveThumbnailUrl } from '@/lib/api/url-resolver';
 import type { DBDownload } from '@/lib/db/schema';
 import type { TagType } from '@/lib/utils/types';
 import { galleryHref } from '@/lib/utils/routes';
-import { hasCompleteDownloadedGallery, type DownloadProgress } from '@/lib/utils/download-zip';
+import { getDownloadedGalleryPages, type DownloadProgress } from '@/lib/utils/download-zip';
 
-// Match the gallery-list grid (GalleryGrid GRID_AUTO) so downloaded items read
-// as the same cover-forward cards.
-const GRID_CLASS =
-  '-mx-2 grid grid-cols-2 gap-x-2 gap-y-2.5 sm:mx-0 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5';
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
-const INITIAL_RENDER_COUNT = 80;
-const RENDER_BATCH_SIZE = 80;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -147,7 +142,6 @@ function useAutoRetryLabel(item: DBDownload): string | null {
 
 interface LibraryCardProps {
   item: DBDownload;
-  localCoverUrl?: string | null;
   onDelete: (item: DBDownload) => void;
   onExport: (galleryId: number, title: string) => void;
   onRetry: (item: DBDownload) => void;
@@ -156,8 +150,6 @@ interface LibraryCardProps {
   /** Live "auto-retry pending" state from the store, fresher than the DB row on
    *  a just-failed item (the library-list query may not have refetched yet). */
   retryOverride?: { retryAt?: string | null; attempt?: number | null } | null;
-  isMissingFiles?: boolean;
-  canExport?: boolean;
 }
 
 interface MenuAction {
@@ -238,17 +230,39 @@ function OverflowMenu({ label, items }: { label: string; items: MenuAction[] }) 
 
 function LibraryCard({
   item,
-  localCoverUrl,
   onDelete,
   onExport,
   onRetry,
   isRetrying,
   retryProgress,
   retryOverride,
-  isMissingFiles = false,
-  canExport = false,
 }: LibraryCardProps) {
   const t = useT();
+  const options = item.folderName ? { folderName: item.folderName } : undefined;
+  // Queries belong to mounted cards so scrolling only resolves nearby covers.
+  // Each result paints independently and is reused when its row returns.
+  const { data: cover } = useQuery({
+    queryKey: ['download-covers', item.galleryId, item.folderName, item.downloadedAt],
+    queryFn: async () => {
+      const store = await createDownloadStore();
+      if (!store.coverUrl) return { url: null, missing: false };
+      const url = await store.coverUrl(item.galleryId, options);
+      return { url, missing: url === null };
+    },
+    staleTime: 60_000,
+  });
+  const { data: manifestAvailable } = useQuery({
+    queryKey: ['download-integrity', item.galleryId, item.folderName, item.pageCount, item.downloadedAt],
+    queryFn: async () => {
+      const pages = await getDownloadedGalleryPages(item.galleryId, options);
+      return item.pageCount > 0 && pages.length === item.pageCount;
+    },
+    enabled: item.status === 'complete',
+    staleTime: 60_000,
+  });
+  const localCoverUrl = cover?.url;
+  const isMissingFiles = manifestAvailable === false || cover?.missing === true;
+  const canExport = manifestAvailable === true && !isMissingFiles;
   const effectiveStatus: DBDownload['status'] =
     item.status === 'complete' && isMissingFiles ? 'failed' : item.status;
   const isFailed = effectiveStatus === 'failed';
@@ -438,26 +452,12 @@ function SearchInputSimple({ value, onChange, placeholder }: SearchInputSimplePr
 // Storage indicator
 // ---------------------------------------------------------------------------
 
-function StorageIndicator() {
+function StorageIndicator({ items }: { items: DBDownload[] | undefined }) {
   const t = useT();
-  const [usageBytes, setUsageBytes] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    createDownloadStore()
-      .then((store) => store.usage())
-      .then((bytes) => {
-        if (!cancelled) setUsageBytes(bytes);
-      })
-      .catch(() => {
-        /* storage unavailable */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (usageBytes === null) return null;
+  // Use recorded download sizes: measuring disk usage here walks every saved
+  // page directory and queues native work ahead of visible covers.
+  if (!items) return null;
+  const usageBytes = items.reduce((total, item) => total + Math.max(0, item.totalBytes ?? 0), 0);
 
   return (
     <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -481,8 +481,6 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const [rawQuery, setRawQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
-  const [renderLimit, setRenderLimit] = useState(INITIAL_RENDER_COUNT);
   const [exportError, setExportError] = useState<string | null>(null);
   const exportingIdsRef = useRef<Set<number>>(new Set());
   // Live per-gallery download progress from the queue processor (store). The
@@ -540,78 +538,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
   const activeLoading = hasQuery ? isFilterLoading : isLoading;
 
   const totalCount = activeItems?.length ?? 0;
-  const visibleItems = useMemo(
-    () => (activeItems ?? []).slice(0, renderLimit),
-    [activeItems, renderLimit],
-  );
-  const visibleGalleryIds = useMemo(
-    () => visibleItems.map((item) => item.galleryId),
-    [visibleItems],
-  );
-  const hasMoreRenderedItems = renderLimit < totalCount;
-
-  const { data: coverUrls = {} } = useQuery({
-    queryKey: ['download-covers', visibleGalleryIds],
-    queryFn: async () => {
-      const store = await createDownloadStore();
-      if (!store.coverUrl) return {};
-      const pairs = await Promise.all(
-        visibleGalleryIds.map(async (id) => [id, await store.coverUrl?.(id)] as const),
-      );
-      return Object.fromEntries(pairs.filter(([, url]) => !!url)) as Record<number, string>;
-    },
-    enabled: visibleGalleryIds.length > 0,
-    staleTime: Infinity,
-  });
-
-  const completeVisibleItems = useMemo(
-    () => visibleItems.filter((item) => item.status === 'complete'),
-    [visibleItems],
-  );
-  const completeIntegrityKey = useMemo(
-    () => completeVisibleItems.map((item) => `${item.galleryId}:${item.pageCount}`).join('|'),
-    [completeVisibleItems],
-  );
-
-  const { data: completeIntegrity = {} } = useQuery({
-    queryKey: ['download-integrity', completeIntegrityKey],
-    queryFn: async () => {
-      const pairs = await Promise.all(
-        completeVisibleItems.map(async (item) => {
-          const ok =
-            (item.pageCount ?? 0) > 0
-              ? await hasCompleteDownloadedGallery(item.galleryId, item.pageCount).catch(
-                  () => false,
-                )
-              : false;
-          return [item.galleryId, ok] as const;
-        }),
-      );
-      return Object.fromEntries(pairs) as Record<number, boolean>;
-    },
-    enabled: completeVisibleItems.length > 0,
-    staleTime: 0,
-  });
-
-  useEffect(() => {
-    setRenderLimit(INITIAL_RENDER_COUNT);
-  }, [debouncedQuery]);
-
-  useEffect(() => {
-    if (!hasMoreRenderedItems) return;
-    if (typeof IntersectionObserver === 'undefined') return;
-    const node = loadMoreRef.current;
-    if (!node) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
-        setRenderLimit((n) => Math.min(n + RENDER_BATCH_SIZE, totalCount));
-      },
-      { rootMargin: '900px 0px' },
-    );
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasMoreRenderedItems, totalCount]);
+  const groups = useMemo(() => [{ key: 'downloads', items: activeItems ?? [] }], [activeItems]);
 
   // Delete handler: remove DB row + DownloadStore files, then invalidate queries
   const handleDelete = useCallback(
@@ -630,7 +557,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
         await deleteDownload(galleryId);
         try {
           const store = await createDownloadStore();
-          await store.deleteGallery(galleryId);
+          await store.deleteGallery(galleryId, item.folderName ? { folderName: item.folderName } : undefined);
         } catch {
           // Storage adapter may not be present or files already gone — DB row is still removed
         }
@@ -717,7 +644,7 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
               </span>
             )}
           </h1>
-          <StorageIndicator />
+          <StorageIndicator items={allItems} />
         </div>
       )}
 
@@ -779,15 +706,16 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
           )}
         </div>
       ) : (
-        <div className={GRID_CLASS}>
-          {visibleItems.map((item) => {
+        <SavedGalleryGrid
+          groups={groups}
+          getItemKey={(item) => item.galleryId}
+          renderItem={(item) => {
             const entry = storeEntries[item.galleryId];
             const isRetrying = !!entry?.progress;
             return (
               <LibraryCard
                 key={item.galleryId}
                 item={item}
-                localCoverUrl={coverUrls[item.galleryId] ?? null}
                 onDelete={handleDelete}
                 onExport={handleExport}
                 onRetry={handleRetry}
@@ -796,15 +724,10 @@ export function DownloadsView({ embedded = false }: { embedded?: boolean }) {
                 retryOverride={
                   entry?.retryAt ? { retryAt: entry.retryAt, attempt: entry.attempt } : null
                 }
-                isMissingFiles={
-                  item.status === 'complete' && completeIntegrity[item.galleryId] === false
-                }
-                canExport={item.status === 'complete' && completeIntegrity[item.galleryId] === true}
               />
             );
-          })}
-          {hasMoreRenderedItems && <div ref={loadMoreRef} className="col-span-full h-8" />}
-        </div>
+          }}
+        />
       )}
     </>
   );

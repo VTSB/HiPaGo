@@ -21,6 +21,59 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
+function ScrollPage({ image, index, url, source }: {
+  image: GalleryImage;
+  index: number;
+  url: string;
+  source?: OfflineImageSource;
+}) {
+  const identity = source ?? image;
+  const [decoded, setDecoded] = useState<{
+    identity: typeof identity;
+    width: number;
+    height: number;
+  } | null>(null);
+  const size = decoded?.identity === identity
+    ? decoded
+    : image.width > 0 && image.height > 0 ? image : { width: 800, height: 1200 };
+  const aspectRatio = `${size.width} / ${size.height}`;
+
+  return (
+    <div
+      data-page-index={index}
+      style={{ aspectRatio }}
+      onLoadCapture={(event) => {
+        const img = event.target;
+        if (img instanceof HTMLImageElement && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          // Capture the displayed image's decode for every transport, including
+          // OfflineImage's network rescue. Never pre-decode the rest of a work.
+          setDecoded({ identity, width: img.naturalWidth, height: img.naturalHeight });
+        }
+      }}
+    >
+      {source ? (
+        <OfflineImage
+          source={source}
+          alt={`Page ${index + 1}`}
+          className="w-full select-none"
+          loading="lazy"
+          draggable={false}
+          style={{ aspectRatio }}
+        />
+      ) : (
+        <AbortableImage
+          src={url}
+          alt={`Page ${index + 1}`}
+          className="w-full select-none"
+          loading="lazy"
+          draggable={false}
+          style={{ aspectRatio }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function ScrollReader({
   images,
   initialPage,
@@ -248,31 +301,13 @@ export function ScrollReader({
     <div ref={setRef} className="h-screen overflow-auto cursor-grab active:cursor-grabbing">
       <div className="mx-auto" style={{ width: `${scrollZoom * 100}%` }}>
         {images.map((img, i) => (
-          <div
+          <ScrollPage
             key={`${img.hash}-${i}`}
-            data-page-index={i}
-            style={{ aspectRatio: `${img.width} / ${img.height}` }}
-          >
-            {normalizedOfflineSources ? (
-              <OfflineImage
-                source={normalizedOfflineSources[i]}
-                alt={`Page ${i + 1}`}
-                className="w-full select-none"
-                loading="lazy"
-                draggable={false}
-                style={{ aspectRatio: `${img.width} / ${img.height}` }}
-              />
-            ) : (
-              <AbortableImage
-                src={urls[i]}
-                alt={`Page ${i + 1}`}
-                className="w-full select-none"
-                loading="lazy"
-                draggable={false}
-                style={{ aspectRatio: `${img.width} / ${img.height}` }}
-              />
-            )}
-          </div>
+            image={img}
+            index={i}
+            url={urls[i]}
+            source={normalizedOfflineSources?.[i]}
+          />
         ))}
       </div>
     </div>

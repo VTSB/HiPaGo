@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,25 @@ vi.mock('@/lib/utils/image-url', () => ({
   galleryImageToFile: (img: { name: string; hash: string }) => ({ name: img.name, hash: img.hash }),
 }));
 
+vi.mock('@/lib/db/gallery', () => ({
+  getGalleryBlock: vi.fn(async () => null),
+  getGalleryImages: vi.fn(async () => null),
+  saveGalleryBlock: vi.fn(async () => {}),
+  saveGalleryImages: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/db/download', () => ({
+  getDownload: vi.fn(async () => ({
+    status: 'complete', pageCount: 2, title: 'Saved', tags: '{}',
+    downloadedAt: '2026-09-27T00:00:00Z', thumbnail: '',
+  })),
+  deserializeTags: () => ({}),
+}));
+vi.mock('@/lib/utils/download-zip', () => ({
+  getDownloadedGalleryPages: vi.fn(async () => [
+    { index: 0, ext: 'webp' }, { index: 1, ext: 'webp' },
+  ]),
+}));
+
 const mockObserve = vi.fn();
 const mockDisconnect = vi.fn();
 function MockIntersectionObserver(this: IntersectionObserver) {
@@ -33,6 +52,8 @@ function MockIntersectionObserver(this: IntersectionObserver) {
 import { ScrollReader } from '../components/ScrollReader';
 import { type GalleryImage, ImageType } from '@/lib/utils/types';
 import { __resetAbortableImageCacheForTests } from '@/shared/components/AbortableImage';
+import { resolveGalleryDetail } from '@/features/gallery-detail/hooks/useGalleryDetail';
+import type { OfflineImageSource } from '../hooks/useOfflineImages';
 
 const makeImage = (name: string): GalleryImage => ({
   name,
@@ -106,6 +127,89 @@ async function mount(initialPage?: number) {
 }
 
 describe('ScrollReader page rows reserve deterministic height', () => {
+  it.each([
+    { transport: 'local', width: 1600, height: 800 },
+    { transport: 'native', width: 1000, height: 1000 },
+    { transport: 'network fallback', width: 1600, height: 800 },
+  ])('uses decoded $transport dimensions for both the row and displayed image', async ({ transport, width, height }) => {
+    const expectedUrl = transport === 'network fallback'
+      ? 'https://cdn.example.com/rescue.webp' : 'file:///saved-page.webp';
+    const source: OfflineImageSource = transport === 'native'
+      ? { index: 0, ext: 'webp', url: expectedUrl }
+      : {
+          index: 0, ext: 'webp',
+          loadUrl: async () => transport === 'local' ? expectedUrl : null,
+          loadFallbackUrl: async () => expectedUrl,
+        };
+    const { container } = render(
+      <ScrollReader
+        images={[{ ...makeImage(''), hash: '' }]}
+        offlineSources={[source]}
+        onScrollPositionChange={vi.fn()}
+        onVisiblePageChange={vi.fn()}
+        scrollCallbackRef={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', expectedUrl));
+    const row = container.querySelector<HTMLElement>('[data-page-index="0"]')!;
+    const img = row.querySelector('img')!;
+    expect(row.style.aspectRatio.replace(/\s/g, '')).toBe('800/1200');
+    expect(img.style.aspectRatio.replace(/\s/g, '')).toBe('800/1200');
+
+    Object.defineProperties(img, { naturalWidth: { value: width }, naturalHeight: { value: height } });
+    fireEvent.load(img);
+
+    expect(row.style.aspectRatio.replace(/\s/g, '')).toBe(`${width}/${height}`);
+    expect(img.style.aspectRatio.replace(/\s/g, '')).toBe(`${width}/${height}`);
+  });
+
+  it('does not reuse a decoded size when the gallery source changes at the same page index', async () => {
+    const placeholder = [{ ...makeImage(''), hash: '' }];
+    const props = {
+      images: placeholder,
+      onScrollPositionChange: vi.fn(), onVisiblePageChange: vi.fn(), scrollCallbackRef: vi.fn(),
+    };
+    const first: OfflineImageSource = { index: 0, ext: 'webp', url: 'file:///first.webp' };
+    const second: OfflineImageSource = { index: 0, ext: 'webp', url: 'file:///second.webp' };
+    const { container, rerender } = render(<ScrollReader {...props} offlineSources={[first]} />);
+    await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', first.url));
+    const firstImg = container.querySelector('img')!;
+    Object.defineProperties(firstImg, { naturalWidth: { value: 1600 }, naturalHeight: { value: 800 } });
+    fireEvent.load(firstImg);
+    expect(container.querySelector<HTMLElement>('[data-page-index="0"]')!.style.aspectRatio.replace(/\s/g, ''))
+      .toBe('1600/800');
+
+    rerender(<ScrollReader {...props} offlineSources={[second]} />);
+    await waitFor(() => expect(container.querySelector('img')).toHaveAttribute('src', second.url));
+    const row = container.querySelector<HTMLElement>('[data-page-index="0"]')!;
+    expect(row.style.aspectRatio.replace(/\s/g, '')).toBe('800/1200');
+    const secondImg = row.querySelector('img')!;
+    Object.defineProperties(secondImg, { naturalWidth: { value: 900 }, naturalHeight: { value: 900 } });
+    fireEvent.load(secondImg);
+    expect(row.style.aspectRatio.replace(/\s/g, '')).toBe('900/900');
+    expect(secondImg.style.aspectRatio.replace(/\s/g, '')).toBe('900/900');
+  });
+
+  it('reserves positive row heights for manifest-only detail and preserves real dimensions', async () => {
+    // Run the real detail producer and files-to-images conversion so an equal
+    // page count cannot conceal zero dimensions at the ScrollReader boundary.
+    const detail = await resolveGalleryDetail(42);
+    const knownImage = { ...makeImage('known'), width: 1000, height: 1600 };
+    const { container } = render(
+      <ScrollReader
+        images={[...detail.images.images, knownImage]}
+        offlineUrls={['file:///0.webp', 'file:///1.webp', 'file:///known.webp']}
+        onScrollPositionChange={vi.fn()}
+        onVisiblePageChange={vi.fn()}
+        scrollCallbackRef={vi.fn()}
+      />,
+    );
+    await act(async () => { await Promise.resolve(); });
+    const ratios = Array.from(container.querySelectorAll<HTMLElement>('[data-page-index]'))
+      .map((row) => row.style.aspectRatio.replace(/\s/g, ''));
+    expect(ratios).toEqual(['800/1200', '800/1200', '1000/1600']);
+  });
+
   it('gives every page wrapper an aspect-ratio so its height is set before images load', async () => {
     const { container } = await mount();
     const rows = container.querySelectorAll('[data-page-index]');

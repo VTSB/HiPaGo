@@ -8,6 +8,21 @@ const mockGetDownloadedGalleryPages = vi.fn();
 const mockGetDownloadedImage = vi.fn();
 const mockHasCompleteDownloadedGallery = vi.fn();
 const mockCreateDownloadStore = vi.fn();
+const mockGetImage = vi.fn();
+const mockFetchGalleryImagesCached = vi.fn();
+const mockGetGgConfig = vi.fn();
+
+vi.mock('@/lib/api/gallery', () => ({
+  fetchGalleryImagesCached: (...args: unknown[]) => mockFetchGalleryImagesCached(...args),
+}));
+vi.mock('@/lib/api/client', () => ({ getGgConfig: () => mockGetGgConfig() }));
+vi.mock('@/lib/utils/image-url', () => ({
+  galleryImageToFile: (image: unknown) => image,
+  getBestImageUrl: (image: { name: string }) => `https://cdn.example/${image.name}`,
+}));
+vi.mock('@/lib/store/settings', () => ({
+  useSettingsStore: { getState: () => ({ imageFormat: 'webp' }) },
+}));
 
 vi.mock('@/lib/db/download', () => ({
   getDownload: (galleryId: number) => mockGetDownload(galleryId),
@@ -18,9 +33,8 @@ vi.mock('@/lib/storage/download-store', () => ({
 }));
 
 vi.mock('@/lib/utils/download-zip', () => ({
-  getDownloadedGalleryPages: (galleryId: number) => mockGetDownloadedGalleryPages(galleryId),
-  getDownloadedImage: (galleryId: number, index: number) =>
-    mockGetDownloadedImage(galleryId, index),
+  getDownloadedGalleryPages: (...args: unknown[]) => mockGetDownloadedGalleryPages(...args),
+  getDownloadedImage: (...args: unknown[]) => mockGetDownloadedImage(...args),
   hasCompleteDownloadedGallery: (galleryId: number, expectedPageCount: number) =>
     mockHasCompleteDownloadedGallery(galleryId, expectedPageCount),
 }));
@@ -66,7 +80,11 @@ beforeEach(() => {
   createdUrls.length = 0;
   revokedUrls.length = 0;
   urlCounter = 0;
-  mockCreateDownloadStore.mockResolvedValue({});
+  mockCreateDownloadStore.mockResolvedValue({ getImage: mockGetImage });
+  mockFetchGalleryImagesCached.mockResolvedValue({
+    id: 42, images: [{ name: '0.webp', hash: 'zero' }, { name: '1.webp', hash: 'one' }],
+  });
+  mockGetGgConfig.mockResolvedValue({});
   mockHasCompleteDownloadedGallery.mockResolvedValue(true);
   vi.stubGlobal('URL', {
     createObjectURL: mockCreateObjectURL,
@@ -119,7 +137,7 @@ describe('useOfflineImages - completed gallery', () => {
       { index: 1, ext: 'webp' },
       { index: 2, ext: 'jpg' },
     ]);
-    mockGetDownloadedImage.mockImplementation((_gid: number, index: number) =>
+    mockGetImage.mockImplementation((_gid: number, index: number) =>
       Promise.resolve(new Uint8Array([index, index + 1])),
     );
 
@@ -131,6 +149,10 @@ describe('useOfflineImages - completed gallery', () => {
     expect(result.current.urls).toBeNull();
     expect(result.current.sources).toHaveLength(3);
     expect(mockGetDownloadedImage).not.toHaveBeenCalled();
+    expect(mockGetImage).not.toHaveBeenCalled();
+    expect(mockHasCompleteDownloadedGallery).not.toHaveBeenCalled();
+    expect(mockFetchGalleryImagesCached).not.toHaveBeenCalled();
+    expect(mockGetGgConfig).not.toHaveBeenCalled();
     expect(mockCreateObjectURL).not.toHaveBeenCalled();
 
     let url: string | null = null;
@@ -139,8 +161,11 @@ describe('useOfflineImages - completed gallery', () => {
     });
 
     expect(url).toBe('blob:mock-url-1');
-    expect(mockGetDownloadedImage).toHaveBeenCalledTimes(1);
-    expect(mockGetDownloadedImage).toHaveBeenCalledWith(42, 0);
+    expect(mockGetImage).toHaveBeenCalledTimes(1);
+    expect(mockGetImage).toHaveBeenCalledWith(42, 0, 'webp', undefined);
+    expect(mockGetDownloadedGalleryPages).toHaveBeenCalledTimes(1);
+    expect(mockFetchGalleryImagesCached).not.toHaveBeenCalled();
+    expect(mockGetGgConfig).not.toHaveBeenCalled();
     expect(mockCreateObjectURL).toHaveBeenCalledTimes(1);
   });
 
@@ -150,7 +175,7 @@ describe('useOfflineImages - completed gallery', () => {
         `file://${galleryId}/${index}.${ext}`,
     );
     mockCreateDownloadStore.mockResolvedValue({ imageUrl });
-    mockGetDownload.mockResolvedValue(makeRow('complete', 7, 2));
+    mockGetDownload.mockResolvedValue({ ...makeRow('complete', 7, 2), folderName: '7-exact-folder' });
     mockGetDownloadedGalleryPages.mockResolvedValue([
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'jpg' },
@@ -170,7 +195,8 @@ describe('useOfflineImages - completed gallery', () => {
 
     expect(url).toBe('file://7/1.jpg');
     expect(imageUrl).toHaveBeenCalledTimes(1);
-    expect(imageUrl).toHaveBeenCalledWith(7, 1, 'jpg');
+    expect(imageUrl).toHaveBeenCalledWith(7, 1, 'jpg', { folderName: '7-exact-folder' });
+    expect(mockGetDownloadedGalleryPages).toHaveBeenCalledWith(7, { folderName: '7-exact-folder' });
     expect(mockGetDownloadedImage).not.toHaveBeenCalled();
     expect(mockCreateObjectURL).not.toHaveBeenCalled();
   });
@@ -222,7 +248,7 @@ describe('useOfflineImages - missing stored files', () => {
     expect(result.current.loading).toBe(false);
   });
 
-  it('returns missing:true when manifest covers pageCount but an image file is missing', async () => {
+  it('keeps valid pages available without scanning every file for missing pages', async () => {
     mockGetDownload.mockResolvedValue(makeRow('complete', 42, 2));
     mockGetDownloadedGalleryPages.mockResolvedValue([
       { index: 0, ext: 'webp' },
@@ -233,10 +259,11 @@ describe('useOfflineImages - missing stored files', () => {
     const { result } = renderHook(() => useOfflineImages(42));
     await flushHook();
 
-    expect(mockHasCompleteDownloadedGallery).toHaveBeenCalledWith(42, 2);
-    expect(result.current.sources).toBeNull();
+    expect(mockHasCompleteDownloadedGallery).not.toHaveBeenCalled();
+    expect(mockGetImage).not.toHaveBeenCalled();
+    expect(result.current.sources).toHaveLength(2);
     expect(result.current.urls).toBeNull();
-    expect(result.current.missing).toBe(true);
+    expect(result.current.missing).toBe(false);
     expect(result.current.loading).toBe(false);
   });
 
@@ -273,7 +300,7 @@ describe('useOfflineImages - missing stored files', () => {
       { index: 0, ext: 'webp' },
       { index: 1, ext: 'webp' },
     ]);
-    mockGetDownloadedImage.mockResolvedValueOnce(null);
+    mockGetImage.mockResolvedValueOnce(null);
 
     const { result } = renderHook(() => useOfflineImages(55));
     await flushHook();
@@ -288,6 +315,43 @@ describe('useOfflineImages - missing stored files', () => {
 
     expect(url).toBeNull();
     expect(mockCreateObjectURL).not.toHaveBeenCalled();
+  });
+});
+
+describe('useOfflineImages - page network recovery', () => {
+  it('loads shared metadata/config only when a missing page requests recovery', async () => {
+    mockGetDownload.mockResolvedValue(makeRow('complete', 42, 2));
+    mockGetDownloadedGalleryPages.mockResolvedValue([
+      { index: 0, ext: 'webp' }, { index: 1, ext: 'webp' },
+    ]);
+    const imageUrl = vi.fn(async () => 'content://saved/page');
+    mockCreateDownloadStore.mockResolvedValue({ imageUrl });
+    const { result } = renderHook(() => useOfflineImages(42));
+    await flushHook();
+
+    await expect(result.current.sources![0].loadUrl!()).resolves.toBe('content://saved/page');
+    expect(mockFetchGalleryImagesCached).not.toHaveBeenCalled();
+    expect(mockGetGgConfig).not.toHaveBeenCalled();
+    await expect(Promise.all(result.current.sources!.map((source) => source.loadFallbackUrl!())))
+      .resolves.toEqual(['https://cdn.example/0.webp', 'https://cdn.example/1.webp']);
+    expect(mockFetchGalleryImagesCached).toHaveBeenCalledTimes(1);
+    expect(mockFetchGalleryImagesCached).toHaveBeenCalledWith(42);
+    expect(mockGetGgConfig).toHaveBeenCalledTimes(1);
+    expect(imageUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a later missing page to retry after connectivity returns', async () => {
+    mockGetDownload.mockResolvedValue(makeRow('complete', 42, 2));
+    mockGetDownloadedGalleryPages.mockResolvedValue([
+      { index: 0, ext: 'webp' }, { index: 1, ext: 'webp' },
+    ]);
+    mockFetchGalleryImagesCached.mockRejectedValueOnce(new Error('offline'));
+    const { result } = renderHook(() => useOfflineImages(42));
+    await flushHook();
+
+    await expect(result.current.sources![0].loadFallbackUrl!()).resolves.toBeNull();
+    await expect(result.current.sources![1].loadFallbackUrl!()).resolves.toBe('https://cdn.example/1.webp');
+    expect(mockFetchGalleryImagesCached).toHaveBeenCalledTimes(2);
   });
 });
 

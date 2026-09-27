@@ -22,6 +22,8 @@ import type { GalleryBlock } from '@/lib/utils/types';
 import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
 import { useDownloadedFilesPresent } from '@/features/gallery-detail/hooks/useDownloadedFilesPresent';
+import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
+import { OfflineImage } from '@/features/reader/components/OfflineImage';
 import { readerHref } from '@/lib/utils/routes';
 
 const INITIAL_THUMBNAILS = 20;
@@ -39,7 +41,8 @@ const TAG_ORDER: Record<string, number> = {
 };
 
 export function GalleryDetail({ id }: { id: number }) {
-  const { block, files, isLoading, error } = useGalleryDetail(id);
+  const { block, files, isLoading, error } = useGalleryDetail(id, { refreshDownloadedMetadata: true });
+  const offline = useOfflineImages(id);
   // Use cached block from list page as instant preview while full info loads
   const cachedBlock = useGalleryBlock(id);
   const router = useRouter();
@@ -132,7 +135,8 @@ export function GalleryDetail({ id }: { id: number }) {
   }, [id]);
   // High-res hero variant: derived from the first file as soon as
   // useGalleryDetail resolves. Stable thereafter (files[0] is set once).
-  const bigThumbnail = files.length > 0 ? getThumbnailUrl(files[0], 'big') : null;
+  const bigThumbnail = files[0]?.hash ? getThumbnailUrl(files[0], 'big') : null;
+  const offlineHero = !files[0]?.hash ? offline.sources?.[0] : undefined;
 
   // The hero is two stacked layers (see render): the cached/clicked thumbnail
   // painted instantly underneath, and the big variant layered on top that only
@@ -227,7 +231,7 @@ export function GalleryDetail({ id }: { id: number }) {
           href={readerHref(id)}
           className="group relative aspect-[3/4] w-full self-start overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
         >
-          {!cachedThumbnail && !bigThumbnail && (
+          {!cachedThumbnail && !bigThumbnail && !offlineHero && (
             <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">
               {t('detail.noImage')}
             </div>
@@ -251,6 +255,15 @@ export function GalleryDetail({ id }: { id: number }) {
             <AbortableImage
               key={`hero-big-${id}`}
               src={bigThumbnail}
+              alt={displayBlock.title}
+              loading="eager"
+              className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            />
+          )}
+          {offlineHero && (
+            <OfflineImage
+              key={`hero-offline-${id}`}
+              source={offlineHero}
               alt={displayBlock.title}
               loading="eager"
               className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
@@ -456,12 +469,17 @@ export function GalleryDetail({ id }: { id: number }) {
                 className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
               >
                 <div className="aspect-[3/4] overflow-hidden">
-                  <AbortableImage
+                  {file.hash ? <AbortableImage
                     src={getThumbnailUrl(file)}
                     alt={`Page ${idx + 1}`}
                     className="h-full w-full object-cover transition-transform group-hover:scale-105"
                     loading="lazy"
-                  />
+                  /> : offline.sources?.[idx] ? <OfflineImage
+                    source={offline.sources[idx]}
+                    alt={`Page ${idx + 1}`}
+                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                    loading="lazy"
+                  /> : null}
                 </div>
                 {/* Page-number badge is always visible on touch devices
                     (no hover state) and fades in on hover on desktop. */}

@@ -13,6 +13,7 @@ import { isTauri, isCapacitor } from '@/lib/utils/platform';
 
 /** Default cache cap when the user has not configured one. */
 export const DEFAULT_IMAGE_CACHE_MAX_BYTES = 250 * 1024 * 1024;
+const INDEX_SAVE_DELAY_MS = 250;
 
 export interface ImageCacheIndexEntry {
   key: string;
@@ -53,6 +54,14 @@ export class ImageCacheStore {
   /** Monotonic recency counter; survives restart via the persisted index. */
   private clock = 0;
   private initialized = false;
+  private initialization: Promise<void> | null = null;
+  private generation = 0;
+  private readonly pending = new Map<string, Promise<string | null>>();
+  private mutations: Promise<void> = Promise.resolve();
+  private clearing: Promise<void> | null = null;
+  private indexDirty = false;
+  private indexTimer: ReturnType<typeof setTimeout> | null = null;
+  private indexWrite: Promise<void> | null = null;
 
   constructor(backend: ImageCacheBackend, maxBytes: number | null = DEFAULT_IMAGE_CACHE_MAX_BYTES) {
     this.backend = backend;
@@ -62,17 +71,28 @@ export class ImageCacheStore {
   /** Load the persisted index. Idempotent. */
   async init(): Promise<void> {
     if (this.initialized) return;
-    const idx = await this.backend.loadIndex();
-    this.entries.clear();
-    this.totalBytes = 0;
-    let maxSeen = 0;
-    for (const e of idx) {
-      this.entries.set(e.key, { size: e.size, lastAccess: e.lastAccess });
-      this.totalBytes += e.size;
-      if (e.lastAccess > maxSeen) maxSeen = e.lastAccess;
+    if (!this.initialization) {
+      const generation = this.generation;
+      this.initialization = this.backend.loadIndex().then((idx) => {
+        if (generation !== this.generation) return;
+        this.entries.clear();
+        this.totalBytes = 0;
+        let maxSeen = 0;
+        for (const e of idx) {
+          this.entries.set(e.key, { size: e.size, lastAccess: e.lastAccess });
+          this.totalBytes += e.size;
+          if (e.lastAccess > maxSeen) maxSeen = e.lastAccess;
+        }
+        this.clock = maxSeen; // continue after the most-recent persisted use
+        this.initialized = true;
+      });
     }
-    this.clock = maxSeen; // continue numbering after the most-recent persisted use
-    this.initialized = true;
+    const initialization = this.initialization;
+    try {
+      await initialization;
+    } finally {
+      if (this.initialization === initialization) this.initialization = null;
+    }
   }
 
   private nextTick(): number {
@@ -101,31 +121,45 @@ export class ImageCacheStore {
    * by the OS), drop the stale entry and return false. Shared by fileUrl /
    * cachedFilePath.
    */
-  private async touch(key: string): Promise<boolean> {
+  private async touch(key: string, generation: number): Promise<boolean> {
     const entry = this.entries.get(key);
     if (!entry) return false;
     const size = await this.backend.statSize(key);
+    // A concurrent clear, eviction, or stale lookup may have removed this entry.
+    if (generation !== this.generation || this.entries.get(key) !== entry) return false;
     if (size == null) {
       this.totalBytes -= entry.size;
       this.entries.delete(key);
-      await this.flushIndex();
+      this.scheduleIndexSave();
       return false;
     }
     entry.lastAccess = this.nextTick();
-    await this.flushIndex();
+    this.scheduleIndexSave();
     return true;
+  }
+
+  private async resolveFile(
+    key: string,
+    generation: number,
+    nativePath = false,
+  ): Promise<string | null> {
+    if (!(await this.touch(key, generation))) return null;
+    const url = await (nativePath ? this.backend.filePath(key) : this.backend.fileUrl(key));
+    return generation === this.generation && this.entries.has(key) ? url : null;
   }
 
   /** Serve the cached file URL (convertFileSrc) for `key`, bumping recency, or
    *  null on a miss / reclaimed file. */
   async fileUrl(key: string): Promise<string | null> {
-    return (await this.touch(key)) ? this.backend.fileUrl(key) : null;
+    while (this.clearing) await this.clearing;
+    return this.resolveFile(key, this.generation);
   }
 
   /** The raw native fs path/uri of `key`'s cached file (for a native file copy,
    *  e.g. the download flow), bumping recency, or null on a miss / reclaimed file. */
   async cachedFilePath(key: string): Promise<string | null> {
-    return (await this.touch(key)) ? this.backend.filePath(key) : null;
+    while (this.clearing) await this.clearing;
+    return this.resolveFile(key, this.generation, true);
   }
 
   /**
@@ -141,9 +175,36 @@ export class ImageCacheStore {
    * (e.g. the Android background warm, where display does not need the file)
    * should skip this when `getMaxBytes() === 0`.
    */
-  async ensureCached(key: string, url: string, headers: Record<string, string>): Promise<string | null> {
-    const hit = await this.fileUrl(key);
+  async ensureCached(
+    key: string,
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<string | null> {
+    while (this.clearing) await this.clearing;
+    const pending = this.pending.get(key);
+    if (pending) return pending;
+    const work = this.loadOrDownload(key, url, headers, this.generation);
+    this.pending.set(key, work);
+    try {
+      return await work;
+    } finally {
+      if (this.pending.get(key) === work) this.pending.delete(key);
+    }
+  }
+
+  private async loadOrDownload(
+    key: string,
+    url: string,
+    headers: Record<string, string>,
+    generation: number,
+  ): Promise<string | null> {
+    const hit = await this.resolveFile(key, generation);
+    if (generation !== this.generation) return null;
     if (hit) return hit;
+    // An eviction may still be removing this filename after a stale-file lookup.
+    // Finish existing removals before writing its replacement.
+    await this.mutations;
+    if (generation !== this.generation) return null;
     let size: number;
     try {
       size = await this.backend.download(key, url, headers);
@@ -155,54 +216,113 @@ export class ImageCacheStore {
       });
       return null;
     }
-    const existing = this.entries.get(key);
-    if (existing) this.totalBytes -= existing.size;
-    this.entries.set(key, { size, lastAccess: this.nextTick() });
-    this.totalBytes += size;
-    await this.flushIndex();
-    await this.evictIfNeeded(key);
-    return this.backend.fileUrl(key);
+    if (generation !== this.generation) return null;
+    await this.mutate(async () => {
+      if (generation !== this.generation) return;
+      const existing = this.entries.get(key);
+      if (existing) this.totalBytes -= existing.size;
+      this.entries.set(key, { size, lastAccess: this.nextTick() });
+      this.totalBytes += size;
+      this.scheduleIndexSave();
+      await this.evictIfNeeded(generation, key);
+    });
+    if (generation !== this.generation || !this.entries.has(key)) return null;
+    const fileUrl = await this.backend.fileUrl(key);
+    return generation === this.generation && this.entries.has(key) ? fileUrl : null;
   }
 
   /** Set the byte cap (`null` = unlimited) and evict down to it if needed. */
   async setMaxBytes(maxBytes: number | null): Promise<void> {
     this.maxBytes = maxBytes;
-    await this.evictIfNeeded();
+    while (this.clearing) await this.clearing;
+    const generation = this.generation;
+    await this.mutate(() => this.evictIfNeeded(generation));
   }
 
   /** Remove everything from the cache. */
   async clear(): Promise<void> {
-    await this.backend.clearAll();
+    // Invalidate work immediately; native downloads cannot be cancelled, so let
+    // them finish before deleting their files. New requests wait for this barrier.
+    this.generation++;
+    if (this.indexTimer !== null) clearTimeout(this.indexTimer);
+    this.indexTimer = null;
+    this.indexDirty = false;
     this.entries.clear();
     this.totalBytes = 0;
+    this.initialized = true;
+    const clearing = Promise.allSettled([
+      this.clearing,
+      this.initialization,
+      this.indexWrite,
+      this.mutations,
+      ...this.pending.values(),
+    ]).then(() => this.backend.clearAll());
+    this.clearing = clearing;
+    try {
+      await clearing;
+    } finally {
+      if (this.clearing === clearing) this.clearing = null;
+    }
+  }
+
+  /** Serialize commits/eviction without holding up independent native downloads. */
+  private mutate(operation: () => Promise<void>): Promise<void> {
+    const work = this.mutations.then(operation);
+    this.mutations = work.catch(() => {});
+    return work;
   }
 
   /** Evict LRU entries until under the cap. `keepKey`, if given, is never evicted
    *  (the file a caller is about to serve must survive even at cap 0). */
-  private async evictIfNeeded(keepKey?: string): Promise<void> {
+  private async evictIfNeeded(generation: number, keepKey?: string): Promise<void> {
+    if (generation !== this.generation) return;
     if (this.maxBytes == null || this.totalBytes <= this.maxBytes) return;
     // Least-recently-accessed first.
     const order = [...this.entries.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
     let changed = false;
     for (const [key, entry] of order) {
-      if (this.totalBytes <= this.maxBytes) break;
-      if (key === keepKey) continue;
+      if (generation !== this.generation) return;
+      if (this.maxBytes == null || this.totalBytes <= this.maxBytes) break;
+      if (key === keepKey || this.entries.get(key) !== entry) continue;
       await this.backend.remove(key);
+      if (generation !== this.generation) return;
+      if (this.entries.get(key) !== entry) continue;
       this.entries.delete(key);
       this.totalBytes -= entry.size;
       changed = true;
     }
-    if (changed) await this.flushIndex();
+    if (changed) this.scheduleIndexSave();
   }
 
-  // Adapters may debounce saveIndex internally; the core flushes on every
-  // mutation so recency/accounting survive an abrupt restart.
-  private async flushIndex(): Promise<void> {
-    const entries: ImageCacheIndexEntry[] = [];
-    for (const [key, e] of this.entries) {
-      entries.push({ key, size: e.size, lastAccess: e.lastAccess });
-    }
-    await this.backend.saveIndex(entries);
+  /** Snapshot only once per burst; the image-serving path never serializes the index. */
+  private scheduleIndexSave(): void {
+    this.indexDirty = true;
+    if (this.indexTimer !== null || this.indexWrite || this.clearing) return;
+    this.indexTimer = setTimeout(() => {
+      this.indexTimer = null;
+      this.persistIndex();
+    }, INDEX_SAVE_DELAY_MS);
+  }
+
+  private persistIndex(): void {
+    if (!this.indexDirty || this.clearing) return;
+    this.indexDirty = false;
+    const generation = this.generation;
+    const entries = [...this.entries].map(([key, entry]) => ({ key, ...entry }));
+    const write = Promise.resolve().then(() => this.backend.saveIndex(entries));
+    this.indexWrite = write;
+    void write.then(
+      () => {
+        this.indexWrite = null;
+        if (generation === this.generation && this.indexDirty) this.scheduleIndexSave();
+      },
+      (error) => {
+        this.indexWrite = null;
+        if (generation === this.generation) this.indexDirty = true;
+        // Keep serving valid files. A later touch/commit retries persistence.
+        console.warn('[image-cache] index save failed', error);
+      },
+    );
   }
 }
 

@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { getDownload } from '@/lib/db/download';
 import { createDownloadStore } from '@/lib/storage/download-store';
+import { fetchGalleryImagesCached } from '@/lib/api/gallery';
+import { getGgConfig } from '@/lib/api/client';
+import { galleryImageToFile, getBestImageUrl } from '@/lib/utils/image-url';
+import { useSettingsStore } from '@/lib/store/settings';
 import {
   getDownloadedGalleryPages,
   getDownloadedImage,
-  hasCompleteDownloadedGallery,
 } from '@/lib/utils/download-zip';
 
 export interface OfflineImageDim {
@@ -27,6 +30,8 @@ export interface OfflineImageSource {
    * caller owns revoking returned blob URLs.
    */
   loadUrl?: () => Promise<string | null>;
+  /** Network rescue, requested only when this page is missing or cannot decode. */
+  loadFallbackUrl?: () => Promise<string | null>;
 }
 
 export interface OfflineImagesResult {
@@ -54,9 +59,9 @@ export interface OfflineImagesResult {
  * sources for the reader.
  *
  * This intentionally avoids reading every image into the JS heap before first
- * paint. Native/file URL platforms resolve those URLs lazily. SAF/content-backed
- * platforms get lazy blob loaders, so page mode reads only the mounted
- * virtualized window and scroll mode reads only images near the viewport.
+ * paint. Native/file URLs are resolved lazily, including Android content URIs.
+ * Other stores read bytes only for mounted/visible pages. A missing page can
+ * recover through the network without changing other pages' offline sources.
  */
 export function useOfflineImages(galleryId: number): OfflineImagesResult {
   const [result, setResult] = useState<OfflineImagesResult>({
@@ -93,22 +98,19 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
       }
 
       let pages: { index: number; ext: string }[];
+      const options = row.folderName ? { folderName: row.folderName } : undefined;
       try {
-        pages = await getDownloadedGalleryPages(galleryId);
+        pages = await getDownloadedGalleryPages(galleryId, options);
       } catch {
         pages = [];
       }
 
       if (cancelled || runId !== runIdRef.current) return;
 
-      let completeOnDisk = false;
-      try {
-        completeOnDisk = await hasCompleteDownloadedGallery(galleryId, row.pageCount ?? 0);
-      } catch {
-        completeOnDisk = false;
-      }
-
-      if (!completeOnDisk) {
+      // Opening a work reads one manifest, not every page in the work. Individual
+      // pages are checked by their lazy loader; reconciliation/export do full
+      // integrity checks separately.
+      if (pages.length === 0 || (row.pageCount > 0 && pages.length !== row.pageCount)) {
         setResult({ sources: null, urls: null, dims: null, missing: true, loading: false });
         return;
       }
@@ -116,12 +118,33 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
       const store = await createDownloadStore().catch(() => null);
       if (cancelled || runId !== runIdRef.current) return;
 
+      let fallbackData: Promise<[
+        Awaited<ReturnType<typeof fetchGalleryImagesCached>>,
+        Awaited<ReturnType<typeof getGgConfig>>,
+      ]> | null = null;
+      async function loadFallbackUrl(index: number): Promise<string | null> {
+        // Share metadata/config across missing pages; healthy local pages never
+        // reach this path. Retry after a failed attempt if connectivity returns.
+        fallbackData ??= Promise.all([fetchGalleryImagesCached(galleryId), getGgConfig()]);
+        const current = fallbackData;
+        try {
+          const [gallery, config] = await current;
+          const image = gallery.images[index];
+          if (!image?.hash) return null;
+          return getBestImageUrl(galleryImageToFile(image), config, useSettingsStore.getState().imageFormat);
+        } catch {
+          if (fallbackData === current) fallbackData = null;
+          return null;
+        }
+      }
+
       if (store?.imageUrl) {
         const imageUrl = store.imageUrl.bind(store);
         const sources: OfflineImageSource[] = pages.map(({ index, ext }) => ({
           index,
           ext,
-          loadUrl: () => imageUrl(galleryId, index, ext).catch(() => null),
+          loadUrl: () => imageUrl(galleryId, index, ext, options).catch(() => null),
+          loadFallbackUrl: () => loadFallbackUrl(index),
         }));
         setResult({
           sources,
@@ -136,8 +159,11 @@ export function useOfflineImages(galleryId: number): OfflineImagesResult {
       const sources: OfflineImageSource[] = pages.map(({ index, ext }) => ({
         index,
         ext,
+        loadFallbackUrl: () => loadFallbackUrl(index),
         loadUrl: async () => {
-          const bytes = await getDownloadedImage(galleryId, index).catch(() => null);
+          const bytes = await (store
+            ? store.getImage(galleryId, index, ext, options)
+            : getDownloadedImage(galleryId, index, options)).catch(() => null);
           if (!bytes) return null;
           const buf = bytes.buffer.slice(
             bytes.byteOffset,

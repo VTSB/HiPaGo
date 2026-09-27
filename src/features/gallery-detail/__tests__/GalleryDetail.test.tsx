@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,10 @@ vi.mock('@/features/gallery-detail/hooks/useGalleryDetail', () => ({
   useGalleryDetail: vi.fn(),
 }));
 
+vi.mock('@/features/reader/hooks/useOfflineImages', () => ({
+  useOfflineImages: vi.fn(),
+}));
+
 vi.mock('@/features/gallery-list/hooks/useGalleryBlock', () => ({
   useGalleryBlock: vi.fn(() => ({ type: 0 })), // GalleryBlockType.LOADING = 0
 }));
@@ -83,8 +87,8 @@ vi.mock('@/lib/api/client', () => ({
 }));
 
 vi.mock('@/lib/utils/image-url', () => ({
-  getThumbnailUrl: (file: { name: string }, size?: string) =>
-    `https://cdn.test/${size || 'small'}/${file.name}`,
+  getThumbnailUrl: vi.fn((file: { name: string }, size?: string) =>
+    `https://cdn.test/${size || 'small'}/${file.name}`),
 }));
 
 vi.mock('@/lib/api/url-resolver', () => ({
@@ -120,6 +124,8 @@ import { useGalleryDetail } from '../hooks/useGalleryDetail';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryBlock, GalleryFile, GalleryImages } from '@/lib/utils/types';
 import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
+import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
+import { getThumbnailUrl } from '@/lib/utils/image-url';
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -152,6 +158,8 @@ function mockDetail(files: GalleryFile[] = []) {
 }
 
 beforeEach(() => {
+  vi.mocked(useOfflineImages).mockReturnValue({ sources: null, urls: null, dims: null, missing: false, loading: false });
+  vi.mocked(getThumbnailUrl).mockClear();
   mockObserve.mockClear();
   mockUnobserve.mockClear();
   mockDisconnect.mockClear();
@@ -167,6 +175,24 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 describe('GalleryDetail thumbnail virtualization', () => {
+  it('loads manifest-only hero and visible previews from lazy local sources without hashless CDN URLs', async () => {
+    mockDetail(makeFiles(80).map((file) => ({ ...file, hash: '', name: '' })));
+    const sources = Array.from({ length: 80 }, (_, index) => ({
+      index,
+      ext: 'webp',
+      loadUrl: vi.fn(async () => `http://localhost/_capacitor_content_/page-${index}.webp`),
+    }));
+    vi.mocked(useOfflineImages).mockReturnValue({ sources, urls: null, dims: null, missing: false, loading: false });
+
+    const { container } = render(<GalleryDetail id={123} />);
+    await waitFor(() => expect(container.querySelector('img[alt="Test Gallery"]')).toHaveAttribute('src', 'http://localhost/_capacitor_content_/page-0.webp'));
+    await waitFor(() => expect(container.querySelector('img[alt="Page 2"]')).toHaveAttribute('src', 'http://localhost/_capacitor_content_/page-1.webp'));
+    expect(getThumbnailUrl).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('img[alt^="Page "]')).toHaveLength(20);
+    expect(sources.slice(20).every((source) => source.loadUrl.mock.calls.length === 0)).toBe(true);
+    expect(useGalleryDetail).toHaveBeenCalledWith(123, { refreshDownloadedMetadata: true });
+  });
+
   it('localizes detailed media type and falls back to raw language when no translation exists', () => {
     mockDetail();
 
