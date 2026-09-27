@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parseTag } from './derive-version.mjs';
 import { buildLatestJson, classifySignature, REQUIRED_PLATFORMS } from './build-latest-json.mjs';
 
-const MARKER = 'hipago-beta-v1';
+const MARKER = 'hipago-beta-v2';
 const PROVENANCE = 'release-provenance.json';
 const MAX_PAGES = 100;
 const SHA = /^[a-f0-9]{40}$/;
@@ -20,11 +20,12 @@ const positiveId = (id) => Number.isSafeInteger(Number(id)) && Number(id) > 0;
 
 function metadata(text) {
   if (text == null) return null;
-  const matches = [...text.matchAll(/<!-- hipago-beta-v1 ([^\n]+) -->/g)];
+  const matches = [...text.matchAll(/<!-- hipago-beta-v([0-9]+) ([^\n]+) -->/g)];
   if (!matches.length) return null;
   if (matches.length !== 1) throw new Error('Ambiguous release reservation metadata.');
-  const data = JSON.parse(matches[0][1]);
-  if (data.schema !== 1 || !canonical.test(data.tag) || !SHA.test(data.sha) || !positiveId(data.runId) || typeof data.repository !== 'string') {
+  const data = JSON.parse(matches[0][2]);
+  if (![1, 2].includes(data.schema) || String(data.schema) !== matches[0][1] || !canonical.test(data.tag) || !SHA.test(data.sha) || !positiveId(data.runId) || typeof data.repository !== 'string' ||
+      data.schema === 2 && (data.ref !== `refs/tags/${data.tag}` || !SHA.test(data.tagRefSha))) {
     throw new Error('Invalid release reservation metadata.');
   }
   parseTag(data.tag);
@@ -32,16 +33,6 @@ function metadata(text) {
 }
 const marker = (data) => `<!-- ${MARKER} ${JSON.stringify(data)} -->`;
 const assetSnapshot = (assets) => assets.map(({ id, name, size, digest }) => ({ id, name, size, digest })).sort((a, b) => a.name.localeCompare(b.name));
-
-export function nextTag(tags) {
-  let code = 0;
-  for (const { name } of tags) {
-    if (canonical.test(name)) code = Math.max(code, parseTag(name).versionCode);
-  }
-  code += 1;
-  if (code > 2_100_000_000) throw new Error('Android versionCode range exhausted.');
-  return `v${Math.floor(code / 1_000_000)}.${Math.floor(code / 1_000) % 1_000}.${code % 1_000}`;
-}
 
 export function githubClient(token, fetchImpl = fetch) {
   if (!token) throw new Error('GITHUB_TOKEN is required.');
@@ -78,12 +69,23 @@ export function githubClient(token, fetchImpl = fetch) {
 }
 
 export class ReleaseAutomation {
-  constructor({ api, repository, sha, runId }) {
+  /**
+   * @param {{api: (...args: any[]) => Promise<any>, repository: string, sha: string,
+   *   runId: string | number, tag?: string, eventAfter?: string}} context
+   */
+  constructor({ api, repository, sha, runId, tag, eventAfter }) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !SHA.test(sha) || !positiveId(runId)) throw new Error('Invalid immutable workflow context.');
+    if (tag !== undefined) {
+      if (!canonical.test(tag)) throw new Error('A canonical vX.Y.Z tag is required.');
+      parseTag(tag);
+    }
+    if (eventAfter !== undefined && !SHA.test(eventAfter)) throw new Error('Invalid push event SHA.');
     this.api = api;
     this.repository = repository;
     this.sha = sha;
     this.runId = Number(runId);
+    this.tag = tag;
+    this.eventAfter = eventAfter;
     this.base = `/repos/${repository}`;
   }
 
@@ -100,26 +102,30 @@ export class ReleaseAutomation {
     throw new Error(`Pagination limit reached for ${path}; refusing a partial release/tag scan.`);
   }
 
-  async tagReservation(tag) {
+  async resolveTag(tag) {
     const ref = await this.request('GET', `/git/ref/tags/${encodeURIComponent(tag)}`);
     let object = ref.object;
-    let reservation = null;
+    const tagRefSha = object?.sha;
+    if (!SHA.test(tagRefSha)) throw new Error(`Invalid tag ref: ${tag}`);
     for (let depth = 0; object.type === 'tag' && depth < 5; depth++) {
       const annotated = await this.request('GET', `/git/tags/${object.sha}`);
-      if (depth === 0) reservation = metadata(annotated.message);
       object = annotated.object;
+      if (!object || !SHA.test(object.sha)) throw new Error(`Invalid tag object: ${tag}`);
     }
     if (object.type !== 'commit' || !SHA.test(object.sha)) throw new Error(`Tag ${tag} does not resolve to a commit.`);
-    return { sha: object.sha, reservation };
+    if (this.eventAfter !== undefined && this.eventAfter !== tagRefSha && this.eventAfter !== object.sha) throw new Error('Push event SHA does not match the tag object or commit.');
+    return { sha: object.sha, tagRefSha };
   }
 
   async verifyIdentity(release) {
     const reservation = metadata(release.body);
+    if (reservation?.schema !== 2) throw new Error('Unsupported manual-tag release provenance; create a new beta commit and tag.');
     if (!reservation || reservation.repository !== this.repository || reservation.sha !== this.sha || reservation.tag !== release.tag_name) {
       throw new Error('Release reservation does not match the pushed commit/repository/tag.');
     }
-    const tag = await this.tagReservation(release.tag_name);
-    if (tag.sha !== this.sha || !same(tag.reservation, reservation)) throw new Error('Resolved tag or tag reservation changed.');
+    if (this.tag !== undefined && reservation.tag !== this.tag) throw new Error('Release tag does not match the pushed tag.');
+    const tag = await this.resolveTag(release.tag_name);
+    if (tag.sha !== this.sha || tag.tagRefSha !== reservation.tagRefSha) throw new Error('Resolved tag or original tag object changed.');
     return reservation;
   }
 
@@ -129,7 +135,7 @@ export class ReleaseAutomation {
       this.request('GET', '/actions/workflows/release.yml'),
     ]);
     if (run.workflow_id !== workflow.id || run.path !== '.github/workflows/release.yml' || run.event !== 'push' ||
-        run.head_branch !== 'release' || run.head_sha !== reservation.sha || run.repository?.full_name !== this.repository ||
+        run.head_branch !== reservation.tag || run.head_sha !== reservation.sha || run.repository?.full_name !== this.repository ||
         run.head_repository?.full_name !== this.repository || !positiveId(run.run_attempt)) {
       throw new Error('Release provenance is not this repository’s beta push workflow.');
     }
@@ -145,50 +151,38 @@ export class ReleaseAutomation {
   }
 
   async prepare() {
+    if (!this.tag) throw new Error('The pushed numeric tag is required for beta preparation.');
     const releases = await this.list('/releases');
     const owned = releases.filter((release) => metadata(release.body)?.repository === this.repository);
-    const published = owned.filter((release) => !release.draft && metadata(release.body).sha === this.sha);
-    if (published.length > 1) throw new Error('Multiple published releases claim this commit.');
-    if (published.length === 1) {
-      await this.verifyPublished(published[0]);
-      return this.outputs(published[0], true);
-    }
-    const drafts = owned.filter((release) => metadata(release.body).runId === this.runId);
-    if (drafts.length > 1) throw new Error('Multiple releases claim this run.');
-    if (drafts.length === 1) {
-      await this.draft(drafts[0].id);
-      return this.outputs(drafts[0], false);
+    const sameCommit = owned.filter((release) => metadata(release.body).sha === this.sha);
+    if (sameCommit.length > 1) throw new Error('Multiple release reservations claim this commit.');
+    if (sameCommit.some((release) => release.tag_name !== this.tag)) throw new Error('This commit already has a different managed tag; use a new commit and tag.');
+    const sameRun = owned.filter((release) => metadata(release.body).runId === this.runId);
+    if (sameRun.length > 1 || sameRun.some((release) => release.tag_name !== this.tag)) throw new Error('Conflicting release reservations for this run.');
+    const matching = releases.filter((release) => release.tag_name === this.tag);
+    if (matching.length > 1) throw new Error('Multiple releases claim the pushed tag.');
+    if (matching.length === 1) {
+      const release = matching[0];
+      if (!release.draft) {
+        await this.verifyPublished(release);
+        return this.outputs(release, true);
+      }
+      await this.draft(release.id);
+      await this.verifyRun(metadata(release.body), false);
+      return this.outputs(release, false);
     }
 
-    let tags = await this.list('/tags');
-    // A tag reservation may have succeeded before draft creation failed. Its
-    // annotated message survives retries, including a new workflow attempt.
-    const sameCommit = tags.filter((tag) => tag.commit.sha === this.sha && canonical.test(tag.name));
-    if (sameCommit.length > 100) throw new Error('Too many tag reservations for this commit.');
-    const resumable = [];
-    for (const tag of sameCommit) {
-      const found = await this.tagReservation(tag.name);
-      if (found.reservation?.runId === this.runId) resumable.push(found.reservation);
+    const tags = await this.list('/tags');
+    const code = parseTag(this.tag).versionCode;
+    const reserved = [...tags.map(({ name }) => name), ...releases.map(({ tag_name }) => tag_name)];
+    if (reserved.some((name) => name !== this.tag && canonical.test(name) && parseTag(name).versionCode >= code)) {
+      throw new Error('Pushed tag must be newer than every other reserved numeric tag or release.');
     }
-    if (resumable.length > 1) throw new Error('Multiple tag reservations claim this run.');
-    let reservation = resumable[0];
-    if (reservation && (reservation.repository !== this.repository || reservation.sha !== this.sha)) throw new Error('Conflicting tag reservation.');
-    for (let attempt = 0; !reservation && attempt < 5; attempt++) {
-      const candidate = { schema: 1, repository: this.repository, sha: this.sha, runId: this.runId, tag: nextTag(tags) };
-      await this.verifyRun(candidate, false);
-      const annotated = await this.request('POST', '/git/tags', { tag: candidate.tag, message: marker(candidate), object: this.sha, type: 'commit' });
-      try {
-        await this.request('POST', '/git/refs', { ref: `refs/tags/${candidate.tag}`, sha: annotated.sha });
-        reservation = candidate;
-      } catch (error) {
-        if (error.status !== 422) throw error;
-        // A 422 can also be a permissions/validation failure: only retry an
-        // actual competing tag, and never force or move an existing ref.
-        await this.request('GET', `/git/ref/tags/${candidate.tag}`);
-        tags = await this.list('/tags');
-      }
-    }
-    if (!reservation) throw new Error('Tag reservation collided five times.');
+    // Manual tags are never created or changed here. Preserve both the direct
+    // ref object (including annotation) and its peeled, immutable build commit.
+    const tag = await this.resolveTag(this.tag);
+    const reservation = { schema: 2, repository: this.repository, sha: this.sha, runId: this.runId,
+      tag: this.tag, ref: `refs/tags/${this.tag}`, tagRefSha: tag.tagRefSha };
     await this.verifyRun(reservation, false);
     await this.verifyIdentity({ tag_name: reservation.tag, body: marker(reservation) });
     const release = await this.request('POST', '/releases', {
@@ -289,6 +283,7 @@ export class ReleaseAutomation {
   }
 
   async editMetadata(release, assets, prerelease) {
+    await this.verifyIdentity(release);
     let failure;
     try {
       await this.request('PATCH', `/releases/${release.id}`, { draft: false, prerelease, make_latest: prerelease ? 'false' : 'true' });
@@ -338,12 +333,19 @@ const isCli = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(impo
 if (isCli) {
   try {
     const command = process.argv[2];
-    const expectedBranch = command === 'promote' ? 'master' : 'release';
-    if (process.env.GITHUB_EVENT_NAME !== 'push' || process.env.GITHUB_REF !== `refs/heads/${expectedBranch}`) throw new Error(`Only a ${expectedBranch} branch push may run ${command}.`);
+    if (!['prepare', 'upload', 'manifest', 'publish', 'promote'].includes(command)) throw new Error(`Unknown release command: ${command}`);
+    const promoting = command === 'promote';
+    const ref = process.env.GITHUB_REF;
+    const tag = !promoting && ref?.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : undefined;
+    if (process.env.GITHUB_EVENT_NAME !== 'push' || (promoting ? ref !== 'refs/heads/master' : !tag || !canonical.test(tag))) {
+      throw new Error(promoting ? 'Only a master branch push may run promote.' : `Only a numeric vX.Y.Z tag push may run ${command}.`);
+    }
+    if (tag) parseTag(tag);
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-    if (event.deleted || event.after !== process.env.GITHUB_SHA) throw new Error('Push event SHA does not match checked-out workflow context.');
+    if (event.deleted || event.forced || event.ref !== ref) throw new Error('Push must be non-deleted, non-forced, and match the full workflow ref.');
+    if (!SHA.test(event.after) || !SHA.test(process.env.GITHUB_SHA) || promoting && event.after !== process.env.GITHUB_SHA) throw new Error('Push event SHA does not match checked-out workflow context.');
     const automation = new ReleaseAutomation({ api: githubClient(process.env.GITHUB_TOKEN), repository: process.env.GITHUB_REPOSITORY,
-      sha: event.after, runId: process.env.GITHUB_RUN_ID });
+      sha: process.env.GITHUB_SHA, runId: process.env.GITHUB_RUN_ID, tag, eventAfter: promoting ? undefined : event.after });
     const id = process.env.RELEASE_ID;
     let outputs;
     if (command === 'prepare') outputs = await automation.prepare();

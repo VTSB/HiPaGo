@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 export function parseTag(tag) {
   if (!tag) {
-    throw new Error('Release tag is empty; pass the tag reserved by the beta preparation job.');
+    throw new Error('Release tag is empty; pass the pushed tag validated by the beta preparation job.');
   }
 
   const version = tag.startsWith('v') ? tag.slice(1) : tag;

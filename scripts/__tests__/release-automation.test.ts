@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ReleaseAutomation, githubClient, nextTag } from '../release-automation.mjs';
+import { ReleaseAutomation, githubClient } from '../release-automation.mjs';
 
 const SHA = 'a'.repeat(40);
 const OTHER_SHA = 'b'.repeat(40);
@@ -18,18 +18,18 @@ type Tag = { name: string; commit: { sha: string } };
 
 class FakeGitHub {
   releases: Release[] = [];
-  tags: Tag[] = [];
+  tags: Tag[] = [{ name: 'v0.0.1', commit: { sha: SHA } }];
   assets = new Map<number, Asset[]>();
   bytes = new Map<number, Buffer>();
-  refs = new Map<string, GitObject>();
+  refs = new Map<string, GitObject>([['v0.0.1', { type: 'commit', sha: SHA }]]);
   objects = new Map<string, { object: GitObject; message: string }>();
   calls: { method: string; path: string; body?: unknown }[] = [];
-  runs = new Map([[10, { id: 10, workflow_id: 7, path: '.github/workflows/release.yml', event: 'push', head_branch: 'release', head_sha: SHA,
+  runs = new Map([[10, { id: 10, workflow_id: 7, path: '.github/workflows/release.yml', event: 'push', head_branch: 'v0.0.1', head_sha: SHA,
     repository: { full_name: REPO }, head_repository: { full_name: REPO }, run_attempt: 1, status: 'in_progress', conclusion: null as string | null }]]);
   nextId = 100;
   latest: number | null = null;
-  collide = 0;
   failCreate = false;
+  loseCreateResponse = false;
   ambiguousPatch = false;
 
   request = async (method: string, fullPath: string, body?: unknown): Promise<unknown> => {
@@ -48,27 +48,12 @@ class FakeGitHub {
       return { object: structuredClone(ref) };
     }
     if (method === 'GET' && path.startsWith('/git/tags/')) return structuredClone(this.objects.get(path.split('/').at(-1)!));
-    if (method === 'POST' && path === '/git/tags') {
-      const sha = (++this.nextId).toString(16).padStart(40, '0');
-      this.objects.set(sha, { object: { sha: data.object as string, type: 'commit' }, message: data.message as string });
-      return { sha };
-    }
-    if (method === 'POST' && path === '/git/refs') {
-      const name = (data.ref as string).replace('refs/tags/', '');
-      if (this.collide-- > 0) {
-        this.tags.push({ name, commit: { sha: OTHER_SHA } });
-        this.refs.set(name, { type: 'commit', sha: OTHER_SHA });
-        throw Object.assign(new Error('Collision'), { status: 422 });
-      }
-      this.refs.set(name, { type: 'tag', sha: data.sha as string });
-      this.tags.push({ name, commit: { sha: this.objects.get(data.sha as string)!.object.sha } });
-      return {};
-    }
     if (method === 'POST' && path === '/releases') {
       if (this.failCreate) throw new Error('Network failed before draft creation');
       const release = { ...data, id: ++this.nextId, created_at: '2026-09-27T12:00:00Z' } as Release;
       this.releases.push(release);
       this.assets.set(release.id, []);
+      if (this.loseCreateResponse) throw new Error('Response lost after draft creation');
       return structuredClone(release);
     }
     if (method === 'GET' && path === '/releases/latest') return structuredClone(this.releases.find((release) => release.id === this.latest));
@@ -108,7 +93,17 @@ class FakeGitHub {
     asset.digest = digest(bytes);
   }
 
-  automation(runId = 10) { return new ReleaseAutomation({ api: this.request, repository: REPO, sha: SHA, runId }); }
+  addTag(name: string, sha = SHA, annotated = false) {
+    const objectSha = (++this.nextId).toString(16).padStart(40, '0');
+    if (annotated) this.objects.set(objectSha, { object: { type: 'commit', sha }, message: 'Operator annotation' });
+    this.refs.set(name, { type: annotated ? 'tag' : 'commit', sha: annotated ? objectSha : sha });
+    this.tags = this.tags.filter((tag) => tag.name !== name);
+    this.tags.push({ name, commit: { sha } });
+    return annotated ? objectSha : sha;
+  }
+  automation(runId = 10, tag = 'v0.0.1', eventAfter?: string) {
+    return new ReleaseAutomation({ api: this.request, repository: REPO, sha: SHA, runId, tag, eventAfter });
+  }
   writes() { return this.calls.filter((call) => call.method !== 'GET'); }
 }
 
@@ -134,23 +129,80 @@ async function publishedFixture() {
   return fixture;
 }
 
-describe('numeric release reservation', () => {
-  it('counts unpublished numeric tags and rolls patch/minor without aliasing versionCode', () => {
-    expect(nextTag([{ name: 'v0.0.64' }, { name: 'v0.0.63' }, { name: 'v99.0.0-beta' }, { name: 'v01.0.0' }])).toBe('v0.0.65');
-    expect(nextTag([{ name: 'v0.0.999' }])).toBe('v0.1.0');
-    expect(nextTag([{ name: 'v1.999.999' }])).toBe('v2.0.0');
-    expect(() => nextTag([{ name: 'v2100.0.0' }])).toThrow('exhausted');
-    expect(() => nextTag([{ name: 'v0.1000.0' }])).toThrow('Android versionCode');
+describe('manual numeric tag reservation', () => {
+  it.each(['v0.0.65', 'v1.7.0', 'v2.0.0'])('uses exactly the operator-selected %s without creating tags', async (tag) => {
+    const api = new FakeGitHub();
+    api.addTag(tag);
+    api.runs.get(10)!.head_branch = tag;
+    const result = await api.automation(10, tag).prepare();
+    expect(result).toMatchObject({ tag, version: tag.slice(1), event_sha: SHA, originating_run_id: '10', skip: 'false' });
+    expect(api.writes()).toHaveLength(1);
+    expect(api.writes()[0]).toMatchObject({ method: 'POST', path: `/repos/${REPO}/releases`,
+      body: { tag_name: tag, target_commitish: SHA, draft: true, prerelease: true, make_latest: 'false' } });
+    expect(api.releases[0].body).toContain('hipago-beta-v2');
+    expect(api.releases[0].body).toContain(`"ref":"refs/tags/${tag}"`);
+    expect(api.releases[0].body).toContain(`"tagRefSha":"${SHA}"`);
   });
 
-  it('uses all tag pages, tolerates legacy null bodies and reserves at the event SHA', async () => {
+  it.each(['v01.2.3', '1.2.3', 'v1.2.3-beta', 'v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v2100.0.1'])('rejects invalid or unsafe %s', (tag) => {
     const api = new FakeGitHub();
-    api.releases.push({ id: 1, tag_name: 'v0.0.1', body: null, draft: false, prerelease: false, created_at: '' });
+    expect(() => api.automation(10, tag)).toThrow();
+    expect(api.writes()).toEqual([]);
+  });
+
+  it('requires the input tag even when a numeric tag exists', async () => {
+    const api = new FakeGitHub();
+    const automation = new ReleaseAutomation({ api: api.request, repository: REPO, sha: SHA, runId: 10 });
+    await expect(automation.prepare()).rejects.toThrow('pushed numeric tag');
+    expect(api.writes()).toEqual([]);
+  });
+
+  it.each(['object', 'commit'])('accepts annotated tags with push after set to the %s SHA', async (after) => {
+    const api = new FakeGitHub();
+    const objectSha = api.addTag('v0.0.1', SHA, true);
+    await api.automation(10, 'v0.0.1', after === 'object' ? objectSha : SHA).prepare();
+    expect(api.releases[0].body).toContain(`"tagRefSha":"${objectSha}"`);
+    expect(api.writes()).toHaveLength(1);
+  });
+
+  it('peels nested annotated tags within the depth bound', async () => {
+    const api = new FakeGitHub();
+    const inner = api.addTag('v0.0.1', SHA, true);
+    api.objects.set(OTHER_SHA, { object: { type: 'tag', sha: inner }, message: 'outer annotation' });
+    api.refs.set('v0.0.1', { type: 'tag', sha: OTHER_SHA });
+    await expect(api.automation().prepare()).resolves.toMatchObject({ tag: 'v0.0.1' });
+    expect(api.releases[0].body).toContain(`"tagRefSha":"${OTHER_SHA}"`);
+  });
+
+  it.each(['missing', 'moved', 'noncommit', 'deep', 'event'])('rejects %s tag identity before mutation', async (failure) => {
+    const api = new FakeGitHub();
+    if (failure === 'missing') api.refs.delete('v0.0.1');
+    if (failure === 'moved') api.addTag('v0.0.1', OTHER_SHA);
+    if (failure === 'noncommit') api.refs.set('v0.0.1', { type: 'tree', sha: SHA });
+    if (failure === 'deep') {
+      api.refs.set('v0.0.1', { type: 'tag', sha: OTHER_SHA });
+      api.objects.set(OTHER_SHA, { object: { type: 'tag', sha: OTHER_SHA }, message: '' });
+    }
+    await expect(api.automation(10, 'v0.0.1', failure === 'event' ? OTHER_SHA : undefined).prepare()).rejects.toThrow();
+    expect(api.writes()).toEqual([]);
+  });
+
+  it('scans every tag page and includes releases whose tag was deleted in reserved versions', async () => {
+    const api = new FakeGitHub();
     api.tags = Array.from({ length: 101 }, (_, i) => ({ name: `v0.0.${i + 1}`, commit: { sha: OTHER_SHA } }));
-    const result = await api.automation().prepare();
-    expect(result).toMatchObject({ tag: 'v0.0.102', event_sha: SHA, originating_run_id: '10', skip: 'false' });
-    expect(api.writes().find((call) => call.path.endsWith('/git/tags'))?.body).toMatchObject({ object: SHA, type: 'commit' });
-    expect(api.writes().find((call) => call.path.endsWith('/releases'))?.body).toMatchObject({ target_commitish: SHA, draft: true, prerelease: true, make_latest: 'false' });
+    api.addTag('v0.0.103');
+    api.runs.get(10)!.head_branch = 'v0.0.103';
+    api.releases.push({ id: 1, tag_name: 'v0.0.102', body: null, draft: true, prerelease: true, created_at: '' });
+    await expect(api.automation(10, 'v0.0.103').prepare()).resolves.toMatchObject({ tag: 'v0.0.103' });
+    expect(api.calls.some((call) => call.path.includes('/tags?per_page=100&page=2'))).toBe(true);
+  });
+
+  it.each(['tag', 'release'])('rejects a tag lower than a reserved %s version', async (source) => {
+    const api = new FakeGitHub();
+    if (source === 'tag') api.addTag('v0.0.2', OTHER_SHA);
+    else api.releases.push({ id: 1, tag_name: 'v0.0.2', body: null, draft: true, prerelease: true, created_at: '' });
+    await expect(api.automation().prepare()).rejects.toThrow('newer than every other reserved');
+    expect(api.writes()).toEqual([]);
   });
 
   it('refuses a truncated 100-page tag scan without mutation', async () => {
@@ -160,40 +212,48 @@ describe('numeric release reservation', () => {
     expect(api.writes()).toEqual([]);
   });
 
-  it('refreshes genuine collisions, bounds retries and never force-updates a ref', async () => {
+  it.each([false, true])('reuses the exact tag after draft creation response failure (created=%s)', async (created) => {
     const api = new FakeGitHub();
-    api.collide = 1;
-    expect((await api.automation().prepare()).tag).toBe('v0.0.2');
-    expect(api.writes().some((call) => call.method === 'PATCH')).toBe(false);
-    const exhausted = new FakeGitHub();
-    exhausted.collide = 10;
-    await expect(exhausted.automation().prepare()).rejects.toThrow('collided five times');
-    expect(exhausted.releases).toEqual([]);
+    api.failCreate = !created;
+    api.loseCreateResponse = created;
+    await expect(api.automation().prepare()).rejects.toThrow();
+    api.failCreate = false;
+    api.loseCreateResponse = false;
+    const first = await api.automation().prepare();
+    api.addTag('v0.0.2', OTHER_SHA);
+    expect(await api.automation().prepare()).toEqual(first);
+    expect(api.releases).toHaveLength(1);
+    expect(api.writes().every((call) => call.path.endsWith('/releases'))).toBe(true);
   });
 
-  it('rejects a moved reserved tag before creating a release on retry', async () => {
+  it.each(['differentTag', 'foreignRun', 'duplicates', 'legacy', 'unmanaged', 'malformed', 'duplicateMarker'])('rejects %s reservation before writes', async (failure) => {
     const api = new FakeGitHub();
-    api.failCreate = true;
-    await expect(api.automation().prepare()).rejects.toThrow('Network failed');
-    api.failCreate = false;
-    api.objects.get(api.refs.get('v0.0.1')!.sha)!.object.sha = OTHER_SHA;
+    await api.automation().prepare();
+    const release = api.releases[0];
+    let automation = api.automation();
+    if (failure === 'differentTag') {
+      api.addTag('v0.0.2');
+      automation = api.automation(10, 'v0.0.2');
+    }
+    if (failure === 'foreignRun') automation = api.automation(11);
+    if (failure === 'duplicates') api.releases.push({ ...release, id: release.id + 1 });
+    if (failure === 'legacy') release.body = release.body!.replace('hipago-beta-v2', 'hipago-beta-v1').replace('"schema":2', '"schema":1');
+    if (failure === 'unmanaged') release.body = null;
+    if (failure === 'malformed') release.body = '<!-- hipago-beta-v2 {} -->';
+    if (failure === 'duplicateMarker') release.body += `\n${release.body}`;
     api.calls = [];
-    await expect(api.automation().prepare()).rejects.toThrow('Resolved tag');
+    await expect(automation.prepare()).rejects.toThrow();
     expect(api.writes()).toEqual([]);
   });
 
-  it('reuses the run reservation after draft creation fails and after a normal retry', async () => {
+  it('rejects replacing an annotated tag with a new annotation on the same commit', async () => {
     const api = new FakeGitHub();
-    api.failCreate = true;
-    await expect(api.automation().prepare()).rejects.toThrow('Network failed');
-    api.failCreate = false;
+    api.addTag('v0.0.1', SHA, true);
+    await api.automation().prepare();
+    api.addTag('v0.0.1', SHA, true);
     api.calls = [];
-    const first = await api.automation().prepare();
-    const retry = await api.automation().prepare();
-    expect(first).toEqual(retry);
-    expect(first.tag).toBe('v0.0.1');
-    expect(api.writes().filter((call) => call.path.endsWith('/git/refs'))).toHaveLength(0);
-    expect(api.releases).toHaveLength(1);
+    await expect(api.automation().prepare()).rejects.toThrow('original tag object changed');
+    expect(api.writes()).toEqual([]);
   });
 });
 
@@ -262,12 +322,16 @@ describe('stable promotion', () => {
     expect(api.writes()).toEqual([]);
   });
 
-  it.each(['sha', 'branch', 'legacyBranch', 'event', 'workflow', 'path', 'repository', 'fork', 'failed', 'pending', 'attempt', 'tag', 'asset', 'releaseId', 'missingProvenance', 'ambiguous', 'draft'])('rejects %s provenance without changing stable', async (failure) => {
+  it.each(['sha', 'branch', 'legacyBranch', 'tagName', 'nullBranch', 'deletedTag', 'reannotated', 'event', 'workflow', 'path', 'repository', 'fork', 'failed', 'pending', 'attempt', 'tag', 'asset', 'releaseId', 'missingProvenance', 'ambiguous', 'draft'])('rejects %s provenance without changing stable', async (failure) => {
     const { api, id, release } = await publishedFixture();
     const run = api.runs.get(10)!;
     if (failure === 'sha') run.head_sha = OTHER_SHA;
     if (failure === 'branch') run.head_branch = 'master';
-    if (failure === 'legacyBranch') run.head_branch = 'beta';
+    if (failure === 'legacyBranch') run.head_branch = 'release';
+    if (failure === 'tagName') run.head_branch = 'v0.0.2';
+    if (failure === 'nullBranch') run.head_branch = null as unknown as string;
+    if (failure === 'deletedTag') api.refs.delete(release.tag_name);
+    if (failure === 'reannotated') api.addTag(release.tag_name, SHA, true);
     if (failure === 'event') run.event = 'workflow_dispatch';
     if (failure === 'workflow') run.workflow_id = 8;
     if (failure === 'path') run.path = '.github/workflows/other.yml';
@@ -314,25 +378,45 @@ describe('stable promotion', () => {
 });
 
 describe('HTTP and workflow boundaries', () => {
-  it.each(['prepare', 'upload', 'manifest', 'publish', 'promote'])('allows %s only from its release/master push branch before reading the event', (command) => {
-    const directory = mkdtempSync(join(tmpdir(), 'hipago-release-branch-'));
+  it.each(['prepare', 'upload', 'manifest', 'publish', 'promote'])('runs %s only from its authorized full push ref', (command) => {
+    const directory = mkdtempSync(join(tmpdir(), 'hipago-release-context-'));
     const eventPath = join(directory, 'event.json');
-    // Stop before any API call, after the branch guard, even for the correct branch.
-    writeFileSync(eventPath, JSON.stringify({ after: OTHER_SHA }));
-    const expectedBranch = command === 'promote' ? 'master' : 'release';
     try {
-      for (const branch of ['release', 'master', 'beta']) {
+      for (const ref of ['refs/heads/release', 'refs/heads/master', 'refs/heads/beta', 'refs/heads/v0.0.1', 'refs/tags/v0.0.1']) {
+        writeFileSync(eventPath, JSON.stringify({ ref, after: SHA, deleted: false, forced: false }));
         const result = spawnSync(process.execPath, ['scripts/release-automation.mjs', command], {
-          encoding: 'utf8',
-          timeout: 10_000,
-          env: { ...process.env, GITHUB_EVENT_NAME: 'push', GITHUB_REF: `refs/heads/${branch}`,
+          encoding: 'utf8', timeout: 10_000,
+          env: { ...process.env, GITHUB_TOKEN: '', GITHUB_EVENT_NAME: 'push', GITHUB_REF: ref,
             GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: SHA },
         });
+        const allowed = command === 'promote' ? ref === 'refs/heads/master' : ref === 'refs/tags/v0.0.1';
         expect(result.status).toBe(1);
-        expect(result.stderr).toContain(branch === expectedBranch
-          ? 'Push event SHA does not match checked-out workflow context.'
-          : `Only a ${expectedBranch} branch push may run ${command}.`);
+        // Missing token is the sentinel immediately after accepted context;
+        // these real CLI subprocesses never make an HTTP request.
+        expect(result.stderr).toContain(allowed ? 'GITHUB_TOKEN is required' : command === 'promote'
+          ? 'Only a master branch push' : 'Only a numeric vX.Y.Z tag push');
       }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['deleted', 'forced', 'ref', 'event', 'version', 'sha', 'masterSha', 'unknown'])('rejects invalid %s CLI context before API access', (failure) => {
+    const directory = mkdtempSync(join(tmpdir(), 'hipago-release-invalid-'));
+    const eventPath = join(directory, 'event.json');
+    const ref = failure === 'masterSha' ? 'refs/heads/master' : failure === 'version' ? 'refs/tags/v0.0.0' : 'refs/tags/v0.0.1';
+    const event = { ref: failure === 'ref' ? 'refs/heads/v0.0.1' : ref, after: failure === 'masterSha' ? OTHER_SHA : SHA,
+      deleted: failure === 'deleted', forced: failure === 'forced' };
+    writeFileSync(eventPath, JSON.stringify(event));
+    try {
+      const result = spawnSync(process.execPath, ['scripts/release-automation.mjs', failure === 'unknown' ? 'invalid' : failure === 'masterSha' ? 'promote' : 'prepare'], {
+        encoding: 'utf8', timeout: 10_000,
+        env: { ...process.env, GITHUB_TOKEN: '', GITHUB_EVENT_NAME: failure === 'event' ? 'workflow_dispatch' : 'push', GITHUB_REF: ref,
+          GITHUB_EVENT_PATH: eventPath, GITHUB_SHA: failure === 'sha' ? 'invalid' : SHA },
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('::error::');
+      expect(result.stderr).not.toContain('GITHUB_TOKEN is required');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -359,17 +443,21 @@ describe('HTTP and workflow boundaries', () => {
     await expect(rejected('POST', '/refs', {})).rejects.toMatchObject({ status: 422 });
   });
 
-  it('has only branch triggers, an uncancelled shared queue, immutable checkouts and a build-free promotion', () => {
+  it('has tag-only beta, master-only promotion, an uncancelled shared queue and immutable checkouts', () => {
     const beta = readFileSync('.github/workflows/release.yml', 'utf8');
     const stable = readFileSync('.github/workflows/promote-release.yml', 'utf8');
-    expect(beta).toMatch(/on:\n  push:\n    branches:\n      - release/);
+    expect(beta).toMatch(/on:\n  push:\n    tags:\n      - 'v\*'/);
+    expect(beta).not.toMatch(/\n    branches:/);
+    expect(stable).not.toMatch(/\n    tags:/);
     expect(stable).toMatch(/on:\n  push:\n    branches:\n      - master/);
     expect(beta).not.toContain('refs/heads/beta');
     for (const workflow of [beta, stable]) {
-      expect(workflow).not.toMatch(/workflow_dispatch|\n    tags:/);
+      expect(workflow).not.toContain('workflow_dispatch');
       expect(workflow).toContain('group: hipago-release-publication\n  queue: max\n  cancel-in-progress: false');
-      expect(workflow.match(/uses: actions\/checkout@v5/g)?.length).toBe(workflow.match(/ref: \$\{\{ (?:github.event.after|needs.prepare.outputs.event_sha) \}\}/g)?.length);
+      expect(workflow.match(/uses: actions\/checkout@v5/g)?.length).toBe(workflow.match(/ref: \$\{\{ (?:github.sha|github.event.after|needs.prepare.outputs.event_sha) \}\}/g)?.length);
     }
+    expect(beta).not.toContain('refs/heads/release');
+    expect(beta.match(/save-if: \$\{\{ startsWith\(github.ref, 'refs\/tags\/v'\) \}\}/g)).toHaveLength(4);
     expect(beta).not.toContain('softprops/action-gh-release');
     expect(beta).toContain('node scripts/release-automation.mjs prepare');
     expect(beta).toContain('node scripts/release-automation.mjs publish');

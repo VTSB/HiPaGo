@@ -2,8 +2,8 @@ name: Beta release
 
 on:
   push:
-    branches:
-      - release
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
@@ -24,10 +24,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # A GITHUB_TOKEN-created tag does not trigger another push workflow. Reserve
-  # the version once, then build that immutable commit directly in this run.
+  # The pushed numeric tag selects the version. Validate its immutable object
+  # and commit before reserving a draft; this workflow never creates tags.
   prepare:
-    name: Reserve beta version
+    name: Validate tag and prepare beta
     if: github.event.deleted == false
     runs-on: ubuntu-latest
     permissions:
@@ -43,12 +43,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.after }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Reserve tag and draft (or verify an existing successful beta)
+      - name: Validate pushed tag and draft (or verify an existing successful beta)
         id: release
         run: node scripts/release-automation.mjs prepare
         env:
@@ -86,7 +86,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ startsWith(github.ref, 'refs/tags/v') }}
           # Save the compiled target even when a later step fails (flaky pod
           # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
           # is discarded and recompiled from scratch on the retry. The cache is
@@ -124,7 +124,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.event_sha }}
           persist-credentials: false
 
-      - name: Derive version from reserved tag
+      - name: Derive version from pushed tag
         uses: ./.github/actions/derive-version
         with:
           tag: ${{ needs.prepare.outputs.tag }}
@@ -148,7 +148,7 @@ jobs:
           workspaces: |
             . -> target
             src-tauri -> target
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ startsWith(github.ref, 'refs/tags/v') }}
           # Save the compiled target even when a later step fails (flaky pod
           # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
           # is discarded and recompiled from scratch on the retry. The cache is
@@ -264,7 +264,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.event_sha }}
           persist-credentials: false
 
-      - name: Derive version from reserved tag
+      - name: Derive version from pushed tag
         uses: ./.github/actions/derive-version
         with:
           tag: ${{ needs.prepare.outputs.tag }}
@@ -297,7 +297,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           # Default is read-only off the repo's default branch; releases run on
-          # the release branch, so write the cache there too — otherwise
+          # a release tag, so write the cache there too — otherwise
           # it never persists across releases.
           cache-read-only: false
 
@@ -313,7 +313,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ startsWith(github.ref, 'refs/tags/v') }}
           # Save the compiled target even when a later step fails (flaky pod
           # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
           # is discarded and recompiled from scratch on the retry. The cache is
@@ -411,7 +411,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.event_sha }}
           persist-credentials: false
 
-      - name: Derive version from reserved tag
+      - name: Derive version from pushed tag
         uses: ./.github/actions/derive-version
         with:
           tag: ${{ needs.prepare.outputs.tag }}
@@ -435,7 +435,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: '. -> target'
-          save-if: ${{ github.ref == 'refs/heads/release' }}
+          save-if: ${{ startsWith(github.ref, 'refs/tags/v') }}
           # Save the compiled target even when a later step fails (flaky pod
           # clone, APK signing, xcodebuild). Otherwise an expensive Rust build
           # is discarded and recompiled from scratch on the retry. The cache is

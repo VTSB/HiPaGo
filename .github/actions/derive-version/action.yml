@@ -1,14 +1,14 @@
-name: 'Derive build version from reserved release tag'
-description: 'Patch package, Tauri and Android versions from the immutable beta preparation output.'
+name: 'Derive build version from pushed release tag'
+description: 'Patch package, Tauri and Android versions from the validated immutable beta preparation output.'
 
 inputs:
   tag:
-    description: 'The vX.Y.Z tag reserved by the preparation job.'
+    description: 'The vX.Y.Z pushed tag validated by the preparation job.'
     required: true
 
 outputs:
   version:
-    description: 'Numeric version from the reserved tag.'
+    description: 'Numeric version from the pushed tag.'
     value: ${{ steps.parse.outputs.version }}
   version_code:
     description: 'Android versionCode (major*1_000_000 + minor*1_000 + patch).'
@@ -17,7 +17,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Parse reserved tag and patch version-bearing files
+    - name: Parse pushed tag and patch version-bearing files
       id: parse
       shell: bash
       env:

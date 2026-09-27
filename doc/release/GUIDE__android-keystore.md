@@ -69,3 +69,19 @@ base64 -i /absolute/path/to/hipago-release.jks | tr -d '\n'
 The workflow decodes `ANDROID_KEYSTORE_BASE64` to
 `android/app/hipago-release.jks`, runs `assembleRelease`, and verifies
 `app-release.apk` with `apksigner`.
+
+## Version and publication
+
+Commit changes on `release`, create one unused `vX.Y.Z` tag higher than existing
+numeric tags/releases, and push that tag explicitly (`git push origin vX.Y.Z`).
+The tag must point at a commit containing the tag-triggered release workflow.
+CI uses exactly X.Y.Z for the beta; a branch push alone does not publish or bump
+the version. Do not edit Gradle/package versions for CI or move a used tag.
+
+After beta CI and device testing succeed, run `git switch master`,
+`git merge --ff-only vX.Y.Z`, then `git push origin master`. This promotes the
+same release and APK without rebuilding. The pushed master commit must equal
+the tested tag commit; merge/squash commits with different SHAs are rejected.
+Repeating an already completed promotion does not create another release.
+For a failed beta, keep its tag and draft; fix the issue in a new commit and
+push a new higher version tag.
