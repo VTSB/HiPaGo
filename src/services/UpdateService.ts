@@ -32,6 +32,7 @@ export type CheckResult = {
   available: boolean;
   version?: string;
   notes?: string;
+  prerelease?: boolean;
   /** Present when the platform can install in-place. UI calls this on
    *  "Install" and may pass a progress callback (0-100). Both the Tauri
    *  backend and Android (via DownloadManager polling) report progress. */
@@ -41,22 +42,25 @@ export type CheckResult = {
 };
 
 interface AndroidUpdaterPlugin {
-  check(opts: { owner: string; repo: string }): Promise<{
+  check(opts: { owner: string; repo: string; includePrereleases: boolean }): Promise<{
     available: boolean;
     version?: string;
     notes?: string;
     apkUrl?: string;
+    prerelease?: boolean;
   }>;
-  install(opts: { apkUrl: string }): Promise<ApplyResult>;
+  install(opts: { apkUrl: string; requestId: string }): Promise<ApplyResult>;
   addListener(
     eventName: 'downloadProgress',
-    listenerFunc: (event: { percent: number }) => void,
+    listenerFunc: (event: { percent: number; requestId?: string }) => void,
   ): Promise<PluginListenerHandle>;
 }
 
 // `registerPlugin` returns a proxy even when the native plugin is absent —
 // calls just reject on non-Android runtimes. Safe to define at module scope.
 const AndroidUpdater = registerPlugin<AndroidUpdaterPlugin>('Updater');
+// Android progress events are global, so only one install may subscribe at a time.
+let androidInstallInProgress = false;
 
 function isTauri(): boolean {
   if (typeof window === 'undefined') return false;
@@ -101,15 +105,18 @@ async function checkTauri(): Promise<CheckResult> {
   };
 }
 
-async function checkAndroid(): Promise<CheckResult> {
-  const res = await AndroidUpdater.check({ owner: OWNER, repo: REPO });
+async function checkAndroid(includePrereleases: boolean): Promise<CheckResult> {
+  const res = await AndroidUpdater.check({ owner: OWNER, repo: REPO, includePrereleases });
   if (!res.available || !res.apkUrl) return { available: false };
   const apkUrl = res.apkUrl;
   return {
     available: true,
     version: res.version,
     notes: res.notes,
+    prerelease: res.prerelease,
     applyFn: async (onProgress) => {
+      if (androidInstallInProgress) throw new Error('An Android update is already installing');
+      androidInstallInProgress = true;
       // Native side: DownloadManager → ACTION_DOWNLOAD_COMPLETE →
       // install intent via FileProvider. Opening the system installer is
       // not the same thing as a completed install, so the native result is
@@ -118,13 +125,20 @@ async function checkAndroid(): Promise<CheckResult> {
       // DownloadManager has no progress callback, so the native plugin polls it
       // and emits `downloadProgress` events; forward them to the UI's progress
       // callback. The listener is always removed once install settles.
-      const handle = await AndroidUpdater.addListener('downloadProgress', (e) => {
-        onProgress?.(Math.max(0, Math.min(100, e.percent)));
-      });
       try {
-        return await AndroidUpdater.install({ apkUrl });
+        const requestId = crypto.getRandomValues(new Uint32Array(4)).join('-');
+        const handle = await AndroidUpdater.addListener('downloadProgress', (e) => {
+          // A native poller can send its terminal event after install() settles.
+          if (e.requestId !== requestId) return;
+          onProgress?.(Math.max(0, Math.min(100, e.percent)));
+        });
+        try {
+          return await AndroidUpdater.install({ apkUrl, requestId });
+        } finally {
+          await handle.remove();
+        }
       } finally {
-        await handle.remove();
+        androidInstallInProgress = false;
       }
     },
   };
@@ -169,11 +183,11 @@ function isNewer(remote: string, current: string): boolean {
 }
 
 export const UpdateService = {
-  async checkForUpdate(): Promise<CheckResult> {
+  async checkForUpdate(options: { includePrereleases?: boolean } = {}): Promise<CheckResult> {
     try {
       if (isTauri()) return await checkTauri();
       const plat = capacitorPlatform();
-      if (plat === 'android') return await checkAndroid();
+      if (plat === 'android') return await checkAndroid(options.includePrereleases === true);
       if (plat === 'ios') return await checkIos();
       return { available: false };
     } catch (err) {

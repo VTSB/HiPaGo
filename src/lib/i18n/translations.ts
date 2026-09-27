@@ -336,6 +336,12 @@ const translations = {
 
   // Settings → About / Update
   'update.about': { en: 'Updates', ko: '업데이트' },
+  'update.beta': { en: 'Beta', ko: '베타' },
+  'update.receiveBeta': { en: 'Receive beta updates', ko: '베타 업데이트 받기' },
+  'update.receiveBeta.help': {
+    en: 'Try public beta releases before stable. They may have bugs. Turning this off will not downgrade an installed beta.',
+    ko: '정식 출시 전 공개 베타를 받습니다. 오류가 있을 수 있으며, 꺼도 설치된 베타가 이전 버전으로 내려가지 않습니다.',
+  },
   'update.about.desc': {
     en: 'Current version and manual update check',
     ko: '현재 버전 및 수동 업데이트 확인',

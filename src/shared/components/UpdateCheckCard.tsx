@@ -7,11 +7,15 @@
  * Independent of the top-of-app UpdateBanner — calling Check here does
  * not affect the banner's session-dismissal state.
  */
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { UpdateService, CURRENT_VERSION, type CheckResult } from '@/services/UpdateService';
 import { useT } from '@/lib/i18n/useT';
+import { useSettingsStore } from '@/lib/store/settings';
+import { isAndroid } from '@/lib/utils/platform';
 
 type InstallNotice = 'permissionRequired' | 'installerStarted' | null;
+const subscribePlatform = () => () => {};
+const serverIsAndroid = () => false;
 
 function firstMeaningfulLine(notes?: string): string | undefined {
   const line = notes?.split('\n').find((entry) => {
@@ -27,50 +31,15 @@ type CheckStatus =
   | { kind: 'upToDate' }
   | { kind: 'available'; result: CheckResult }
   | { kind: 'installing'; percent: number }
-  | { kind: 'failed' };
+  | { kind: 'failed'; action: 'check' | 'install' };
 
 export function UpdateCheckCard() {
   const t = useT();
-  const [status, setStatus] = useState<CheckStatus>({ kind: 'idle' });
-  const [installNotice, setInstallNotice] = useState<InstallNotice>(null);
-
-  const onCheck = async () => {
-    setStatus({ kind: 'checking' });
-    setInstallNotice(null);
-    try {
-      const result = await UpdateService.checkForUpdate();
-      if (!result.available) {
-        setStatus({ kind: 'upToDate' });
-      } else {
-        setStatus({ kind: 'available', result });
-      }
-    } catch {
-      setStatus({ kind: 'failed' });
-    }
-  };
-
-  const onInstall = async () => {
-    if (status.kind !== 'available') return;
-    const { result } = status;
-    if (result.applyFn) {
-      setStatus({ kind: 'installing', percent: 0 });
-      try {
-        const applyResult = await result.applyFn((percent) => {
-          setStatus({ kind: 'installing', percent });
-        });
-        setStatus({ kind: 'available', result });
-        if (applyResult.status === 'permission_required') {
-          setInstallNotice('permissionRequired');
-        } else if (applyResult.status === 'installer_started') {
-          setInstallNotice('installerStarted');
-        }
-      } catch {
-        setStatus({ kind: 'failed' });
-      }
-    } else if (result.releaseUrl) {
-      window.open(result.releaseUrl, '_blank', 'noopener,noreferrer');
-    }
-  };
+  const receiveBetaUpdates = useSettingsStore((s) => s.receiveBetaUpdates);
+  const setReceiveBetaUpdates = useSettingsStore((s) => s.setReceiveBetaUpdates);
+  const betaHelpId = useId();
+  const android = useSyncExternalStore(subscribePlatform, isAndroid, serverIsAndroid);
+  const includePrereleases = android && receiveBetaUpdates;
 
   return (
     <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
@@ -81,7 +50,84 @@ export function UpdateCheckCard() {
         <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
           {t('update.about.desc')}
         </p>
+        {android && (
+          <div className="mb-4">
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={receiveBetaUpdates}
+                onChange={(event) => setReceiveBetaUpdates(event.target.checked)}
+                aria-describedby={betaHelpId}
+                className="h-5 w-5 shrink-0 accent-blue-600"
+              />
+              {t('update.receiveBeta')}
+            </label>
+            <p id={betaHelpId} className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">
+              {t('update.receiveBeta.help')}
+            </p>
+          </div>
+        )}
+        {/* Reset channel-specific state while keeping focus on the switch. */}
+        <UpdateCheckState key={String(includePrereleases)} includePrereleases={includePrereleases} />
+      </div>
+    </div>
+  );
+}
 
+function UpdateCheckState({ includePrereleases }: { includePrereleases: boolean }) {
+  const t = useT();
+  const [status, setStatus] = useState<CheckStatus>({ kind: 'idle' });
+  const [installNotice, setInstallNotice] = useState<InstallNotice>(null);
+  const mounted = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  const onCheck = async () => {
+    setStatus({ kind: 'checking' });
+    setInstallNotice(null);
+    try {
+      const result = await UpdateService.checkForUpdate({ includePrereleases });
+      if (!mounted.current) return;
+      if (!result.available) {
+        setStatus({ kind: 'upToDate' });
+      } else {
+        setStatus({ kind: 'available', result });
+      }
+    } catch {
+      if (mounted.current) setStatus({ kind: 'failed', action: 'check' });
+    }
+  };
+
+  const onInstall = async () => {
+    if (status.kind !== 'available') return;
+    const { result } = status;
+    if (result.applyFn) {
+      setStatus({ kind: 'installing', percent: 0 });
+      try {
+        const applyResult = await result.applyFn((percent) => {
+          if (mounted.current) setStatus({ kind: 'installing', percent });
+        });
+        if (!mounted.current) return;
+        setStatus({ kind: 'available', result });
+        if (applyResult.status === 'permission_required') {
+          setInstallNotice('permissionRequired');
+        } else if (applyResult.status === 'installer_started') {
+          setInstallNotice('installerStarted');
+        }
+      } catch {
+        if (mounted.current) setStatus({ kind: 'failed', action: 'install' });
+      }
+    } else if (result.releaseUrl) {
+      window.open(result.releaseUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  return (
+    <>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">
@@ -135,11 +181,16 @@ export function UpdateCheckCard() {
               <p className="text-base text-blue-800 sm:text-sm dark:text-blue-200">
                 <span className="font-mono font-medium">v{status.result.version}</span>{' '}
                 {t('update.about.newAvailable')}
+                {status.result.prerelease && (
+                  <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-semibold dark:bg-blue-900">
+                    {t('update.beta')}
+                  </span>
+                )}
               </p>
               <button
                 type="button"
                 onClick={onInstall}
-                className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm active:bg-blue-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-blue-700"
+                className="min-h-11 shrink-0 whitespace-nowrap rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm active:bg-blue-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-1.5 sm:font-medium sm:hover:bg-blue-700"
               >
                 {status.result.applyFn
                   ? t('update.banner.install')
@@ -191,11 +242,10 @@ export function UpdateCheckCard() {
                 clipRule="evenodd"
               />
             </svg>
-            {t('update.about.checkFailed')}
+            {status.action === 'install' ? t('update.banner.installFailed') : t('update.about.checkFailed')}
           </div>
         )}
         </div>
-      </div>
-    </div>
+    </>
   );
 }

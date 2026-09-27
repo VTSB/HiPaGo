@@ -16,6 +16,8 @@ interface SettingsStoreState {
   defaultFilterQuery: string;
   /** Android-only: block screenshots, screen recording, and recent-app previews. */
   secureScreen: boolean;
+  /** Android-only: include published beta releases in update checks. */
+  receiveBetaUpdates: boolean;
   /** Mobile library hub tab to open when /library has no explicit tab query. */
   libraryInitialTab: LibraryInitialTab;
   dualPage: boolean;
@@ -39,6 +41,7 @@ interface SettingsStoreState {
   setImageFormat: (format: 'auto' | 'avif' | 'webp' | 'original') => void;
   setDefaultFilterQuery: (query: string) => void;
   setSecureScreen: (enabled: boolean) => void;
+  setReceiveBetaUpdates: (enabled: boolean) => void;
   setLibraryInitialTab: (tab: LibraryInitialTab) => void;
   setDualPage: (dual: boolean) => void;
   setGridColumns: (cols: number) => void;
@@ -131,6 +134,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       blurTags: DEFAULT_BLUR_TAGS,
       defaultFilterQuery: '',
       secureScreen: true,
+      receiveBetaUpdates: false,
       libraryInitialTab: 'favorites',
       dualPage: false,
       gridColumns: 0,
@@ -145,6 +149,7 @@ export const useSettingsStore = create<SettingsStoreState>()(
       setImageFormat: (format) => set({ imageFormat: format }),
       setDefaultFilterQuery: (query) => set({ defaultFilterQuery: query }),
       setSecureScreen: (enabled) => set({ secureScreen: enabled }),
+      setReceiveBetaUpdates: (enabled) => set({ receiveBetaUpdates: enabled }),
       setLibraryInitialTab: (tab) => set({ libraryInitialTab: tab }),
       setDualPage: (dual) => set({ dualPage: dual }),
       setGridColumns: (cols) => set({ gridColumns: cols }),

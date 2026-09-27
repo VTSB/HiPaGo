@@ -5,19 +5,20 @@ import { fileURLToPath } from 'node:url';
 
 export function parseTag(tag) {
   if (!tag) {
-    throw new Error('GITHUB_REF_NAME is empty; derive-version must run on a tag-push event.');
+    throw new Error('Release tag is empty; pass the tag reserved by the beta preparation job.');
   }
 
   const version = tag.startsWith('v') ? tag.slice(1) : tag;
-  if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) {
+  if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
     throw new Error(`Tag '${tag}' does not match required vX.Y.Z (got version='${version}'). Pre-release suffixes are not supported.`);
   }
 
   const [major, minor, patch] = version.split('.').map(Number);
-  return {
-    version,
-    versionCode: major * 1_000_000 + minor * 1_000 + patch,
-  };
+  const versionCode = major * 1_000_000 + minor * 1_000 + patch;
+  if (!Number.isSafeInteger(versionCode) || minor > 999 || patch > 999 || versionCode < 1 || versionCode > 2_100_000_000) {
+    throw new Error(`Tag '${tag}' exceeds the Android versionCode range (minor/patch <= 999; code 1..2100000000).`);
+  }
+  return { version, versionCode };
 }
 
 function patchJsonVersion(file, version, log) {
@@ -70,7 +71,7 @@ export function patchAndroidBuildGradle(file, version, versionCode) {
   writeFileSync(file, text);
 }
 
-export function deriveVersion({ root = process.cwd(), refName = process.env.GITHUB_REF_NAME, outputFile = process.env.GITHUB_OUTPUT, log = console.log } = {}) {
+export function deriveVersion({ root = process.cwd(), refName = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME, outputFile = process.env.GITHUB_OUTPUT, log = console.log } = {}) {
   const { version, versionCode } = parseTag(refName);
   log(`Tag ${refName} -> version=${version} versionCode=${versionCode}`);
 

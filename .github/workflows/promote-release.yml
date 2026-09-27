@@ -1,0 +1,35 @@
+name: Promote tested beta to stable
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  actions: read
+
+# Share the lane with the entire beta workflow. Waiting pushes are queued,
+# never cancelled in favour of a newer push. Dispatch order is not guaranteed.
+concurrency:
+  group: hipago-release-publication
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote exact tested commit without rebuilding
+    if: github.event.deleted == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.after }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Verify successful beta provenance and promote unchanged assets
+        run: node scripts/release-automation.mjs promote
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

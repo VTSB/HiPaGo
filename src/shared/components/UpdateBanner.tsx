@@ -3,7 +3,7 @@
 /**
  * Top-of-app banner that surfaces new releases.
  *
- * - Calls UpdateService.checkForUpdate() once on mount.
+ * - Calls UpdateService.checkForUpdate() on mount and Android channel changes.
  * - Renders nothing when no update is available, the platform has no
  *   auto-update path (plain web), or the user dismissed this version
  *   for the current session.
@@ -14,9 +14,11 @@
  * - When the platform can only deep-link (iOS), the primary action
  *   opens the GitHub Release page in the system browser.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UpdateService, type CheckResult } from '@/services/UpdateService';
 import { useT } from '@/lib/i18n/useT';
+import { useSettingsStore } from '@/lib/store/settings';
+import { isAndroid } from '@/lib/utils/platform';
 
 const DISMISS_KEY = 'hipago-update-banner-dismissed-version';
 type ApplyNotice = 'permissionRequired' | 'installerStarted' | 'failed' | null;
@@ -30,16 +32,24 @@ function firstMeaningfulLine(notes?: string): string | undefined {
 }
 
 export function UpdateBanner() {
+  const receiveBetaUpdates = useSettingsStore((s) => s.receiveBetaUpdates);
+  const includePrereleases = isAndroid() && receiveBetaUpdates;
+  return <UpdateBannerState key={String(includePrereleases)} includePrereleases={includePrereleases} />;
+}
+
+function UpdateBannerState({ includePrereleases }: { includePrereleases: boolean }) {
   const t = useT();
   const [result, setResult] = useState<CheckResult | null>(null);
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [notice, setNotice] = useState<ApplyNotice>(null);
+  const mounted = useRef(false);
 
   useEffect(() => {
+    mounted.current = true;
     let cancelled = false;
-    UpdateService.checkForUpdate().then((r) => {
+    UpdateService.checkForUpdate({ includePrereleases }).then((r) => {
       if (cancelled) return;
       if (r.available && r.version) {
         const last = sessionStorage.getItem(DISMISS_KEY);
@@ -48,9 +58,10 @@ export function UpdateBanner() {
       setResult(r);
     });
     return () => {
+      mounted.current = false;
       cancelled = true;
     };
-  }, []);
+  }, [includePrereleases]);
 
   if (!result || !result.available || dismissed) return null;
 
@@ -60,18 +71,24 @@ export function UpdateBanner() {
       setProgress(0);
       setNotice(null);
       try {
-        const applyResult = await result.applyFn((percent) => setProgress(percent));
+        const applyResult = await result.applyFn((percent) => {
+          if (mounted.current) setProgress(percent);
+        });
+        if (!mounted.current) return;
         if (applyResult.status === 'permission_required') {
           setNotice('permissionRequired');
         } else if (applyResult.status === 'installer_started') {
           setNotice('installerStarted');
         }
       } catch (err) {
+        if (!mounted.current) return;
         console.warn('[UpdateBanner] apply failed', err);
         setNotice('failed');
       } finally {
-        setInstalling(false);
-        setProgress(null);
+        if (mounted.current) {
+          setInstalling(false);
+          setProgress(null);
+        }
       }
     } else if (result.releaseUrl) {
       window.open(result.releaseUrl, '_blank', 'noopener,noreferrer');
@@ -127,14 +144,21 @@ export function UpdateBanner() {
         </svg>
 
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">
-            {t('update.banner.title')}
-            {result.version ? (
-              <span className="ml-1.5 font-mono text-zinc-500 dark:text-zinc-400">
-                v{result.version}
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="truncate text-sm font-semibold">
+              {t('update.banner.title')}
+              {result.version ? (
+                <span className="ml-1.5 font-mono text-zinc-500 dark:text-zinc-400">
+                  v{result.version}
+                </span>
+              ) : null}
+            </p>
+            {result.prerelease && (
+              <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-semibold text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                {t('update.beta')}
               </span>
-            ) : null}
-          </p>
+            )}
+          </div>
           {noteLine && (
             <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{noteLine}</p>
           )}

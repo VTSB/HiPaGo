@@ -27,6 +27,7 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -35,14 +36,13 @@ import java.net.URL;
  * Capacitor plugin for in-app APK update.
  *
  * Two methods:
- *   check({owner, repo}) → {available, version?, notes?, apkUrl?}
- *     Queries https://api.github.com/repos/{owner}/{repo}/releases/latest,
- *     compares the tag (e.g. "v0.0.7") against the installed app version,
- *     finds the first `.apk` asset, returns the download URL. Resolves
+ *   check({owner, repo, includePrereleases?}) → {available, version?, notes?, apkUrl?, prerelease?}
+ *     Queries stable/latest by default, or published releases when beta is
+ *     enabled, and selects the highest installable newer numeric version. Resolves
  *     {available:false} on any network or parse error (UI prefers silent
  *     no-op over a broken banner).
  *
- *   install({apkUrl}) → {status}
+ *   install({apkUrl, requestId?}) → {status}
  *     Downloads via DownloadManager into the app's external-files Downloads
  *     directory (path declared in res/xml/file_paths.xml), then on
  *     ACTION_DOWNLOAD_COMPLETE fires an Intent.ACTION_VIEW with a
@@ -52,71 +52,36 @@ import java.net.URL;
  */
 @CapacitorPlugin(name = "Updater")
 public class UpdaterPlugin extends Plugin {
+    private static final int RELEASES_PER_PAGE = 100;
+    private static final int MAX_RELEASE_PAGES = 10;
 
     @PluginMethod
     public void check(PluginCall call) {
         final String owner = call.getString("owner");
         final String repo = call.getString("repo");
+        final boolean includePrereleases = call.getBoolean("includePrereleases", false);
         if (owner == null || owner.isEmpty() || repo == null || repo.isEmpty()) {
             call.reject("owner and repo are required");
             return;
         }
         new Thread(() -> {
             try {
-                URL url = new URL("https://api.github.com/repos/" + owner + "/" + repo + "/releases/latest");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestProperty("Accept", "application/vnd.github+json");
-                // A user-initiated "Check for updates" must always hit the network
-                // fresh — never serve a cached "no newer version" body that only
-                // clears on app restart. Disable any HTTP response cache (a default
-                // one is absent today but may be installed later / by some OEMs) and
-                // ask intermediaries to revalidate.
-                conn.setUseCaches(false);
-                conn.setRequestProperty("Cache-Control", "no-cache");
-                conn.setConnectTimeout(10000);
-                conn.setReadTimeout(15000);
-
-                int code = conn.getResponseCode();
-                if (code != 200) {
+                JSONArray releases = fetchReleases(owner, repo, includePrereleases);
+                UpdateReleaseSelector.Update update = UpdateReleaseSelector.select(
+                        releases, getCurrentVersion(), includePrereleases);
+                if (update == null) {
                     JSObject ret = new JSObject();
                     ret.put("available", false);
-                    call.resolve(ret);
-                    return;
-                }
-
-                StringBuilder body = new StringBuilder();
-                try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
-                    String line;
-                    while ((line = r.readLine()) != null) {
-                        body.append(line).append('\n');
-                    }
-                }
-
-                JSONObject json = new JSONObject(body.toString());
-                String tag = json.optString("tag_name", "");
-                String remoteVer = tag.startsWith("v") ? tag.substring(1) : tag;
-                String currentVer = getCurrentVersion();
-                if (remoteVer.isEmpty() || !isNewer(remoteVer, currentVer)) {
-                    JSObject ret = new JSObject();
-                    ret.put("available", false);
-                    call.resolve(ret);
-                    return;
-                }
-
-                String apkUrl = findApkAssetUrl(json.optJSONArray("assets"));
-                if (apkUrl == null) {
-                    JSObject ret = new JSObject();
-                    ret.put("available", false);
-                    ret.put("reason", "no .apk asset in release");
                     call.resolve(ret);
                     return;
                 }
 
                 JSObject ret = new JSObject();
                 ret.put("available", true);
-                ret.put("version", remoteVer);
-                ret.put("notes", json.optString("body", ""));
-                ret.put("apkUrl", apkUrl);
+                ret.put("version", update.version);
+                ret.put("notes", update.notes);
+                ret.put("apkUrl", update.apkUrl);
+                ret.put("prerelease", update.prerelease);
                 call.resolve(ret);
             } catch (Exception e) {
                 JSObject ret = new JSObject();
@@ -127,9 +92,56 @@ public class UpdaterPlugin extends Plugin {
         }).start();
     }
 
+    private static JSONArray fetchReleases(String owner, String repo, boolean includePrereleases) throws Exception {
+        String endpoint = "https://api.github.com/repos/" + owner + "/" + repo + "/releases";
+        if (!includePrereleases) {
+            return new JSONArray().put(new JSONObject(fetchReleaseResponse(endpoint + "/latest")));
+        }
+        JSONArray releases = new JSONArray();
+        for (int page = 1; page <= MAX_RELEASE_PAGES; page++) {
+            JSONArray batch = new JSONArray(fetchReleaseResponse(
+                    endpoint + "?per_page=" + RELEASES_PER_PAGE + "&page=" + page));
+            for (int i = 0; i < batch.length(); i++) {
+                releases.put(batch.get(i));
+            }
+            if (batch.length() < RELEASES_PER_PAGE) {
+                return releases;
+            }
+        }
+        // An incomplete scan cannot prove which published version is highest.
+        throw new IOException("Release list exceeds update check limit");
+    }
+
+    private static String fetchReleaseResponse(String endpoint) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+        try {
+            conn.setRequestProperty("Accept", "application/vnd.github+json");
+            // Manual checks must not replay a cached no-update response.
+            conn.setUseCaches(false);
+            conn.setRequestProperty("Cache-Control", "no-cache");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(15000);
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                throw new IOException("Release check returned HTTP " + code);
+            }
+            StringBuilder body = new StringBuilder();
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    body.append(line).append('\n');
+                }
+            }
+            return body.toString();
+        } finally {
+            conn.disconnect();
+        }
+    }
+
     @PluginMethod
     public void install(PluginCall call) {
         final String apkUrl = call.getString("apkUrl");
+        final String requestId = call.getString("requestId");
         if (apkUrl == null || apkUrl.isEmpty()) {
             call.reject("apkUrl is required");
             return;
@@ -175,7 +187,7 @@ public class UpdaterPlugin extends Plugin {
             // Surface download progress to the JS layer so the in-app banner /
             // settings card show a moving bar instead of a frozen 0%.
             // DownloadManager has no progress callback, so poll it.
-            startProgressPolling(dm, downloadId);
+            startProgressPolling(dm, downloadId, requestId);
 
             final BroadcastReceiver onComplete = new BroadcastReceiver() {
                 @Override
@@ -236,7 +248,7 @@ public class UpdaterPlugin extends Plugin {
      * only way to drive the in-app progress bar. The thread ends on its own when
      * the download succeeds, fails, or its row disappears — no cancel plumbing.
      */
-    private void startProgressPolling(final DownloadManager dm, final long downloadId) {
+    private void startProgressPolling(final DownloadManager dm, final long downloadId, final String requestId) {
         new Thread(() -> {
             while (true) {
                 int status = -1;
@@ -258,7 +270,7 @@ public class UpdaterPlugin extends Plugin {
                 }
 
                 if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    emitProgress(100);
+                    emitProgress(100, requestId);
                     return;
                 }
                 if (status == DownloadManager.STATUS_FAILED) {
@@ -269,7 +281,7 @@ public class UpdaterPlugin extends Plugin {
                 // instead of showing a false number.
                 if (total > 0 && soFar >= 0) {
                     long pct = (soFar * 100L) / total;
-                    emitProgress((int) Math.max(0, Math.min(100, pct)));
+                    emitProgress((int) Math.max(0, Math.min(100, pct)), requestId);
                 }
 
                 try {
@@ -281,9 +293,12 @@ public class UpdaterPlugin extends Plugin {
         }).start();
     }
 
-    private void emitProgress(int percent) {
+    private void emitProgress(int percent, String requestId) {
         JSObject ev = new JSObject();
         ev.put("percent", percent);
+        if (requestId != null) {
+            ev.put("requestId", requestId);
+        }
         notifyListeners("downloadProgress", ev);
     }
 
@@ -315,50 +330,9 @@ public class UpdaterPlugin extends Plugin {
         }
     }
 
-    private static String findApkAssetUrl(JSONArray assets) {
-        if (assets == null) {
-            return null;
-        }
-        for (int i = 0; i < assets.length(); i++) {
-            JSONObject a = assets.optJSONObject(i);
-            if (a == null) {
-                continue;
-            }
-            String name = a.optString("name", "");
-            if (name.toLowerCase().endsWith(".apk")) {
-                String url = a.optString("browser_download_url", "");
-                if (!url.isEmpty()) {
-                    return url;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static boolean isNewer(String remote, String current) {
-        String[] r = remote.split("\\.");
-        String[] c = current.split("\\.");
-        int n = Math.max(r.length, c.length);
-        for (int i = 0; i < n; i++) {
-            int ri = parseIntSafe(i < r.length ? r[i] : "0");
-            int ci = parseIntSafe(i < c.length ? c[i] : "0");
-            if (ri > ci) return true;
-            if (ri < ci) return false;
-        }
-        return false;
-    }
-
     private String getCurrentVersion() throws Exception {
         Context ctx = getContext();
         PackageInfo info = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0);
         return info.versionName != null ? info.versionName : "0.0.0";
-    }
-
-    private static int parseIntSafe(String s) {
-        try {
-            return Integer.parseInt(s);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
     }
 }

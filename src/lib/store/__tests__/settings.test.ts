@@ -42,6 +42,7 @@ describe('settings store', () => {
       blurTags: ['male:yaoi'],
       defaultFilterQuery: '',
       secureScreen: true,
+      receiveBetaUpdates: false,
       libraryInitialTab: 'favorites',
     });
   });
@@ -207,6 +208,32 @@ describe('settings store', () => {
       expect(useSettingsStore.getState().secureScreen).toBe(true);
       useSettingsStore.getState().setSecureScreen(false);
       expect(useSettingsStore.getState().secureScreen).toBe(false);
+    });
+  });
+
+  describe('beta update preference', () => {
+    it('defaults to stable for a new installation', () => {
+      expect(useSettingsStore.getInitialState().receiveBetaUpdates).toBe(false);
+    });
+
+    it('persists opt-in and opt-out across hydration', async () => {
+      for (const enabled of [true, false]) {
+        useSettingsStore.getState().setReceiveBetaUpdates(enabled);
+        const saved = mockLocalStorage._store['hipago-settings'];
+        expect(JSON.parse(saved).state.receiveBetaUpdates).toBe(enabled);
+        useSettingsStore.setState({ receiveBetaUpdates: !enabled });
+        mockLocalStorage.getItem.mockReturnValueOnce(saved);
+        await useSettingsStore.persist.rehydrate();
+        expect(useSettingsStore.getState().receiveBetaUpdates).toBe(enabled);
+      }
+    });
+
+    it('keeps stable when older saved settings omit the preference', async () => {
+      mockLocalStorage.getItem.mockReturnValueOnce(JSON.stringify({
+        state: { locale: 'en' }, version: 7,
+      }));
+      await useSettingsStore.persist.rehydrate();
+      expect(useSettingsStore.getState().receiveBetaUpdates).toBe(false);
     });
   });
 
