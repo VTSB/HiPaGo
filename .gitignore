@@ -31,6 +31,8 @@
 
 # IDE local state
 /.idea/caches/
+/.idea/vcs.xml
+/.idea/deviceManager.xml
 /android/.idea/caches/
 /android/.idea/deviceManager.xml
 /android/.idea/runConfigurations.xml
