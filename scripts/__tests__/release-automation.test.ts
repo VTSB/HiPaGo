@@ -144,7 +144,7 @@ describe('manual numeric tag reservation', () => {
     expect(api.releases[0].body).toContain(`"tagRefSha":"${SHA}"`);
   });
 
-  it.each(['v01.2.3', '1.2.3', 'v1.2.3-beta', 'v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v2100.0.1'])('rejects invalid or unsafe %s', (tag) => {
+  it.each(['v01.2.3', '1.2.3', 'v1.2.3-beta', 'v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v2100.0.1', 'v256.0.0', 'v1.256.0'])('rejects invalid or unsafe %s', (tag) => {
     const api = new FakeGitHub();
     expect(() => api.automation(10, tag)).toThrow();
     expect(api.writes()).toEqual([]);
@@ -203,6 +203,17 @@ describe('manual numeric tag reservation', () => {
     else api.releases.push({ id: 1, tag_name: 'v0.0.2', body: null, draft: true, prerelease: true, created_at: '' });
     await expect(api.automation().prepare()).rejects.toThrow('newer than every other reserved');
     expect(api.writes()).toEqual([]);
+  });
+
+  it.each(['tag', 'release'])('can prepare after rejected numeric names remain in %s history', async (source) => {
+    const api = new FakeGitHub();
+    for (const name of ['v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v256.0.0', 'v1.256.0', 'v9007199254740992.0.0']) {
+      if (source === 'tag') api.addTag(name, OTHER_SHA);
+      else api.releases.push({ id: ++api.nextId, tag_name: name, body: null, draft: true, prerelease: true, created_at: '' });
+    }
+    await expect(api.automation().prepare()).resolves.toMatchObject({ tag: 'v0.0.1' });
+    expect(api.writes()).toHaveLength(1);
+    expect(api.writes()[0]).toMatchObject({ method: 'POST', path: `/repos/${REPO}/releases` });
   });
 
   it('refuses a truncated 100-page tag scan without mutation', async () => {

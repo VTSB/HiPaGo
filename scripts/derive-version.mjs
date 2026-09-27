@@ -18,6 +18,9 @@ export function parseTag(tag) {
   if (!Number.isSafeInteger(versionCode) || minor > 999 || patch > 999 || versionCode < 1 || versionCode > 2_100_000_000) {
     throw new Error(`Tag '${tag}' exceeds the Android versionCode range (minor/patch <= 999; code 1..2100000000).`);
   }
+  if (major > 255 || minor > 255) {
+    throw new Error(`Tag '${tag}' exceeds the Windows MSI range (major/minor <= 255).`);
+  }
   return { version, versionCode };
 }
 

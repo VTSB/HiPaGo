@@ -175,7 +175,14 @@ export class ReleaseAutomation {
     const tags = await this.list('/tags');
     const code = parseTag(this.tag).versionCode;
     const reserved = [...tags.map(({ name }) => name), ...releases.map(({ tag_name }) => tag_name)];
-    if (reserved.some((name) => name !== this.tag && canonical.test(name) && parseTag(name).versionCode >= code)) {
+    if (reserved.some((name) => {
+      if (name === this.tag || !canonical.test(name)) return false;
+      // Rejected manual tags remain in Git. Only supported release versions
+      // reserve a number; an invalid tag must not poison every later release.
+      let versionCode;
+      try { ({ versionCode } = parseTag(name)); } catch { return false; }
+      return versionCode >= code;
+    })) {
       throw new Error('Pushed tag must be newer than every other reserved numeric tag or release.');
     }
     // Manual tags are never created or changed here. Preserve both the direct

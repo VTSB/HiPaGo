@@ -32,12 +32,12 @@ describe('parseTag', () => {
     expect(parseTag('v2.3.4')).toEqual({ version: '2.3.4', versionCode: 2_003_004 });
   });
 
-  it.each(['v01.2.3', 'v1.02.3', 'v1.2.03', 'v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v2100.0.1', 'v9007199254740992.0.0'])('rejects noncanonical or unsafe version %s', (tag) => {
+  it.each(['v01.2.3', 'v1.02.3', 'v1.2.03', 'v0.0.0', 'v1.1000.0', 'v1.0.1000', 'v2100.0.1', 'v9007199254740992.0.0', 'v256.0.0', 'v1.256.0'])('rejects noncanonical or unsafe version %s', (tag) => {
     expect(() => parseTag(tag)).toThrow();
   });
 
-  it('accepts the highest Android versionCode without overflow', () => {
-    expect(parseTag('v2100.0.0').versionCode).toBe(2_100_000_000);
+  it('accepts the highest version supported by both Android and Windows MSI', () => {
+    expect(parseTag('v255.255.999')).toEqual({ version: '255.255.999', versionCode: 255_255_999 });
   });
 
   it('rejects prerelease suffixes', () => {
