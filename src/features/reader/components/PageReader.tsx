@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { GalleryImage, GgConfig } from '@/lib/utils/types';
 import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
@@ -17,6 +17,7 @@ import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImage
 // smooth-scroll for a snappier flip. Tune here.
 const PAGE_TURN_MS = 150;
 const PAGE_TURN_EASING = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
+const EMPTY_IMAGE_URLS: string[] = [];
 
 export function PageReader({
   images,
@@ -48,6 +49,7 @@ export function PageReader({
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
   const [width, setWidth] = useState(0);
+  const [initialViewportReady, setInitialViewportReady] = useState(false);
   // Mirror `width` so the once-attached scroll listener reads the current value
   // (and the SAME value the slides are sized with) without re-subscribing.
   const widthRef = useRef(0);
@@ -131,13 +133,28 @@ export function PageReader({
     estimateSize,
     overscan: 2,
   });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  useLayoutEffect(() => {
+    if (initialViewportReady || !width) return;
+    const el = scrollerRef.current;
+    const targetSlide = Math.floor(currentPage / step);
+    // A cold virtualizer initially mounts page zero's window. The initial jump
+    // changes scrollLeft before its scroll event mounts the requested window;
+    // keep both eager display and warming out of the queue during that gap.
+    if (el && Math.abs(el.scrollLeft - targetSlide * width) < 1 &&
+        virtualItems.some((item) => item.index === targetSlide)) {
+      setInitialViewportReady(true);
+    }
+  }, [initialViewportReady, width, currentPage, step, virtualItems]);
 
   // Re-measure virtual items when the viewport width changes.
   useEffect(() => {
     if (width) virtualizer.measure();
   }, [width, virtualizer]);
 
-  useReaderImagePreloader(urls, Math.floor(currentPage / step) * step, step, !!normalizedOfflineSources);
+  useReaderImagePreloader(initialViewportReady ? urls : EMPTY_IMAGE_URLS,
+    Math.floor(currentPage / step) * step, step, !!normalizedOfflineSources);
 
   // Sync the snapped page back to the parent (native scroll → currentPage).
   useEffect(() => {
@@ -374,6 +391,7 @@ export function PageReader({
   const currentSlide = Math.floor(currentPage / step);
 
   const renderSlide = (slideIndex: number) => {
+    if (!normalizedOfflineSources && !initialViewportReady) return null;
     const pageIdx = slideIndex * step;
     const secondIdx = dualPage ? pageIdx + 1 : -1;
     const hasSecond = dualPage && secondIdx < images.length;
@@ -434,7 +452,7 @@ export function PageReader({
         ref={trackRef}
         style={{ width: virtualizer.getTotalSize(), height: '100%', position: 'relative' }}
       >
-        {virtualizer.getVirtualItems().map((vi) => (
+        {virtualItems.map((vi) => (
           <div
             key={vi.key}
             data-slide-index={vi.index}

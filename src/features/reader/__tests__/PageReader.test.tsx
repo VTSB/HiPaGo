@@ -39,19 +39,30 @@ vi.mock('@/lib/utils/image-url', () => ({
 // Spy on the virtualizer's scrollToIndex so the open-at-page regression test can
 // assert the initial positioning routes through the library API (not a raw
 // scrollLeft assignment that clamps short on device).
-const { scrollToIndexSpy } = vi.hoisted(() => ({ scrollToIndexSpy: vi.fn() }));
+const { scrollToIndexSpy, virtualWindow } = vi.hoisted(() => ({
+  scrollToIndexSpy: vi.fn(),
+  virtualWindow: { holdInitial: false, start: null as number | null },
+}));
 
 // Deterministic virtualizer: render a windowed slice (≤5) so jsdom (which has no
 // layout/scroll) still mounts slides. Mirrors the VirtualGalleryGrid test mock.
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: () => number }) => {
+    const [range, setRange] = React.useState({ start: 0 });
     const sz = estimateSize() || 1000;
+    const first = virtualWindow.start ?? range.start;
     return {
       getVirtualItems: () =>
-        Array.from({ length: Math.min(count, 5) }, (_, i) => ({ key: i, index: i, start: i * sz, size: sz })),
+        Array.from({ length: Math.min(count - first, 5) }, (_, i) => {
+          const index = first + i;
+          return { key: index, index, start: index * sz, size: sz };
+        }),
       getTotalSize: () => count * sz,
       measure: () => {},
-      scrollToIndex: scrollToIndexSpy,
+      scrollToIndex: (index: number, options: unknown) => {
+        scrollToIndexSpy(index, options);
+        if (!virtualWindow.holdInitial) setRange({ start: Math.max(0, index - 2) });
+      },
     };
   },
 }));
@@ -94,6 +105,12 @@ async function resolveConfigAndDrainPreloads() {
 }
 
 beforeEach(() => {
+  virtualWindow.holdInitial = false;
+  virtualWindow.start = null;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    left: 0, top: 0, right: 400, bottom: 800, width: 400, height: 800,
+    x: 0, y: 0, toJSON() {},
+  } as DOMRect);
   mockObserve.mockClear();
   mockDisconnect.mockClear();
   settings.imageFormat = 'webp';
@@ -105,6 +122,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -179,6 +197,44 @@ describe('PageReader preload window', () => {
   });
   afterEach(() => { vi.stubGlobal('Image', OriginalImage); });
 
+  it('waits for the requested cold page window before starting display or warm requests', async () => {
+    virtualWindow.holdInitial = true;
+    const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const onPageChange = vi.fn();
+    const { container, rerender } = render(
+      <PageReader images={images50} currentPage={19} onPageChange={onPageChange} />,
+    );
+    await resolveConfigAndDrainPreloads();
+    const scroller = container.firstElementChild as HTMLElement;
+    expect(scroller.scrollLeft).toBe(19 * 400);
+    expect(container.querySelector('[data-slide-index="0"]')).not.toBeNull();
+    expect(container.querySelectorAll('img[src]')).toHaveLength(0);
+    expect(createdImages).toHaveLength(0);
+
+    // Position has moved, but the virtualizer's old range remains until its
+    // scroll notification commits the target and neighboring slides.
+    virtualWindow.start = 17;
+    rerender(<PageReader images={images50} currentPage={19} onPageChange={onPageChange} />);
+    await act(async () => { await drainPreloads(); });
+    expect(container.querySelector('img[alt="Page 20"]')?.getAttribute('src'))
+      .toBe('https://cdn.example.com/019.jpg');
+    expect(container.querySelectorAll('img[src]')).toHaveLength(5);
+    expect(createdImages.length).toBeGreaterThan(0);
+    expect(createdImages.flatMap(({ srcs }) => srcs))
+      .not.toContain('https://cdn.example.com/000.jpg');
+  });
+
+  it('does not admit cold display or warming before the viewport width is measured', async () => {
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+      left: 0, top: 0, right: 0, bottom: 800, width: 0, height: 800,
+    } as DOMRect);
+    const { container } = render(<PageReader images={images} currentPage={0} onPageChange={vi.fn()} />);
+    await resolveConfigAndDrainPreloads();
+    expect(container.querySelector('[data-slide-index="0"]')).not.toBeNull();
+    expect(container.querySelectorAll('img[src]')).toHaveLength(0);
+    expect(createdImages).toHaveLength(0);
+  });
+
   it('warms surrounding pages via JS Image() (no DOM <img data-preload>)', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { container } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
@@ -236,6 +292,10 @@ describe('PageReader preload window', () => {
     await resolveConfigAndDrainPreloads();
     const initialCount = createdImages.length;
     expect(initialCount).toBeGreaterThan(0);
+    const scroller = container.firstElementChild as HTMLElement;
+    scroller.scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+      scroller.scrollLeft = typeof options === 'number' ? options : options?.left ?? 0;
+    });
     rerender(<PageReader images={images25} currentPage={20} onPageChange={vi.fn()} />);
     await act(async () => { await drainPreloads(); });
     expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
@@ -376,9 +436,13 @@ describe('PageReader preload concurrency cap', () => {
 
   it('aborts the previous page warms when navigating to a new page', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
-    const { rerender } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
+    const { container, rerender } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
     await resolveConfigAndDrainPreloads();
     expect(created).toBe(4);
+    const scroller = container.firstElementChild as HTMLElement;
+    scroller.scrollTo = vi.fn((options?: ScrollToOptions | number) => {
+      scroller.scrollLeft = typeof options === 'number' ? options : options?.left ?? 0;
+    });
     rerender(<PageReader images={images50} currentPage={30} onPageChange={vi.fn()} />);
     await act(async () => { await Promise.resolve(); });
     // The 4 warms from page 20 were aborted (src cleared) when the effect re-ran.
