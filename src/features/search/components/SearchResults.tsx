@@ -54,6 +54,12 @@ export function SearchResults() {
   });
 
   const [viewingPage, setViewingPage] = useState(1);
+  const populationKey = JSON.stringify([query, defaultFilterQuery, language, sort]);
+  const [previousPopulation, setPreviousPopulation] = useState(populationKey);
+  if (populationKey !== previousPopulation) {
+    setPreviousPopulation(populationKey);
+    setViewingPage(1);
+  }
 
   const gridRef = useRef<VirtualGalleryGridHandle>(null);
   const floatingNavRef = useRef<FloatingPageNavHandle>(null);
@@ -182,6 +188,7 @@ export function SearchResults() {
             </h2>
           )}
           <VirtualGalleryGrid
+            key={populationKey}
             ref={gridRef}
             totalLength={filteredIds.length}
             totalPages={totalPages}

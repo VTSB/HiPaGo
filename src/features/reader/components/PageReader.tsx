@@ -6,18 +6,11 @@ import type { GalleryImage, GgConfig } from '@/lib/utils/types';
 import { getBestImageUrl, galleryImageToFile } from '@/lib/utils/image-url';
 import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
-import { AbortableImage, preloadImageSource } from '@/shared/components/AbortableImage';
+import { AbortableImage } from '@/shared/components/AbortableImage';
+import { useReaderImagePreloader } from '../hooks/useReaderImagePreloader';
 import { OfflineImage } from './OfflineImage';
 import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImages';
 
-// High-res manga pages can be 10–20 MB decoded each. Hidden preload <img>
-// tags still get decoded by the browser, so a large mounted window pins
-// hundreds of MB of bitmap memory and OOMs during rapid prev/next mashing.
-// We keep the window small and asymmetric (readers mostly move forward)
-// and warm the cache via JS Image() objects whose decoded bitmaps are
-// released the moment the user navigates again.
-const PRELOAD_AHEAD = 15;
-const PRELOAD_BEHIND = 5;
 // Page-turn slide duration (ms). The turn animates the track's `transform`
 // (compositor thread) instead of `scrollLeft` (main thread), so it's smooth and
 // never churns the virtualizer mid-animation — ~half the browser's native
@@ -144,60 +137,7 @@ export function PageReader({
     if (width) virtualizer.measure();
   }, [width, virtualizer]);
 
-  // Warm nearby pages through the same platform-aware image loader used by
-  // AbortableImage. This matters on Capacitor: a raw JS Image() cannot attach
-  // the bypass headers, so Android would skip preloading and then visibly wait
-  // on every page turn.
-  useEffect(() => {
-    if (!urls.length) return;
-    // Skip JS-Image preloading for offline (blob) URLs — they are already in
-    // memory so there is nothing to warm and no network request to abort.
-    if (normalizedOfflineSources) return;
-    const end = Math.min(urls.length - 1, currentPage + PRELOAD_AHEAD);
-    const start = Math.max(0, currentPage - PRELOAD_BEHIND);
-    const skip = new Set(dualPage ? [currentPage, currentPage + 1] : [currentPage]);
-
-    // Warm nearest-first, forward-biased (readers move forward): +1, +2, …
-    // ahead, then -1, -2, … behind. Order matters because we cap concurrency.
-    const queue: string[] = [];
-    for (let i = currentPage + 1; i <= end; i++) if (!skip.has(i)) queue.push(urls[i]);
-    for (let i = currentPage - 1; i >= start; i--) if (!skip.has(i)) queue.push(urls[i]);
-
-    // Cap in-flight warming requests. The visible page's <img> shares the CDN's
-    // small connection pool; firing all ~20 preloads at once let low-priority
-    // warming starve the page the user is actually looking at (stuck "loading
-    // forever"). MAX_PRELOAD leaves slots free for the high-priority visible
-    // image. No timeout — slow syncs are allowed to finish.
-    const MAX_PRELOAD = 4;
-    // Abort warms for the page we leave: stalled CDN requests otherwise hold the
-    // per-host connection slots forever, permanently starving the next visible
-    // page into "loading". Aborting on navigation frees those slots at once.
-    const controller = new AbortController();
-    let cancelled = false;
-    let active = 0;
-    let next = 0;
-    const pump = () => {
-      while (!cancelled && active < MAX_PRELOAD && next < queue.length) {
-        const url = queue[next++];
-        active += 1;
-        preloadImageSource(url, controller.signal)
-          .catch(() => {
-            // Best-effort warming only (aborted or failed). Visible image load
-            // owns user-facing errors.
-          })
-          .finally(() => {
-            active -= 1;
-            if (!cancelled) pump();
-          });
-      }
-    };
-    pump();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [urls, currentPage, dualPage, normalizedOfflineSources]);
+  useReaderImagePreloader(urls, Math.floor(currentPage / step) * step, step, !!normalizedOfflineSources);
 
   // Sync the snapped page back to the parent (native scroll → currentPage).
   useEffect(() => {

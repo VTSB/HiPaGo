@@ -36,6 +36,13 @@ export function GalleryListView() {
   const { totalLength, requestPage, getItemId, isInitialLoading, error } = useVirtualGallery(sort);
 
   const language = useSettingsStore((s) => s.language);
+  const defaultFilterQuery = useSettingsStore((s) => s.defaultFilterQuery);
+  const populationKey = JSON.stringify([sort, language, defaultFilterQuery]);
+  const [previousPopulation, setPreviousPopulation] = useState(populationKey);
+  if (populationKey !== previousPopulation) {
+    setPreviousPopulation(populationKey);
+    setViewingPage(1);
+  }
 
   const t = useT();
 
@@ -51,9 +58,11 @@ export function GalleryListView() {
   const [cachedTotalPages, setCachedTotalPages] = useState(0);
   const [prevSortForCache, setPrevSortForCache] = useState(sort);
   const [prevLanguageForCache, setPrevLanguageForCache] = useState(language);
-  if (sort !== prevSortForCache || language !== prevLanguageForCache) {
+  const [prevFilterForCache, setPrevFilterForCache] = useState(defaultFilterQuery);
+  if (sort !== prevSortForCache || language !== prevLanguageForCache || defaultFilterQuery !== prevFilterForCache) {
     setPrevSortForCache(sort);
     setPrevLanguageForCache(language);
+    setPrevFilterForCache(defaultFilterQuery);
     setCachedTotalPages(0);
   }
   if (totalPages > cachedTotalPages) {
@@ -110,6 +119,7 @@ export function GalleryListView() {
         <SkeletonGrid />
       ) : (
         <VirtualGalleryGrid
+          key={populationKey}
           ref={gridRef}
           totalLength={totalLength}
           totalPages={displayTotalPages}

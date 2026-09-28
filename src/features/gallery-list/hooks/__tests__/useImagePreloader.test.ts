@@ -4,176 +4,133 @@ import { renderHook, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useImagePreloader } from '../useImagePreloader';
-import { GalleryBlockType } from '@/lib/utils/types';
-import type { GalleryBlock } from '@/lib/utils/types';
-import type { VirtualItem } from '@tanstack/react-virtual';
+import { GalleryBlockType, type GalleryBlock } from '@/lib/utils/types';
+import { PAGE_SIZE } from '@/lib/utils/constants';
 
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-const mockResolveBlock = vi.fn<(id: number, signal?: AbortSignal) => Promise<GalleryBlock>>();
-
+const { resolveBlock, preload } = vi.hoisted(() => ({
+  resolveBlock: vi.fn(), preload: vi.fn(),
+}));
 vi.mock('../useGalleryBlock', () => ({
-  galleryBlockQueryKey: (id: number) => ['gallery-block', id],
-  resolveBlock: (...args: [number, AbortSignal?]) => mockResolveBlock(...args),
+  galleryBlockQueryKey: (id: number) => ['gallery-block', id], resolveBlock,
 }));
+vi.mock('@/shared/components/AbortableImage', () => ({ preloadImageSource: preload }));
+vi.mock('@/lib/api/url-resolver', () => ({ resolveThumbnailUrl: (url: string) => url }));
 
-vi.mock('@/lib/api/url-resolver', () => ({
-  resolveThumbnailUrl: (url: string) => `/api/img/proxied/${url}`,
-}));
-
-// Track Image() constructor calls
-const createdImages: { src: string }[] = [];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeBlock(id: number, thumbnail: string): GalleryBlock {
+const block = (id: number): GalleryBlock => ({
+  id, type: GalleryBlockType.NOT_DETAILED, title: String(id),
+  thumbnail: '/thumb/' + id, tags: {}, date: new Date(), related: [],
+});
+function setup() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: React.ReactNode }) =>
+    React.createElement(QueryClientProvider, { client: queryClient }, children);
+  return { queryClient, wrapper };
+}
+function options(page = 2, count = PAGE_SIZE * 4) {
   return {
-    id,
-    type: GalleryBlockType.NOT_DETAILED,
-    title: `Gallery ${id}`,
-    thumbnail,
-    tags: {},
-    date: new Date(),
-    related: [],
+    getItemId: (index: number) => index + 1, viewingPage: page,
+    visibleStartItem: (page - 1) * PAGE_SIZE + 5,
+    visibleEndItem: (page - 1) * PAGE_SIZE + 9,
+    totalLength: count, requestPage: vi.fn(),
   };
 }
-
-function makeVirtualItems(startIndex: number, count: number): VirtualItem[] {
-  return Array.from({ length: count }, (_, i) => ({
-    index: startIndex + i,
-    key: startIndex + i,
-    start: (startIndex + i) * 300,
-    end: (startIndex + i + 1) * 300,
-    size: 300,
-    lane: 0,
-  }));
+async function flush() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(100);
+    for (let i = 0; i < 300; i++) await Promise.resolve();
+  });
 }
+beforeEach(() => {
+  vi.useFakeTimers();
+  resolveBlock.mockReset().mockImplementation(async (id: number) => block(id));
+  preload.mockReset().mockResolvedValue(undefined);
+});
+afterEach(() => vi.useRealTimers());
 
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return {
-    queryClient,
-    wrapper: ({ children }: { children: React.ReactNode }) =>
-      React.createElement(QueryClientProvider, { client: queryClient }, children),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('useImagePreloader — thumbnail image preloading', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    createdImages.length = 0;
-    mockResolveBlock.mockReset();
-
-    // Stub Image constructor to track preloaded images
-    vi.stubGlobal('Image', class {
-      _src = '';
-      get src() { return this._src; }
-      set src(v: string) {
-        this._src = v;
-        if (v) createdImages.push({ src: v });
-      }
-    });
-
-    // requestIdleCallback → run synchronously
-    vi.stubGlobal('requestIdleCallback', (fn: () => void) => {
-      fn();
-      return 0;
-    });
-    vi.stubGlobal('cancelIdleCallback', () => {});
+describe('adjacent logical page warming', () => {
+  it.each([
+    [1, [0, 1], 1, PAGE_SIZE * 2],
+    [2, [1, 2, 0], 1, PAGE_SIZE * 3],
+    [4, [3, 2], PAGE_SIZE * 2 + 1, PAGE_SIZE * 4],
+  ])('clamps page %i to one previous/next page', async (page, expectedPages, firstId, lastId) => {
+    const props = options(page as number);
+    const { wrapper } = setup();
+    renderHook(() => useImagePreloader(props), { wrapper });
+    await flush();
+    expect(props.requestPage.mock.calls.map(([p]) => p)).toEqual(expectedPages);
+    const ids = resolveBlock.mock.calls.map(([id]) => id).sort((a, b) => a - b);
+    expect(ids).toEqual(Array.from({ length: (lastId as number) - (firstId as number) + 1 }, (_, i) => (firstId as number) + i));
+    expect(preload).toHaveBeenCalledTimes(ids.length);
+    expect(resolveBlock.mock.calls.every((args) => args[3] === 2)).toBe(true);
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
+  it('starts metadata at the actual viewport and holds the bound until images finish', async () => {
+    preload.mockImplementation(() => new Promise(() => {}));
+    const props = options();
+    const { wrapper } = setup();
+    renderHook(() => useImagePreloader(props), { wrapper });
+    await flush();
+    expect(resolveBlock).toHaveBeenCalledTimes(2);
+    expect(preload).toHaveBeenCalledTimes(2);
+    for (const [id] of resolveBlock.mock.calls) {
+      expect(id - 1).toBeGreaterThanOrEqual(props.visibleStartItem);
+      expect(id - 1).toBeLessThanOrEqual(props.visibleEndItem);
+    }
   });
 
-  it('preloads thumbnail images after block data is fetched', async () => {
-    const block = makeBlock(42, 'https://cdn.example.com/tn/42.avif');
-    mockResolveBlock.mockResolvedValue(block);
-
-    const { wrapper } = createWrapper();
-
-    // Visible rows = [5..9], preloadRows=2 → preload rows [3,4] and [10,11]
-    // With 5 cols, row 10 col 0 → itemIndex = 50, id comes from getItemId
-    const getItemId = (idx: number) => idx < 60 ? 42 : null;
-
-    renderHook(
-      () =>
-        useImagePreloader({
-          getItemId,
-          virtualItems: makeVirtualItems(5, 5),
-          windowStartItem: 0,
-          actualCols: 5,
-          totalLength: 60,
-          requestPage: vi.fn(),
-          preloadRows: 2,
-        }),
-      { wrapper },
-    );
-
-    // Trigger the 300ms debounce
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    // Wait for prefetch promises to resolve
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
-    // Block data should have been prefetched
-    expect(mockResolveBlock).toHaveBeenCalled();
-
-    // Thumbnail images should have been preloaded via new Image().src
-    expect(createdImages.length).toBeGreaterThan(0);
-    expect(createdImages.some((img) => img.src.includes('42.avif'))).toBe(true);
+  it('does not restart warming when equivalent callbacks and viewport bounds rerender', async () => {
+    preload.mockImplementation(() => new Promise(() => {}));
+    const { wrapper } = setup();
+    const { rerender } = renderHook((props) => useImagePreloader(props), { wrapper, initialProps: options() });
+    await flush();
+    const signal = preload.mock.calls[0][1] as AbortSignal;
+    rerender({ ...options(), visibleStartItem: PAGE_SIZE + 10 });
+    await flush();
+    expect(preload).toHaveBeenCalledTimes(2);
+    expect(signal.aborted).toBe(false);
+    expect(preload.mock.calls[0][2]()).toBeGreaterThan(0);
   });
 
-  it('does NOT preload images for LOADING or FAILED blocks', async () => {
-    const loadingBlock: GalleryBlock = {
-      id: 99,
-      type: GalleryBlockType.LOADING,
-      title: '',
-      thumbnail: '',
-      tags: {},
-      date: new Date(),
-      related: [],
-    };
-    mockResolveBlock.mockResolvedValue(loadingBlock);
+  it('cancels old metadata and never warms an image from a late obsolete result', async () => {
+    const pending: Array<{ id: number; signal: AbortSignal; resolve: (value: GalleryBlock) => void }> = [];
+    resolveBlock.mockImplementation((id, signal) => new Promise((resolve) => pending.push({ id, signal, resolve })));
+    const { wrapper } = setup();
+    const { rerender, unmount } = renderHook((props) => useImagePreloader(props), { wrapper, initialProps: options(1, PAGE_SIZE * 10) });
+    await flush();
+    const old = pending.slice();
+    rerender(options(8, PAGE_SIZE * 10));
+    expect(old.every((p) => p.signal.aborted)).toBe(true);
+    await act(async () => { old.forEach((p) => p.resolve(block(p.id))); });
+    expect(preload).not.toHaveBeenCalled();
+    await flush();
+    unmount();
+    expect(pending.every((p) => p.signal.aborted)).toBe(true);
+  });
 
-    const { wrapper } = createWrapper();
-    const getItemId = (idx: number) => idx < 10 ? 99 : null;
+  it('skips failed metadata and an empty population', async () => {
+    resolveBlock.mockImplementation(async (id) => ({ ...block(id), type: GalleryBlockType.FAILED }));
+    const { wrapper } = setup();
+    const { rerender } = renderHook((props) => useImagePreloader(props), { wrapper, initialProps: options() });
+    await flush();
+    expect(preload).not.toHaveBeenCalled();
+    resolveBlock.mockClear();
+    const empty = options(1, 0);
+    rerender(empty);
+    await flush();
+    expect(empty.requestPage).not.toHaveBeenCalled();
+    expect(resolveBlock).not.toHaveBeenCalled();
+  });
 
-    renderHook(
-      () =>
-        useImagePreloader({
-          getItemId,
-          virtualItems: makeVirtualItems(0, 2),
-          windowStartItem: 0,
-          actualCols: 5,
-          totalLength: 20,
-          requestPage: vi.fn(),
-          preloadRows: 2,
-        }),
-      { wrapper },
-    );
-
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-      await vi.runAllTimersAsync();
-    });
-
-    // No image preloading for loading blocks
-    expect(createdImages.length).toBe(0);
+  it('aborts unfinished image warming on page changes and unmount', async () => {
+    preload.mockImplementation(() => new Promise(() => {}));
+    const { wrapper } = setup();
+    const { rerender, unmount } = renderHook((props) => useImagePreloader(props), { wrapper, initialProps: options(1) });
+    await flush();
+    const oldSignals = preload.mock.calls.map((args) => args[1] as AbortSignal);
+    rerender(options(4));
+    expect(oldSignals.every((s) => s.aborted)).toBe(true);
+    await flush();
+    unmount();
+    expect(preload.mock.calls.every((args) => args[1].aborted)).toBe(true);
   });
 });

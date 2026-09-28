@@ -18,8 +18,12 @@ vi.mock('../../hooks/useImagePreloader', () => ({
 }));
 
 vi.mock('../GalleryCard', () => ({
-  GalleryCardById: ({ id }: { id: number }) => <div data-testid={`card-${id}`} data-card-id={id} />,
+  GalleryCardById: ({ id, demand }: { id: number; demand: boolean }) => <div data-testid={`card-${id}`} data-card-id={id} data-demand={String(demand)} />,
 }));
+
+let mockVisibleRange: { startIndex: number; endIndex: number } | undefined;
+let mockVirtualCount = 5;
+beforeEach(() => { mockVisibleRange = undefined; mockVirtualCount = 5; });
 
 const mockScrollToIndex = vi.fn();
 const mockMeasure = vi.fn();
@@ -36,8 +40,9 @@ vi.mock('@tanstack/react-virtual', () => ({
   }) => {
     const sz = estimateSize();
     return {
+      range: mockVisibleRange,
       getVirtualItems: () =>
-        Array.from({ length: Math.min(count, 5) }, (_, i) => ({
+        Array.from({ length: Math.min(count, mockVirtualCount) }, (_, i) => ({
           key: i,
           index: i,
           start: i * sz,
@@ -191,6 +196,23 @@ describe('VirtualGalleryGrid — data-item-index', () => {
 // ---------------------------------------------------------------------------
 
 describe('VirtualGalleryGrid — requestPage', () => {
+  it('limits speculative cards to adjacent pages and demands metadata only for actual visible rows', () => {
+    mockVirtualCount = 30;
+    mockVisibleRange = { startIndex: 8, endIndex: 10 };
+    const requestPage = vi.fn();
+    const { container } = render(<VirtualGalleryGrid
+      totalLength={300} totalPages={12} viewingPage={4}
+      getItemId={(index) => index + 1} requestPage={requestPage}
+    />);
+    const demanded = Array.from(container.querySelectorAll('[data-demand="true"]'))
+      .map((el) => Number(el.getAttribute('data-card-id')));
+    expect(demanded).toEqual(Array.from({ length: 15 }, (_, i) => 41 + i));
+    expect(screen.queryByTestId('card-1')).toBeNull();
+    expect(screen.queryByTestId('card-126')).toBeNull();
+    expect(screen.getByTestId('card-76')).toHaveAttribute('data-demand', 'false');
+    expect(new Set(requestPage.mock.calls.map(([page]) => page))).toEqual(new Set([1, 2, 3, 4]));
+  });
+
   it('calls requestPage for pages covering the visible virtual rows', () => {
     const requestPage = vi.fn();
     render(
@@ -221,7 +243,8 @@ describe('VirtualGalleryGrid — requestPage', () => {
 
     expect(requestPage).toHaveBeenCalledWith(6);
     expect(requestPage).toHaveBeenCalledWith(7);
-    expect(requestPage).toHaveBeenCalledWith(8);
+    expect(requestPage).toHaveBeenCalledWith(5);
+    expect(requestPage).not.toHaveBeenCalledWith(8);
   });
 });
 

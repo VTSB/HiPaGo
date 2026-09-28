@@ -6,6 +6,12 @@ import React from 'react';
 // ---------------------------------------------------------------------------
 // Mocks — declared before imports that use them
 // ---------------------------------------------------------------------------
+const { mockPreloadImage } = vi.hoisted(() => ({ mockPreloadImage: vi.fn() }));
+vi.mock('@/shared/components/AbortableImage', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/shared/components/AbortableImage')>(),
+  preloadImageSource: mockPreloadImage,
+}));
+
 vi.mock('@/lib/api/client', () => ({
   getGgConfig: () => Promise.resolve({ b: 0, m: 0 }),
 }));
@@ -44,9 +50,15 @@ vi.mock('@/lib/utils/download-zip', () => ({
 
 const mockObserve = vi.fn();
 const mockDisconnect = vi.fn();
-function MockIntersectionObserver(this: IntersectionObserver) {
+const intersections: Array<{
+  callback: IntersectionObserverCallback;
+  root: Element | Document | null;
+  observer: IntersectionObserver;
+}> = [];
+function MockIntersectionObserver(this: IntersectionObserver, callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
   (this as unknown as { observe: typeof mockObserve }).observe = mockObserve;
   (this as unknown as { disconnect: typeof mockDisconnect }).disconnect = mockDisconnect;
+  intersections.push({ callback, root: options?.root ?? null, observer: this });
 }
 
 import { ScrollReader } from '../components/ScrollReader';
@@ -70,6 +82,9 @@ let rafStub: ((cb: FrameRequestCallback) => number) | undefined;
 beforeEach(() => {
   mockObserve.mockClear();
   mockDisconnect.mockClear();
+  intersections.length = 0;
+  mockPreloadImage.mockReset();
+  mockPreloadImage.mockImplementation(() => new Promise<void>(() => {}));
   __resetAbortableImageCacheForTests();
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -123,7 +138,7 @@ async function mount(initialPage?: number) {
   );
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
   const container = utils.container.firstElementChild as HTMLElement;
-  return { ...utils, container };
+  return { ...utils, container, onVisiblePageChange };
 }
 
 describe('ScrollReader page rows reserve deterministic height', () => {
@@ -235,5 +250,55 @@ describe('ScrollReader initial-page scroll', () => {
   it('does not scroll when opened at the first page (index 0)', async () => {
     const { container } = await mount(0);
     expect(container.scrollTop).toBe(0);
+  });
+});
+
+describe('ScrollReader visible-page warming', () => {
+  it('replaces the preload window when the actual most-visible page changes', async () => {
+    const { container, onVisiblePageChange } = await mount(5);
+    expect(mockPreloadImage.mock.calls.map(([url]) => url)).toEqual(
+      [6, 4, 7, 3].map((page) => `https://cdn.example.com/${String(page).padStart(3, '0')}.jpg`),
+    );
+    const oldSignals = mockPreloadImage.mock.calls.map(([, signal]) => signal as AbortSignal);
+    const tracker = intersections.find(({ root }) => root === container);
+    expect(tracker).toBeDefined();
+    const entry = (page: number, ratio: number) => ({
+      target: container.querySelector(`[data-page-index="${page}"]`)!,
+      intersectionRatio: ratio,
+      isIntersecting: ratio > 0,
+    } as IntersectionObserverEntry);
+
+    await act(async () => {
+      tracker!.callback([entry(5, 0), entry(9, 0.25), entry(10, 0.8)], tracker!.observer);
+    });
+
+    expect(onVisiblePageChange).toHaveBeenLastCalledWith(10);
+    expect(oldSignals.every((signal) => signal.aborted)).toBe(true);
+    expect(mockPreloadImage.mock.calls.slice(4).map(([url]) => url)).toEqual(
+      [11, 9, 12, 8].map((page) => `https://cdn.example.com/${String(page).padStart(3, '0')}.jpg`),
+    );
+    expect(container.querySelector('[data-page-index="10"] img')).toHaveAttribute('fetchpriority', 'high');
+  });
+
+  it('starts no network warming for an offline reader', async () => {
+    render(
+      <ScrollReader
+        images={images}
+        offlineUrls={images.map((_, page) => `file:///saved/${page}.webp`)}
+        onScrollPositionChange={vi.fn()}
+        onVisiblePageChange={vi.fn()}
+        scrollCallbackRef={vi.fn()}
+      />,
+    );
+    await act(async () => { await Promise.resolve(); });
+    expect(mockPreloadImage).not.toHaveBeenCalled();
+  });
+
+  it('cancels the active warm window when leaving scroll mode', async () => {
+    const { unmount } = await mount(5);
+    expect(mockPreloadImage).toHaveBeenCalledTimes(4);
+    const signals = mockPreloadImage.mock.calls.map(([, signal]) => signal as AbortSignal);
+    unmount();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });

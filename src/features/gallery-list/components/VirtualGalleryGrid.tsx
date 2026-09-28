@@ -272,12 +272,18 @@ export const VirtualGalleryGrid = memo(
     );
 
     const virtualItems = virtualizer.getVirtualItems();
+    // range excludes overscan. Overscan cards consume warmed query data but
+    // must not eagerly start a second, unbounded metadata prefetch queue.
+    const firstVisibleRow = virtualizer.range?.startIndex ?? virtualItems[0]?.index ?? 0;
+    const lastVisibleRow = virtualizer.range?.endIndex ?? virtualItems.at(-1)?.index ?? 0;
+    const visibleStartItem = windowStartItem + firstVisibleRow * actualCols;
+    const visibleEndItem = Math.min(totalLength - 1, windowStartItem + (lastVisibleRow + 1) * actualCols - 1);
 
     useImagePreloader({
       getItemId,
-      virtualItems,
-      windowStartItem,
-      actualCols,
+      viewingPage,
+      visibleStartItem,
+      visibleEndItem,
       totalLength,
       requestPage,
     });
@@ -291,13 +297,15 @@ export const VirtualGalleryGrid = memo(
     useEffect(() => {
       const pageIndex = Math.max(0, viewingPage - 1);
       requestPage(pageIndex);
-      requestPage(pageIndex + 1);
-      requestPage(pageIndex + 2);
-    }, [viewingPage, requestPage]);
+      if (pageIndex > 0) requestPage(pageIndex - 1);
+      if ((pageIndex + 1) * PAGE_SIZE < totalLength) requestPage(pageIndex + 1);
+    }, [viewingPage, totalLength, requestPage]);
 
-    // Request pages for all rows currently in the virtual window
+    // Visible demand can cross a logical page boundary; mounted overscan is
+    // not an extra speculative window.
     useEffect(() => {
       for (const vRow of virtualItems) {
+        if (vRow.index < firstVisibleRow || vRow.index > lastVisibleRow) continue;
         const startItem = windowStartItem + vRow.index * actualCols;
         const endItem = Math.min(
           windowStartItem + (vRow.index + 1) * actualCols - 1,
@@ -307,7 +315,7 @@ export const VirtualGalleryGrid = memo(
         const endPage = Math.floor(endItem / PAGE_SIZE);
         if (endPage !== Math.floor(startItem / PAGE_SIZE)) requestPage(endPage);
       }
-    }, [virtualItems, windowStartItem, actualCols, totalLength, requestPage]);
+    }, [virtualItems, firstVisibleRow, lastVisibleRow, windowStartItem, actualCols, totalLength, requestPage]);
 
     return (
       <div ref={containerRef} className="-mx-2 sm:mx-0" style={{ overflowAnchor: 'none' }}>
@@ -355,9 +363,12 @@ export const VirtualGalleryGrid = memo(
                     const itemIndex = rowStart + col;
                     if (itemIndex >= totalLength) return <div key={col} />;
                     const id = getItemId(itemIndex);
+                    const demand = vRow.index >= firstVisibleRow && vRow.index <= lastVisibleRow;
+                    const itemPage = Math.floor(itemIndex / PAGE_SIZE) + 1;
+                    const inWarmWindow = Math.abs(itemPage - viewingPage) <= 1;
                     return (
                       <div key={itemIndex} data-item-index={itemIndex}>
-                        {id !== null ? <GalleryCardById id={id} /> : <SkeletonCard />}
+                        {id !== null && (demand || inWarmWindow) ? <GalleryCardById id={id} demand={demand} /> : <SkeletonCard />}
                       </div>
                     );
                   })}

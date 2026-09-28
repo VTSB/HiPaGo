@@ -9,14 +9,26 @@ import React from 'react';
 
 let resolveGg: (v: unknown) => void = () => {};
 const mockGetGgConfig = vi.fn(() => new Promise((res) => { resolveGg = res; }));
+const settings = vi.hoisted(() => ({ imageFormat: 'webp', dualPage: false }));
 
 vi.mock('@/lib/api/client', () => ({
   getGgConfig: () => mockGetGgConfig(),
 }));
 
+vi.mock('@/shared/utils/imageLoadScheduler', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/utils/imageLoadScheduler')>();
+  return {
+    ...actual,
+    // Keep the real batching/priority/lifetime implementation. A fixed budget
+    // isolates reader-window assertions from synthetic Image load-time samples
+    // and leaves room for the mocked virtualizer's ten dual-page demand nodes.
+    imageLoadScheduler: new actual.ImageLoadScheduler({ start: 16, min: 16, max: 16 }),
+  };
+});
+
 vi.mock('@/lib/store/settings', () => ({
   useSettingsStore: (sel: (s: { imageFormat: string; dualPage: boolean }) => unknown) =>
-    sel({ imageFormat: 'webp', dualPage: false }),
+    sel(settings),
 }));
 
 vi.mock('@/lib/utils/image-url', () => ({
@@ -67,15 +79,25 @@ const makeImage = (name: string): GalleryImage => ({
 const images = [makeImage('001'), makeImage('002'), makeImage('003')];
 const fakeGgConfig = { b: 0, m: 0 };
 
-// The reader caps concurrent preloads, so a window only fully warms across
-// several microtask rounds (load → finally → pump → next). Flush generously.
+// The reader and shared scheduler both batch starts. Drain only short dispatch
+// turns; advancing the long attempt timeout would hide stalled-load defects.
 async function drainPreloads() {
-  for (let i = 0; i < 80; i++) await Promise.resolve();
+  for (let i = 0; i < 30; i++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+async function resolveConfigAndDrainPreloads() {
+  await act(async () => { resolveGg(fakeGgConfig); });
+  // Commit URL-dependent effects before draining the shared scheduler's batch.
+  await act(async () => { await drainPreloads(); });
 }
 
 beforeEach(() => {
   mockObserve.mockClear();
   mockDisconnect.mockClear();
+  settings.imageFormat = 'webp';
+  settings.dualPage = false;
   __resetAbortableImageCacheForTests();
   vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -160,7 +182,7 @@ describe('PageReader preload window', () => {
   it('warms surrounding pages via JS Image() (no DOM <img data-preload>)', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { container } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
+    await resolveConfigAndDrainPreloads();
     expect(container.querySelectorAll('[data-preload="true"]').length).toBe(0);
     expect(createdImages.length).toBe(20);
     const expected = [15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35].map(
@@ -173,14 +195,45 @@ describe('PageReader preload window', () => {
   it('clamps preload range at start boundary', async () => {
     const images10 = Array.from({ length: 10 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     render(<PageReader images={images10} currentPage={0} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
+    await resolveConfigAndDrainPreloads();
     expect(createdImages.length).toBe(9);
+  });
+
+  it('excludes the displayed dual-page pair when opened at an odd physical page', async () => {
+    settings.dualPage = true;
+    const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
+    const { container } = render(<PageReader images={images50} currentPage={21} onPageChange={vi.fn()} />);
+    await resolveConfigAndDrainPreloads();
+    // The deterministic virtualizer mounts ten demand images in dual mode.
+    // Settle them so this test measures the warm window, not demand saturation.
+    await act(async () => {
+      container.querySelectorAll('img').forEach((image) => fireEvent.load(image));
+    });
+    await act(async () => { await drainPreloads(); });
+    const warmed = createdImages.flatMap(({ srcs }) => srcs.filter(Boolean));
+    expect(warmed).not.toContain('https://cdn.example.com/020.jpg');
+    expect(warmed).not.toContain('https://cdn.example.com/021.jpg');
+    expect(warmed).toContain('https://cdn.example.com/022.jpg');
+    expect(warmed).toContain('https://cdn.example.com/019.jpg');
+  });
+
+  it('does not warm network images for offline sources', async () => {
+    render(
+      <PageReader
+        images={images}
+        currentPage={0}
+        onPageChange={vi.fn()}
+        offlineUrls={images.map((_, page) => `file:///saved/${page}.webp`)}
+      />,
+    );
+    await act(async () => { await drainPreloads(); });
+    expect(createdImages).toHaveLength(0);
   });
 
   it('warms the new preload window after navigation without DOM preload nodes', async () => {
     const images25 = Array.from({ length: 25 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { container, rerender } = render(<PageReader images={images25} currentPage={5} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await drainPreloads(); });
+    await resolveConfigAndDrainPreloads();
     const initialCount = createdImages.length;
     expect(initialCount).toBeGreaterThan(0);
     rerender(<PageReader images={images25} currentPage={20} onPageChange={vi.fn()} />);
@@ -304,7 +357,7 @@ describe('PageReader preload concurrency cap', () => {
   it('never fires more than 4 preload requests in flight at once', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await resolveConfigAndDrainPreloads();
     // With no load events firing, the pump fills exactly the cap and waits.
     expect(peak).toBeLessThanOrEqual(4);
     expect(created).toBe(4);
@@ -313,7 +366,7 @@ describe('PageReader preload concurrency cap', () => {
   it('aborts in-flight warms on unmount so connection slots are freed', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { unmount } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await resolveConfigAndDrainPreloads();
     expect(created).toBe(4);
     expect(cleared).toBe(0); // still in flight
     unmount();
@@ -324,7 +377,7 @@ describe('PageReader preload concurrency cap', () => {
   it('aborts the previous page warms when navigating to a new page', async () => {
     const images50 = Array.from({ length: 50 }, (_, i) => makeImage(String(i).padStart(3, '0')));
     const { rerender } = render(<PageReader images={images50} currentPage={20} onPageChange={vi.fn()} />);
-    await act(async () => { resolveGg(fakeGgConfig); await Promise.resolve(); });
+    await resolveConfigAndDrainPreloads();
     expect(created).toBe(4);
     rerender(<PageReader images={images50} currentPage={30} onPageChange={vi.fn()} />);
     await act(async () => { await Promise.resolve(); });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // On Android the WebView interceptor (BypassWebViewClient) handles CDN images,
@@ -34,11 +34,11 @@ afterEach(() => {
 });
 
 describe('AbortableImage on Android', () => {
-  it('loads a CDN image as a plain <img src> (interceptor bypasses; no objectURL)', () => {
+  it('loads a CDN image as a plain <img src> (interceptor bypasses; no objectURL)', async () => {
     const { container } = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
     const img = container.querySelector('img') as HTMLImageElement;
     // The real CDN URL is emitted directly — proof the native-fetch/objectURL
     // branch was skipped on Android.
-    expect(img.getAttribute('src')).toBe(CDN);
+    await waitFor(() => expect(img.getAttribute('src')).toBe(CDN));
   });
 });

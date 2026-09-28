@@ -58,13 +58,10 @@ describe('useVirtualGallery', () => {
     expect(fetchBrowseIds).toHaveBeenCalledWith('all', 0, PAGE_SIZE, 'date_added');
   });
 
-  it('prefetches the first pages on mount so mobile scroll has IDs ready', async () => {
+  it('seeds only the first page; the grid owns adjacent-page prefetch', async () => {
     renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(1));
     expect(fetchBrowseIds).toHaveBeenCalledWith('all', 0, PAGE_SIZE, 'date_added');
-    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 1, PAGE_SIZE, 'date_added');
-    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 2, PAGE_SIZE, 'date_added');
-    expect(fetchBrowseIds).toHaveBeenCalledWith('all', 3, PAGE_SIZE, 'date_added');
   });
 
   it('isInitialLoading is true while page 0 is pending', () => {
@@ -211,57 +208,47 @@ describe('neededPages ring buffer', () => {
     vi.clearAllMocks();
     if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
     mockDefaultFilterQuery = '';
-    fetchBrowseIds.mockResolvedValue({ idList: [], length: 100 });
+    fetchBrowseIds.mockResolvedValue({ idList: [], length: 5000 });
     getGalleryIdsForQuery.mockResolvedValue([900, 800, 700]);
   });
 
-  it('requesting 21 pages caps at 20 — only 20 unique pages are ever active', async () => {
+  it('requests only explicit pages without expanding each into more speculative work', async () => {
     // Track every unique page number that fetchBrowseIds is called with
     const fetchedPages = new Set<number>();
     fetchBrowseIds.mockImplementation((_lang: string, page: number) => {
       fetchedPages.add(page);
-      return Promise.resolve({ idList: [], length: 100 });
+      return Promise.resolve({ idList: [], length: 5000 });
     });
 
     const { result } = renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
 
-    // page 0 is added on mount; add pages 1-20 to reach 21 total, triggering cap
+    // page 0 is added on mount; request another twenty pages explicitly.
     for (let p = 1; p <= 20; p++) {
       act(() => { result.current.requestPage(p); });
     }
 
     // Wait for React Query to process all queries
     await waitFor(() => {
-      // After cap: only 20 pages should be active; page 0 was dropped when page 20 added
-      // React Query fires fetches for each query in neededPages at the time of render.
-      // With 21 total requests but cap at 20, the set holds exactly 20 pages.
       expect(fetchBrowseIds.mock.calls.length).toBeGreaterThanOrEqual(1);
     });
 
     // Allow all queries to settle
     await new Promise((r) => setTimeout(r, 50));
 
-    // Requesting a page also prefetches the next three pages.
-    // Verify: page 20 was fetched (it's in the cap window)
     expect(fetchedPages.has(20)).toBe(true);
 
-    // Page 0 may or may not have been fetched before it was dropped from the set,
-    // and each explicit request can fetch three pages ahead. The indirect
-    // invariant here is that unique fetches stay bounded by requested pages plus
-    // the prefetch window, not unbounded growth.
-    expect(fetchedPages.size).toBeLessThanOrEqual(24);
+    expect([...fetchedPages].sort((a, b) => a - b)).toEqual(Array.from({ length: 21 }, (_, i) => i));
   });
 
   it('requestPage for already-requested page within cap does not grow the set', async () => {
     const { result } = renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(1));
 
-    // Request pages 1-10. Pages 1-3 are already covered by mount prefetch;
-    // page 10 also prefetches up to page 13.
+    // Request pages 1-10 without expanding their ranges.
     for (let p = 1; p <= 10; p++) {
       act(() => { result.current.requestPage(p); });
     }
-    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(14));
+    await waitFor(() => expect(fetchBrowseIds).toHaveBeenCalledTimes(11));
 
     // Re-requesting pages 1-10 must be deduplicated — neededPages Set prevents re-adding
     const callCountBefore = fetchBrowseIds.mock.calls.length;
@@ -276,11 +263,11 @@ describe('neededPages ring buffer', () => {
   it('after cap, page 50 is present and page 0 is evicted from neededPages', async () => {
     // Arrange: distinguish page 0 results from page 50 results
     fetchBrowseIds.mockImplementation((_lang: string, page: number) => {
-      return Promise.resolve({ idList: [page * 100], length: 500 });
+      return Promise.resolve({ idList: [page * 100], length: 5000 });
     });
 
     const { result } = renderHook(() => useVirtualGallery(), { wrapper: makeWrapper() });
-    await waitFor(() => expect(result.current.totalLength).toBe(500));
+    await waitFor(() => expect(result.current.totalLength).toBe(5000));
 
     // Request pages 1-49 (total = 50, exactly at cap)
     for (let p = 1; p <= 49; p++) {

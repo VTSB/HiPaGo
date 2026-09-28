@@ -2,6 +2,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import React from 'react';
+
+const flush = async () => { await act(async () => {
+  if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+  else await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+}); };
 import { AbortableImage, preloadImageSource, __resetAbortableImageCacheForTests } from '../AbortableImage';
 
 // ---------------------------------------------------------------------------
@@ -32,22 +38,24 @@ describe('AbortableImage opacity fade-in', () => {
   // -------------------------------------------------------------------------
   // Test 1: opacity 0 before load
   // -------------------------------------------------------------------------
-  it('has opacity 0 before any load event fires', () => {
+  it('has opacity 0 before any load event fires', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/image.jpg" alt="test" loading="eager" />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
     expect(img.style.opacity).toBe('0');
   });
 
   // -------------------------------------------------------------------------
   // Test 2: opacity cleared after onLoad fires
   // -------------------------------------------------------------------------
-  it('clears inline opacity after the load event fires', () => {
+  it('clears inline opacity after the load event fires', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/image.jpg" alt="test" loading="eager" />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
 
     // Before load: opacity is '0'
     expect(img.style.opacity).toBe('0');
@@ -62,11 +70,12 @@ describe('AbortableImage opacity fade-in', () => {
   // -------------------------------------------------------------------------
   // Test 3: opacity resets to 0 when src changes
   // -------------------------------------------------------------------------
-  it('resets opacity to 0 when src prop changes', () => {
+  it('resets opacity to 0 when src prop changes', async () => {
     const { container, rerender } = render(
       <AbortableImage src="https://example.com/first.jpg" alt="test" loading="eager" />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
 
     // Load the first image
     fireEvent.load(img);
@@ -83,7 +92,7 @@ describe('AbortableImage opacity fade-in', () => {
   // -------------------------------------------------------------------------
   // Test 4: IntersectionObserver is created with rootMargin '400px'
   // -------------------------------------------------------------------------
-  it('creates IntersectionObserver with rootMargin of 400px for lazy images', () => {
+  it('creates IntersectionObserver with rootMargin of 400px for lazy images', async () => {
     const constructorSpy = vi.fn().mockImplementation(function (
       this: IntersectionObserver,
     ) {
@@ -104,41 +113,44 @@ describe('AbortableImage opacity fade-in', () => {
 });
 
 describe('AbortableImage preload prop', () => {
-  it('preload=true renders img with fetchPriority="low"', () => {
+  it('preload=true renders img with fetchPriority="low"', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
     expect(img).not.toBeNull();
     // HTML attribute is lowercase even though JSX prop is camelCase
     expect(img.getAttribute('fetchpriority')).toBe('low');
   });
 
-  it('preload=true renders with hidden styles', () => {
+  it('preload=true renders with hidden styles', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
     expect(img.style.visibility).toBe('hidden');
     expect(img.style.width).toBe('0px');
   });
 
-  it('preload=true renders with data-preload="true"', () => {
+  it('preload=true renders with data-preload="true"', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
     expect(img.getAttribute('data-preload')).toBe('true');
   });
 
-  it('preload=true does not create IntersectionObserver', () => {
+  it('preload=true does not create IntersectionObserver', async () => {
     render(
       <AbortableImage src="https://example.com/image.jpg" alt="test" preload />,
     );
     expect(mockObserve).not.toHaveBeenCalled();
   });
 
-  it('preload=true on failed state renders null', () => {
+  it('preload=true on failed state renders null', async () => {
     vi.useFakeTimers();
 
     const { container } = render(
@@ -146,6 +158,7 @@ describe('AbortableImage preload prop', () => {
     );
 
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
 
     // Fire errors to exhaust retries and reach permanent fail
     // First error — starts retry 1
@@ -174,7 +187,7 @@ describe('AbortableImage does not abort in-flight or cached loads (regression)',
   // list→settings→list re-mount: the old code cleared src when an image left
   // the viewport before loading, which raced load-completion and left images
   // permanently blank. The observer must only ever turn loading ON.
-  it('keeps its src when the observer reports the image left the viewport', () => {
+  it('keeps its src when the observer reports the image left the viewport', async () => {
     let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null = null;
     const capturing = vi.fn().mockImplementation(function (
       this: IntersectionObserver,
@@ -190,9 +203,11 @@ describe('AbortableImage does not abort in-flight or cached loads (regression)',
       <AbortableImage src="https://example.com/inflight.jpg" alt="t" loading="lazy" />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
 
     // Enter the viewport → src is emitted, load begins (but never completes).
     act(() => ioCallback?.([{ isIntersecting: true }]));
+    await flush();
     expect(img.getAttribute('src')).toContain('inflight.jpg');
 
     // Leaves the viewport before finishing — src must NOT be cleared.
@@ -200,10 +215,11 @@ describe('AbortableImage does not abort in-flight or cached loads (regression)',
     expect(img.getAttribute('src')).toContain('inflight.jpg');
   });
 
-  it('renders a cache-seeded image visible immediately on a later mount', () => {
+  it('renders a cache-seeded image visible immediately on a later mount', async () => {
     const src = 'https://example.com/cached.jpg';
     // First mount + load populates the module-level loadedSrcCache.
     const first = render(<AbortableImage src={src} alt="t" loading="eager" />);
+    await flush();
     fireEvent.load(first.container.querySelector('img') as HTMLImageElement);
     first.unmount();
 
@@ -211,6 +227,7 @@ describe('AbortableImage does not abort in-flight or cached loads (regression)',
     // for an observer round-trip — and must never be treated as abortable.
     const { container } = render(<AbortableImage src={src} alt="t" loading="lazy" />);
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
     expect(img.getAttribute('src')).toContain('cached.jpg');
     expect(img.style.opacity).toBe(''); // loaded → not dimmed
   });
@@ -239,6 +256,7 @@ describe('preloadImageSource cancellation', () => {
     const original = stubImage(srcs);
     const ctrl = new AbortController();
     const p = preloadImageSource('https://example.com/warm.jpg', ctrl.signal);
+    await flush();
     // The request started.
     expect(srcs).toEqual(['https://example.com/warm.jpg']);
     ctrl.abort();
@@ -283,31 +301,34 @@ describe('preloadImageSource cancellation', () => {
 });
 
 describe('AbortableImage spinner prop', () => {
-  it('shows a loading spinner while visible and unloaded, removes it after load', () => {
+  it('shows a loading spinner while visible and unloaded, removes it after load', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/x.jpg" alt="t" loading="eager" spinner />,
     );
+    await flush();
     expect(container.querySelector('[role="status"]')).not.toBeNull();
     fireEvent.load(container.querySelector('img') as HTMLImageElement);
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
 
-  it('renders no spinner when the prop is omitted (grid/card call-sites unchanged)', () => {
+  it('renders no spinner when the prop is omitted (grid/card call-sites unchanged)', async () => {
     const { container } = render(
       <AbortableImage src="https://example.com/x.jpg" alt="t" loading="eager" />,
     );
+    await flush();
     expect(container.querySelector('[role="status"]')).toBeNull();
   });
 });
 
 describe('AbortableImage retry behavior', () => {
-  it('stops retrying after 3 attempts', () => {
+  it('stops retrying after 3 attempts', async () => {
     vi.useFakeTimers();
 
     const { container } = render(
       <AbortableImage src="https://example.com/missing.jpg" alt="test" loading="eager" />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
 
     // Fire 4 errors — only 3 retries should happen
     for (let i = 0; i < 4; i++) {
@@ -322,13 +343,14 @@ describe('AbortableImage retry behavior', () => {
     vi.useRealTimers();
   });
 
-  it('stops retrying on fast consecutive failures (likely 404)', () => {
+  it('stops retrying on fast consecutive failures (likely 404)', async () => {
     vi.useFakeTimers();
 
     const { container } = render(
       <AbortableImage src="https://example.com/gone.jpg" alt="test" loading="eager" />,
     );
     const img = container.querySelector('img') as HTMLImageElement;
+    await flush();
 
     // First error → triggers retry after 1s
     fireEvent.error(img);

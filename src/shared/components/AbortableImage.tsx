@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { isAndroid, isCapacitor, isTauri } from '@/lib/utils/platform';
 import { getImageCache } from '@/lib/cache/image-cache';
 import { useScheduledImageLoad } from './useScheduledImageLoad';
+import { imageLoadScheduler, imageViewportDistance, STUCK_MS, type SlotHandle } from '@/shared/utils/imageLoadScheduler';
 import { Spinner } from '@/shared/components/Spinner';
 
 interface AbortableImageProps {
@@ -112,56 +113,135 @@ async function ensureCachedFileUrl(src: string): Promise<string | null> {
   }
 }
 
-export function preloadImageSource(src: string, signal?: AbortSignal): Promise<void> {
+interface NativeSubscriber {
+  priority: () => number;
+  background: boolean;
+  finish: (url: string | null) => void;
+}
+interface NativeImageWork {
+  subscribers: Set<NativeSubscriber>;
+  state: 'lookup' | 'queued' | 'active' | 'done';
+  handle?: SlotHandle;
+}
+const nativeImageWork = new Map<string, NativeImageWork>();
+const abortError = () => new DOMException('Aborted', 'AbortError');
+
+/** A visible consumer can join and promote its own queued native prefetch. */
+function scheduledCachedFileUrl(
+  src: string,
+  signal: AbortSignal | undefined,
+  priority: () => number,
+  background: boolean,
+): Promise<string | null> {
+  if (signal?.aborted) return Promise.reject(abortError());
+  const memo = resolvedFileUrlCache.get(src);
+  if (memo) return Promise.resolve(memo);
+  let work = nativeImageWork.get(src);
+  const fresh = !work;
+  if (!work) {
+    work = { subscribers: new Set(), state: 'lookup' };
+    nativeImageWork.set(src, work);
+  }
+  const job = work;
+  const finish = (url: string | null) => {
+    if (job.state === 'done') return;
+    job.state = 'done';
+    if (nativeImageWork.get(src) === job) nativeImageWork.delete(src);
+    for (const subscriber of job.subscribers) subscriber.finish(url);
+    job.subscribers.clear();
+  };
+  const result = new Promise<string | null>((resolve, reject) => {
+    const subscriber: NativeSubscriber = {
+      priority, background,
+      finish: (url) => { signal?.removeEventListener('abort', onAbort); resolve(url); },
+    };
+    const onAbort = () => {
+      signal?.removeEventListener('abort', onAbort);
+      job.subscribers.delete(subscriber);
+      reject(abortError());
+      if (job.subscribers.size === 0 && job.state !== 'active') {
+        job.handle?.cancel();
+        finish(null);
+      }
+    };
+    job.subscribers.add(subscriber);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  if (fresh) {
+    void cacheFileUrl(src).then((hit) => {
+      if (job.state === 'done') return;
+      if (hit) { finish(hit); return; }
+      job.state = 'queued';
+      const handle = imageLoadScheduler.acquire(
+        () => Math.min(...[...job.subscribers].map((subscriber) => subscriber.priority())),
+        { background: () => ![...job.subscribers].some((subscriber) => !subscriber.background) },
+      );
+      job.handle = handle;
+      void handle.granted.then(async () => {
+        if (job.state === 'done' || job.subscribers.size === 0) {
+          handle.release();
+          finish(null);
+          return;
+        }
+        job.state = 'active';
+        const startedAt = performance.now();
+        // Native downloads cannot abort through this API. Even if every JS
+        // subscriber leaves, retain the grant until the actual download settles.
+        const url = await ensureCachedFileUrl(src);
+        handle.release({ ok: !!url, ms: performance.now() - startedAt });
+        finish(url);
+      });
+    });
+  } else {
+    imageLoadScheduler.refresh();
+  }
+  return result;
+}
+
+export function preloadImageSource(
+  src: string,
+  signal?: AbortSignal,
+  priority: () => number = () => Infinity,
+): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError());
   if (loadedSrcCache.has(src)) return Promise.resolve();
-  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
   if (mustServeFromCache(src)) {
-    // The native streaming download isn't backed by the browser connection pool,
-    // so a hard cancel isn't needed for slot-starvation; just short-circuit the
-    // JS waiter when navigation aborts so the caller's queue can advance.
-    const run = ensureCachedFileUrl(src).then(() => undefined);
-    if (!signal) return run;
-    return new Promise((resolve, reject) => {
-      const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
-      signal.addEventListener('abort', onAbort, { once: true });
-      run
-        .then(() => {
-          signal.removeEventListener('abort', onAbort);
-          resolve();
-        })
-        .catch((err) => {
-          signal.removeEventListener('abort', onAbort);
-          reject(err);
-        });
+    return scheduledCachedFileUrl(src, signal, priority, true).then((url) => {
+      if (!url) throw new Error(`preload failed: ${src}`);
     });
   }
   return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.fetchPriority = 'low';
-    const detach = () => {
-      img.onload = null;
-      img.onerror = null;
+    const handle = imageLoadScheduler.acquire(priority, { background: () => true });
+    let img: HTMLImageElement | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    let startedAt = 0;
+    const finish = (error?: Error, cancelled = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
+      handle.cancel();
+      if (img) {
+        img.onload = null;
+        img.onerror = null;
+        if (error) img.src = ''; // cancel before releasing the real browser slot
+        handle.release(cancelled ? undefined : { ok: !error, ms: performance.now() - startedAt });
+      }
+      if (error) reject(error); else resolve();
     };
-    const onAbort = () => {
-      // Clearing src aborts the in-flight HTTP request and frees the per-host
-      // connection slot — without this, warm requests stalled by the throttling
-      // CDN pin every slot and the visible page never loads.
-      img.src = '';
-      detach();
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-    img.onload = () => {
-      loadedSrcCache.add(src);
-      detach();
-      resolve();
-    };
-    img.onerror = () => {
-      detach();
-      reject(new Error(`preload failed: ${src}`));
-    };
+    const onAbort = () => finish(abortError(), true);
     signal?.addEventListener('abort', onAbort, { once: true });
-    img.src = src;
+    void handle.granted.then(() => {
+      if (settled) { handle.release(); return; }
+      img = new Image();
+      img.fetchPriority = 'low';
+      startedAt = performance.now();
+      img.onload = () => { loadedSrcCache.add(src); finish(); };
+      img.onerror = () => finish(new Error(`preload failed: ${src}`));
+      timer = setTimeout(() => finish(new Error(`preload timed out: ${src}`)), STUCK_MS);
+      img.src = src;
+    });
   });
 }
 
@@ -185,14 +265,11 @@ export function __resetAbortableImageCacheForTests() {
 }
 
 /**
- * Image that prioritises viewport-visible loads and cancels off-screen requests.
+ * Image that prioritises viewport-visible loads through a shared cold-work budget.
  *
- * - Uses IntersectionObserver instead of native `loading="lazy"` so that
- *   images leaving the viewport *before* they finish loading get their `src`
- *   cleared, freeing up browser connection slots for images the user can
- *   actually see.
- * - Once an image has fully loaded it is never cleared (even if scrolled away).
- * - `loading="eager"` bypasses the observer and loads immediately.
+ * - IntersectionObserver admits nearby work; active images keep their src on exit.
+ * - Cached images paint immediately, even on a later mount.
+ * - `loading="eager"` bypasses visibility admission, while retaining the budget.
  * - Serves from the persistent, file-backed LRU cache: a cache hit is streamed
  *   from disk via a file URL (no image bytes in the JS heap, works offline).
  *   Shared by reader, gallery-detail, and gallery-list/library — they all get
@@ -205,6 +282,11 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   // never treated as an abortable in-flight request on re-mount.
   const loadedRef = useRef(loadedSrcCache.has(src));
   const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelRetry = useCallback(() => {
+    clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = undefined;
+  }, []);
   // Once-per-src guard for stale cached-file recovery (handleError below).
   const staleRecoverRef = useRef(false);
   const fromCache = mustServeFromCache(src);
@@ -234,21 +316,22 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   // Set when this src is a non-bypass cache miss: the plain <img src> displays
   // as today and its bytes are warmed into the cache once it has loaded.
   const shouldWarmRef = useRef(false);
+  const warmControllerRef = useRef<AbortController | null>(null);
 
-  // Order the network <img> load through the viewport-first scheduler. Skip it
-  // for cached / eager / preload / explicit-high / bypass-served images, which
-  // must never be queued behind the grid.
-  const shouldSchedule =
-    !fromCache &&
-    loading !== 'eager' &&
-    !preload &&
-    fetchPriority !== 'high' &&
+  const shouldSchedule = !fromCache && !cacheUrl &&
+    !/^(blob:|data:|file:|capacitor:|asset:|https?:\/\/asset\.localhost\/|https?:\/\/[^/]*localhost\/.*_capacitor_file_)/.test(src) &&
     !loadedSrcCache.has(src);
   const { granted, onSettled } = useScheduledImageLoad({
     shouldSchedule,
     wantsToLoad: visible && !!effectiveSrc,
-    loadKey: shouldSchedule ? effectiveSrc : null,
+    loadKey: shouldSchedule ? src : null,
     imgRef,
+    background: preload || fetchPriority === 'low',
+    onTimeout: () => {
+      cancelRetry();
+      setFailed(true);
+      onPermanentError?.();
+    },
   });
 
   // Keep the latest onPermanentError in a ref so callbacks always call the
@@ -263,12 +346,17 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   useEffect(() => {
     if (cacheUrlState?.src === src) return;
     let cancelled = false;
+    const controller = new AbortController();
     shouldWarmRef.current = false;
     (async () => {
       if (fromCache) {
         // iOS/Tauri: the WebView can only show the CDN image from a local file,
         // so serve from the cache (streaming download on a miss).
-        const url = await ensureCachedFileUrl(src);
+        if (!visible) return;
+        const url = await scheduledCachedFileUrl(
+          src, controller.signal, () => imageViewportDistance(imgRef.current),
+          preload || fetchPriority === 'low',
+        ).catch(() => null);
         if (cancelled) return;
         if (url) setCacheUrlState({ src, url });
         else {
@@ -292,18 +380,21 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [fromCache, src, cacheUrlState]);
+  }, [fromCache, src, cacheUrlState, visible, preload, fetchPriority]);
 
   // Reset state when src/loading/preload changes using render-phase setState
   // (the React-documented derived-state pattern — react-hooks/set-state-in-effect safe).
   // Resetting visible forces the IntersectionObserver to re-fire,
   // which fixes stuck-invisible images when virtual scroll reuses a DOM slot.
-  const [prevSrc, setPrevSrc] = useState(effectiveSrc);
+  const [prevSrc, setPrevSrc] = useState(src);
+  const [prevEffectiveSrc, setPrevEffectiveSrc] = useState(effectiveSrc);
   const [prevLoading, setPrevLoading] = useState(loading);
   const [prevPreload, setPrevPreload] = useState(preload);
-  if (effectiveSrc !== prevSrc || loading !== prevLoading || preload !== prevPreload) {
-    setPrevSrc(effectiveSrc);
+  if (src !== prevSrc || effectiveSrc !== prevEffectiveSrc || loading !== prevLoading || preload !== prevPreload) {
+    setPrevSrc(src);
+    setPrevEffectiveSrc(effectiveSrc);
     setPrevLoading(loading);
     setPrevPreload(preload);
     setLoaded(loadedSrcCache.has(src));
@@ -311,7 +402,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     // Same cache-hit fast path as the initial useState: if the new URL is
     // already cached, keep visible=true so the <img> emits its src on the
     // first commit instead of waiting for the observer round-trip.
-    if (loading !== 'eager' && !preload && !loadedSrcCache.has(src)) setVisible(false);
+    setVisible(!!cacheUrl || loading === 'eager' || preload || loadedSrcCache.has(src));
   }
 
   // Reset the internal tracking refs when src/loading/preload changes.
@@ -319,7 +410,12 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
   useEffect(() => {
     loadedRef.current = loadedSrcCache.has(src);
     retryCountRef.current = 0;
-  }, [effectiveSrc, loading, preload, src]);
+    return () => {
+      cancelRetry();
+      warmControllerRef.current?.abort();
+      warmControllerRef.current = null;
+    };
+  }, [effectiveSrc, loading, preload, src, cancelRetry]);
 
   // Reset the stale-cached-file recovery guard only on a genuine src change (a new
   // image in a recycled component). NOT on effectiveSrc — recovery itself swaps
@@ -332,6 +428,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
   // Track whether the image has completed loading
   const handleLoad = useCallback(() => {
+    cancelRetry();
     loadedRef.current = true;
     retryCountRef.current = 0;
     staleRecoverRef.current = false; // a real paint re-arms recovery for a later reclaim
@@ -350,19 +447,26 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       (isCapacitor() || isTauri())
     ) {
       warmedSrcCache.add(src);
+      const controller = new AbortController();
+      warmControllerRef.current = controller;
       void (async () => {
         const cache = await getImageCache().catch(() => null);
-        if (!cache || cache.getMaxBytes() === 0) return; // caching off → skip warm
-        await ensureCachedFileUrl(src);
+        if (!cache || cache.getMaxBytes() === 0 || controller.signal.aborted) {
+          warmedSrcCache.delete(src);
+          return;
+        }
+        const url = await scheduledCachedFileUrl(src, controller.signal, () => Infinity, true).catch(() => null);
+        if (!url) warmedSrcCache.delete(src);
       })();
     }
-  }, [effectiveSrc, src, onSettled]);
+  }, [effectiveSrc, src, onSettled, cancelRetry]);
 
   // Retry on error (up to 3 times with exponential backoff).
   // Fast consecutive errors (< 2s apart) indicate a permanent failure (404/gone)
   // and are not retried to avoid wasting bandwidth.
   const lastErrorTimeRef = useRef(0);
   const handleError = useCallback(() => {
+    cancelRetry();
     // Stale cached-file recovery — checked BEFORE the loaded-guard, because an
     // <img> error on a resolved cache file URL means that file failed to load
     // regardless of the optimistic `loaded` flag (ensureCachedFileUrl marks a src
@@ -402,7 +506,8 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     lastErrorTimeRef.current = now;
     retryCountRef.current += 1;
     const delay = Math.min(1000 * 2 ** (retryCountRef.current - 1), 10000);
-    setTimeout(() => {
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = undefined;
       const img = imgRef.current;
       if (img && mountedRef.current && !loadedRef.current) {
         const cur = img.src;
@@ -410,7 +515,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
         img.src = cur;
       }
     }, delay);
-  }, [onSettled, cacheUrl, effectiveSrc, src]);
+  }, [onSettled, cacheUrl, effectiveSrc, src, cancelRetry]);
 
   // IntersectionObserver: set visible when entering viewport, clear when leaving (if not loaded).
   // The sync viewport check (already-in-view on mount) is deferred via requestAnimationFrame
@@ -454,7 +559,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
       cancelAnimationFrame(rafId);
       observer.disconnect();
     };
-  }, [loading, effectiveSrc, preload]);
+  }, [loading, effectiveSrc, preload, src]);
 
   // Track mount state for retry safety
   useEffect(() => {

@@ -55,6 +55,7 @@ The `reader` feature implements a full-screen image viewer with two modes: page-
 
 ### hooks/
 - **`useReader.ts`** - Main logic hook
+- **`useReaderImagePreloader.ts`** - Shared nearest-first, bounded online page warming for both reader modes; uses the shared image scheduler and cancels obsolete page windows.
 
 ### store/
 - **`reader.store.ts`** - Zustand state management

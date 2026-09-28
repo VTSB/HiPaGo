@@ -210,7 +210,7 @@ describe('fetchGalleryBlockHtmlById', () => {
 
     const result = await fetchGalleryBlockHtmlById(999);
 
-    expect(apiClient.fetchLtnText).toHaveBeenCalledWith('galleryblock/999.html', { signal: undefined });
+    expect(apiClient.fetchLtnText).toHaveBeenCalledWith('galleryblock/999.html', { signal: undefined, queuePriority: 1 });
     expect(parseGalleryBlockHtml).toHaveBeenCalledWith(mockHtml, 999);
     expect(result).toEqual(mockBlock);
     expect(result.type).toBe(GalleryBlockType.NOT_DETAILED);

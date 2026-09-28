@@ -9,15 +9,7 @@ import { PAGE_SIZE } from '@/lib/utils/constants';
 import type { SortOrder } from '@/lib/utils/types';
 
 const MAX_ACTIVE_PAGES = 50;
-const PREFETCH_AHEAD_PAGES = 3;
 const TOTAL_LENGTH_CACHE_PREFIX = 'hipago:listTotalLength';
-
-function expandPageWindow(pageIndex: number): number[] {
-  return Array.from(
-    { length: PREFETCH_AHEAD_PAGES + 1 },
-    (_, offset) => pageIndex + offset,
-  );
-}
 
 function capActivePages(pages: Set<number>): Set<number> {
   if (pages.size <= MAX_ACTIVE_PAGES) return pages;
@@ -70,10 +62,9 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
   const defaultFilterQuery = useSettingsStore((s) => s.defaultFilterQuery).trim();
 
   // Set of page indices we've requested — only grows until capped.
-  // Seed a few pages ahead so Android WebView has IDs ready even if scroll
-  // virtualizer updates arrive late or only cover the first mobile rows.
+  // The grid owns the adjacent-page window; an ID request never expands it.
   const [neededPages, setNeededPages] = useState<ReadonlySet<number>>(
-    () => new Set(expandPageWindow(0)),
+    () => new Set([0]),
   );
 
   // Ratchet: once we've seen a totalLength, never report lower than that.
@@ -100,7 +91,7 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
     setPrevSort(sort);
     setPrevLanguage(language);
     setPrevDefaultFilterQuery(defaultFilterQuery);
-    setNeededPages(new Set(expandPageWindow(0)));
+    setNeededPages(new Set([0]));
     // Seed from the new key's cache so the container height for the
     // newly-selected filter is correct synchronously.
     setMaxTotalLength(readCachedTotalLength(language, sort, defaultFilterQuery));
@@ -146,18 +137,15 @@ export function useVirtualGallery(sort: SortOrder = 'date_added') {
   const safeTotalLength = maxTotalLength > 0 ? maxTotalLength : totalLength;
 
   const requestPage = useCallback((pageIndex: number) => {
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 ||
+        (safeTotalLength > 0 && pageIndex >= Math.ceil(safeTotalLength / PAGE_SIZE))) return;
     setNeededPages((prev) => {
+      if (prev.has(pageIndex)) return prev;
       const next = new Set(prev);
-      let changed = false;
-      for (const page of expandPageWindow(pageIndex)) {
-        if (next.has(page)) continue;
-        next.add(page);
-        changed = true;
-      }
-      if (!changed) return prev;
+      next.add(pageIndex);
       return capActivePages(next);
     });
-  }, []);
+  }, [safeTotalLength]);
 
   const getItemId = (itemIndex: number): number | null => {
     if (hasDefaultFilter) {

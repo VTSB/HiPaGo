@@ -8,22 +8,30 @@ import { GalleryBlockType } from '@/lib/utils/types';
 
 export const galleryBlockQueryKey = (id: number) => ['gallery-block', id] as const;
 
-export async function resolveBlock(id: number, signal?: AbortSignal, queryClient?: QueryClient): Promise<GalleryBlock> {
+export async function resolveBlock(id: number, signal?: AbortSignal, queryClient?: QueryClient, queuePriority = 1): Promise<GalleryBlock> {
   // Try local DB first — silently skip if DB not initialized
+  let local: GalleryBlock | null = null;
   try {
-    const local = await getGalleryBlock(id);
-    if (local) {
-      // SWR: return cached immediately, revalidate in background if stale
-      if (isStale(local)) {
-        revalidateBlock(id, queryClient);
-      }
-      return local;
-    }
+    local = await getGalleryBlock(id);
   } catch {
     // Recoverable: WASM DB not initialized or query failed — fall through to remote fetch
   }
+  signal?.throwIfAborted();
+  if (local) {
+    if (isStale(local)) {
+      if (queuePriority > 1) {
+        // Keep speculative refresh inside its bounded task. Otherwise React
+        // Query would mark stale DB metadata fresh and later demand skips SWR.
+        return (await revalidateBlock(id, queryClient, signal, queuePriority)) ?? local;
+      }
+      // Visible demand still paints local metadata immediately.
+      void revalidateBlock(id, queryClient);
+    }
+    return local;
+  }
   try {
-    const block = await fetchGalleryBlockHtmlById(id, signal);
+    signal?.throwIfAborted();
+    const block = await fetchGalleryBlockHtmlById(id, signal, queuePriority);
     if (block.type === GalleryBlockType.NOT_DETAILED || block.type === GalleryBlockType.DETAILED) {
       saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
     }
@@ -47,28 +55,31 @@ function isStale(block: GalleryBlock): boolean {
 }
 
 /** Background revalidation — updates DB and React Query cache */
-function revalidateBlock(id: number, queryClient?: QueryClient): void {
-  fetchGalleryBlockHtmlById(id)
-    .then((block) => {
-      if (block.type === GalleryBlockType.NOT_DETAILED || block.type === GalleryBlockType.DETAILED) {
-        saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
-        // Update React Query cache so UI reflects the fresh data immediately
-        if (queryClient) {
-          queryClient.setQueryData(galleryBlockQueryKey(id), block);
-        }
-      }
-    })
-    .catch((e) => console.warn('[gallery-block] Revalidation failed:', e));
+async function revalidateBlock(
+  id: number, queryClient?: QueryClient, signal?: AbortSignal, queuePriority = 1,
+): Promise<GalleryBlock | undefined> {
+  try {
+    const block = await fetchGalleryBlockHtmlById(id, signal, queuePriority);
+    if (block.type === GalleryBlockType.NOT_DETAILED || block.type === GalleryBlockType.DETAILED) {
+      saveGalleryBlock(block).catch((e) => console.warn('[gallery-block] DB save failed:', e));
+      queryClient?.setQueryData(galleryBlockQueryKey(id), block);
+      return block;
+    }
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    console.warn('[gallery-block] Revalidation failed:', e);
+  }
 }
 
 /**
  * Individually fetches and caches a single gallery block.
  * Returns a LOADING placeholder immediately, swapped with real data once resolved.
  */
-export function useGalleryBlock(id: number): GalleryBlock {
+export function useGalleryBlock(id: number, enabled = true): GalleryBlock {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: galleryBlockQueryKey(id),
+    enabled,
     queryFn: ({ signal }) => resolveBlock(id, signal, queryClient),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,

@@ -77,7 +77,7 @@ describe('AbortableImage file-backed cache serving (AC-04)', () => {
 
     const { container } = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
     const img = container.querySelector('img') as HTMLImageElement;
-    expect(img.getAttribute('src')).toBe(CDN); // interceptor invariant
+    await waitFor(() => expect(img.getAttribute('src')).toBe(CDN)); // interceptor invariant
 
     await waitFor(() => expect(fileUrl).toHaveBeenCalledWith(CDN));
     await flush();
@@ -146,7 +146,7 @@ describe('AbortableImage cache-clear invalidation (blank-list-after-clear)', () 
     //    never the deleted file URL.
     const second = render(<AbortableImage src={CDN} alt="t" loading="eager" />);
     const img2 = second.container.querySelector('img') as HTMLImageElement;
-    expect(img2.getAttribute('src')).toBe(CDN);
+    await waitFor(() => expect(img2.getAttribute('src')).toBe(CDN));
     await flush();
     expect(img2.getAttribute('src')).toBe(CDN);
   });

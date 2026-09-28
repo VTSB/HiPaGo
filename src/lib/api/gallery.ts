@@ -40,9 +40,10 @@ export async function fetchGalleryInfo(id: number): Promise<GalleryInfo> {
 export async function fetchGalleryBlockHtmlById(
   id: number,
   signal?: AbortSignal,
+  queuePriority = 1,
 ): Promise<GalleryBlock> {
   try {
-    const text = await apiClient.fetchLtnText(`galleryblock/${id}.html`, { signal });
+    const text = await apiClient.fetchLtnText(`galleryblock/${id}.html`, { signal, queuePriority });
     return parseGalleryBlockHtml(text, id);
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw e;

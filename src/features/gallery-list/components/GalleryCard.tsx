@@ -227,8 +227,8 @@ export const GalleryCard = memo(function GalleryCard({ block }: { block: Gallery
 });
 
 /** Render a gallery card by ID — fetches its own data progressively. */
-export const GalleryCardById = memo(function GalleryCardById({ id }: { id: number }) {
-  const block = useGalleryBlock(id);
+export const GalleryCardById = memo(function GalleryCardById({ id, demand = true }: { id: number; demand?: boolean }) {
+  const block = useGalleryBlock(id, demand);
   const prefetch = usePrefetchGalleryInfo(id);
   return <CardContent block={block} onPrefetch={prefetch} />;
 });

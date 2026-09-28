@@ -16,16 +16,18 @@ import { getGgConfig } from '@/lib/api/client';
 import { useSettingsStore } from '@/lib/store/settings';
 import { OfflineImage } from './OfflineImage';
 import type { OfflineImageSource } from '@/features/reader/hooks/useOfflineImages';
+import { useReaderImagePreloader } from '../hooks/useReaderImagePreloader';
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
-function ScrollPage({ image, index, url, source }: {
+function ScrollPage({ image, index, url, source, current }: {
   image: GalleryImage;
   index: number;
   url: string;
   source?: OfflineImageSource;
+  current: boolean;
 }) {
   const identity = source ?? image;
   const [decoded, setDecoded] = useState<{
@@ -57,6 +59,7 @@ function ScrollPage({ image, index, url, source }: {
           alt={`Page ${index + 1}`}
           className="w-full select-none"
           loading="lazy"
+          fetchPriority={current ? 'high' : undefined}
           draggable={false}
           style={{ aspectRatio }}
         />
@@ -66,6 +69,7 @@ function ScrollPage({ image, index, url, source }: {
           alt={`Page ${index + 1}`}
           className="w-full select-none"
           loading="lazy"
+          fetchPriority={current ? 'high' : undefined}
           draggable={false}
           style={{ aspectRatio }}
         />
@@ -131,6 +135,10 @@ export function ScrollReader({
     if (!ggConfig) return [];
     return images.map((img) => getBestImageUrl(galleryImageToFile(img), ggConfig, imageFormat));
   }, [normalizedOfflineSources, images, ggConfig, imageFormat]);
+
+  const [visible, setVisible] = useState({ images, page: initialPage ?? 0 });
+  const visiblePage = visible.images === images ? visible.page : (initialPage ?? 0);
+  useReaderImagePreloader(urls, visiblePage, 1, !!normalizedOfflineSources);
 
   // Auto-scroll to the initial page. The page rows reserve their height via
   // aspect-ratio (see the wrapper below), so the target offset is correct
@@ -208,6 +216,8 @@ export function ScrollReader({
           }
         }
         if (bestIdx >= 0) {
+          setVisible((previous) => previous.images === images && previous.page === bestIdx
+            ? previous : { images, page: bestIdx });
           onVisiblePageChangeRef.current(bestIdx);
         }
       },
@@ -216,7 +226,7 @@ export function ScrollReader({
 
     pages.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [urls.length]);
+  }, [urls.length, images]);
 
   const scrollZoom = useSettingsStore((s) => s.scrollZoom);
 
@@ -304,6 +314,7 @@ export function ScrollReader({
           <ScrollPage
             key={`${img.hash}-${i}`}
             image={img}
+            current={i === visiblePage}
             index={i}
             url={urls[i]}
             source={normalizedOfflineSources?.[i]}

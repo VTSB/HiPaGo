@@ -4,7 +4,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { useGalleryBlock } from '../useGalleryBlock';
-import { GalleryBlockType } from '@/lib/utils/types';
+import { GalleryBlockType, type GalleryBlock } from '@/lib/utils/types';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -58,6 +58,73 @@ describe('resolveBlock SWR revalidation', () => {
     vi.clearAllMocks();
   });
 
+  it('awaits stale metadata refresh inside the speculative query before marking it fresh', async () => {
+    const stale = { id: 42, type: GalleryBlockType.NOT_DETAILED, title: 'Cached',
+      date: new Date(), tags: {}, thumbnail: '/42.webp', related: [],
+      updatedAt: new Date(0) };
+    getGalleryBlock.mockResolvedValue(stale);
+    const controller = new AbortController();
+    const fresh = { ...stale, thumbnail: '/fresh.webp', updatedAt: new Date() };
+    let finish!: (value: GalleryBlock) => void;
+    fetchGalleryBlockHtmlById.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const client = new QueryClient();
+    let settled = false;
+    const warming = client.fetchQuery({
+      queryKey: ['gallery-block', 42], staleTime: 300000,
+      queryFn: () => resolveBlock(42, controller.signal, undefined, 2),
+    }).then((value) => { settled = true; return value; });
+    await Promise.resolve();
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(42, controller.signal, 2);
+    expect(settled).toBe(false);
+    finish(fresh);
+    expect(await warming).toBe(fresh);
+    // A subsequent visible query can reuse the data only after it was refreshed.
+    const demand = vi.fn(() => resolveBlock(42));
+    expect(await client.fetchQuery({ queryKey: ['gallery-block', 42], queryFn: demand, staleTime: 300000 })).toBe(fresh);
+    expect(demand).not.toHaveBeenCalled();
+    client.clear();
+  });
+
+  it('passes speculative priority on a miss and stops before remote lookup after cancellation', async () => {
+    getGalleryBlock.mockResolvedValue(null);
+    fetchGalleryBlockHtmlById.mockResolvedValue({ id: 43, type: GalleryBlockType.FAILED });
+    const controller = new AbortController();
+    await resolveBlock(43, controller.signal, undefined, 2);
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(43, controller.signal, 2);
+    controller.abort();
+    await expect(resolveBlock(44, controller.signal, undefined, 2)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains stale cached data when a speculative refresh fails', async () => {
+    const stale = { id: 45, type: GalleryBlockType.NOT_DETAILED, title: 'Cached',
+      date: new Date(), tags: {}, thumbnail: '/45.webp', related: [], updatedAt: new Date(0) };
+    getGalleryBlock.mockResolvedValue(stale);
+    fetchGalleryBlockHtmlById.mockRejectedValue(new Error('network down'));
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(await resolveBlock(45, undefined, undefined, 2)).toBe(stale);
+      expect(saveGalleryBlock).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it('does not turn a cancelled stale refresh into successful cached data', async () => {
+    const stale = { id: 46, type: GalleryBlockType.NOT_DETAILED, title: 'Cached',
+      date: new Date(), tags: {}, thumbnail: '/46.webp', related: [], updatedAt: new Date(0) };
+    getGalleryBlock.mockResolvedValue(stale);
+    const controller = new AbortController();
+    fetchGalleryBlockHtmlById.mockImplementation(() => new Promise((_, reject) => {
+      controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+    }));
+    const warming = resolveBlock(46, controller.signal, undefined, 2);
+    await Promise.resolve();
+    controller.abort();
+    await expect(warming).rejects.toMatchObject({ name: 'AbortError' });
+    expect(saveGalleryBlock).not.toHaveBeenCalled();
+  });
+
   it('returns cached block immediately without fetching when fresh', async () => {
     const freshBlock = {
       id: 200,
@@ -100,7 +167,7 @@ describe('resolveBlock SWR revalidation', () => {
 
     // Background revalidation triggered (no signal)
     await new Promise((r) => setTimeout(r, 20));
-    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(201);
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(201, undefined, 1);
     expect(saveGalleryBlock).toHaveBeenCalledWith(freshBlock);
   });
 
@@ -125,7 +192,7 @@ describe('resolveBlock SWR revalidation', () => {
     expect(result).toBe(staleBlock);
 
     await new Promise((r) => setTimeout(r, 20));
-    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(202);
+    expect(fetchGalleryBlockHtmlById).toHaveBeenCalledWith(202, undefined, 1);
     expect(saveGalleryBlock).toHaveBeenCalledWith(freshBlock);
   });
 
