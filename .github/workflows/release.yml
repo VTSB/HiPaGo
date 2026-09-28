@@ -157,15 +157,18 @@ jobs:
           # keyed on Cargo.lock + rustc, so stale entries self-evict.
           cache-on-failure: true
 
-      # Cache the resolved Tauri Linux .debs (webkit/appindicator/rsvg dev
-      # libs) so reinstalls across runs are near-instant. Installs normally on
-      # a cache miss, so first-run behaviour is unchanged.
+      # Resolve the full dependency tree on this runner; restoring cached
+      # package files alone can leave native libraries or pkg-config files missing.
       - name: Install Linux dependencies
         if: matrix.target == 'linux'
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-          version: 1.0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl wget file libssl-dev \
+            libglib2.0-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev patchelf
+          pkg-config --atleast-version=2.70 glib-2.0
+          pkg-config --modversion glib-2.0 gtk+-3.0 webkit2gtk-4.1
 
       - run: pnpm install --frozen-lockfile
 

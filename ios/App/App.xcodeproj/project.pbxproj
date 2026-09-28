@@ -381,7 +381,14 @@
 				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 1.0;
-				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-D",
+					COCOAPODS,
+					"-DDEBUG",
+					"-Xcc",
+					"-fmodule-map-file=$(PROJECT_DIR)/App/bypassFFI.modulemap",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.hipago.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -413,6 +420,11 @@
 				);
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 1.0;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xcc",
+					"-fmodule-map-file=$(PROJECT_DIR)/App/bypassFFI.modulemap",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.hipago.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
