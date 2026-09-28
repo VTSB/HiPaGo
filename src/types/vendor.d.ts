@@ -4,6 +4,7 @@ declare module '@hipago/bypass-napi' {
     status: number;
     headers: Record<string, string>;
     read(): Promise<Buffer | null>;
+    close?(): void;
   }
   export interface BufferedResponse {
     status: number;

@@ -50,14 +50,6 @@ async fn get_client() -> napi::Result<Arc<BypassClient>> {
     Ok(client)
 }
 
-/// Reset the client so the next call creates a fresh one (new proxy, new connections).
-async fn reset_client() {
-    let mut guard = client_lock().write().await;
-    if let Some(client) = guard.take() {
-        client.shutdown().await;
-    }
-}
-
 use tokio::sync::Mutex;
 
 /// Streaming response — headers/status available immediately,
@@ -66,7 +58,9 @@ use tokio::sync::Mutex;
 pub struct BypassResponseStream {
     status: u16,
     headers: HashMap<String, String>,
-    receiver: Mutex<tokio::sync::mpsc::Receiver<Vec<u8>>>,
+    receiver:
+        Mutex<tokio::sync::mpsc::Receiver<std::result::Result<Vec<u8>, bypass_core::BypassError>>>,
+    closed: tokio::sync::watch::Sender<bool>,
 }
 
 #[napi]
@@ -83,13 +77,34 @@ impl BypassResponseStream {
 
     /// Read the next body chunk. Returns null when the body is complete.
     #[napi]
-    pub async fn read(&self) -> Option<Buffer> {
-        self.receiver
-            .lock()
-            .await
-            .recv()
-            .await
-            .map(|chunk| chunk.into())
+    pub async fn read(&self) -> napi::Result<Option<Buffer>> {
+        let mut closed = self.closed.subscribe();
+        let mut receiver = self.receiver.lock().await;
+        if *closed.borrow() {
+            receiver.close();
+            return Ok(None);
+        }
+        let chunk = tokio::select! {
+            biased;
+            _ = closed.changed() => {
+                receiver.close();
+                return Ok(None);
+            }
+            chunk = receiver.recv() => chunk,
+        };
+        chunk
+            .transpose()
+            .map(|chunk| chunk.map(Buffer::from))
+            .map_err(|err| napi::Error::from_reason(err.to_string()))
+    }
+
+    /// Interrupt a pending read without acquiring its held receiver lock.
+    #[napi]
+    pub fn close(&self) {
+        self.closed.send_replace(true);
+        if let Ok(mut receiver) = self.receiver.try_lock() {
+            receiver.close();
+        }
     }
 }
 
@@ -110,14 +125,17 @@ pub async fn bypass_fetch(
                     status: resp.status,
                     headers: resp.headers,
                     receiver: Mutex::new(resp.body_rx),
+                    closed: tokio::sync::watch::channel(false).0,
                 });
             }
             Err(e) => {
                 if attempt == 0 {
                     eprintln!("[bypass-napi] streaming fetch failed, resetting client: {e}");
-                    reset_client().await;
+                    bypass_core::reset_failed_client(client_lock(), &client).await;
                 } else {
-                    return Err(napi::Error::from_reason(format!("Bypass fetch failed: {e}")));
+                    return Err(napi::Error::from_reason(format!(
+                        "Bypass fetch failed: {e}"
+                    )));
                 }
             }
         }

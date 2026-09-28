@@ -143,6 +143,103 @@ describe('bypassFetch', () => {
     });
   });
 
+  describe('native stream lifecycle', () => {
+    let nativeFetch: ReturnType<typeof vi.fn>;
+    beforeEach(async () => {
+      nativeFetch = vi.fn();
+      vi.doMock('@hipago/bypass-napi', () => ({ bypassFetch: nativeFetch }));
+      bypassFetch = (await import('../bypass-fetch')).bypassFetch;
+    });
+
+    it('closes a late native stream after abort before headers', async () => {
+      let resolve!: (stream: StreamResponse) => void;
+      nativeFetch.mockImplementation(() => new Promise((done) => { resolve = done; }));
+      const abort = new AbortController();
+      const remove = vi.spyOn(abort.signal, 'removeEventListener');
+      const pending = bypassFetch('https://example.test/', { signal: abort.signal });
+      await vi.waitFor(() => expect(nativeFetch).toHaveBeenCalled());
+      abort.abort();
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+      const late = { ...mockStreamResponse([]), close: vi.fn() };
+      resolve(late);
+      await vi.waitFor(() => expect(late.close).toHaveBeenCalledOnce());
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+      expect(late.read).not.toHaveBeenCalled();
+    });
+
+    it('errors a pending read immediately on abort and removes its listener', async () => {
+      const stream = { ...mockStreamResponse([]), read: vi.fn(() => new Promise<Buffer | null>(() => {})), close: vi.fn() };
+      nativeFetch.mockResolvedValue(stream);
+      const abort = new AbortController();
+      const remove = vi.spyOn(abort.signal, 'removeEventListener');
+      const resp = await bypassFetch('https://example.test/', { signal: abort.signal });
+      const body = resp.text();
+      await vi.waitFor(() => expect(stream.read).toHaveBeenCalled());
+      abort.abort();
+      await expect(body).rejects.toMatchObject({ name: 'AbortError' });
+      expect(stream.close).toHaveBeenCalledOnce();
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    });
+
+    it('consumer cancellation closes native work even while read is pending', async () => {
+      let resolve!: (chunk: Buffer | null) => void;
+      const stream = { ...mockStreamResponse([]), read: vi.fn(() => new Promise<Buffer | null>((done) => { resolve = done; })), close: vi.fn() };
+      nativeFetch.mockResolvedValue(stream);
+      const abort = new AbortController();
+      const remove = vi.spyOn(abort.signal, 'removeEventListener');
+      const resp = await bypassFetch('https://example.test/', { signal: abort.signal });
+      const reader = resp.body!.getReader();
+      const pending = reader.read();
+      await vi.waitFor(() => expect(stream.read).toHaveBeenCalled());
+      await reader.cancel();
+      resolve(Buffer.from('late'));
+      await expect(pending).resolves.toEqual({ done: true, value: undefined });
+      expect(stream.close).toHaveBeenCalledOnce();
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    });
+
+    it('propagates body failure after a chunk instead of accepting truncated success', async () => {
+      const stream = { ...mockStreamResponse([]), read: vi.fn().mockResolvedValueOnce(Buffer.from('part')).mockRejectedValueOnce(new Error('truncated')), close: vi.fn() };
+      nativeFetch.mockResolvedValue(stream);
+      const abort = new AbortController();
+      const remove = vi.spyOn(abort.signal, 'removeEventListener');
+      const resp = await bypassFetch('https://example.test/', { signal: abort.signal });
+      await expect(resp.text()).rejects.toThrow('truncated');
+      expect(stream.close).toHaveBeenCalledOnce();
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    });
+
+    it.each([204, 205, 304])('constructs a null body for native and legacy status %i', async (status) => {
+      const stream = { ...mockStreamResponse([], status), close: vi.fn() };
+      nativeFetch.mockResolvedValueOnce(stream).mockResolvedValueOnce({ status, headers: {}, body: Buffer.alloc(0) });
+      const current = await bypassFetch('https://example.test/');
+      const legacy = await bypassFetch('https://example.test/');
+      expect(current.body).toBeNull();
+      expect(legacy.body).toBeNull();
+      expect(current.status).toBe(status);
+      expect(legacy.status).toBe(status);
+      expect(stream.read).not.toHaveBeenCalled();
+      expect(stream.close).toHaveBeenCalledOnce();
+    });
+
+    it('normal EOF closes native work and removes abort listener', async () => {
+      const stream = { ...mockStreamResponse([Buffer.from('ok')]), close: vi.fn() };
+      nativeFetch.mockResolvedValue(stream);
+      const abort = new AbortController();
+      const remove = vi.spyOn(abort.signal, 'removeEventListener');
+      const resp = await bypassFetch('https://example.test/', { signal: abort.signal });
+      expect(await resp.text()).toBe('ok');
+      abort.abort();
+      expect(stream.close).toHaveBeenCalledOnce();
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+    });
+
+    it('preserves buffered legacy bodies', async () => {
+      nativeFetch.mockResolvedValue({ status: 200, headers: {}, body: Buffer.from('legacy') });
+      expect(await (await bypassFetch('https://example.test/')).text()).toBe('legacy');
+    });
+  });
+
   describe('when napi addon is unavailable', () => {
     beforeEach(async () => {
       vi.resetModules();

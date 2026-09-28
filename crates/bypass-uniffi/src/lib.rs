@@ -47,13 +47,6 @@ async fn get_client() -> Result<Arc<BypassClient>, BypassError> {
     Ok(client)
 }
 
-async fn reset_client() {
-    let mut guard = client_lock().write().await;
-    if let Some(client) = guard.take() {
-        client.shutdown().await;
-    }
-}
-
 // NOTE: the variant field is named `reason`, not `message`. UniFFI's Kotlin
 // generator emits a `val <field>` on the generated Exception subclass; a
 // field named `message` collides with `kotlin.Throwable.message` and
@@ -108,7 +101,7 @@ pub fn bypass_fetch(
                 }
                 Err(e) if attempt == 0 => {
                     eprintln!("[bypass-uniffi] fetch failed, resetting client: {e}");
-                    reset_client().await;
+                    bypass_core::reset_failed_client(client_lock(), &client).await;
                 }
                 Err(e) => return Err(BypassError::from(e)),
             }
@@ -138,7 +131,7 @@ pub fn bypass_download_to_file(
                 Ok(written) => return Ok(written as i64),
                 Err(e) if attempt == 0 => {
                     eprintln!("[bypass-uniffi] download failed, resetting client: {e}");
-                    reset_client().await;
+                    bypass_core::reset_failed_client(client_lock(), &client).await;
                 }
                 Err(e) => return Err(BypassError::from(e)),
             }

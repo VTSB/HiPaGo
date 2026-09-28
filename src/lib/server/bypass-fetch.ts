@@ -7,6 +7,7 @@ interface StreamResponse {
   status: number;
   headers: Record<string, string>;
   read(): Promise<Buffer | null>;
+  close?(): void;
 }
 
 interface BufferedResponse {
@@ -106,42 +107,82 @@ export async function bypassFetch(
       return Promise.reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
     }
 
-    const resp = await native.bypassFetch(urlStr, headers ?? undefined);
-
-    // Streaming response (new .node) vs buffered response (old .node)
-    if ('read' in resp && typeof resp.read === 'function') {
-      let aborted = false;
-      signal?.addEventListener('abort', () => { aborted = true; }, { once: true });
-
-      const readable = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          if (aborted) { controller.close(); return; }
-          const chunk = await (resp as StreamResponse).read();
-          if (chunk === null || aborted) { controller.close(); }
-          else { controller.enqueue(new Uint8Array(chunk)); }
-        },
+    const abortReason = () => signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+    let response: StreamResponse | BufferedResponse | undefined;
+    let finished = false;
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let rejectAbort: (reason: unknown) => void = () => {};
+    const abortPromise = new Promise<never>((_, reject) => { rejectAbort = reject; });
+    const close = (resp: StreamResponse | BufferedResponse | undefined) => {
+      if (resp && 'read' in resp) resp.close?.();
+    };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      signal?.removeEventListener('abort', onAbort);
+      close(response);
+    };
+    const onAbort = () => {
+      if (finished) return;
+      const reason = abortReason();
+      finish();
+      if (controller) controller.error(reason);
+      else rejectAbort(reason);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      // A legacy addon cannot cancel its pending header request. Reject promptly
+      // and close the stream if that native call eventually completes.
+      const nativeResponse = native.bypassFetch(urlStr, headers ?? undefined).then((resp) => {
+        if (finished) close(resp);
+        else response = resp;
+        return resp;
       });
+      const resp = await Promise.race([nativeResponse, abortPromise]);
+      if (signal?.aborted) throw abortReason();
+      const noBody = [204, 205, 304].includes(resp.status);
+      const responseInit = { status: resp.status, headers: new Headers(resp.headers) };
+      if (noBody) {
+        finish();
+        return new Response(null, responseInit);
+      }
 
-      return new Response(readable, {
-        status: resp.status,
-        headers: new Headers(resp.headers),
-      });
+      if ('read' in resp && typeof resp.read === 'function') {
+        const readable = new ReadableStream<Uint8Array>({
+          start(streamController) { controller = streamController; },
+          async pull(streamController) {
+            if (finished) return;
+            try {
+              const chunk = await resp.read();
+              if (finished) return;
+              if (chunk === null) {
+                finish();
+                streamController.close();
+              } else {
+                streamController.enqueue(new Uint8Array(chunk));
+              }
+            } catch (err) {
+              if (finished) return;
+              finish();
+              streamController.error(err);
+            }
+          },
+          cancel() { finish(); },
+        });
+        return new Response(readable, responseInit);
+      }
+
+      finish();
+      const buf = (resp as BufferedResponse).body;
+      return new Response(
+        new Uint8Array(buf.buffer as ArrayBuffer, buf.byteOffset, buf.byteLength),
+        responseInit,
+      );
+    } catch (err) {
+      finish();
+      throw err;
     }
 
-    // Wrap the Node Buffer in a Uint8Array — the WHATWG `Response` constructor
-    // accepts a Uint8Array as BodyInit but not a Node Buffer. Buffer is already
-    // a Uint8Array view, so this re-wraps the same bytes without copying. The
-    // `as ArrayBuffer` cast is sound: a Node Buffer is always backed by a real
-    // ArrayBuffer (never SharedArrayBuffer), and BodyInit requires the precise
-    // `Uint8Array<ArrayBuffer>` type rather than `Uint8Array<ArrayBufferLike>`.
-    const buf = (resp as BufferedResponse).body;
-    return new Response(
-      new Uint8Array(buf.buffer as ArrayBuffer, buf.byteOffset, buf.byteLength),
-      {
-        status: resp.status,
-        headers: new Headers(resp.headers),
-      },
-    );
   }
 
   // Fallback: plain fetch (no bypass)

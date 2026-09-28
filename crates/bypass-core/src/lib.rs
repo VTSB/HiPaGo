@@ -8,6 +8,7 @@
 
 pub mod client;
 pub mod doh;
+mod download;
 mod ech_http;
 pub mod proxy;
 
@@ -101,5 +102,48 @@ impl BypassClient {
     /// Shut down the SOCKS5 proxy.
     pub async fn shutdown(&self) {
         self.proxy_handle.shutdown().await;
+    }
+}
+
+/// Remove only the failed generation; never shut a replacement down while holding the lock.
+pub async fn reset_failed_client(
+    clients: &tokio::sync::RwLock<Option<std::sync::Arc<BypassClient>>>,
+    failed: &std::sync::Arc<BypassClient>,
+) {
+    let removed = {
+        let mut guard = clients.write().await;
+        if guard
+            .as_ref()
+            .is_some_and(|current| std::sync::Arc::ptr_eq(current, failed))
+        {
+            guard.take()
+        } else {
+            None
+        }
+    };
+    if let Some(client) = removed {
+        client.shutdown().await;
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    #[tokio::test]
+    async fn stale_failure_does_not_reset_replacement() {
+        let old = Arc::new(BypassClient::new().await.unwrap());
+        let replacement = Arc::new(BypassClient::new().await.unwrap());
+        let clients = RwLock::new(Some(Arc::clone(&replacement)));
+        reset_failed_client(&clients, &old).await;
+        assert!(Arc::ptr_eq(
+            clients.read().await.as_ref().unwrap(),
+            &replacement
+        ));
+        reset_failed_client(&clients, &replacement).await;
+        assert!(clients.read().await.is_none());
+        old.shutdown().await;
     }
 }

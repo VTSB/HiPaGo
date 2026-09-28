@@ -7,7 +7,7 @@ use crate::BypassError;
 use base64::{engine::general_purpose, Engine as _};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex, Semaphore};
 
@@ -50,20 +50,61 @@ struct DohAnswer {
 pub struct DohResolver {
     cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
     ech_cache: Arc<Mutex<HashMap<String, EchCacheEntry>>>,
-    in_flight: Arc<Mutex<HashMap<String, broadcast::Sender<Result<Vec<String>, String>>>>>,
-    ech_in_flight: Arc<Mutex<HashMap<String, broadcast::Sender<Result<Option<Vec<u8>>, String>>>>>,
+    in_flight: Arc<StdMutex<HashMap<String, broadcast::Sender<Result<Vec<String>, String>>>>>,
+    ech_in_flight:
+        Arc<StdMutex<HashMap<String, broadcast::Sender<Result<Option<Vec<u8>>, String>>>>>,
     http_client: Arc<rquest::Client>,
     query_slots: Arc<Semaphore>,
 }
 
-enum ResolveRole {
-    Leader(broadcast::Sender<Result<Vec<String>, String>>),
-    Follower(broadcast::Receiver<Result<Vec<String>, String>>),
+// The owner removes the entry even when its future is dropped at an await.
+// These locks protect only map operations; no I/O occurs while held.
+struct LookupOwner<T: Clone> {
+    entries: Arc<StdMutex<HashMap<String, broadcast::Sender<Result<T, String>>>>>,
+    hostname: String,
+    sender: broadcast::Sender<Result<T, String>>,
+    complete: bool,
 }
 
-enum EchResolveRole {
-    Leader(broadcast::Sender<Result<Option<Vec<u8>>, String>>),
-    Follower(broadcast::Receiver<Result<Option<Vec<u8>>, String>>),
+impl<T: Clone> LookupOwner<T> {
+    fn finish(mut self, result: Result<T, String>) {
+        self.entries.lock().unwrap().remove(&self.hostname);
+        self.complete = true;
+        let _ = self.sender.send(result);
+    }
+}
+
+impl<T: Clone> Drop for LookupOwner<T> {
+    fn drop(&mut self) {
+        if !self.complete {
+            self.entries.lock().unwrap().remove(&self.hostname);
+            let _ = self.sender.send(Err("DoH lookup owner cancelled".into()));
+        }
+    }
+}
+
+fn join_lookup<T: Clone>(
+    entries: &Arc<StdMutex<HashMap<String, broadcast::Sender<Result<T, String>>>>>,
+    hostname: &str,
+) -> (
+    broadcast::Receiver<Result<T, String>>,
+    Option<LookupOwner<T>>,
+) {
+    let mut entries_guard = entries.lock().unwrap();
+    if let Some(sender) = entries_guard.get(hostname) {
+        return (sender.subscribe(), None);
+    }
+    let (sender, receiver) = broadcast::channel(1);
+    entries_guard.insert(hostname.to_owned(), sender.clone());
+    (
+        receiver,
+        Some(LookupOwner {
+            entries: Arc::clone(entries),
+            hostname: hostname.to_owned(),
+            sender,
+            complete: false,
+        }),
+    )
 }
 
 impl DohResolver {
@@ -78,8 +119,8 @@ impl DohResolver {
         Self {
             cache: Arc::new(Mutex::new(HashMap::new())),
             ech_cache: Arc::new(Mutex::new(HashMap::new())),
-            in_flight: Arc::new(Mutex::new(HashMap::new())),
-            ech_in_flight: Arc::new(Mutex::new(HashMap::new())),
+            in_flight: Arc::new(StdMutex::new(HashMap::new())),
+            ech_in_flight: Arc::new(StdMutex::new(HashMap::new())),
             http_client: Arc::new(client),
             query_slots: Arc::new(Semaphore::new(MAX_DOH_QUERIES)),
         }
@@ -110,26 +151,16 @@ impl DohResolver {
             }
         }
 
-        let role = {
-            let mut in_flight = self.in_flight.lock().await;
-            if let Some(tx) = in_flight.get(&hostname) {
-                ResolveRole::Follower(tx.subscribe())
-            } else {
-                let (tx, _) = broadcast::channel::<Result<Vec<String>, String>>(1);
-                in_flight.insert(hostname.clone(), tx.clone());
-                ResolveRole::Leader(tx)
-            }
-        };
-
-        let tx = match role {
-            ResolveRole::Follower(mut rx) => {
-                let result = rx
+        let (mut receiver, owner) = join_lookup(&self.in_flight, &hostname);
+        let owner = match owner {
+            Some(owner) => owner,
+            None => {
+                return receiver
                     .recv()
                     .await
-                    .map_err(|e| BypassError::DohError(format!("In-flight recv failed: {e}")))?;
-                return result.map_err(BypassError::DohError);
+                    .map_err(|e| BypassError::DohError(format!("In-flight recv failed: {e}")))?
+                    .map_err(BypassError::DohError)
             }
-            ResolveRole::Leader(tx) => tx,
         };
 
         // Perform the actual resolution
@@ -147,19 +178,11 @@ impl DohResolver {
             );
         }
 
-        // Remove before broadcasting: a late caller must not subscribe after
-        // the one-shot result was already sent.
-        {
-            let mut in_flight = self.in_flight.lock().await;
-            in_flight.remove(&hostname);
-        }
-
-        // Broadcast result to all waiters
         let broadcast_result = match &result {
             Ok((ips, _)) => Ok(ips.clone()),
             Err(e) => Err(e.to_string()),
         };
-        let _ = tx.send(broadcast_result);
+        owner.finish(broadcast_result);
 
         result.map(|(ips, _)| ips)
     }
@@ -180,25 +203,16 @@ impl DohResolver {
             }
         }
 
-        let role = {
-            let mut in_flight = self.ech_in_flight.lock().await;
-            if let Some(tx) = in_flight.get(&hostname) {
-                EchResolveRole::Follower(tx.subscribe())
-            } else {
-                let (tx, _) = broadcast::channel::<Result<Option<Vec<u8>>, String>>(1);
-                in_flight.insert(hostname.clone(), tx.clone());
-                EchResolveRole::Leader(tx)
+        let (mut receiver, owner) = join_lookup(&self.ech_in_flight, &hostname);
+        let owner = match owner {
+            Some(owner) => owner,
+            None => {
+                return receiver
+                    .recv()
+                    .await
+                    .map_err(|e| BypassError::DohError(format!("In-flight recv failed: {e}")))?
+                    .map_err(BypassError::DohError)
             }
-        };
-
-        let tx = match role {
-            EchResolveRole::Follower(mut rx) => {
-                let result = rx.recv().await.map_err(|e| {
-                    BypassError::DohError(format!("ECH in-flight recv failed: {e}"))
-                })?;
-                return result.map_err(BypassError::DohError);
-            }
-            EchResolveRole::Leader(tx) => tx,
         };
 
         let result = self.fetch_ech_from_doh(&hostname).await;
@@ -214,16 +228,11 @@ impl DohResolver {
             );
         }
 
-        {
-            let mut in_flight = self.ech_in_flight.lock().await;
-            in_flight.remove(&hostname);
-        }
-
         let broadcast_result = match &result {
             Ok((config_list, _)) => Ok(config_list.clone()),
             Err(e) => Err(e.to_string()),
         };
-        let _ = tx.send(broadcast_result);
+        owner.finish(broadcast_result);
 
         result.map(|(config_list, _)| config_list)
     }
@@ -552,6 +561,94 @@ mod tests {
         decode_ech_config_value, normalize_hostname, parse_dns_wire_hex,
         parse_ech_config_from_https_rr, split_svcb_fields,
     };
+
+    #[tokio::test]
+    async fn cancelled_dns_and_ech_owners_wake_followers_and_allow_new_owner() {
+        for ech in [false, true] {
+            let resolver = super::DohResolver::new();
+            // Keep both providers queued, so this test never contacts the network.
+            let _permits = resolver.query_slots.acquire_many(2).await.unwrap();
+            let spawn_lookup = || {
+                let resolver = resolver.clone();
+                tokio::spawn(async move {
+                    if ech {
+                        resolver
+                            .resolve_ech_config("example.test")
+                            .await
+                            .map(|_| ())
+                    } else {
+                        resolver.resolve_all("example.test").await.map(|_| ())
+                    }
+                })
+            };
+            let active = || {
+                if ech {
+                    resolver
+                        .ech_in_flight
+                        .lock()
+                        .unwrap()
+                        .contains_key("example.test")
+                } else {
+                    resolver
+                        .in_flight
+                        .lock()
+                        .unwrap()
+                        .contains_key("example.test")
+                }
+            };
+            let leader = spawn_lookup();
+            while !active() {
+                tokio::task::yield_now().await;
+            }
+            let follower = spawn_lookup();
+            // Wait for the real follower subscription, not a timing assumption.
+            loop {
+                let subscribers = if ech {
+                    resolver.ech_in_flight.lock().unwrap()["example.test"].receiver_count()
+                } else {
+                    resolver.in_flight.lock().unwrap()["example.test"].receiver_count()
+                };
+                if subscribers >= 2 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            leader.abort();
+            let _ = leader.await;
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_secs(1), follower)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .is_err()
+            );
+            assert!(!active());
+            let next = spawn_lookup();
+            while !active() {
+                tokio::task::yield_now().await;
+            }
+            next.abort();
+            let _ = next.await;
+            assert!(!active());
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_follower_does_not_remove_its_owner() {
+        let entries = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::<
+            String,
+            tokio::sync::broadcast::Sender<Result<Vec<String>, String>>,
+        >::new()));
+        let (_, owner) = super::join_lookup(&entries, "example.test");
+        let (follower, no_owner) = super::join_lookup(&entries, "example.test");
+        assert!(no_owner.is_none());
+        drop(follower);
+        assert!(entries.lock().unwrap().contains_key("example.test"));
+        let (mut remaining, _) = super::join_lookup(&entries, "example.test");
+        owner.unwrap().finish(Ok(vec!["192.0.2.1".into()]));
+        assert_eq!(remaining.recv().await.unwrap().unwrap(), vec!["192.0.2.1"]);
+        assert!(entries.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn normalizes_dns_names_for_cache_and_in_flight_dedup() {

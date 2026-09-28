@@ -119,19 +119,31 @@ impl Client {
         }
 
         // Channel with small buffer — provides backpressure
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(4);
+        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, BypassError>>(4);
 
         tokio::spawn(async move {
             let mut response = response;
             loop {
-                match response.chunk().await {
+                let next = tokio::select! {
+                    _ = tx.closed() => break,
+                    next = response.chunk() => next,
+                };
+                match next {
                     Ok(Some(chunk)) => {
-                        if tx.send(chunk.to_vec()).await.is_err() {
+                        if tx.send(Ok(chunk.to_vec())).await.is_err() {
                             break; // receiver dropped (client disconnected)
                         }
                     }
                     Ok(None) => break, // body complete
-                    Err(_) => break,   // read error — signal EOF
+                    Err(err) => {
+                        let _ = tx
+                            .send(Err(BypassError::HttpError(format_error_chain(
+                                "Body read failed",
+                                &err,
+                            ))))
+                            .await;
+                        break;
+                    }
                 }
             }
             // tx drops here → receiver gets None
@@ -148,69 +160,15 @@ impl Client {
     /// full payload never lives in memory (used by the image cache so big reader
     /// images are never materialised in the JS heap). Returns total bytes written.
     ///
-    /// Writes to a `<dest_path>.part` temp file and renames on success, so an
-    /// interrupted download never leaves a truncated file that later reads as a
-    /// valid cache hit. On a non-2xx response (or read error) the partial file is
-    /// removed and an error returned.
+    /// Each attempt owns a unique temporary file and publishes only at clean EOF.
     pub async fn download_to_file(
         &self,
         url: &str,
         headers: Option<HashMap<String, String>>,
         dest_path: &str,
     ) -> Result<u64, BypassError> {
-        use tokio::io::AsyncWriteExt;
-
-        if let Some(written) = self
-            .ech
-            .download_to_file(url, headers.as_ref(), dest_path)
-            .await?
-        {
-            return Ok(written);
-        }
-
-        let mut request = self.inner.get(url);
-        if let Some(hdrs) = headers {
-            for (key, value) in hdrs {
-                request = request.header(&key, &value);
-            }
-        }
-
-        let mut response = request
-            .send()
-            .await
-            .map_err(|e| BypassError::HttpError(format_error_chain("Request failed", &e)))?;
-
-        let status = response.status().as_u16();
-        if !(200..300).contains(&status) {
-            return Err(BypassError::HttpError(format!(
-                "Image fetch failed with HTTP {status}"
-            )));
-        }
-
-        if let Some(parent) = std::path::Path::new(dest_path).parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let tmp_path = format!("{dest_path}.part");
-        let mut file = tokio::fs::File::create(&tmp_path).await?;
-        let mut total: u64 = 0;
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => {
-                    file.write_all(&chunk).await?;
-                    total += chunk.len() as u64;
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    drop(file);
-                    let _ = tokio::fs::remove_file(&tmp_path).await;
-                    return Err(BypassError::HttpError(format!("Body read failed: {e}")));
-                }
-            }
-        }
-        file.flush().await?;
-        drop(file);
-        tokio::fs::rename(&tmp_path, dest_path).await?;
-        Ok(total)
+        let response = self.fetch_streaming(url, headers).await?;
+        crate::download::save_response(response, dest_path).await
     }
 }
 
@@ -228,5 +186,46 @@ fn format_error_chain(context: &str, err: &dyn StdError) -> String {
 pub struct StreamingResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
-    pub body_rx: mpsc::Receiver<Vec<u8>>,
+    pub body_rx: mpsc::Receiver<Result<Vec<u8>, BypassError>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn fallback_stream_reports_content_length_truncation() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 2048];
+            socket.read(&mut request).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\npart")
+                .await
+                .unwrap();
+        });
+        // Use the exact fallback pump with a direct loopback client, avoiding
+        // external DNS/TLS and the unrelated SOCKS handshake in this regression.
+        let client = Client {
+            inner: rquest::Client::builder().no_proxy().build().unwrap(),
+            ech: EchHttpClient::new(),
+        };
+        let mut response = client
+            .fetch_streaming(&format!("http://{address}/"), None)
+            .await
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut failure = None;
+        while let Some(chunk) = response.body_rx.recv().await {
+            match chunk {
+                Ok(chunk) => bytes.extend_from_slice(&chunk),
+                Err(err) => failure = Some(err),
+            }
+        }
+        assert_eq!(bytes, b"part");
+        assert!(failure.is_some());
+    }
 }

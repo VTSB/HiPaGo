@@ -7,13 +7,17 @@ use rustls::pki_types::{EchConfigListBytes, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::time::{timeout, timeout_at, Instant};
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::TlsConnector;
 use url::Url;
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const PHASE_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_CHUNK_SIZE: usize = 16 * 1024;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
@@ -71,25 +75,10 @@ impl EchHttpClient {
 
         let status = response.status;
         let headers = response.headers;
-        let mut body = response.body;
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(4);
+        let body = response.body;
+        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, BypassError>>(4);
 
-        tokio::spawn(async move {
-            loop {
-                match body.next_chunk().await {
-                    Ok(Some(chunk)) => {
-                        if tx.send(chunk).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(err) => {
-                        eprintln!("[bypass-ech] streaming body read failed: {err}");
-                        break;
-                    }
-                }
-            }
-        });
+        tokio::spawn(pump_body(body, tx));
 
         Ok(Some(StreamingResponse {
             status,
@@ -98,56 +87,26 @@ impl EchHttpClient {
         }))
     }
 
-    pub async fn download_to_file(
+    async fn open_stream(
         &self,
         url: &str,
         headers: Option<&HashMap<String, String>>,
-        dest_path: &str,
-    ) -> Result<Option<u64>, BypassError> {
-        let mut response = match self.open_stream(url, headers).await? {
-            Some(response) => response,
-            None => return Ok(None),
-        };
-
-        if !(200..300).contains(&response.status) {
-            return Err(BypassError::HttpError(format!(
-                "Image fetch failed with HTTP {}",
-                response.status
-            )));
-        }
-
-        if let Some(parent) = std::path::Path::new(dest_path).parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
-        let tmp_path = format!("{dest_path}.part");
-        let mut file = tokio::fs::File::create(&tmp_path).await?;
-
-        let result = async {
-            let mut total: u64 = 0;
-            while let Some(chunk) = response.body.next_chunk().await? {
-                file.write_all(&chunk).await?;
-                total += chunk.len() as u64;
-            }
-            file.flush().await?;
-            Ok::<u64, BypassError>(total)
-        }
-        .await;
-
-        match result {
-            Ok(total) => {
-                drop(file);
-                tokio::fs::rename(&tmp_path, dest_path).await?;
-                Ok(Some(total))
-            }
-            Err(err) => {
-                drop(file);
-                let _ = tokio::fs::remove_file(&tmp_path).await;
-                Err(err)
+    ) -> Result<Option<EchResponseStream>, BypassError> {
+        match timeout(
+            REQUEST_TIMEOUT,
+            self.open_stream_before_deadline(url, headers),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => {
+                eprintln!("[bypass-ech] ECH response head timed out; falling back");
+                Ok(None)
             }
         }
     }
 
-    async fn open_stream(
+    async fn open_stream_before_deadline(
         &self,
         url: &str,
         headers: Option<&HashMap<String, String>>,
@@ -194,7 +153,9 @@ impl EchHttpClient {
         headers: Option<&HashMap<String, String>>,
         ech_config_list: Vec<u8>,
     ) -> Result<EchResponseStream, BypassError> {
-        let tcp = connect_via_doh(&self.resolver, host, port).await?;
+        let tcp = timeout(PHASE_TIMEOUT, connect_via_doh(&self.resolver, host, port))
+            .await
+            .map_err(|_| timed_out("connect"))??;
 
         let ech_config = EchConfig::new(
             EchConfigListBytes::from(ech_config_list),
@@ -214,9 +175,9 @@ impl EchHttpClient {
         let server_name = ServerName::try_from(host.to_string())
             .map_err(|e| BypassError::HttpError(format!("Invalid ECH server name {host}: {e}")))?;
         let connector = TlsConnector::from(Arc::new(tls_config));
-        let mut tls = connector
-            .connect(server_name, tcp)
+        let mut tls = timeout(PHASE_TIMEOUT, connector.connect(server_name, tcp))
             .await
+            .map_err(|_| timed_out("TLS handshake"))?
             .map_err(|e| BypassError::HttpError(format!("ECH TLS handshake failed: {e}")))?;
 
         if tls.get_ref().1.ech_status() != EchStatus::Accepted {
@@ -226,15 +187,49 @@ impl EchHttpClient {
         }
 
         let request = build_get_request(parsed, host, port, headers)?;
-        tls.write_all(request.as_bytes()).await?;
-        tls.flush().await?;
-
-        let (status, headers, body_mode, initial_body) = read_http_head(&mut tls).await?;
+        let (status, headers, body_mode, initial_body) = timeout(PHASE_TIMEOUT, async {
+            tls.write_all(request.as_bytes()).await?;
+            tls.flush().await?;
+            read_http_head(&mut tls).await
+        })
+        .await
+        .map_err(|_| timed_out("HTTP headers"))??;
         Ok(EchResponseStream {
             status,
             headers,
             body: BodyChunkReader::new(tls, initial_body, body_mode),
         })
+    }
+}
+
+async fn pump_body<R: AsyncRead + Unpin>(
+    mut body: BodyChunkReader<R>,
+    tx: mpsc::Sender<Result<Vec<u8>, BypassError>>,
+) {
+    loop {
+        let next = tokio::select! {
+            _ = tx.closed() => break,
+            next = body.next_chunk() => next,
+        };
+        let chunk = match next {
+            Ok(Some(chunk)) => Ok(chunk),
+            Ok(None) => break,
+            Err(err) => Err(err),
+        };
+        let failed = chunk.is_err();
+        match timeout_at(body.deadline, tx.reserve()).await {
+            Ok(Ok(permit)) => permit.send(chunk),
+            Ok(Err(_)) => break,
+            Err(_) => {
+                // Backpressure must not keep the socket alive past its deadline.
+                drop(body);
+                let _ = tx.send(Err(timed_out("body"))).await;
+                return;
+            }
+        }
+        if failed {
+            break;
+        }
     }
 }
 
@@ -338,10 +333,23 @@ where
 
     loop {
         if let Some(header_end) = find_header_end(&raw) {
-            let header_bytes = &raw[..header_end];
-            let initial_body = raw[header_end + 4..].to_vec();
-            let (status, headers) = parse_http_head(header_bytes)?;
-            let body_mode = body_mode(&headers)?;
+            if header_end + 4 > MAX_HEADER_BYTES {
+                return Err(BypassError::HttpError(
+                    "ECH HTTP headers exceeded limit".into(),
+                ));
+            }
+            let (status, headers) = parse_http_head(&raw[..header_end])?;
+            raw.drain(..header_end + 4);
+            if (100..200).contains(&status) {
+                if status == 101 {
+                    return Err(BypassError::HttpError(
+                        "ECH protocol upgrade is unsupported".into(),
+                    ));
+                }
+                continue;
+            }
+            let initial_body = raw;
+            let body_mode = body_mode(status, &headers)?;
             return Ok((status, headers, body_mode, initial_body));
         }
 
@@ -359,6 +367,10 @@ where
         }
         raw.extend_from_slice(&buf[..n]);
     }
+}
+
+fn timed_out(phase: &str) -> BypassError {
+    BypassError::HttpError(format!("ECH {phase} timed out"))
 }
 
 fn find_header_end(raw: &[u8]) -> Option<usize> {
@@ -392,7 +404,10 @@ fn parse_http_head(header_bytes: &[u8]) -> Result<(u16, HashMap<String, String>)
     Ok((status, headers))
 }
 
-fn body_mode(headers: &HashMap<String, String>) -> Result<BodyMode, BypassError> {
+fn body_mode(status: u16, headers: &HashMap<String, String>) -> Result<BodyMode, BypassError> {
+    if matches!(status, 204 | 304) {
+        return Ok(BodyMode::Done);
+    }
     if headers
         .get("transfer-encoding")
         .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"))
@@ -429,6 +444,7 @@ struct BodyChunkReader<R> {
     reader: R,
     pending: Vec<u8>,
     mode: BodyMode,
+    deadline: Instant,
 }
 
 impl<R> BodyChunkReader<R>
@@ -440,10 +456,17 @@ where
             reader,
             pending,
             mode,
+            deadline: Instant::now() + REQUEST_TIMEOUT,
         }
     }
 
     async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, BypassError> {
+        timeout_at(self.deadline, self.next_chunk_before_deadline())
+            .await
+            .map_err(|_| timed_out("body"))?
+    }
+
+    async fn next_chunk_before_deadline(&mut self) -> Result<Option<Vec<u8>>, BypassError> {
         match std::mem::replace(&mut self.mode, BodyMode::Done) {
             BodyMode::ContentLength { mut remaining } => {
                 if remaining == 0 {
@@ -639,6 +662,116 @@ mod tests {
 
         assert_eq!(parsed.status, 200);
         assert_eq!(parsed.body, b"hello");
+    }
+
+    #[tokio::test]
+    async fn consumes_coalesced_and_split_informational_heads() {
+        let raw = b"HTTP/1.1 103 Early Hints\r\nLink: hint\r\n\r\nHTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+        let parsed = parse_raw_response(raw.to_vec()).await.unwrap();
+        assert_eq!(parsed.status, 200);
+        assert_eq!(parsed.body, b"ok");
+        let (mut reader, mut writer) = tokio::io::duplex(1);
+        let bytes = raw.to_vec();
+        let writer = tokio::spawn(async move {
+            writer.write_all(&bytes).await.unwrap();
+        });
+        let (status, _, mode, pending) = read_http_head(&mut reader).await.unwrap();
+        assert_eq!(status, 200);
+        let mut body = BodyChunkReader::new(reader, pending, mode);
+        let mut bytes = Vec::new();
+        while let Some(chunk) = body.next_chunk().await.unwrap() {
+            bytes.extend(chunk);
+        }
+        assert_eq!(bytes, b"ok");
+        writer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn interim_eof_is_an_error_and_no_body_status_ignores_length() {
+        assert!(
+            parse_raw_response(b"HTTP/1.1 103 Early Hints\r\n\r\n".to_vec())
+                .await
+                .is_err()
+        );
+        for status in [204, 304] {
+            let parsed = parse_raw_response(
+                format!("HTTP/1.1 {status} Empty\r\nContent-Length: 999\r\n\r\n").into_bytes(),
+            )
+            .await
+            .unwrap();
+            assert!(parsed.body.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn body_pump_reports_truncation_after_partial_chunk() {
+        let (reader, mut writer) = tokio::io::duplex(16);
+        writer.write_all(b"part").await.unwrap();
+        drop(writer);
+        let body = BodyChunkReader::new(
+            reader,
+            vec![],
+            super::BodyMode::ContentLength { remaining: 8 },
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        super::pump_body(body, tx).await;
+        assert_eq!(rx.recv().await.unwrap().unwrap(), b"part");
+        assert!(rx.recv().await.unwrap().is_err());
+        assert!(rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stalled_body_has_a_deadline_and_receiver_drop_closes_transport() {
+        use tokio::io::AsyncReadExt;
+        let (reader, mut writer) = tokio::io::duplex(16);
+        let mut body = BodyChunkReader::new(reader, vec![], super::BodyMode::UntilEof);
+        body.deadline = tokio::time::Instant::now();
+        assert!(body
+            .next_chunk()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("timed out"));
+        drop(body);
+        assert_eq!(writer.read(&mut [0; 1]).await.unwrap(), 0);
+        let (reader, mut writer) = tokio::io::duplex(16);
+        let body = BodyChunkReader::new(reader, vec![], super::BodyMode::UntilEof);
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let pump = tokio::spawn(super::pump_body(body, tx));
+        drop(rx);
+        tokio::time::timeout(std::time::Duration::from_secs(1), pump)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(writer.read(&mut [0; 1]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn backpressure_does_not_retain_transport_past_body_deadline() {
+        use tokio::io::AsyncReadExt;
+        let (reader, mut writer) = tokio::io::duplex(16);
+        let mut body = BodyChunkReader::new(reader, b"chunk".to_vec(), super::BodyMode::UntilEof);
+        body.deadline = tokio::time::Instant::now();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tx.send(Ok(b"already queued".to_vec())).await.unwrap();
+        let pump = tokio::spawn(super::pump_body(body, tx));
+        // Keep the channel full while observing the actual peer socket close.
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), writer.read(&mut [0; 1]))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        assert_eq!(rx.recv().await.unwrap().unwrap(), b"already queued");
+        assert!(rx
+            .recv()
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("timed out"));
+        pump.await.unwrap();
     }
 
     #[test]
