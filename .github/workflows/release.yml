@@ -48,6 +48,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          # This job only runs Node scripts; pnpm is not installed.
+          package-manager-cache: false
       - name: Validate pushed tag and draft (or verify an existing successful beta)
         id: release
         run: node scripts/release-automation.mjs prepare
@@ -538,6 +540,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
       - name: Verify signatures and upload the complete updater manifest
         run: node scripts/release-automation.mjs manifest
         env:
@@ -560,6 +563,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
       - name: Validate artifacts, record provenance and publish prerelease
         run: node scripts/release-automation.mjs publish
         env:

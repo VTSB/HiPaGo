@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
+          # Promotion only runs a dependency-free Node script.
+          package-manager-cache: false
       - name: Verify successful beta provenance and promote unchanged assets
         run: node scripts/release-automation.mjs promote
         env:
