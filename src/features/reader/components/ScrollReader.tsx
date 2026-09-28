@@ -68,7 +68,7 @@ function ScrollPage({ image, index, url, source, current }: {
           src={url}
           alt={`Page ${index + 1}`}
           className="w-full select-none"
-          loading="lazy"
+          loading={current ? 'eager' : 'lazy'}
           fetchPriority={current ? 'high' : undefined}
           draggable={false}
           style={{ aspectRatio }}

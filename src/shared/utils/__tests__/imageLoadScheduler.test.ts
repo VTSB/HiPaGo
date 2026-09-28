@@ -4,6 +4,37 @@ import { ImageLoadScheduler, viewportDistance } from '../imageLoadScheduler';
 const flush = async () => { await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.resolve(); };
 
 describe('ImageLoadScheduler', () => {
+  it('holds background dispatch until a display grant has actually started', async () => {
+    const scheduler = new ImageLoadScheduler({ start: 4, min: 4, max: 4 });
+    const order: string[] = [];
+    const warm = scheduler.acquire(() => 1, { background: () => true });
+    warm.granted.then(() => order.push('warm'));
+    const display = scheduler.acquire(() => 0, { awaitStart: true });
+    display.granted.then(() => order.push('display grant'));
+    await flush();
+    expect(order).toEqual(['display grant']);
+    expect(scheduler.activeCount).toBe(1);
+    display.markStarted();
+    await flush();
+    expect(order).toEqual(['display grant', 'warm']);
+    display.release();
+    warm.release();
+  });
+
+  it('unblocks background work if a display disappears before acknowledging its start', async () => {
+    const scheduler = new ImageLoadScheduler({ start: 4, min: 4, max: 4 });
+    const display = scheduler.acquire(() => 0, { awaitStart: true });
+    const warm = scheduler.acquire(() => 1, { background: () => true });
+    let started = false;
+    warm.granted.then(() => { started = true; });
+    await flush();
+    expect(started).toBe(false);
+    display.release();
+    await flush();
+    expect(started).toBe(true);
+    warm.release();
+  });
+
   it('batches cold starts so visible demand wins over earlier distant mounts', async () => {
     const scheduler = new ImageLoadScheduler({ start: 2, min: 2, max: 2 });
     const order: string[] = [];

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { imageLoadScheduler, imageViewportDistance, STUCK_MS } from '@/shared/utils/imageLoadScheduler';
 
 /** Own one browser attempt from actual src assignment through settle/cancel. */
@@ -24,6 +24,7 @@ export function useScheduledImageLoad(params: {
     imageLoadScheduler.refresh();
   }, [background]);
   const releaseRef = useRef<((ok: boolean) => void) | null>(null);
+  const markStartedRef = useRef<(() => void) | null>(null);
   const timeoutRef = useRef(params.onTimeout);
   useEffect(() => { timeoutRef.current = params.onTimeout; });
 
@@ -36,7 +37,7 @@ export function useScheduledImageLoad(params: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const handle = imageLoadScheduler.acquire(
       () => imageViewportDistance(imgRef.current),
-      { background: () => backgroundRef.current },
+      { background: () => backgroundRef.current, awaitStart: true },
     );
     const imageElement = imgRef.current;
     const clearSource = () => {
@@ -54,6 +55,7 @@ export function useScheduledImageLoad(params: {
       if (cancelled) { handle.release(); return; }
       startedAt = performance.now();
       releaseRef.current = settle;
+      markStartedRef.current = handle.markStarted;
       setGrantedKey(loadKey);
       timer = setTimeout(() => {
         // Stop the real browser attempt BEFORE making its capacity available.
@@ -72,8 +74,15 @@ export function useScheduledImageLoad(params: {
         handle.release(); // navigation/src replacement is not network congestion
       }
       if (releaseRef.current === settle) releaseRef.current = null;
+      if (markStartedRef.current === handle.markStarted) markStartedRef.current = null;
     };
   }, [shouldSchedule, wantsToLoad, loadKey, imgRef]);
+
+  useLayoutEffect(() => {
+    if (shouldSchedule && wantsToLoad && loadKey && grantedKey === loadKey) {
+      markStartedRef.current?.();
+    }
+  }, [shouldSchedule, wantsToLoad, loadKey, grantedKey]);
 
   const onSettled = useCallback((ok: boolean) => {
     releaseRef.current?.(ok);

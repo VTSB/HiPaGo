@@ -13,12 +13,15 @@ interface Waiter {
   id: number;
   priority: () => number;
   background: () => boolean;
+  awaitingStart: boolean;
   grant: () => void;
 }
 export interface SlotHandle {
   granted: Promise<void>;
   /** Starts are always batched; retained for existing callers. */
   immediate: boolean;
+  /** A display owner acknowledges src assignment after its DOM commit. */
+  markStarted: () => void;
   cancel: () => void;
   /** Releases only this grant, once. Omit a sample for routine cancellation. */
   release: (sample?: LoadSample) => void;
@@ -40,15 +43,21 @@ export class ImageLoadScheduler {
   get activeCount(): number { return this.active.size; }
   get pendingCount(): number { return this.waiters.length; }
 
-  acquire(priority: () => number, options: { background?: () => boolean } = {}): SlotHandle {
+  acquire(priority: () => number, options: { background?: () => boolean; awaitStart?: boolean } = {}): SlotHandle {
     const id = ++this.seq;
     let resolveFn: () => void = () => {};
     const granted = new Promise<void>((resolve) => { resolveFn = resolve; });
-    this.waiters.push({ id, priority, background: options.background ?? (() => false), grant: resolveFn });
+    this.waiters.push({ id, priority, background: options.background ?? (() => false), awaitingStart: options.awaitStart ?? false, grant: resolveFn });
     this.refresh();
     return {
       granted,
       immediate: false,
+      markStarted: () => {
+        const active = this.active.get(id);
+        if (!active?.awaitingStart) return;
+        active.awaitingStart = false;
+        this.refresh();
+      },
       cancel: () => {
         this.waiters = this.waiters.filter((w) => w.id !== id);
       },
@@ -91,9 +100,13 @@ export class ImageLoadScheduler {
       let bestIdx = -1;
       let bestBackground = true;
       let bestDistance = Infinity;
+      const demandStarting = [...this.active.values()].some((active) => active.awaitingStart && !active.background());
       for (let i = 0; i < this.waiters.length; i++) {
         const waiter = this.waiters[i];
         const background = waiter.background();
+        // A React display grant is not yet a transport start. Let its src reach
+        // the DOM before an imperative Image preloader can consume bandwidth.
+        if (background && demandStarting) continue;
         // Speculative work always leaves one real transport slot for demand.
         if (background && this.active.size >= Math.max(1, this.limit - 1)) continue;
         const distance = safePriority(waiter.priority);

@@ -254,6 +254,15 @@ describe('ScrollReader initial-page scroll', () => {
 });
 
 describe('ScrollReader visible-page warming', () => {
+  it('starts the current page without waiting for intersection or animation-frame admission', async () => {
+    vi.stubGlobal('requestAnimationFrame', () => 1);
+    const view = await mount(4);
+    await waitFor(() => {
+      expect(view.getByAltText('Page 5').getAttribute('src')).toBe('https://cdn.example.com/004.jpg');
+    });
+    expect(view.getByAltText('Page 6').getAttribute('src')).toBeNull();
+  });
+
   it('replaces the preload window when the actual most-visible page changes', async () => {
     const { container, onVisiblePageChange } = await mount(5);
     expect(mockPreloadImage.mock.calls.map(([url]) => url)).toEqual(
