@@ -118,6 +118,29 @@ describe('useScheduledImageLoad actual attempt lifetime', () => {
 });
 
 describe('clipped image priority', () => {
+  it('keeps a scaled thumbnail hidden by its offscreen card behind visible demand', async () => {
+    const wrapper = document.createElement('div');
+    wrapper.style.overflow = 'hidden';
+    wrapper.getBoundingClientRect = () => ({ top: -305, bottom: -5, left: 0, right: 200 }) as DOMRect;
+    const hidden = document.createElement('img');
+    hidden.getBoundingClientRect = () => ({ top: -327.5, bottom: 17.5, left: -15, right: 215 }) as DOMRect;
+    wrapper.append(hidden);
+    document.body.append(wrapper);
+    const visible = image(10).current;
+    expect(imageViewportDistance(hidden)).toBe(5);
+    expect(imageViewportDistance(visible)).toBe(0);
+    const scheduler = new ImageLoadScheduler({ start: 1, min: 1, max: 1 });
+    const order: string[] = [];
+    const first = scheduler.acquire(() => imageViewportDistance(hidden));
+    first.granted.then(() => order.push('hidden'));
+    const second = scheduler.acquire(() => imageViewportDistance(visible));
+    second.granted.then(() => order.push('visible'));
+    await flush();
+    expect(order).toEqual(['visible']);
+    first.cancel();
+    second.release();
+  });
+
   it('keeps offscreen clipped cards finite and dispatches the closest despite registration order', async () => {
     const card = (top: number) => {
       const wrapper = document.createElement('div');

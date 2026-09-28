@@ -320,7 +320,7 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
 
   const shouldSchedule = !fromCache && !cacheUrl &&
     !/^(blob:|data:|file:|capacitor:|asset:|https?:\/\/asset\.localhost\/|https?:\/\/[^/]*localhost\/.*_capacitor_file_)/.test(src) &&
-    !loadedSrcCache.has(src);
+    !loaded;
   const { granted, onSettled } = useScheduledImageLoad({
     shouldSchedule,
     wantsToLoad: visible && !!effectiveSrc,
@@ -397,7 +397,9 @@ export function AbortableImage({ src, alt, className, loading = 'lazy', style, d
     setPrevEffectiveSrc(effectiveSrc);
     setPrevLoading(loading);
     setPrevPreload(preload);
-    setLoaded(loadedSrcCache.has(src));
+    // Another consumer warming the same URL must not revoke this element's
+    // active grant. Only a new source adopts the shared cache's loaded state.
+    if (src !== prevSrc || effectiveSrc !== prevEffectiveSrc) setLoaded(loadedSrcCache.has(src));
     setFailed(false);
     // Same cache-hit fast path as the initial useState: if the new URL is
     // already cached, keep visible=true so the <img> emits its src on the

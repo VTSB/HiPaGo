@@ -146,14 +146,28 @@ export function imageViewportDistance(element: HTMLElement | null): number {
     right: (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth),
     bottom: (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight),
   };
-  const ancestors: HTMLElement[] = [];
-  for (let parent = element.parentElement; parent; parent = parent.parentElement) ancestors.push(parent);
-  for (const parent of ancestors.reverse()) {
+  const clips: Array<{ rect: DOMRect; clipX: boolean; clipY: boolean }> = [];
+  let imageRect: Rectangle = element.getBoundingClientRect();
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
     const style = getComputedStyle(parent);
     const clipX = /(auto|scroll|hidden|clip)/.test(style.overflowX || style.overflow);
     const clipY = /(auto|scroll|hidden|clip)/.test(style.overflowY || style.overflow);
     if (!clipX && !clipY) continue;
     const rect = parent.getBoundingClientRect();
+    clips.push({ rect, clipX, clipY });
+    const clippedImage = {
+      left: clipX ? Math.max(imageRect.left, rect.left) : imageRect.left,
+      right: clipX ? Math.min(imageRect.right, rect.right) : imageRect.right,
+      top: clipY ? Math.max(imageRect.top, rect.top) : imageRect.top,
+      bottom: clipY ? Math.min(imageRect.bottom, rect.bottom) : imageRect.bottom,
+    };
+    // A transformed thumbnail can extend into the viewport while its card is
+    // wholly outside it. Measure the part inside its own clip. When an image
+    // lies beyond a scroll container, retain its distance instead of collapsing
+    // every offscreen page to the container's edge.
+    if (clippedImage.right > clippedImage.left && clippedImage.bottom > clippedImage.top) imageRect = clippedImage;
+  }
+  for (const { rect, clipX, clipY } of clips.reverse()) {
     const clipped = {
       left: clipX ? Math.max(bounds.left, rect.left) : bounds.left,
       right: clipX ? Math.min(bounds.right, rect.right) : bounds.right,
@@ -164,7 +178,7 @@ export function imageViewportDistance(element: HTMLElement | null): number {
     // card's own overflow-hidden wrapper must not erase that distance reference.
     if (clipped.right > clipped.left && clipped.bottom > clipped.top) Object.assign(bounds, clipped);
   }
-  return rectangleDistance(element.getBoundingClientRect(), bounds);
+  return rectangleDistance(imageRect, bounds);
 }
 
 /** Deadline for an actual browser attempt, never a queued wait. */

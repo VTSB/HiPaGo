@@ -142,6 +142,35 @@ describe('native cache transport scheduling', () => {
 });
 
 describe('browser preload budget', () => {
+  it('retains an active displayed source when another consumer warms the same URL', async () => {
+    mocks.native = false;
+    const images: HTMLImageElement[] = [];
+    vi.stubGlobal('Image', class {
+      src = ''; fetchPriority = ''; onload: (() => void) | null = null; onerror: (() => void) | null = null;
+      constructor() { images.push(this as unknown as HTMLImageElement); }
+    });
+    const url = source('shared-browser');
+    const warm = preloadImageSource(url);
+    await flush();
+    const view = render(<AbortableImage src={url} alt="visible" loading="eager" />);
+    await flush();
+    const element = view.container.querySelector('img')!;
+    expect(element.getAttribute('src')).toBe(url);
+    expect(imageLoadScheduler.activeCount).toBe(2);
+    await act(async () => { images[0].onload?.(new Event('load')); await warm; });
+    view.rerender(<AbortableImage src={url} alt="visible changed" loading="eager" />);
+    await flush();
+    expect(element.getAttribute('src')).toBe(url);
+    expect(imageLoadScheduler.activeCount).toBe(1);
+    // Admission-prop changes also must not adopt another consumer's cache state.
+    view.rerender(<AbortableImage src={url} alt="visible changed" loading="lazy" />);
+    await flush();
+    expect(element.getAttribute('src')).toBe(url);
+    expect(imageLoadScheduler.activeCount).toBe(1);
+    fireEvent.load(element);
+    expect(imageLoadScheduler.activeCount).toBe(0);
+  });
+
   it('keeps speculative starts bounded and cancels the real src before releasing', async () => {
     mocks.native = false;
     const images: HTMLImageElement[] = [];
