@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AbortableImage, preloadImageSource, resetImageDisplayCaches } from '../AbortableImage';
 import { imageLoadScheduler } from '@/shared/utils/imageLoadScheduler';
@@ -16,6 +16,32 @@ afterEach(() => {
   resetImageDisplayCaches();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it('starts concurrent foreground images by distance instead of React tree order', async () => {
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  vi.spyOn(HTMLImageElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLImageElement) {
+    const top = this.alt === 'far' ? -200 : this.alt === 'near' ? -110 : 10;
+    return { top, bottom: top + 100, left: 0, right: 100 } as DOMRect;
+  });
+  const assigned: string[] = [];
+  const setAttribute = Element.prototype.setAttribute;
+  vi.spyOn(Element.prototype, 'setAttribute').mockImplementation(function (this: Element, name, value) {
+    if (this.tagName === 'IMG' && name === 'src') assigned.push(value);
+    setAttribute.call(this, name, value);
+  });
+  const url = (name: string) => `https://images.example/${name}.webp`;
+  const view = render(<>
+    <AbortableImage src={url('far')} alt="far" loading="eager" />
+    <AbortableImage src={url('near')} alt="near" loading="eager" />
+    <AbortableImage src={url('visible')} alt="visible" loading="eager" />
+  </>);
+  await waitFor(() => expect(assigned).toHaveLength(3));
+  expect(assigned).toEqual(['visible', 'near', 'far'].map(url));
+  // Source assignment is ordered; the network requests remain concurrent.
+  expect(imageLoadScheduler.activeCount).toBe(3);
+  view.getAllByRole('img').forEach((element) => fireEvent.load(element));
+  expect(imageLoadScheduler.activeCount).toBe(0);
 });
 
 it('commits the visible src before an imperative preloader starts with spare capacity', async () => {

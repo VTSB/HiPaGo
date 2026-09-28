@@ -56,7 +56,9 @@ export class ImageLoadScheduler {
         const active = this.active.get(id);
         if (!active?.awaitingStart) return;
         active.awaitingStart = false;
-        this.refresh();
+        // The DOM now owns this source. Advance the next grant without adding
+        // a timer delay; its promise callback still runs after this commit.
+        this.dispatch();
       },
       cancel: () => {
         this.waiters = this.waiters.filter((w) => w.id !== id);
@@ -101,12 +103,12 @@ export class ImageLoadScheduler {
       let bestBackground = true;
       let bestDistance = Infinity;
       const demandStarting = [...this.active.values()].some((active) => active.awaitingStart && !active.background());
+      // React can otherwise batch several grants and assign srcs in tree order.
+      // Serialize only grant-to-DOM-start, keeping started downloads concurrent.
+      if (demandStarting) return;
       for (let i = 0; i < this.waiters.length; i++) {
         const waiter = this.waiters[i];
         const background = waiter.background();
-        // A React display grant is not yet a transport start. Let its src reach
-        // the DOM before an imperative Image preloader can consume bandwidth.
-        if (background && demandStarting) continue;
         // Speculative work always leaves one real transport slot for demand.
         if (background && this.active.size >= Math.max(1, this.limit - 1)) continue;
         const distance = safePriority(waiter.priority);
