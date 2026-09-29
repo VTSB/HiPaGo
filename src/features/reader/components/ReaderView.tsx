@@ -20,6 +20,11 @@ export function ReaderView({
   galleryId: number;
   initialPage?: number;
 }) {
+  // A new work needs fresh offline loaders, not the previous work's manifest.
+  return <ReaderSession key={galleryId} galleryId={galleryId} initialPage={initialPage} />;
+}
+
+function ReaderSession({ galleryId, initialPage }: { galleryId: number; initialPage?: number }) {
   const reader = useReader(galleryId, initialPage);
   const offline = useOfflineImages(galleryId);
   // Enable native WebView pinch-zoom only while the reader is open (Android);
@@ -125,7 +130,7 @@ export function ReaderView({
   const offlineCount = offline.sources?.length ?? 0;
   const images: GalleryImage[] = useMemo(
     () =>
-      offlineCount > 0 && reader.images.length !== offlineCount
+      offlineCount > 0 && (reader.galleryId !== galleryId || reader.images.length !== offlineCount)
         ? Array.from({ length: offlineCount }, (_, i) => ({
             name: '',
             hash: `offline-${i}`,
@@ -137,7 +142,7 @@ export function ReaderView({
             types: new Set<ImageType>(),
           }))
         : reader.images,
-    [offlineCount, reader.images, offline.dims],
+    [offlineCount, reader.galleryId, galleryId, reader.images, offline.dims],
   );
 
   // Seed the reader store from the manifest so totalPages / navigation / the
