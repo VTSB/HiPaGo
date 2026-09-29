@@ -3,7 +3,7 @@ import { BOTTOM_TABS, NAV_ITEMS, isNavActive, isStackedRoute, isRootTab } from '
 
 describe('navItems — bottom tab set', () => {
   it('exposes exactly 4 mobile tabs in order', () => {
-    expect(BOTTOM_TABS.map((t) => t.href)).toEqual(['/', '/search', '/library', '/settings']);
+    expect(BOTTOM_TABS.map((t) => t.href)).toEqual(['/', '/search', '/library', '/more']);
   });
 
   it('Browse tab matches only the exact root', () => {
@@ -13,12 +13,13 @@ describe('navItems — bottom tab set', () => {
     expect(browse.matches('/library')).toBe(false);
   });
 
-  it('Library/보관함 tab owns /library, /favorites and /history (merged hub)', () => {
+  it('Library owns saved works and download management', () => {
     const saved = BOTTOM_TABS.find((t) => t.href === '/library')!;
     expect(saved.matches('/library')).toBe(true);
     expect(saved.matches('/favorites')).toBe(true);
-    expect(saved.matches('/history')).toBe(true);
-    expect(saved.matches('/history/2024')).toBe(true);
+    expect(saved.matches('/history')).toBe(false);
+    expect(saved.matches('/downloads')).toBe(true);
+    expect(saved.matches('/history/2024')).toBe(false);
     expect(saved.matches('/')).toBe(false);
     expect(saved.matches('/search')).toBe(false);
   });
@@ -29,9 +30,12 @@ describe('navItems — bottom tab set', () => {
     expect(search.matches('/settings')).toBe(false);
   });
 
-  it('Settings tab matches /settings', () => {
-    const settings = BOTTOM_TABS.find((t) => t.href === '/settings')!;
+  it('More tab owns settings and history', () => {
+    const settings = BOTTOM_TABS.find((t) => t.href === '/more')!;
     expect(settings.matches('/settings')).toBe(true);
+    expect(settings.matches('/settings/reader')).toBe(true);
+    expect(settings.matches('/history')).toBe(true);
+    expect(settings.matches('/downloads')).toBe(false);
     expect(settings.matches('/')).toBe(false);
   });
 });
@@ -44,18 +48,12 @@ describe('navItems — desktop isNavActive', () => {
 
   it('prefix-matches non-root hrefs', () => {
     expect(isNavActive('/favorites', '/favorites')).toBe(true);
-    expect(isNavActive('/library/x', '/library')).toBe(true);
+    expect(isNavActive('/downloads', '/library')).toBe(true);
     expect(isNavActive('/settings', '/favorites')).toBe(false);
   });
 
-  it('keeps the original 5 desktop destinations', () => {
-    expect(NAV_ITEMS.map((n) => n.href)).toEqual([
-      '/',
-      '/favorites',
-      '/history',
-      '/library',
-      '/settings',
-    ]);
+  it('shares four desktop/mobile destinations', () => {
+    expect(NAV_ITEMS.map((n) => n.href)).toEqual(['/', '/search', '/library', '/more']);
   });
 });
 
@@ -64,8 +62,11 @@ describe('navItems — root vs stacked route classification', () => {
     expect(isRootTab('/', false)).toBe(true);
     expect(isRootTab('/library', false)).toBe(true);
     expect(isRootTab('/favorites', false)).toBe(true);
-    expect(isRootTab('/history', false)).toBe(true);
-    expect(isRootTab('/settings', false)).toBe(true);
+    expect(isRootTab('/more', false)).toBe(true);
+    expect(isRootTab('/history', false)).toBe(false);
+    expect(isRootTab('/settings', false)).toBe(false);
+    expect(isRootTab('/settings/reader', false)).toBe(false);
+    expect(isRootTab('/downloads', false)).toBe(false);
   });
 
   it('treats gallery detail and licenses as stacked', () => {

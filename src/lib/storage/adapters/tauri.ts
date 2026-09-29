@@ -168,15 +168,21 @@ export class TauriDownloadStore implements DownloadStore {
   }
 
   async deleteGallery(galleryId: number): Promise<void> {
+    let entries: FsEntry[];
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('plugin:fs|remove', {
-        path: this.galleryPath(galleryId),
-        options: { baseDir: this.baseDir, recursive: true },
-      });
-    } catch {
-      // Already gone — treat as success.
+      entries = await this.readDir(DOWNLOADS_DIR);
+    } catch (error) {
+      // Native ENOENT is the only verified missing-root result. Permission and
+      // I/O failures must reach the caller so its download index is retained.
+      if (String(error).includes('(os error 2)')) return;
+      throw error;
     }
+    if (!entries.some(entry => entry.name === galleryFolderName(galleryId))) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('plugin:fs|remove', {
+      path: this.galleryPath(galleryId),
+      options: { baseDir: this.baseDir, recursive: true },
+    });
   }
 
   async gallerySize(galleryId: number): Promise<number> {

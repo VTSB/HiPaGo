@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { GalleryBlockType, type TagType } from '@/lib/utils/types';
@@ -17,6 +17,14 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { fetchGalleryInfo } from '@/lib/api/gallery';
 import { galleryHref } from '@/lib/utils/routes';
 import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
+
+import type { DBDownload } from '@/lib/db/schema';
+import { deserializeTags } from '@/lib/db/download';
+import { getDownloadedImage, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
+import { createDownloadStore } from '@/lib/storage/download-store';
+import { GalleryActionTarget } from '@/shared/components/GalleryActionTarget';
+
+interface CardOptions { download?: DBDownload; selected?: boolean; onSelect?: () => void; onBeginSelection?: () => void }
 
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 
@@ -63,7 +71,7 @@ function CardSkeleton() {
   );
 }
 
-function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: () => void }) {
+function CardContent({ block, onPrefetch, download, selected, onSelect, onBeginSelection }: { block: GalleryBlock; onPrefetch?: () => void } & CardOptions) {
   const queryClient = useQueryClient();
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
@@ -96,13 +104,41 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   // Use the BIG image only if it is ALREADY in the persistent image cache (e.g.
   // cached after viewing the detail page) — served from disk, no network. Never
   // fetch the big variant over the network for the list; otherwise show small.
+  const { data: cover } = useQuery({
+    queryKey: ['download-covers', block.id, download?.folderName, download?.downloadedAt],
+    queryFn: async () => {
+      const store = await createDownloadStore();
+      const options = download?.folderName ? { folderName: download.folderName } : undefined;
+      const url = await store.coverUrl?.(block.id, options);
+      if (url) return { url, bytes: null };
+      return { url: null, bytes: await getDownloadedImage(block.id, 0, options) };
+    },
+    enabled: !!download && download.pageCount > 0,
+    staleTime: 60_000,
+    gcTime: 60_000,
+  });
+  const [blobCover, setBlobCover] = useState<{ source: typeof cover; url: string } | null>(null);
+  useEffect(() => {
+    if (!cover?.bytes) return;
+    const url = URL.createObjectURL(new Blob([new Uint8Array(cover.bytes).buffer]));
+    let active = true;
+    queueMicrotask(() => { if (active) setBlobCover({ source: cover, url }); });
+    return () => { active = false; URL.revokeObjectURL(url); };
+  }, [cover]);
+  const localCover = cover?.url || (blobCover && blobCover.source === cover ? blobCover.url : null);
+  const { data: completeFiles } = useQuery({
+    queryKey: ['download-integrity', block.id, download?.folderName, download?.pageCount, download?.downloadedAt],
+    queryFn: () => hasCompleteDownloadedGallery(block.id, download!.pageCount, { folderName: download?.folderName }),
+    enabled: download?.status === 'complete',
+    staleTime: 60_000,
+  });
   const smallThumb = block.thumbnail ? resolveThumbnailUrl(block.thumbnail) : '';
   const bigThumb = toBigThumbnailUrl(smallThumb);
   // Holds the big URL once confirmed cached FOR THE CURRENT bigThumb. Derived
   // thumbSrc falls back to small whenever it doesn't match (block change / miss),
   // so the effect never calls setState synchronously.
   const [cachedBig, setCachedBig] = useState<string | null>(null);
-  const thumbSrc = bigThumb && cachedBig === bigThumb ? bigThumb : smallThumb;
+  const thumbSrc = localCover || (bigThumb && cachedBig === bigThumb ? bigThumb : smallThumb);
   useEffect(() => {
     if (!bigThumb || bigThumb === smallThumb) return;
     let cancelled = false;
@@ -121,19 +157,23 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
   }, [smallThumb, bigThumb]);
 
   if (block.type === GalleryBlockType.LOADING) {
-    return <CardSkeleton />;
+    return <GalleryActionTarget gallery={{ id: block.id }} selected={selected} onSelect={onSelect} onBeginSelection={onBeginSelection}><CardSkeleton /></GalleryActionTarget>;
   }
   if (block.type === GalleryBlockType.FAILED) {
     return (
+      <GalleryActionTarget focusable gallery={{ id: block.id }} selected={selected} onSelect={onSelect} onBeginSelection={onBeginSelection}>
       <div className="flex aspect-[2/3] items-center justify-center rounded-lg border border-red-200 bg-red-50 text-sm text-red-500 dark:border-red-900 dark:bg-red-950">
         {t('card.failed')} #{block.id}
       </div>
+      </GalleryActionTarget>
     );
   }
 
   return (
+    <GalleryActionTarget gallery={{ id: block.id, title: block.title, thumbnail: block.thumbnail, tags: block.tags }} selected={selected} onSelect={onSelect} onBeginSelection={onBeginSelection}>
     <Link
       href={galleryHref(block.id)}
+      tabIndex={onSelect ? -1 : undefined}
       className="group block touch-manipulation"
       draggable={false}
       onClick={() => {
@@ -154,7 +194,8 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
       onPointerEnter={onPrefetch}
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:bg-zinc-800 sm:hover:shadow-lg">
-        {block.thumbnail ? (
+        {download && <span className="absolute right-2 top-2 z-10 rounded-full bg-black/70 px-2 py-1 text-xs text-white">{t(download.status === 'complete' ? completeFiles === true ? 'detail.downloaded' : completeFiles === false ? 'library.filesMissing' : 'actions.loading' : download.status === 'failed' ? 'library.failed' : 'library.pending')}</span>}
+        {block.thumbnail || localCover ? (
           <AbortableImage
             src={thumbSrc}
             alt={block.title}
@@ -205,6 +246,7 @@ function CardContent({ block, onPrefetch }: { block: GalleryBlock; onPrefetch?: 
         </div>
       </div>
     </Link>
+    </GalleryActionTarget>
   );
 }
 
@@ -220,15 +262,22 @@ function usePrefetchGalleryInfo(id: number) {
   }, [queryClient, id]);
 }
 
-/** Render a gallery card by passing a pre-loaded block. */
-export const GalleryCard = memo(function GalleryCard({ block }: { block: GalleryBlock }) {
+/** Saved and downloaded works share the same card and action target. */
+export const GalleryCard = memo(function GalleryCard({ block, ...options }: { block: GalleryBlock } & CardOptions) {
   const prefetch = usePrefetchGalleryInfo(block.id);
-  return <CardContent block={block} onPrefetch={prefetch} />;
+  return <CardContent block={block} onPrefetch={prefetch} {...options} />;
 });
 
-/** Render a gallery card by ID — fetches its own data progressively. */
-export const GalleryCardById = memo(function GalleryCardById({ id, demand = true }: { id: number; demand?: boolean }) {
+function RemoteGalleryCard({ id, demand = true, ...options }: { id: number; demand?: boolean } & CardOptions) {
   const block = useGalleryBlock(id, demand);
-  const prefetch = usePrefetchGalleryInfo(id);
-  return <CardContent block={block} onPrefetch={prefetch} />;
+  return <GalleryCard block={block} {...options} />;
+}
+
+export const GalleryCardById = memo(function GalleryCardById({ id, download, ...options }: { id: number; demand?: boolean } & CardOptions) {
+  if (download) {
+    const block: GalleryBlock = { id, type: GalleryBlockType.NOT_DETAILED, title: download.title,
+      thumbnail: download.thumbnail, tags: deserializeTags(download.tags), date: new Date(download.downloadedAt), related: [] };
+    return <GalleryCard block={block} download={download} {...options} />;
+  }
+  return <RemoteGalleryCard id={id} {...options} />;
 });

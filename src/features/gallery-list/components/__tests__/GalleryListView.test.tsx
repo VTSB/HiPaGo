@@ -58,6 +58,8 @@ vi.mock('@/shared/components/FloatingPageNav', () => ({
   }),
 }));
 
+vi.mock('../ContinueReading', () => ({ ContinueReading: () => null }));
+
 vi.mock('../GalleryGrid', () => ({
   SkeletonGrid: () => <div data-testid="skeleton" />,
 }));

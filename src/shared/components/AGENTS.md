@@ -215,3 +215,8 @@ const Component = () => {
 - QueryClient caching prevents redundant API calls
 
 <!-- MANUAL: -->
+
+### Saved work interactions
+- `GalleryActionsProvider` in the main layout owns the single action host and mutation authority. `GalleryActionTarget` only binds long press, context menu and selection; cards do not mount their own menus.
+- `useGalleryActions` exposes saving, downloading, confirmed removal/file deletion and collection management. Helpers reject errors after showing feedback; visible-button callers must catch, and batch callers retain failed selections.
+- Destructive operations refuse queued, paused, active and retry-pending work. Delete stored files before the download index; file-only deletion retains saved membership. `data-hipago-overlay` and the `hipago:overlay-back` event allow Android Back to dismiss overlays before navigating.

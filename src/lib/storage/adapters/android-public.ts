@@ -103,10 +103,14 @@ export class AndroidPublicDownloadStore implements DownloadStore {
   private async resolveFolder(
     galleryId: number,
     options?: DownloadStoreLookupOptions,
+    strict = false,
   ): Promise<string | null> {
     const preferred = options?.folderName?.trim();
     if (preferred) {
-      if (!this.isSafeFolderName(preferred)) return null;
+      if (!this.isSafeFolderName(preferred)) {
+        if (strict) throw new Error('Invalid download folder name');
+        return null;
+      }
       const libDir = await resolveLibraryDir();
       try {
         const { exists } = await PublicLibrary.stat({ path: `${libDir}/${preferred}` });
@@ -114,7 +118,8 @@ export class AndroidPublicDownloadStore implements DownloadStore {
           this.folderCache.set(galleryId, preferred);
           return preferred;
         }
-      } catch {
+      } catch (error) {
+        if (strict) throw error;
         // Exact DB folder is unavailable — do not fall back to a stale prefix hit.
       }
       this.folderCache.delete(galleryId);
@@ -122,7 +127,7 @@ export class AndroidPublicDownloadStore implements DownloadStore {
     }
 
     const cached = this.folderCache.get(galleryId);
-    if (cached !== undefined) return cached;
+    if (!strict && cached !== undefined) return cached;
 
     const libDir = await resolveLibraryDir();
     try {
@@ -135,7 +140,8 @@ export class AndroidPublicDownloadStore implements DownloadStore {
           return n;
         }
       }
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
       // Library dir doesn't exist yet or readdir failed — not found.
     }
     return null;
@@ -352,14 +358,15 @@ export class AndroidPublicDownloadStore implements DownloadStore {
   // ── deleteGallery ──────────────────────────────────────────────────────────
 
   async deleteGallery(galleryId: number, options?: DownloadStoreLookupOptions): Promise<void> {
-    const folder = await this.resolveFolder(galleryId, options);
-    if (!folder) return; // Already gone — treat as success.
     const libDir = await resolveLibraryDir();
-    try {
-      await PublicLibrary.deleteDir({ path: `${libDir}/${folder}` });
-    } catch {
-      // Already gone — treat as success.
-    }
+    if (!(await PublicLibrary.stat({ path: libDir })).exists) return;
+    const folder = await this.resolveFolder(galleryId, options, true);
+    if (!folder) return;
+    const path = `${libDir}/${folder}`;
+    await PublicLibrary.deleteDir({ path });
+    // Document providers can report a failed delete as a false return in the
+    // native bridge. Verify absence before the caller discards its index.
+    if ((await PublicLibrary.stat({ path })).exists) throw new Error('Download folder could not be deleted');
     this.folderCache.delete(galleryId);
   }
 }

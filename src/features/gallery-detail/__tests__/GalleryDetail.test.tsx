@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render as renderBase, waitFor, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -62,9 +63,12 @@ vi.mock('@/features/gallery-list/hooks/useGalleryBlock', () => ({
   useGalleryBlock: vi.fn(() => ({ type: 0 })), // GalleryBlockType.LOADING = 0
 }));
 
-vi.mock('@/features/gallery-detail/hooks/useFavoriteToggle', () => ({
-  useFavoriteToggle: vi.fn(() => ({ isFav: false, isPending: false, toggle: vi.fn() })),
+const galleryActions = vi.hoisted(() => ({
+  open: vi.fn(),
+  save: vi.fn(async () => {}),
+  download: vi.fn(async () => {}),
 }));
+vi.mock('@/shared/hooks/useGalleryActions', () => ({ useGalleryActions: () => galleryActions }));
 
 vi.mock('@/features/gallery-detail/hooks/useDownloadGallery', () => ({
   useDownloadGallery: vi.fn(() => ({ progress: null, start: vi.fn(), cancel: vi.fn() })),
@@ -87,16 +91,21 @@ vi.mock('@/lib/api/client', () => ({
 }));
 
 vi.mock('@/lib/utils/image-url', () => ({
-  getThumbnailUrl: vi.fn((file: { name: string }, size?: string) =>
-    `https://cdn.test/${size || 'small'}/${file.name}`),
+  getThumbnailUrl: vi.fn(
+    (file: { name: string }, size?: string) => `https://cdn.test/${size || 'small'}/${file.name}`,
+  ),
 }));
 
 vi.mock('@/lib/api/url-resolver', () => ({
   resolveThumbnailUrl: (url: string) => url,
 }));
 
+vi.mock('@/lib/db/adapter', () => ({ ensureDb: vi.fn(async () => ({ query: async () => [] })) }));
+
 vi.mock('@/lib/db/gallery', () => ({
   recordVisit: vi.fn(() => Promise.resolve()),
+  isFavorite: vi.fn(async () => false),
+  getReadingProgress: vi.fn(async () => null),
 }));
 
 vi.mock('@/shared/components/Spinner', () => ({
@@ -126,6 +135,15 @@ import type { GalleryBlock, GalleryFile, GalleryImages } from '@/lib/utils/types
 import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
 import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
+
+function render(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderBase(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -158,7 +176,16 @@ function mockDetail(files: GalleryFile[] = []) {
 }
 
 beforeEach(() => {
-  vi.mocked(useOfflineImages).mockReturnValue({ sources: null, urls: null, dims: null, missing: false, loading: false });
+  galleryActions.open.mockClear();
+  galleryActions.save.mockClear();
+  galleryActions.download.mockClear();
+  vi.mocked(useOfflineImages).mockReturnValue({
+    sources: null,
+    urls: null,
+    dims: null,
+    missing: false,
+    loading: false,
+  });
   vi.mocked(getThumbnailUrl).mockClear();
   mockObserve.mockClear();
   mockUnobserve.mockClear();
@@ -182,11 +209,27 @@ describe('GalleryDetail thumbnail virtualization', () => {
       ext: 'webp',
       loadUrl: vi.fn(async () => `http://localhost/_capacitor_content_/page-${index}.webp`),
     }));
-    vi.mocked(useOfflineImages).mockReturnValue({ sources, urls: null, dims: null, missing: false, loading: false });
+    vi.mocked(useOfflineImages).mockReturnValue({
+      sources,
+      urls: null,
+      dims: null,
+      missing: false,
+      loading: false,
+    });
 
     const { container } = render(<GalleryDetail id={123} />);
-    await waitFor(() => expect(container.querySelector('img[alt="Test Gallery"]')).toHaveAttribute('src', 'http://localhost/_capacitor_content_/page-0.webp'));
-    await waitFor(() => expect(container.querySelector('img[alt="Page 2"]')).toHaveAttribute('src', 'http://localhost/_capacitor_content_/page-1.webp'));
+    await waitFor(() =>
+      expect(container.querySelector('img[alt="Test Gallery"]')).toHaveAttribute(
+        'src',
+        'http://localhost/_capacitor_content_/page-0.webp',
+      ),
+    );
+    await waitFor(() =>
+      expect(container.querySelector('img[alt="Page 2"]')).toHaveAttribute(
+        'src',
+        'http://localhost/_capacitor_content_/page-1.webp',
+      ),
+    );
     expect(getThumbnailUrl).not.toHaveBeenCalled();
     expect(container.querySelectorAll('img[alt^="Page "]')).toHaveLength(20);
     expect(sources.slice(20).every((source) => source.loadUrl.mock.calls.length === 0)).toBe(true);
@@ -270,5 +313,18 @@ describe('GalleryDetail thumbnail virtualization', () => {
 
     const { container } = render(<GalleryDetail id={123} />);
     expect(container.textContent).not.toContain('10 / 10');
+  });
+});
+
+describe('GalleryDetail shared work management', () => {
+  it('exposes visible save and management entries without a per-card ellipsis', async () => {
+    mockDetail();
+    render(<GalleryDetail id={123} />);
+    fireEvent.click(screen.getByRole('button', { name: 'actions.save' }));
+    expect(galleryActions.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 123, title: 'Test Gallery' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'actions.title' }));
+    expect(galleryActions.open).toHaveBeenCalledWith(expect.objectContaining({ id: 123 }));
   });
 });

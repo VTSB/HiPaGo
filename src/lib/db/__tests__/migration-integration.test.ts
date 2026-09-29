@@ -124,6 +124,14 @@ async function createAdapter(ddl: string): Promise<InMemoryAdapter> {
   const db = new SQL.Database();
   const adapter = new InMemoryAdapter(db);
   await adapter.exec(ddl);
+  // App initialization creates these persistent tables before running migrations.
+  await adapter.exec(`
+    CREATE TABLE IF NOT EXISTS favorites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      galleryId INTEGER NOT NULL UNIQUE,
+      addedAt TEXT NOT NULL
+    );
+  `);
   return adapter;
 }
 

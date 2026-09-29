@@ -57,7 +57,7 @@ export function BottomNav() {
 
   return (
     <nav
-      aria-label={t('nav.browse')}
+      aria-label={t('nav.main')}
       aria-hidden={keyboardOpen || undefined}
       className={`pointer-events-none fixed inset-x-0 bottom-0 z-40 mb-[calc(0.5rem+env(safe-area-inset-bottom))] flex justify-center transition-[transform,opacity] duration-200 ease-out md:hidden ${
         keyboardOpen ? 'translate-y-[200%] opacity-0' : 'translate-y-0 opacity-100'

@@ -19,7 +19,10 @@ import { useTagI18n, useTagLocalName } from '@/lib/i18n/useTagI18n';
 import { useGalleryBlock } from '@/features/gallery-list/hooks/useGalleryBlock';
 import { getGgConfig } from '@/lib/api/client';
 import type { GalleryBlock } from '@/lib/utils/types';
-import { useFavoriteToggle } from '@/features/gallery-detail/hooks/useFavoriteToggle';
+import { useQuery } from '@tanstack/react-query';
+import { ensureDb } from '@/lib/db/adapter';
+import { isFavorite, getReadingProgress } from '@/lib/db/gallery';
+import { useGalleryActions } from '@/shared/hooks/useGalleryActions';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
 import { useDownloadedFilesPresent } from '@/features/gallery-detail/hooks/useDownloadedFilesPresent';
 import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
@@ -148,10 +151,13 @@ export function GalleryDetail({ id }: { id: number }) {
 
   const relatedIds = displayBlock?.related?.slice(0, 12) ?? [];
 
-  const { isFav, isPending: favPending, toggle: toggleFav } = useFavoriteToggle(id);
+  const actions = useGalleryActions();
+  const { data: isFav = false } = useQuery({ queryKey: ['library-membership', id], queryFn: async () => { await ensureDb(); return isFavorite(id); }, staleTime: 0 });
+  const { data: reading } = useQuery({ queryKey: ['reading-progress', id], queryFn: () => getReadingProgress(id), staleTime: 0 });
+  const gallery = { id, title: displayBlock?.title, thumbnail: displayBlock?.thumbnail, tags: displayBlock?.tags };
+  const manage = () => actions.open(gallery);
   const {
     progress: dlProgress,
-    start: handleDownload,
     cancel: handleCancelDownload,
     error: dlError,
     isDownloaded,
@@ -163,12 +169,6 @@ export function GalleryDetail({ id }: { id: number }) {
     files,
     displayBlock?.tags as Record<string, string[]> | undefined,
   );
-
-  // A completed gallery's button re-downloads on tap; confirm first so an
-  // accidental tap doesn't re-start a finished download.
-  const handleRedownload = useCallback(() => {
-    if (window.confirm(t('detail.redownloadConfirm'))) handleDownload();
-  }, [t, handleDownload]);
 
   // "Downloaded" but the on-disk image files are gone (user deleted them, or a
   // partial write) → surface it at the download button so the user can restore
@@ -269,31 +269,6 @@ export function GalleryDetail({ id }: { id: number }) {
               className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
             />
           )}
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              toggleFav();
-            }}
-            disabled={favPending}
-            className={`absolute left-2 top-2 flex h-11 w-11 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-colors disabled:opacity-50 sm:h-auto sm:w-auto sm:p-1.5 ${isFav ? 'text-yellow-400' : 'text-white/70 sm:hover:text-white'}`}
-            aria-label={isFav ? t('detail.removeFavorite') : t('detail.addFavorite')}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill={isFav ? 'currentColor' : 'none'}
-              stroke="currentColor"
-              strokeWidth={isFav ? 0 : 2}
-              className="h-5 w-5"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"
-              />
-            </svg>
-          </button>
         </Link>
         <div className="min-w-0 space-y-3 sm:space-y-4">
           <div className="min-w-0">
@@ -326,6 +301,92 @@ export function GalleryDetail({ id }: { id: number }) {
               {displayBlock.date.toLocaleDateString()}
             </p>
           )}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Link
+              href={readerHref(id, reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1 ? reading.lastPage + 1 : undefined)}
+              className="inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-2xl bg-zinc-900 px-10 py-3 text-base font-semibold text-white active:bg-zinc-800 sm:min-h-12 sm:w-auto sm:rounded-lg sm:py-2.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
+            >
+              {t(reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1 ? 'actions.continue' : 'detail.read')}
+            </Link>
+            <button onClick={() => { if (isFav) manage(); else void actions.save(gallery).catch(() => {}); }} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm dark:border-zinc-700">{t(isFav ? 'actions.saved' : 'actions.save')}</button>
+            <button onClick={manage} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm dark:border-zinc-700">{t('actions.title')}</button>
+            {files.length > 0 &&
+              (dlProgress ? (
+                <button
+                  onClick={handleCancelDownload}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+                >
+                  <Spinner size="sm" />
+                  {dlProgress.current}/{dlProgress.total}
+                </button>
+              ) : queuedPosition !== null ? (
+                <button
+                  onClick={handleCancelDownload}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+                >
+                  {t('library.queue.queued')}
+                  <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+                    #{queuedPosition}
+                  </span>
+                </button>
+              ) : filesMissing ? (
+                <button
+                  onClick={() => { void actions.download(gallery).catch(() => {}); }}
+                  title={t('detail.filesMissing')}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-8 py-2.5 text-base font-semibold text-amber-700 active:bg-amber-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.515 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {t('detail.filesMissing')}
+                </button>
+              ) : isDownloaded ? (
+                <button
+                  onClick={manage}
+                  title={t('detail.redownload')}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-green-600/40 bg-green-50 px-8 py-2.5 text-base font-semibold text-green-700 active:bg-green-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-green-100 dark:border-green-500/40 dark:bg-green-950/40 dark:text-green-400 dark:active:bg-green-900/40 sm:dark:hover:bg-green-900/40"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {t('detail.downloaded')}
+                </button>
+              ) : (
+                <button
+                  onClick={() => { void actions.download(gallery).catch(() => {}); }}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-4 w-4"
+                  >
+                    <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+                    <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+                  </svg>
+                  {t('detail.download')}
+                </button>
+              ))}
+          </div>
           {tagEntries.length > 0 && (
             <div className="space-y-2">
               {tagEntries.map(([type, tags]) => (
@@ -351,90 +412,6 @@ export function GalleryDetail({ id }: { id: number }) {
               ))}
             </div>
           )}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Link
-              href={readerHref(id)}
-              className="inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-2xl bg-zinc-900 px-10 py-3 text-base font-semibold text-white active:bg-zinc-800 sm:min-h-12 sm:w-auto sm:rounded-lg sm:py-2.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
-            >
-              {t('detail.read')}
-            </Link>
-            {files.length > 0 &&
-              (dlProgress ? (
-                <button
-                  onClick={handleCancelDownload}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-                >
-                  <Spinner size="sm" />
-                  {dlProgress.current}/{dlProgress.total}
-                </button>
-              ) : queuedPosition !== null ? (
-                <button
-                  onClick={handleCancelDownload}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-                >
-                  {t('library.queue.queued')}
-                  <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
-                    #{queuedPosition}
-                  </span>
-                </button>
-              ) : filesMissing ? (
-                <button
-                  onClick={handleDownload}
-                  title={t('detail.filesMissing')}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-8 py-2.5 text-base font-semibold text-amber-700 active:bg-amber-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-4 w-4"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.515 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  {t('detail.filesMissing')}
-                </button>
-              ) : isDownloaded ? (
-                <button
-                  onClick={handleRedownload}
-                  title={t('detail.redownload')}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-green-600/40 bg-green-50 px-8 py-2.5 text-base font-semibold text-green-700 active:bg-green-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-green-100 dark:border-green-500/40 dark:bg-green-950/40 dark:text-green-400 dark:active:bg-green-900/40 sm:dark:hover:bg-green-900/40"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-4 w-4"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  {t('detail.downloaded')}
-                </button>
-              ) : (
-                <button
-                  onClick={handleDownload}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-4 w-4"
-                  >
-                    <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
-                    <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
-                  </svg>
-                  {t('detail.download')}
-                </button>
-              ))}
-          </div>
           {dlError && <p className="text-sm text-red-600 dark:text-red-400">{dlError}</p>}
         </div>
       </div>

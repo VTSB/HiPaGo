@@ -101,8 +101,8 @@ class OpfsStore implements DownloadStore {
       await this.root.removeEntry(galleryFolderName(galleryId), {
         recursive: true,
       });
-    } catch {
-      // Already gone — treat as success.
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
     }
   }
 

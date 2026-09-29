@@ -1,821 +1,347 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import type { DBDownload } from '@/lib/db/schema';
 import React from 'react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { DBDownload } from '@/lib/db/schema';
 import LibraryPage from '../page';
 
-// Stub matchMedia (jsdom doesn't ship it) so the useIsMobile branch in the new
-// LibraryHub wrapper resolves deterministically to "desktop" — on desktop the
-// hub renders <DownloadsView /> byte-equivalent to the old library page, keeping
-// these assertions valid. Mobile segmented-control behavior is covered by
-// qa-browser. Same stub shape as FloatingPageNav.test.tsx.
-if (typeof window !== 'undefined' && !window.matchMedia) {
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: (query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      dispatchEvent: () => false,
-    }),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-const mockNavigation = vi.hoisted(() => ({
+const state = vi.hoisted(() => ({
+  ids: [3, 2, 1],
+  beginSelection: new Map<number, () => void>(),
+  downloads: [] as DBDownload[],
+  titles: [
+    { galleryId: 1, title: 'Able' },
+    { galleryId: 2, title: 'Beta' },
+    { galleryId: 3, title: 'Gamma' },
+  ],
+  collections: [{ id: 10, name: 'Reading', count: 2 }],
+  classified: [2, 1],
+  matches: [] as number[],
   replace: vi.fn(),
-}));
-const mockDevice = vi.hoisted(() => ({
-  isMobile: false,
-}));
-const mockSettings = vi.hoisted(() => ({
-  libraryInitialTab: 'favorites' as 'favorites' | 'history' | 'downloads',
-}));
-const mockQueueOps = vi.hoisted(() => ({
-  enqueueDownload: vi.fn(async () => 1),
-}));
-const mockRetryOps = vi.hoisted(() => ({
-  clearAutoRetry: vi.fn(async () => {}),
-}));
-const mockDownloadProgressState = vi.hoisted(() => ({
-  entries: {},
-  downloaded: {},
-  queue: [],
-  globalPaused: false,
-  start: vi.fn(async () => {}),
-  cancel: vi.fn(),
-  refreshDownloaded: vi.fn(async () => {}),
   refreshQueue: vi.fn(async () => {}),
-  reorder: vi.fn(async () => {}),
-  pause: vi.fn(async () => {}),
-  resume: vi.fn(async () => {}),
-  pauseAll: vi.fn(async () => {}),
-  resumeAll: vi.fn(async () => {}),
-  clearRetryPending: vi.fn(),
+  remove: vi.fn(async () => {}),
+  deleteFiles: vi.fn(async () => {}),
+  getLibraryIds: vi.fn(),
+  create: vi.fn(),
+  rename: vi.fn(),
+  deleteCollection: vi.fn(),
+  addToCollection: vi.fn(async () => {}),
+  removeFromCollection: vi.fn(async () => {}),
 }));
-const mockListDownloads = vi.fn<() => Promise<DBDownload[]>>();
-const mockSearchDownloads = vi.fn<(opts: { query?: string }) => Promise<DBDownload[]>>();
-const mockDeleteDownload = vi.fn<(id: number) => Promise<void>>();
-const mockCreateDownloadStore = vi.fn();
-const mockExportGalleryZip = vi.fn<(galleryId: number, title: string) => Promise<void>>();
-const mockGetDownloadedGalleryPages = vi.fn();
-const mockProcessQueue = vi.hoisted(() =>
-  vi.fn<(opts?: { onlyGalleryId?: number }) => Promise<void>>().mockResolvedValue(undefined),
-);
-
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: mockNavigation.replace }),
+  useRouter: () => ({ replace: state.replace }),
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
-
-vi.mock('@/shared/hooks/useIsMobile', () => ({
-  useIsMobile: () => mockDevice.isMobile,
+vi.mock('@/lib/i18n/useT', () => ({ useT: () => (key: string) => key }));
+vi.mock('@/shared/hooks/useGalleryActions', () => ({
+  useGalleryActions: () => ({ remove: state.remove, deleteFiles: state.deleteFiles }),
 }));
-
+vi.mock('@/lib/db/adapter', () => ({
+  ensureDb: async () => ({ query: async () => state.titles }),
+}));
 vi.mock('@/lib/db/download', () => ({
-  listDownloads: () => mockListDownloads(),
-  // DownloadsView now reads the LIBRARY-filtered list; point it at the same
-  // mock so existing assertions (which seed mockListDownloads) keep working.
-  listLibraryDownloads: () => mockListDownloads(),
-  searchDownloads: (opts: { query?: string }) => mockSearchDownloads(opts),
-  deleteDownload: (id: number) => mockDeleteDownload(id),
-  // The redesigned card deserializes tags at render time (not just in retry),
-  // so the mock must provide it too.
-  deserializeTags: (raw: string) => {
-    try {
-      return JSON.parse(raw) as Record<string, string[]>;
-    } catch {
-      return {};
-    }
+  listDownloads: async () => state.downloads,
+  deserializeTags: (raw: string) => JSON.parse(raw),
+}));
+vi.mock('@/lib/db/library', () => ({
+  getLibraryIds: (options: { collectionId?: number; unclassified?: boolean }) =>
+    state.getLibraryIds(options),
+  getCollections: async () => state.collections,
+  createCollection: (name: string) => state.create(name),
+  renameCollection: (id: number, name: string) => state.rename(id, name),
+  deleteCollection: (id: number) => state.deleteCollection(id),
+  addToCollection: state.addToCollection,
+  removeFromCollection: state.removeFromCollection,
+}));
+vi.mock('@/lib/db/search-local', () => ({ filterFavoritesByTags: async () => state.matches }));
+vi.mock('@/lib/store/download-progress', () => ({
+  DOWNLOAD_LIBRARY_CHANGED_EVENT: 'download-library-changed',
+  useDownloadProgressStore: (selector: (data: unknown) => unknown) =>
+    selector({ queue: [], refreshQueue: state.refreshQueue }),
+}));
+vi.mock('@/features/gallery-list/components/GalleryCard', () => ({
+  GalleryCardById: ({
+    id,
+    download,
+    selected,
+    onSelect,
+    onBeginSelection,
+  }: {
+    id: number;
+    download?: DBDownload;
+    selected?: boolean;
+    onSelect?: () => void;
+    onBeginSelection?: () => void;
+  }) => {
+    if (onBeginSelection) state.beginSelection.set(id, onBeginSelection);
+    return (
+      <button data-testid="work" aria-pressed={selected} onClick={onSelect}>
+        {download?.title ?? `Saved ${id}`}
+      </button>
+    );
   },
 }));
-
-// The queue layer + processor are pulled in by the rewired retry path; stub them
-// so the page test stays a pure UI render test (no DB adapter / network).
-vi.mock('@/lib/db/download-queue', () => ({
-  enqueueDownload: mockQueueOps.enqueueDownload,
-}));
-
-vi.mock('@/lib/db/download-retry', () => ({
-  clearAutoRetry: mockRetryOps.clearAutoRetry,
-  AUTO_RETRY_MAX: 3,
-}));
-
-vi.mock('@/lib/store/download-progress', () => {
-  // Full-enough store shape: DownloadQueueView (mounted atop DownloadsView since
-  // Task B) reads queue/globalPaused + action selectors, and renders nothing when
-  // queue is empty — so an empty queue keeps this a pure library-list render test.
-  const useDownloadProgressStore = Object.assign(
-    (sel: (s: typeof mockDownloadProgressState) => unknown) => sel(mockDownloadProgressState),
-    { getState: () => mockDownloadProgressState },
-  );
-  return {
-    DOWNLOAD_LIBRARY_CHANGED_EVENT: 'hipago:download-library-changed',
-    processQueue: mockProcessQueue,
-    useDownloadProgressStore,
-  };
-});
-
-vi.mock('@/lib/storage/download-store', () => ({
-  createDownloadStore: () => mockCreateDownloadStore(),
-}));
-
-vi.mock('@/lib/utils/download-zip', () => ({
-  exportGalleryZip: (galleryId: number, title: string) => mockExportGalleryZip(galleryId, title),
-  getDownloadedGalleryPages: (...args: unknown[]) => mockGetDownloadedGalleryPages(...args),
-}));
-
-// Grid scrolling/DOM bounds use the real virtualizer in SavedGalleryGrid.test.
-// These tests exercise each mounted download card's loading/actions.
 vi.mock('@/features/gallery-list/components/SavedGalleryGrid', () => ({
-  SavedGalleryGrid: ({ groups, renderItem }: {
-    groups: Array<{ items: DBDownload[] }>;
-    renderItem: (item: DBDownload) => React.ReactNode;
-  }) => <>{groups.flatMap((group) => group.items).map(renderItem)}</>,
+  SavedGalleryGrid: React.forwardRef(function Grid(
+    {
+      groups,
+      renderItem,
+    }: {
+      groups: Array<{ key: string; items: number[] }>;
+      renderItem: (id: number) => React.ReactNode;
+    },
+    _ref,
+  ) {
+    void _ref;
+    return (
+      <div>
+        {groups.flatMap((group) =>
+          group.items.map((id) => <React.Fragment key={id}>{renderItem(id)}</React.Fragment>),
+        )}
+      </div>
+    );
+  }),
 }));
-
-vi.mock('@/shared/components/AbortableImage', () => ({
-  // Image loading has its own tests; this suite observes the chosen source.
-  // eslint-disable-next-line @next/next/no-img-element
-  AbortableImage: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
-}));
-
-// Mock next/link as a plain anchor
-vi.mock('next/link', () => ({
-  default: ({
-    href,
-    children,
-    onClick,
-    ...rest
+vi.mock('@/shared/components/FilterBar', () => ({
+  FilterBar: ({
+    onFilterChange,
   }: {
-    href: string;
-    children: React.ReactNode;
-    onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
-    [k: string]: unknown;
+    onFilterChange: (filters: { tags: []; titleQuery: string }) => void;
   }) => (
-    <a
-      href={href}
-      {...rest}
-      onClick={(event) => {
-        event.preventDefault();
-        onClick?.(event);
-      }}
-    >
-      {children}
-    </a>
+    <input
+      aria-label="Filter"
+      onChange={(event) => onFilterChange({ tags: [], titleQuery: event.target.value })}
+    />
   ),
 }));
-
-// Mock Spinner
-vi.mock('@/shared/components/Spinner', () => ({
-  Spinner: () => <div data-testid="spinner" />,
+vi.mock('@/shared/components/DbErrorBanner', () => ({ DbErrorBanner: () => null }));
+vi.mock('@/shared/components/DbStageSpinner', () => ({
+  DbStageSpinner: () => <div role="status">Loading</div>,
 }));
+vi.mock('@/shared/components/FloatingPageNav', () => ({ FloatingPageNav: () => null }));
 
-// Mock i18n — return the key so tests are locale-agnostic
-vi.mock('@/lib/i18n/useT', () => ({
-  useT: () => (key: string) => key,
-}));
-
-vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: (
-    sel: (s: {
-      locale: string;
-      libraryInitialTab: 'favorites' | 'history' | 'downloads';
-    }) => unknown,
-  ) => sel({ locale: 'en', libraryInitialTab: mockSettings.libraryInitialTab }),
-}));
-
-// ---------------------------------------------------------------------------
-// Test data
-// ---------------------------------------------------------------------------
-
-function makeItem(overrides: Partial<DBDownload> = {}): DBDownload {
+function download(galleryId: number, status: DBDownload['status'] = 'complete'): DBDownload {
   return {
-    galleryId: 1001,
-    title: 'Test Gallery',
-    thumbnail: '',
+    galleryId,
+    title: galleryId === 2 ? 'Downloaded Beta' : 'Failed Gamma',
+    thumbnail: '/local-cover',
     tags: '{}',
-    pageCount: 20,
-    totalBytes: 1024 * 1024 * 5,
-    downloadedAt: new Date('2024-01-15').toISOString(),
-    status: 'complete',
-    ...overrides,
+    status,
+    pageCount: 5,
+    totalBytes: 100,
+    downloadedAt: '2025-01-01',
   };
 }
-
-// ---------------------------------------------------------------------------
-// Render helper — lazy import so vi.mock factories are applied first
-// ---------------------------------------------------------------------------
-
-async function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-  const result = render(
-    React.createElement(QueryClientProvider, { client: qc }, React.createElement(LibraryPage)),
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <LibraryPage />
+    </QueryClientProvider>,
   );
-  return { ...result, qc };
+}
+const workNames = () => screen.getAllByTestId('work').map((element) => element.textContent);
+beforeEach(() => {
+  vi.clearAllMocks();
+  state.beginSelection.clear();
+  window.history.replaceState({}, '', '/library');
+  state.ids = [3, 2, 1];
+  state.downloads = [download(2)];
+  state.matches = [];
+  state.collections = [{ id: 10, name: 'Reading', count: 2 }];
+  state.classified = [2, 1];
+  state.getLibraryIds.mockImplementation(async (options) =>
+    options.collectionId
+      ? state.classified
+      : options.unclassified
+        ? state.ids.filter((id) => !state.classified.includes(id))
+        : state.ids,
+  );
+  state.create.mockImplementation(async (name) => {
+    state.collections.push({ id: 11, name, count: 0 });
+    return 11;
+  });
+  state.rename.mockResolvedValue(undefined);
+  state.deleteCollection.mockImplementation(async (id) => {
+    state.collections = state.collections.filter((collection) => collection.id !== id);
+  });
+  state.remove.mockResolvedValue();
+  state.deleteFiles.mockResolvedValue();
+});
+afterEach(cleanup);
+
+async function ready() {
+  await waitFor(() => expect(screen.getAllByTestId('work')).toHaveLength(3));
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-describe('LibraryPage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDevice.isMobile = false;
-    mockSettings.libraryInitialTab = 'favorites';
-    mockDownloadProgressState.entries = {};
-    mockDownloadProgressState.downloaded = {};
-    mockDownloadProgressState.queue = [];
-    mockDownloadProgressState.globalPaused = false;
-    window.history.replaceState({}, '', '/library');
-    sessionStorage.clear();
-    mockCreateDownloadStore.mockResolvedValue({
-      usage: vi.fn().mockResolvedValue(0),
-      deleteGallery: vi.fn().mockResolvedValue(undefined),
-    });
-    mockExportGalleryZip.mockResolvedValue(undefined);
-    mockGetDownloadedGalleryPages.mockResolvedValue(
-      Array.from({ length: 20 }, (_, index) => ({ index, ext: 'webp' })),
+describe('unified saved library', () => {
+  it('shows saved and downloaded works in one grid and passes offline metadata to common cards', async () => {
+    renderPage();
+    await ready();
+    expect(workNames()).toEqual(['Saved 3', 'Downloaded Beta', 'Saved 1']);
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'library.more' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'library.manager' })).toHaveAttribute(
+      'href',
+      '/downloads',
     );
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  // ── AC-004: list renders ──────────────────────────────────────────────────
-
-  it('shows recorded download sizes without scanning storage on entry', async () => {
-    const usage = vi.fn().mockResolvedValue(999);
-    mockCreateDownloadStore.mockResolvedValue({ usage });
-    mockListDownloads.mockResolvedValue([
-      makeItem({ galleryId: 1001, totalBytes: 1024 * 1024 }),
-      makeItem({ galleryId: 1002, totalBytes: 2 * 1024 * 1024 }),
-    ]);
-    await act(async () => { await renderPage(); });
-    expect(await screen.findByText('3.0 MB')).toBeInTheDocument();
-    expect(usage).not.toHaveBeenCalled();
-  });
-
-  it('paints each local cover independently and uses its exact folder identity', async () => {
-    const coverUrl = vi.fn((id: number) => id === 1001
-      ? new Promise<string | null>(() => {})
-      : Promise.resolve('https://localhost/_capacitor_content_/second.webp'));
-    mockCreateDownloadStore.mockResolvedValue({ usage: async () => 0, coverUrl });
-    mockListDownloads.mockResolvedValue([
-      makeItem({ galleryId: 1001, title: 'Slow cover', folderName: '1001 Exact' }),
-      makeItem({ galleryId: 1002, title: 'Ready cover', folderName: '1002 Exact' }),
-    ]);
-    await act(async () => { await renderPage(); });
-    expect(await screen.findByAltText('Ready cover')).toHaveAttribute(
-      'src', 'https://localhost/_capacitor_content_/second.webp',
-    );
-    expect(coverUrl).toHaveBeenCalledWith(1002, { folderName: '1002 Exact' });
-    expect(mockGetDownloadedGalleryPages).toHaveBeenCalledWith(1002, { folderName: '1002 Exact' });
-    expect(screen.queryByAltText('Slow cover')).toBeNull();
-  });
-
-  it('shows a spinner while loading', async () => {
-    mockListDownloads.mockReturnValue(new Promise(() => {}));
-
-    await act(async () => {
-      await renderPage();
-    });
-
-    expect(screen.getByTestId('spinner')).toBeTruthy();
-  });
-
-  it('renders an empty-state message when there are no downloads', async () => {
-    mockListDownloads.mockResolvedValue([]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    expect(screen.getByText('library.empty')).toBeTruthy();
-  });
-
-  it('renders a card for each downloaded item', async () => {
-    const items: DBDownload[] = [
-      makeItem({ galleryId: 1001, title: 'Gallery One' }),
-      makeItem({ galleryId: 1002, title: 'Gallery Two', status: 'failed' }),
-    ];
-    mockListDownloads.mockResolvedValue(items);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    expect(screen.getByText('Gallery One')).toBeTruthy();
-    expect(screen.getByText('Gallery Two')).toBeTruthy();
-  });
-
-  it('renders total item count in the heading', async () => {
-    mockListDownloads.mockResolvedValue([makeItem(), makeItem({ galleryId: 1002 })]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    expect(screen.getByText('(2)')).toBeTruthy();
-  });
-
-  it('makes the whole card a link pointing to the gallery route', async () => {
-    // The card is now a cover-forward gallery-block card: tapping the card
-    // itself opens the gallery (no inline "Open" button).
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001 })]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const cardLink = screen.getByRole('link');
-    expect(cardLink.getAttribute('href')).toBe('/gallery?id=1001');
-  });
-
-  it('opens the downloads segment on mobile when the URL tab is downloads', async () => {
-    mockDevice.isMobile = true;
-    window.history.replaceState({}, '', '/library?tab=downloads');
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
+  it('keeps manager access and filters mounted for an empty library', async () => {
+    state.ids = [];
+    state.downloads = [];
+    renderPage();
+    await screen.findByText('library.savedEmpty');
+    expect(screen.getByRole('link', { name: 'library.manager' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Filter')).toBeInTheDocument();
     expect(
-      screen.getByRole('tab', { name: 'saved.seg.downloads' }).getAttribute('aria-selected'),
-    ).toBe('true');
-    expect(screen.getByText('Saved Download')).toBeTruthy();
+      screen.getAllByRole('link').filter((link) => link.getAttribute('href') === '/downloads'),
+    ).toHaveLength(1);
   });
 
-  it('uses the configured initial tab on mobile when the URL has no tab', async () => {
-    mockDevice.isMobile = true;
-    mockSettings.libraryInitialTab = 'downloads';
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
+  it('shows failed-download summary only when actionable work exists', async () => {
+    state.downloads.push(download(3, 'failed'));
+    renderPage();
+    await ready();
+    expect(screen.getByRole('link', { name: 'library.status.failed 1' })).toHaveAttribute(
+      'href',
+      '/downloads',
+    );
+    expect(workNames()).toContain('Failed Gamma');
+  });
 
-    await act(async () => {
-      await renderPage();
+  it('filters downloaded state without creating a second library', async () => {
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'library.downloadedOnly' }));
+    expect(workNames()).toEqual(['Downloaded Beta']);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'library.downloadedOnly' }));
+    expect(workNames()).toHaveLength(3);
+  });
+
+  it('searches download metadata when remote/gallery cache metadata is absent', async () => {
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByLabelText('Filter'), { target: { value: 'Beta' } });
+    await waitFor(() => expect(workNames()).toEqual(['Downloaded Beta']));
+    expect(screen.getByLabelText('Filter')).toBeInTheDocument();
+  });
+
+  it('sorts saved works by oldest and title', async () => {
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByRole('combobox', { name: 'library.sort' }), {
+      target: { value: 'oldest' },
     });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
+    expect(workNames()).toEqual(['Saved 1', 'Downloaded Beta', 'Saved 3']);
+    fireEvent.change(screen.getByRole('combobox', { name: 'library.sort' }), {
+      target: { value: 'title' },
+    });
+    await waitFor(() => expect(workNames()).toEqual(['Saved 1', 'Downloaded Beta', 'Saved 3']));
+  });
 
+  it('queries a collection or unclassified membership and preserves All', async () => {
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
+      target: { value: '10' },
+    });
+    await waitFor(() => expect(workNames()).toHaveLength(2));
+    expect(state.getLibraryIds).toHaveBeenLastCalledWith({ collectionId: 10 });
+    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
+      target: { value: 'unclassified' },
+    });
+    await waitFor(() => expect(workNames()).toEqual(['Saved 3']));
+    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
+      target: { value: 'all' },
+    });
+    await ready();
+  });
+
+  it('creates an optional collection without moving saved works or downloading', async () => {
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'library.collectionNew' }));
+    expect(screen.getByRole('button', { name: /actions.save/ })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'library.collectionName' }), {
+      target: { value: 'Later' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /actions.save/ }));
+    await waitFor(() => expect(state.create).toHaveBeenCalledWith('Later'));
+    await screen.findByRole('option', { name: 'Later (0)' });
+    expect(workNames()).toHaveLength(3);
+  });
+
+  it('deletes a collection only after its keep-works message and preserves library membership', async () => {
+    renderPage();
+    await ready();
+    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
+      target: { value: '10' },
+    });
+    await waitFor(() => expect(workNames()).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: 'library.collectionDelete' }));
     expect(
-      screen.getByRole('tab', { name: 'saved.seg.downloads' }).getAttribute('aria-selected'),
-    ).toBe('true');
-    expect(screen.getByText('Saved Download')).toBeTruthy();
+      screen.getByText('library.collectionDeleteConfirm', { exact: false }),
+    ).toBeInTheDocument();
+    expect(state.deleteCollection).not.toHaveBeenCalled();
+    const buttons = screen.getAllByRole('button', { name: 'library.collectionDelete' });
+    fireEvent.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(state.deleteCollection).toHaveBeenCalledWith(10));
+    await ready();
+    expect(state.remove).not.toHaveBeenCalled();
+    expect(state.deleteFiles).not.toHaveBeenCalled();
   });
 
-  it('writes the downloads tab into the URL when selected on mobile', async () => {
-    mockDevice.isMobile = true;
-    mockListDownloads.mockResolvedValue([]);
-
-    await act(async () => {
-      await renderPage();
+  it('enters selection with the single work chosen by the common menu', async () => {
+    renderPage();
+    await ready();
+    expect(state.beginSelection.has(2)).toBe(true);
+    act(() => {
+      state.beginSelection.get(2)!();
     });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('tab', { name: 'saved.seg.downloads' }));
-    });
-
-    expect(mockNavigation.replace).toHaveBeenCalledWith('/library?tab=downloads', {
-      scroll: false,
-    });
-  });
-
-  it('remembers the downloads tab URL before opening a downloaded gallery', async () => {
-    mockDevice.isMobile = true;
-    window.history.replaceState({}, '', '/library?tab=downloads');
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 1001, title: 'Saved Download' })]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('link'));
-    });
-
-    expect(sessionStorage.getItem('hipago:last-list-url')).toBe('/library?tab=downloads');
-  });
-
-  it('does NOT show per-card size/page-count metadata on the card face', async () => {
-    // The redesigned card matches the gallery-block card: title + tags only.
-    // Page count and size were removed from the card (storage-used stays in the
-    // page header). Verify the page-count number is not rendered on the card.
-    mockListDownloads.mockResolvedValue([
-      makeItem({ pageCount: 42, totalBytes: 1024, title: 'Sized Gallery' }),
-    ]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    expect(screen.getByText('Sized Gallery')).toBeTruthy();
-    expect(screen.queryByText(/42/)).toBeNull();
-  });
-
-  // ── AC-004: delete action ─────────────────────────────────────────────────
-
-  it('calls deleteDownload and deleteGallery when delete is confirmed', async () => {
-    const item = makeItem({ galleryId: 2001 });
-    mockListDownloads.mockResolvedValue([item]);
-    mockDeleteDownload.mockResolvedValue(undefined);
-    const mockDeleteGallery = vi.fn().mockResolvedValue(undefined);
-    mockCreateDownloadStore.mockResolvedValue({
-      usage: vi.fn().mockResolvedValue(0),
-      deleteGallery: mockDeleteGallery,
-    });
-
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const moreBtn = screen.getByRole('button', { name: 'library.more' });
-    await act(async () => {
-      fireEvent.click(moreBtn);
-    });
-
-    const deleteBtn = screen.getByRole('menuitem', { name: 'library.delete' });
-    await act(async () => {
-      fireEvent.click(deleteBtn);
-    });
-
-    expect(mockDeleteDownload).toHaveBeenCalledWith(2001);
-    expect(mockDeleteGallery).toHaveBeenCalledWith(2001, undefined);
-    expect(mockDownloadProgressState.cancel).not.toHaveBeenCalled();
-  });
-
-  it('cancels native/in-flight work before deleting a downloading row', async () => {
-    mockListDownloads.mockResolvedValue([
-      makeItem({ galleryId: 2002, title: 'Active Native Download', status: 'downloading' }),
-    ]);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await screen.findByText('Active Native Download');
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
-    });
-
-    expect(mockDownloadProgressState.cancel).toHaveBeenCalledWith(2002);
-    expect(mockDeleteDownload).toHaveBeenCalledWith(2002);
-  });
-
-  it('clears a pending auto-retry before deleting a failed row', async () => {
-    mockListDownloads.mockResolvedValue([
-      makeItem({
-        galleryId: 2003,
-        title: 'Retry Pending',
-        status: 'failed',
-        nextRetryAt: new Date(Date.now() + 30_000).toISOString(),
-        retryCount: 1,
-      }),
-    ]);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.delete' }));
-    });
-
-    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(2003);
-    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(2003);
-    expect(mockDeleteDownload).toHaveBeenCalledWith(2003);
-  });
-
-  it('does NOT delete when the confirm dialog is cancelled', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 3001 })]);
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const moreBtn = screen.getByRole('button', { name: 'library.more' });
-    await act(async () => {
-      fireEvent.click(moreBtn);
-    });
-
-    const deleteBtn = screen.getByRole('menuitem', { name: 'library.delete' });
-    await act(async () => {
-      fireEvent.click(deleteBtn);
-    });
-
-    expect(mockDeleteDownload).not.toHaveBeenCalled();
-  });
-
-  it('shows an export error when stored files are missing', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4001, title: 'Broken Export' })]);
-    mockExportGalleryZip.mockRejectedValue(new Error('Missing downloaded page 2'));
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await screen.findByRole('menuitem', { name: 'library.exportZip' });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
-    });
-
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('library.exportFailed');
-    expect(mockExportGalleryZip).toHaveBeenCalledWith(4001, 'Broken Export');
-  });
-
-  it('shows a failed badge and hides export when a complete DB row is missing files', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4003, title: 'Missing Files' })]);
-    mockGetDownloadedGalleryPages.mockResolvedValue([]);
-
-    let qc: Awaited<ReturnType<typeof renderPage>>['qc'];
-    await act(async () => {
-      ({ qc } = await renderPage());
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-    await waitFor(() => expect(mockGetDownloadedGalleryPages).toHaveBeenCalledWith(4003, undefined));
-    const invalidate = vi.spyOn(qc!, 'invalidateQueries');
-
-    expect(screen.getByText('library.status.failed')).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-
-    expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
-    const retry = screen.getByRole('menuitem', { name: 'library.retry' });
-    expect(retry).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.click(retry);
-    });
-
-    await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4003 }));
-    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(4003);
-    expect(mockQueueOps.enqueueDownload).toHaveBeenCalledWith(
-      expect.objectContaining({ galleryId: 4003, title: 'Missing Files' }),
-      { userInitiated: true },
+    expect(screen.getByRole('button', { name: 'Downloaded Beta' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
     );
-    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4003);
-    expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['download-integrity'] });
+    expect(
+      screen.getAllByTestId('work').filter((work) => work.getAttribute('aria-pressed') === 'true'),
+    ).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'actions.remove' })).toBeEnabled();
   });
 
-  it('manual retry only starts the selected failed gallery', async () => {
-    mockListDownloads.mockResolvedValue([
-      makeItem({ galleryId: 4100, title: 'Failed Retry', status: 'failed' }),
-    ]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.retry' }));
-    });
-
-    await waitFor(() => expect(mockProcessQueue).toHaveBeenCalledWith({ onlyGalleryId: 4100 }));
-    expect(mockRetryOps.clearAutoRetry).toHaveBeenCalledWith(4100);
-    expect(mockQueueOps.enqueueDownload).toHaveBeenCalledWith(
-      expect.objectContaining({ galleryId: 4100, title: 'Failed Retry' }),
-      { userInitiated: true },
+  it('keeps selection on failed batch operations for retry', async () => {
+    state.remove.mockRejectedValue(new Error('Storage unavailable'));
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Downloaded Beta' }));
+    fireEvent.click(screen.getByRole('button', { name: 'actions.remove' }));
+    await screen.findByRole('alert');
+    expect(state.remove).toHaveBeenCalledWith([expect.objectContaining({ id: 2 })]);
+    expect(screen.getByRole('button', { name: 'Downloaded Beta' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
     );
-    expect(mockDownloadProgressState.clearRetryPending).toHaveBeenCalledWith(4100);
-    expect(mockDownloadProgressState.refreshQueue).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'actions.remove' })).toBeEnabled();
   });
 
-  it('shows pending auto-retry from the live store before the DB row refetches', async () => {
-    const retryAt = new Date(Date.now() + 30_000).toISOString();
-    mockListDownloads.mockResolvedValue([
-      makeItem({
-        galleryId: 4200,
-        title: 'Just Failed',
-        status: 'failed',
-        nextRetryAt: null,
-        retryCount: 0,
-      }),
-    ]);
-    mockDownloadProgressState.entries = {
-      4200: { progress: null, error: 'boom', retryAt, attempt: 1 },
-    };
-
-    await act(async () => {
-      await renderPage();
-    });
-
-    expect(await screen.findByText('library.retry.autoIn (library.retry.attempt)')).toBeTruthy();
+  it('clears selection on filters so batch operations cannot target hidden works', async () => {
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'library.selectAll' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'library.downloadedOnly' }));
+    expect(screen.getByRole('button', { name: 'actions.remove' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Downloaded Beta' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
   });
 
-  it('hides export while complete-row integrity is still being checked', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4004, title: 'Pending Check' })]);
-    mockGetDownloadedGalleryPages.mockReturnValue(new Promise(() => {}));
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-
-    expect(screen.queryByRole('menuitem', { name: 'library.exportZip' })).toBeNull();
-    expect(screen.queryByRole('menuitem', { name: 'library.retry' })).toBeNull();
-    expect(screen.getByRole('menuitem', { name: 'library.delete' })).toBeTruthy();
-  });
-
-  it('does not start a duplicate export while one is already pending', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ galleryId: 4002, title: 'Slow Export' })]);
-    mockExportGalleryZip.mockReturnValue(new Promise(() => {}));
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await screen.findByRole('menuitem', { name: 'library.exportZip' });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'library.more' }));
-    });
-    await screen.findByRole('menuitem', { name: 'library.exportZip' });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'library.exportZip' }));
-    });
-
-    expect(mockExportGalleryZip).toHaveBeenCalledTimes(1);
-    expect(mockExportGalleryZip).toHaveBeenCalledWith(4002, 'Slow Export');
-  });
-
-  // ── AC-006: search filters the list ──────────────────────────────────────
-  //
-  // The search path involves two layers of async: the debounce setTimeout
-  // (250 ms) and React-Query's own internal scheduler (also setTimeout-based).
-  // Both layers interact with fake timers, making flush-and-check patterns
-  // unreliable.  The cleanest solution: bypass the debounce by testing the
-  // underlying query behaviour directly — set debouncedQuery by typing text
-  // and relying on real timers + waitFor.  The debounce is 250 ms; with a
-  // 3 s waitFor timeout there is ample headroom even in slow CI.
-  //
-  // A separate test verifies the debounce mechanism in isolation without
-  // React-Query involvement.
-
-  it('does not call searchDownloads immediately on typing (debounce check)', async () => {
-    // Use fake timers only to prove searchDownloads is NOT called before 250 ms.
-    // We do NOT advance timers here — just check the call count right after typing.
-    mockListDownloads.mockResolvedValue([makeItem()]);
-    mockSearchDownloads.mockResolvedValue([]);
-
-    vi.useFakeTimers();
-    try {
-      await act(async () => {
-        await renderPage();
-      });
-      // Drain the initial listDownloads fetch
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-
-      const input = screen.getByRole('textbox');
-      act(() => {
-        fireEvent.change(input, { target: { value: 'dragon' } });
-      });
-
-      // Debounce has not fired — search must not have been called yet
-      expect(mockSearchDownloads).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('calls searchDownloads with typed query after debounce elapses', async () => {
-    mockListDownloads.mockResolvedValue([makeItem()]);
-    mockSearchDownloads.mockResolvedValue([makeItem({ galleryId: 9001, title: 'Filtered' })]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const input = screen.getByRole('textbox');
-    act(() => {
-      fireEvent.change(input, { target: { value: 'dragon' } });
-    });
-
-    await waitFor(() => expect(mockSearchDownloads).toHaveBeenCalledWith({ query: 'dragon' }), {
-      timeout: 3000,
-    });
-  });
-
-  it('shows filtered results after debounce', async () => {
-    mockListDownloads.mockResolvedValue([makeItem({ title: 'Original' })]);
-    mockSearchDownloads.mockResolvedValue([
-      makeItem({ galleryId: 9001, title: 'Filtered Result' }),
-    ]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const input = screen.getByRole('textbox');
-    act(() => {
-      fireEvent.change(input, { target: { value: 'filtered' } });
-    });
-
-    await waitFor(() => expect(screen.getByText('Filtered Result')).toBeTruthy(), {
-      timeout: 3000,
-    });
-  });
-
-  it('shows no-results message when search returns empty', async () => {
-    mockListDownloads.mockResolvedValue([makeItem()]);
-    mockSearchDownloads.mockResolvedValue([]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const input = screen.getByRole('textbox');
-    act(() => {
-      fireEvent.change(input, { target: { value: 'zzznomatch' } });
-    });
-
-    await waitFor(() => expect(screen.getByText('search.noResults')).toBeTruthy(), {
-      timeout: 3000,
-    });
-  });
-
-  it('reverts to full list when query is cleared', async () => {
-    const full = [makeItem({ title: 'Full List Item' })];
-    mockListDownloads.mockResolvedValue(full);
-    mockSearchDownloads.mockResolvedValue([makeItem({ galleryId: 9001, title: 'Filtered' })]);
-
-    await act(async () => {
-      await renderPage();
-    });
-    await waitFor(() => expect(screen.queryByTestId('spinner')).toBeNull());
-
-    const input = screen.getByRole('textbox');
-
-    // Type → wait for filtered results
-    act(() => {
-      fireEvent.change(input, { target: { value: 'x' } });
-    });
-    await waitFor(() => expect(screen.getByText('Filtered')).toBeTruthy(), { timeout: 3000 });
-
-    // Clear via the visible clear control → wait for full list to reappear
-    const clearButton = screen.getByRole('button', { name: 'Clear' });
-    act(() => {
-      fireEvent.click(clearButton);
-    });
-    await waitFor(() => expect(screen.getByText('Full List Item')).toBeTruthy(), { timeout: 3000 });
+  it('routes legacy history tab bookmarks to standalone history', async () => {
+    window.history.replaceState({}, '', '/library?tab=history');
+    renderPage();
+    await waitFor(() => expect(state.replace).toHaveBeenCalledWith('/history'));
   });
 });

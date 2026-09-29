@@ -3,7 +3,7 @@
  * plus the listLibraryDownloads status filter. Uses the real sql.js in-memory
  * adapter (same as download.test.ts) so SQL semantics are exercised end-to-end.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { setupTestDb, clearAllTables, teardownTestDb } from './test-db';
 import { upsertDownload, getDownload, listLibraryDownloads, serializeTags } from '../download';
 import {
@@ -15,6 +15,9 @@ import {
   removeFromQueue,
   reorderQueue,
 } from '../download-queue';
+import { getLibraryIds } from '../library';
+import { getDb } from '../adapter';
+import { queryOne } from './test-db';
 import type { DBDownload } from '../schema';
 
 const makeRow = (overrides: Partial<DBDownload> = {}): DBDownload => ({
@@ -291,5 +294,42 @@ describe('listLibraryDownloads', () => {
     );
     const rows = await listLibraryDownloads();
     expect(rows[0].galleryId).toBe(2);
+  });
+});
+
+describe('enqueue saves library membership atomically', () => {
+  it('keeps membership after cancelling a queued work with no downloaded pages', async () => {
+    await enqueueDownload(meta(301));
+    expect(await getLibraryIds()).toEqual([301]);
+    await removeFromQueue(301);
+    expect(await getDownload(301)).toBeNull();
+    expect(await getLibraryIds()).toEqual([301]);
+  });
+
+  it('preserves a saved date when downloading an already saved work', async () => {
+    await getDb().execute('INSERT INTO favorites (galleryId, addedAt) VALUES (?, ?)', [
+      302,
+      '2020-01-01',
+    ]);
+    await enqueueDownload(meta(302));
+    expect(await queryOne('SELECT addedAt FROM favorites WHERE galleryId = ?', [302])).toEqual({
+      addedAt: '2020-01-01',
+    });
+  });
+
+  it('rolls back the queue record if saving membership fails', async () => {
+    const db = getDb();
+    const execute = db.execute.bind(db);
+    const spy = vi.spyOn(db, 'execute').mockImplementation(async (sql, params) => {
+      if (sql.includes('INTO favorites')) throw new Error('disk full');
+      return execute(sql, params);
+    });
+    try {
+      await expect(enqueueDownload(meta(303))).rejects.toThrow('disk full');
+      expect(await getDownload(303)).toBeNull();
+      expect(await getLibraryIds()).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

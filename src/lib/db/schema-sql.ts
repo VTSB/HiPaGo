@@ -74,6 +74,17 @@ CREATE TABLE IF NOT EXISTS favorites (
 );
 CREATE INDEX IF NOT EXISTS idx_favorites_addedAt ON favorites(addedAt);
 
+CREATE TABLE IF NOT EXISTS library_collection (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS library_collection_item (
+  collectionId INTEGER NOT NULL,
+  galleryId INTEGER NOT NULL,
+  PRIMARY KEY (collectionId, galleryId)
+);
+CREATE INDEX IF NOT EXISTS idx_library_collection_item_galleryId ON library_collection_item(galleryId);
+
 CREATE TABLE IF NOT EXISTS history (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   galleryId INTEGER NOT NULL UNIQUE,

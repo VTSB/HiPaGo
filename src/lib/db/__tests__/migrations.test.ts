@@ -29,8 +29,7 @@ class PragmaTestAdapter implements DbAdapter {
     this.db.run(sql, params);
     const changes = this.db.getRowsModified();
     const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const lastInsertRowId =
-      result.length > 0 ? (result[0].values[0][0] as number) : 0;
+    const lastInsertRowId = result.length > 0 ? (result[0].values[0][0] as number) : 0;
     return { changes, lastInsertRowId };
   }
 
@@ -61,13 +60,17 @@ class PragmaTestAdapter implements DbAdapter {
 async function createAdapter(): Promise<PragmaTestAdapter> {
   const SQL = await initSqlJs();
   const db = new SQL.Database();
-  return new PragmaTestAdapter(db);
+  const adapter = new PragmaTestAdapter(db);
+  // These application tables already existed before schema versioning began.
+  await adapter.exec(`
+    CREATE TABLE favorites (id INTEGER PRIMARY KEY AUTOINCREMENT, galleryId INTEGER NOT NULL UNIQUE, addedAt TEXT NOT NULL);
+    CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, galleryId INTEGER NOT NULL UNIQUE, lastPage INTEGER NOT NULL DEFAULT 0, totalPages INTEGER NOT NULL DEFAULT 0, readerMode TEXT NOT NULL DEFAULT 'page', viewedAt TEXT NOT NULL);
+  `);
+  return adapter;
 }
 
 async function getUserVersion(adapter: PragmaTestAdapter): Promise<number> {
-  const rows = await adapter.query<{ user_version: number }>(
-    'PRAGMA user_version',
-  );
+  const rows = await adapter.query<{ user_version: number }>('PRAGMA user_version');
   return rows[0].user_version;
 }
 
@@ -322,7 +325,7 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     await runMigrations(adapter);
 
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
-    expect(LATEST_VERSION).toBe(7);
+    expect(LATEST_VERSION).toBe(8);
   });
 
   it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {
@@ -672,5 +675,72 @@ describe('runMigrations: migration v7 adds retryCount + nextRetryAt to download'
     expect(colNames.has('queuePosition')).toBe(true);
     expect(colNames.has('retryCount')).toBe(true);
     expect(colNames.has('nextRetryAt')).toBe(true);
+  });
+});
+
+describe('migration v8 preserves the unified library', () => {
+  let adapter: PragmaTestAdapter;
+  beforeEach(async () => {
+    adapter = await createAdapter();
+    await adapter.exec(SCHEMA_V6_DOWNLOAD);
+    await adapter.exec(
+      `ALTER TABLE download ADD COLUMN retryCount INTEGER; ALTER TABLE download ADD COLUMN nextRetryAt TEXT; PRAGMA user_version = 7;`,
+    );
+    await adapter.execute('INSERT INTO favorites (galleryId, addedAt) VALUES (?, ?)', [
+      10,
+      '2020-01-01',
+    ]);
+    await adapter.execute(
+      'INSERT INTO history (galleryId, lastPage, totalPages, viewedAt) VALUES (?, ?, ?, ?)',
+      [10, 3, 12, '2025-01-01'],
+    );
+    for (const [galleryId, status] of [
+      [10, 'complete'],
+      [20, 'failed'],
+      [30, 'queued'],
+    ] as const) {
+      await adapter.execute(
+        'INSERT INTO download (galleryId, title, thumbnail, downloadedAt, status, pageCount) VALUES (?, ?, ?, ?, ?, ?)',
+        [galleryId, `Work ${galleryId}`, '', '2024-01-01', status, 5],
+      );
+    }
+  });
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('saves existing downloads once without changing favorite dates, download data or history', async () => {
+    await runMigrations(adapter);
+    expect(
+      await adapter.query('SELECT galleryId, addedAt FROM favorites ORDER BY galleryId'),
+    ).toEqual([
+      { galleryId: 10, addedAt: '2020-01-01' },
+      { galleryId: 20, addedAt: '2024-01-01' },
+      { galleryId: 30, addedAt: '2024-01-01' },
+    ]);
+    expect(
+      await adapter.query('SELECT galleryId, status, pageCount FROM download ORDER BY galleryId'),
+    ).toEqual([
+      { galleryId: 10, status: 'complete', pageCount: 5 },
+      { galleryId: 20, status: 'failed', pageCount: 5 },
+      { galleryId: 30, status: 'queued', pageCount: 5 },
+    ]);
+    expect(
+      await adapter.query('SELECT lastPage, totalPages FROM history WHERE galleryId = 10'),
+    ).toEqual([{ lastPage: 3, totalPages: 12 }]);
+    await runMigrations(adapter);
+    expect(await adapter.query('SELECT galleryId FROM favorites')).toHaveLength(3);
+  });
+
+  it('does not resurrect deliberately removed membership on subsequent startup', async () => {
+    await runMigrations(adapter);
+    await adapter.execute('DELETE FROM favorites WHERE galleryId = ?', [20]);
+    await runMigrations(adapter);
+    expect(
+      await adapter.query('SELECT galleryId FROM favorites WHERE galleryId = 20'),
+    ).toHaveLength(0);
+    expect(await adapter.query('SELECT galleryId FROM download WHERE galleryId = 20')).toHaveLength(
+      1,
+    );
   });
 });

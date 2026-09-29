@@ -52,9 +52,7 @@ export const MIGRATIONS: Migration[] = [
       await adapter.exec(
         'CREATE INDEX IF NOT EXISTS idx_download_downloadedAt ON download(downloadedAt)',
       );
-      await adapter.exec(
-        'CREATE INDEX IF NOT EXISTS idx_download_status ON download(status)',
-      );
+      await adapter.exec('CREATE INDEX IF NOT EXISTS idx_download_status ON download(status)');
     },
   },
   {
@@ -125,6 +123,28 @@ export const MIGRATIONS: Migration[] = [
       if (!colNames.has('nextRetryAt')) {
         await adapter.exec('ALTER TABLE download ADD COLUMN nextRetryAt TEXT');
       }
+    },
+  },
+  {
+    version: 8,
+    description: 'Add flat library collections and save existing downloads to the library',
+    up: async (adapter) => {
+      await adapter.exec(`
+        CREATE TABLE IF NOT EXISTS library_collection (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS library_collection_item (
+          collectionId INTEGER NOT NULL,
+          galleryId INTEGER NOT NULL,
+          PRIMARY KEY (collectionId, galleryId)
+        );
+        CREATE INDEX IF NOT EXISTS idx_library_collection_item_galleryId ON library_collection_item(galleryId)
+      `);
+      await adapter.exec(`
+        INSERT OR IGNORE INTO favorites (galleryId, addedAt)
+        SELECT galleryId, downloadedAt FROM download
+      `);
     },
   },
 ];

@@ -1,5 +1,6 @@
 'use client';
 
+import { ContinueReading } from './ContinueReading';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useVirtualGallery } from '../hooks/useVirtualGallery';
@@ -96,11 +97,12 @@ export function GalleryListView() {
   }, [replaceUrlState]);
 
   if (error && totalLength === 0) {
-    return <div className="py-12 text-center text-red-500">{error}</div>;
+    return <div><ContinueReading /><div className="py-12 text-center text-red-500">{error}</div></div>;
   }
 
   return (
     <div>
+      <ContinueReading />
       <div className="mb-4 flex flex-row items-center justify-between gap-3">
         <h1 className="min-w-0 truncate text-2xl font-bold leading-tight text-zinc-900 dark:text-zinc-100">
           {t(`sort.${sort}` as const)}

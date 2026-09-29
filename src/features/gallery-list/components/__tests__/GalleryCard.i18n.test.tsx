@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSettingsStore } from '@/lib/store/settings';
 import { useTagI18nStore } from '@/lib/store/tag-i18n';
 import { GalleryBlockType, TagType } from '@/lib/utils/types';
 import type { GalleryBlock } from '@/lib/utils/types';
+vi.mock('@/shared/hooks/useGalleryActions', () => ({
+  useGalleryActions: () => ({ open: vi.fn() }),
+}));
+
 import { GalleryCard } from '../GalleryCard';
 
 function renderCard(block: GalleryBlock) {

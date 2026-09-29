@@ -101,7 +101,9 @@ class FakePublicLibrary {
   }
 
   async getUri({ path }: { path: string }) {
-    return { uri: this.files.has(path) ? `content://test.documents/${encodeURIComponent(path)}` : null };
+    return {
+      uri: this.files.has(path) ? `content://test.documents/${encodeURIComponent(path)}` : null,
+    };
   }
 
   async deleteDir({ path }: { path: string }) {
@@ -536,4 +538,63 @@ describe('AndroidPublicDownloadStore — Android-specific behaviour', () => {
     const back = await store.getImage(111, -1, 'json');
     expect(back).toEqual(manifest);
   });
+});
+
+describe('AndroidPublicDownloadStore destructive error propagation', () => {
+  let store: AndroidPublicDownloadStore;
+  beforeEach(() => {
+    fakeLib = new FakePublicLibrary();
+    store = AndroidPublicDownloadStore.create();
+  });
+
+  it('propagates exact-folder stat errors without deleting files', async () => {
+    await store.ensureGallery(12, 'Work');
+    const denied = new Error('Permission revoked');
+    const stat = fakeLib.stat.bind(fakeLib);
+    vi.spyOn(fakeLib, 'stat').mockImplementation(async (options) => {
+      if (options.path === `${LIB}/12 Work`) throw denied;
+      return stat(options);
+    });
+    const remove = vi.spyOn(fakeLib, 'deleteDir');
+    await expect(store.deleteGallery(12, { folderName: '12 Work' })).rejects.toBe(denied);
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('propagates prefix lookup errors rather than reporting a successful deletion', async () => {
+    fakeLib.dirs.add(LIB);
+    vi.spyOn(fakeLib, 'readdir').mockRejectedValueOnce(new Error('Permission revoked'));
+    const remove = vi.spyOn(fakeLib, 'deleteDir');
+    await expect(store.deleteGallery(12)).rejects.toThrow('Permission revoked');
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it('keeps files and the cached titled folder when native deletion fails', async () => {
+    const bytes = makeBytes(8);
+    await store.ensureGallery(12, 'Work');
+    await store.putImage(12, 0, bytes, 'webp');
+    const list = vi.spyOn(fakeLib, 'readdir');
+    vi.spyOn(fakeLib, 'deleteDir').mockRejectedValueOnce(new Error('Storage error'));
+    await expect(store.deleteGallery(12)).rejects.toThrow('Storage error');
+    expect(await store.getImage(12, 0, 'webp')).toEqual(bytes);
+    expect(list).toHaveBeenCalledOnce();
+    expect(fakeLib.dirs.has(`${LIB}/12 Work`)).toBe(true);
+  });
+
+  it('treats an exact-folder stat result of absent as a successful no-op', async () => {
+    const remove = vi.spyOn(fakeLib, 'deleteDir');
+    await expect(store.deleteGallery(12, { folderName: '12 Missing' })).resolves.toBeUndefined();
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+it('Android rejects silent native deletion failure while retaining cached files', async () => {
+  fakeLib = new FakePublicLibrary();
+  const store = AndroidPublicDownloadStore.create();
+  await store.ensureGallery(12, 'Work');
+  const bytes = makeBytes(8);
+  await store.putImage(12, 0, bytes, 'webp');
+  vi.spyOn(fakeLib, 'deleteDir').mockResolvedValueOnce(undefined);
+  await expect(store.deleteGallery(12)).rejects.toThrow('could not be deleted');
+  expect(await store.getImage(12, 0, 'webp')).toEqual(bytes);
+  expect(fakeLib.dirs.has(`${LIB}/12 Work`)).toBe(true);
 });

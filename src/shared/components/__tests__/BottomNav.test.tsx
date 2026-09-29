@@ -21,18 +21,15 @@ describe('BottomNav', () => {
     mockPathname = '/';
     render(<BottomNav />);
     const links = screen.getAllByRole('link');
-    expect(links.map((a) => a.getAttribute('href'))).toEqual([
-      '/',
-      '/search',
-      '/library',
-      '/settings',
-    ]);
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['/', '/search', '/library', '/more']);
   });
 
   it('marks the Browse tab active on the root path', () => {
     mockPathname = '/';
     render(<BottomNav />);
-    const active = screen.getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
+    const active = screen
+      .getAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page');
     expect(active).toHaveLength(1);
     expect(active[0].getAttribute('href')).toBe('/');
   });
@@ -40,22 +37,28 @@ describe('BottomNav', () => {
   it('marks the Library tab active when on /favorites (merged hub)', () => {
     mockPathname = '/favorites';
     render(<BottomNav />);
-    const active = screen.getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
+    const active = screen
+      .getAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page');
     expect(active).toHaveLength(1);
     expect(active[0].getAttribute('href')).toBe('/library');
   });
 
-  it('marks the Library tab active when on /history (merged hub)', () => {
+  it('marks the More tab active when on /history', () => {
     mockPathname = '/history';
     render(<BottomNav />);
-    const active = screen.getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
-    expect(active[0].getAttribute('href')).toBe('/library');
+    const active = screen
+      .getAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page');
+    expect(active[0].getAttribute('href')).toBe('/more');
   });
 
   it('marks the Search tab active on /search', () => {
     mockPathname = '/search';
     render(<BottomNav />);
-    const active = screen.getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
+    const active = screen
+      .getAllByRole('link')
+      .filter((a) => a.getAttribute('aria-current') === 'page');
     expect(active[0].getAttribute('href')).toBe('/search');
   });
 });

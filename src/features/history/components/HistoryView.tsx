@@ -2,7 +2,10 @@
 
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { BackBar } from '@/shared/components/BackBar';
+import { ConfirmActionDialog } from '@/shared/components/ConfirmActionDialog';
+import { removeHistory, clearHistory } from '@/lib/db/library';
 import { getRecentlyViewedWithDates } from '@/lib/db/gallery';
 import { filterHistoryByTags } from '@/lib/db/search-local';
 import { GalleryCardById } from '@/features/gallery-list/components/GalleryCard';
@@ -75,6 +78,22 @@ const PAGE_SIZE = 25;
 
 export function HistoryView({ embedded = false }: { embedded?: boolean }) {
   const t = useT();
+  const queryClient = useQueryClient();
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [confirm, setConfirm] = useState<'all' | 'selected' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const deleteRecords = async () => {
+    setBusy(true);
+    try {
+      if (confirm === 'all') await clearHistory();
+      else for (const id of selected) await removeHistory(id);
+      await Promise.all(['history-grouped','history-filtered','reading-progress','continue-reading'].map(key => queryClient.invalidateQueries({ queryKey: [key] })));
+      setSelected([]); setSelecting(false); setConfirm(null);
+    } catch { setDeleteError(t('actions.failed')); }
+    finally { setBusy(false); }
+  };
   const locale = useSettingsStore((s) => s.locale);
   const gridRef = useRef<SavedGalleryGridHandle>(null);
 
@@ -107,12 +126,13 @@ export function HistoryView({ embedded = false }: { embedded?: boolean }) {
     [entries, filteredIds, hasFilters, locale],
   );
   const renderGrid = () => (
-    <SavedGalleryGrid ref={gridRef} groups={groups} getItemKey={(id) => id} renderItem={(id) => <GalleryCardById id={id} />} />
+    <SavedGalleryGrid ref={gridRef} groups={groups} getItemKey={(id) => id} renderItem={(id) => <GalleryCardById id={id} onBeginSelection={selecting ? undefined : () => { setSelecting(true); setSelected([id]); }} selected={selecting ? selected.includes(id) : undefined} onSelect={selecting ? () => setSelected(ids => ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id]) : undefined} />} />
   );
   const showFilterBar = !isLoading && (totalCount > 0 || hasFilters);
 
   return (
     <>
+      {!embedded && <BackBar title={t('history.title')} fallbackHref="/more" />}
       {!embedded && (
         <div className="mb-4">
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
@@ -126,6 +146,12 @@ export function HistoryView({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
+      <div className="mb-4 flex flex-wrap gap-2">
+        {totalCount > 0 && <><button className="min-h-11 rounded-xl border px-4" onClick={() => { setSelecting(!selecting); setSelected([]); }}>{t(selecting ? 'actions.done' : 'actions.select')}</button>
+        <button className="min-h-11 rounded-xl border px-4 text-red-600" onClick={() => { setDeleteError(''); setConfirm('all'); }}>{t('history.clear')}</button></>}
+        {selecting && <button disabled={!selected.length} className="min-h-11 rounded-xl border px-4 text-red-600 disabled:opacity-40" onClick={() => { setDeleteError(''); setConfirm('selected'); }}>{t('history.remove')} ({selected.length})</button>}
+      </div>
+      {confirm && <ConfirmActionDialog title={t('history.confirmDelete')} onCancel={() => setConfirm(null)} onConfirm={deleteRecords} busy={busy} error={deleteError} />}
       <DbErrorBanner />
 
       {/* Filter bar — hidden when history is empty and no filter active. */}

@@ -86,6 +86,14 @@ async function createAdapter(withSchema = false, withNewCols = false): Promise<M
     } else {
       db.run(SCHEMA_WITHOUT_NEW_COLS);
     }
+    // Persistent membership is initialized before migrations in the real app.
+    db.run(`
+      CREATE TABLE IF NOT EXISTS favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        galleryId INTEGER NOT NULL UNIQUE,
+        addedAt TEXT NOT NULL
+      );
+    `);
   }
   return adapter;
 }

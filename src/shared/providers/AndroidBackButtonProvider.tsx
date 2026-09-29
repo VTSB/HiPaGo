@@ -42,9 +42,15 @@ export function AndroidBackButtonProvider({ children }: { children: ReactNode })
       depthRef.current = Math.max(0, nextDepth);
     };
 
-    const canGoBack = () => depthRef.current > 0;
+    const canGoBack = () =>
+      depthRef.current > 0 || !!document.querySelector('[data-hipago-overlay]');
 
     const handleAndroidBack = () => {
+      if (document.querySelector('[data-hipago-overlay]')) {
+        const event = new Event('hipago:overlay-back', { cancelable: true });
+        window.dispatchEvent(event);
+        if (event.defaultPrevented) return true;
+      }
       if (canGoBack()) {
         window.history.back();
         return true;

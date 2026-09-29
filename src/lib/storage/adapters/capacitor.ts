@@ -180,15 +180,21 @@ export class CapacitorDownloadStore implements DownloadStore {
   }
 
   async deleteGallery(galleryId: number): Promise<void> {
-    try {
-      await this.Filesystem.rmdir({
-        path: this.galleryPath(galleryId),
-        directory: this.Directory.Data,
-        recursive: true,
-      });
-    } catch {
-      // Already gone — treat as success.
-    }
+    // Enumerate a known app directory instead of treating arbitrary native
+    // errors as proof of absence (iOS messages can be localized).
+    const root = await this.Filesystem.readdir({ path: '', directory: this.Directory.Data });
+    const nameOf = (entry: string | { name: string }) => typeof entry === 'string' ? entry : entry.name;
+    if (!root.files.some((entry: string | { name: string }) => nameOf(entry) === DOWNLOADS_DIR)) return;
+    const downloads = await this.Filesystem.readdir({ path: DOWNLOADS_DIR, directory: this.Directory.Data });
+    if (!downloads.files.some((entry: string | { name: string }) => nameOf(entry) === galleryFolderName(galleryId))) return;
+    await this.Filesystem.rmdir({
+      path: this.galleryPath(galleryId),
+      directory: this.Directory.Data,
+      recursive: true,
+    });
+    const remaining = await this.Filesystem.readdir({ path: DOWNLOADS_DIR, directory: this.Directory.Data });
+    if (remaining.files.some((entry: string | { name: string }) => nameOf(entry) === galleryFolderName(galleryId)))
+      throw new Error('Download folder could not be deleted');
   }
 
   async gallerySize(galleryId: number): Promise<number> {

@@ -9,9 +9,9 @@
  * `download-zip.ts::downloadGalleryToLibrary`. This module only owns the
  * 'queued'/'paused' transitions and the ordering.
  */
-import { ensureDb, persistDb } from './adapter';
+import { ensureDb, persistDb, withTransaction } from './adapter';
 import type { DBDownload } from './schema';
-import { upsertDownload, getDownload, serializeTags } from './download';
+import { getDownload, serializeTags } from './download';
 
 const SELECT_COLS =
   'galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt';
@@ -65,38 +65,46 @@ export async function enqueueDownload(
   meta: EnqueueMeta,
   opts: { userInitiated?: boolean; keepRetryState?: boolean; queuePosition?: number } = {},
 ): Promise<number> {
-  const existing = await getDownload(meta.galleryId);
-
-  const position =
-    opts.queuePosition !== undefined
-      ? opts.queuePosition
-      : opts.userInitiated
-        ? ((await minQueuePosition()) ?? 1) - 1
-        : ((await maxQueuePosition()) ?? 0) + 1;
-
-  await upsertDownload({
-    galleryId: meta.galleryId,
-    title: meta.title,
-    thumbnail: meta.thumbnail,
-    tags: serializeTags(meta.tags),
-    // Preserve any partial progress from a prior attempt so the processor can
-    // resume rather than restart.
-    pageCount: existing?.pageCount ?? 0,
-    totalBytes: existing?.totalBytes ?? 0,
-    downloadedAt: existing?.downloadedAt ?? new Date().toISOString(),
-    status: 'queued',
-    folderName: existing?.folderName ?? null,
-    migratedAt: existing?.migratedAt ?? null,
-    // Clear any stale failure reason when (re-)queuing.
-    lastError: null,
-    queuePosition: position,
-    // Auto-retry bookkeeping: keep the escalating-backoff counter for an
-    // automatic requeue; reset it (fresh attempts) for a manual retry / plain
-    // enqueue. nextRetryAt is always cleared — the row is no longer 'failed'.
-    retryCount: opts.keepRetryState ? (existing?.retryCount ?? 0) : 0,
-    nextRetryAt: null,
+  const db = await ensureDb();
+  // Read position/progress and write both authorities in one serialized
+  // transaction. A failed enqueue must not leave phantom saved membership.
+  const position = await withTransaction(async () => {
+    const existing = await getDownload(meta.galleryId);
+    const assignedPosition =
+      opts.queuePosition !== undefined
+        ? opts.queuePosition
+        : opts.userInitiated
+          ? ((await minQueuePosition()) ?? 1) - 1
+          : ((await maxQueuePosition()) ?? 0) + 1;
+    const now = new Date().toISOString();
+    await db.execute(
+      `INSERT OR REPLACE INTO download
+        (galleryId, title, thumbnail, tags, pageCount, totalBytes, downloadedAt, status, folderName, migratedAt, lastError, queuePosition, retryCount, nextRetryAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        meta.galleryId,
+        meta.title,
+        meta.thumbnail,
+        serializeTags(meta.tags),
+        existing?.pageCount ?? 0,
+        existing?.totalBytes ?? 0,
+        existing?.downloadedAt ?? now,
+        'queued',
+        existing?.folderName ?? null,
+        existing?.migratedAt ?? null,
+        null,
+        assignedPosition,
+        opts.keepRetryState ? (existing?.retryCount ?? 0) : 0,
+        null,
+      ],
+    );
+    await db.execute('INSERT OR IGNORE INTO favorites (galleryId, addedAt) VALUES (?, ?)', [
+      meta.galleryId,
+      now,
+    ]);
+    return assignedPosition;
   });
-
+  await persistDb();
   return position;
 }
 

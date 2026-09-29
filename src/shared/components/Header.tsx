@@ -2,25 +2,19 @@
 
 import { Suspense, useRef } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { SearchBar } from '@/features/search/components/SearchBar';
 import { LanguageFilter } from '@/shared/components/LanguageFilter';
 import { SyncStatusIndicator } from '@/shared/components/SyncStatusIndicator';
 import { useT } from '@/lib/i18n/useT';
 import { useScrollReveal } from '@/shared/hooks/useScrollReveal';
-import { NAV_ITEMS } from '@/shared/nav/navItems';
+import { NAV_ITEMS, isNavActive } from '@/shared/nav/navItems';
 import { QueueBadgeDot } from '@/shared/nav/QueueBadgeDot';
 
-/**
- * Top header. Desktop (>=md) is unchanged: brand + search + language filter +
- * horizontal nav. Mobile (<md) is now a slim brand bar only — the old
- * hamburger drawer is replaced by the BottomNav tab bar, and the stretched
- * mobile search field is gone (search lives in the Search tab / dedicated
- * /search page). LanguageFilter on mobile lives in Settings; SyncStatus stays
- * desktop-only (mobile surfaces DB problems via DbErrorBanner). The sticky bar
- * still gesture-slides on scroll via `--list-chrome`.
- */
+/** Desktop navigation uses the same destinations as the mobile tab bar. */
 export function Header() {
   const t = useT();
+  const pathname = usePathname();
   const headerRef = useRef<HTMLElement | null>(null);
   useScrollReveal({
     scrollElement: typeof window !== 'undefined' ? window : null,
@@ -52,25 +46,19 @@ export function Header() {
         </div>
 
         {/* Desktop nav */}
-        <nav className="ml-auto hidden items-center gap-2 md:flex">
+        <nav aria-label={t('nav.main')} className="ml-auto hidden items-center gap-2 md:flex">
           <SyncStatusIndicator />
-          {NAV_ITEMS.slice(0, 4).map((n) => (
+          {NAV_ITEMS.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className="relative rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              aria-current={isNavActive(pathname, n.href) ? 'page' : undefined}
+              className={`relative rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${isNavActive(pathname, n.href) ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'}`}
             >
               {t(n.key)}
               {n.href === '/library' && <QueueBadgeDot className="absolute right-1 top-1" />}
             </Link>
           ))}
-          <div className="mx-1 h-4 w-px bg-zinc-300 dark:bg-zinc-700" />
-          <Link
-            href="/settings"
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-          >
-            {t('nav.settings')}
-          </Link>
         </nav>
       </div>
     </header>

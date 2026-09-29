@@ -22,8 +22,7 @@ class TestAdapter implements DbAdapter {
     // sql.js doesn't expose last_insert_rowid directly from run,
     // so we query it separately
     const result = this.db.exec('SELECT last_insert_rowid() as id');
-    const lastInsertRowId =
-      result.length > 0 ? (result[0].values[0][0] as number) : 0;
+    const lastInsertRowId = result.length > 0 ? (result[0].values[0][0] as number) : 0;
     return { changes, lastInsertRowId };
   }
 
@@ -62,6 +61,8 @@ export async function setupTestDb(): Promise<void> {
 export async function clearAllTables(): Promise<void> {
   const db = getDb();
   await db.exec(`
+    DELETE FROM library_collection_item;
+    DELETE FROM library_collection;
     DELETE FROM download;
     DELETE FROM gallery_tag;
     DELETE FROM gallery_relate;
@@ -93,8 +94,6 @@ export async function queryOne<T>(sql: string, params?: unknown[]): Promise<T | 
 
 /** Count rows in a table. */
 export async function countRows(table: string): Promise<number> {
-  const result = await getDb().query<{ c: number }>(
-    `SELECT COUNT(*) as c FROM ${table}`,
-  );
+  const result = await getDb().query<{ c: number }>(`SELECT COUNT(*) as c FROM ${table}`);
   return result[0].c;
 }
