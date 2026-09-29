@@ -8,14 +8,15 @@ use rustls::{ClientConfig, RootCertStore};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::time::{timeout, timeout_at, Instant};
+use tokio::time::{timeout_at, Instant};
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::TlsConnector;
 use url::Url;
 
+#[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const PHASE_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_CHUNK_SIZE: usize = 16 * 1024;
@@ -30,18 +31,22 @@ pub struct EchHttpClient {
 }
 
 impl EchHttpClient {
+    #[cfg(test)]
     pub fn new() -> Self {
-        Self {
-            resolver: DohResolver::new(),
-        }
+        Self::with_resolver(DohResolver::new())
+    }
+
+    pub(crate) fn with_resolver(resolver: DohResolver) -> Self {
+        Self { resolver }
     }
 
     pub async fn fetch(
         &self,
         url: &str,
         headers: Option<&HashMap<String, String>>,
+        deadline: Instant,
     ) -> Result<Option<BypassResponse>, BypassError> {
-        let mut response = match self.open_stream(url, headers).await? {
+        let mut response = match self.open_stream(url, headers, deadline).await? {
             Some(response) => response,
             None => return Ok(None),
         };
@@ -67,8 +72,9 @@ impl EchHttpClient {
         &self,
         url: &str,
         headers: Option<&HashMap<String, String>>,
+        deadline: Instant,
     ) -> Result<Option<StreamingResponse>, BypassError> {
-        let response = match self.open_stream(url, headers).await? {
+        let response = match self.open_stream(url, headers, deadline).await? {
             Some(response) => response,
             None => return Ok(None),
         };
@@ -91,10 +97,11 @@ impl EchHttpClient {
         &self,
         url: &str,
         headers: Option<&HashMap<String, String>>,
+        deadline: Instant,
     ) -> Result<Option<EchResponseStream>, BypassError> {
-        match timeout(
-            REQUEST_TIMEOUT,
-            self.open_stream_before_deadline(url, headers),
+        match timeout_at(
+            deadline.min(Instant::now() + PHASE_TIMEOUT),
+            self.open_stream_before_deadline(url, headers, deadline),
         )
         .await
         {
@@ -110,6 +117,7 @@ impl EchHttpClient {
         &self,
         url: &str,
         headers: Option<&HashMap<String, String>>,
+        deadline: Instant,
     ) -> Result<Option<EchResponseStream>, BypassError> {
         let parsed = Url::parse(url)
             .map_err(|e| BypassError::HttpError(format!("Invalid URL for ECH fetch: {e}")))?;
@@ -134,7 +142,7 @@ impl EchHttpClient {
         };
 
         match self
-            .open_ech_stream(&parsed, &host, port, headers, ech_config_list)
+            .open_ech_stream(&parsed, &host, port, headers, ech_config_list, deadline)
             .await
         {
             Ok(response) => Ok(Some(response)),
@@ -152,10 +160,15 @@ impl EchHttpClient {
         port: u16,
         headers: Option<&HashMap<String, String>>,
         ech_config_list: Vec<u8>,
+        deadline: Instant,
     ) -> Result<EchResponseStream, BypassError> {
-        let tcp = timeout(PHASE_TIMEOUT, connect_via_doh(&self.resolver, host, port))
-            .await
-            .map_err(|_| timed_out("connect"))??;
+        let connect_deadline = deadline.min(Instant::now() + PHASE_TIMEOUT);
+        let tcp = timeout_at(
+            connect_deadline,
+            connect_via_doh(&self.resolver, host, port, connect_deadline),
+        )
+        .await
+        .map_err(|_| timed_out("connect"))??;
 
         let ech_config = EchConfig::new(
             EchConfigListBytes::from(ech_config_list),
@@ -175,10 +188,13 @@ impl EchHttpClient {
         let server_name = ServerName::try_from(host.to_string())
             .map_err(|e| BypassError::HttpError(format!("Invalid ECH server name {host}: {e}")))?;
         let connector = TlsConnector::from(Arc::new(tls_config));
-        let mut tls = timeout(PHASE_TIMEOUT, connector.connect(server_name, tcp))
-            .await
-            .map_err(|_| timed_out("TLS handshake"))?
-            .map_err(|e| BypassError::HttpError(format!("ECH TLS handshake failed: {e}")))?;
+        let tls = timeout_at(
+            deadline.min(Instant::now() + PHASE_TIMEOUT),
+            connector.connect(server_name, tcp),
+        )
+        .await
+        .map_err(|_| timed_out("TLS handshake"))?
+        .map_err(|e| BypassError::HttpError(format!("ECH TLS handshake failed: {e}")))?;
 
         if tls.get_ref().1.ech_status() != EchStatus::Accepted {
             return Err(BypassError::HttpError(format!(
@@ -187,19 +203,30 @@ impl EchHttpClient {
         }
 
         let request = build_get_request(parsed, host, port, headers)?;
-        let (status, headers, body_mode, initial_body) = timeout(PHASE_TIMEOUT, async {
-            tls.write_all(request.as_bytes()).await?;
-            tls.flush().await?;
-            read_http_head(&mut tls).await
+        exchange_http(tls, &request, deadline).await
+    }
+}
+
+// This exchange starts only after verified TLS and ECH acceptance. Keep the
+// original request deadline when handing the successful head to its body.
+async fn exchange_http<R: AsyncRead + AsyncWrite + Unpin>(
+    mut transport: R,
+    request: &str,
+    deadline: Instant,
+) -> Result<EchResponseStream<R>, BypassError> {
+    let (status, headers, body_mode, initial_body) =
+        timeout_at(deadline.min(Instant::now() + PHASE_TIMEOUT), async {
+            transport.write_all(request.as_bytes()).await?;
+            transport.flush().await?;
+            read_http_head(&mut transport).await
         })
         .await
         .map_err(|_| timed_out("HTTP headers"))??;
-        Ok(EchResponseStream {
-            status,
-            headers,
-            body: BodyChunkReader::new(tls, initial_body, body_mode),
-        })
-    }
+    Ok(EchResponseStream {
+        status,
+        headers,
+        body: BodyChunkReader::with_deadline(transport, initial_body, body_mode, deadline),
+    })
 }
 
 async fn pump_body<R: AsyncRead + Unpin>(
@@ -233,37 +260,20 @@ async fn pump_body<R: AsyncRead + Unpin>(
     }
 }
 
-struct EchResponseStream {
+struct EchResponseStream<R = RustlsTlsStream> {
     status: u16,
     headers: HashMap<String, String>,
-    body: BodyChunkReader<RustlsTlsStream>,
+    body: BodyChunkReader<R>,
 }
 
 async fn connect_via_doh(
     resolver: &DohResolver,
     host: &str,
     port: u16,
+    deadline: Instant,
 ) -> Result<TcpStream, BypassError> {
     let ips = resolver.resolve_all(host).await?;
-    let mut last_err = None;
-
-    for ip in &ips {
-        match TcpStream::connect(format!("{ip}:{port}")).await {
-            Ok(stream) => {
-                stream.set_nodelay(true)?;
-                return Ok(stream);
-            }
-            Err(err) => {
-                last_err = Some(format!("{ip}:{port}: {err}"));
-            }
-        }
-    }
-
-    Err(BypassError::ProxyError(format!(
-        "Failed to connect to {host}:{port} via DoH IPs [{}]: {}",
-        ips.join(", "),
-        last_err.unwrap_or_else(|| "no addresses attempted".into())
-    )))
+    crate::connect::connect_to_ips(&ips, port, deadline).await
 }
 
 fn build_get_request(
@@ -451,16 +461,24 @@ impl<R> BodyChunkReader<R>
 where
     R: AsyncRead + Unpin,
 {
+    #[cfg(test)]
     fn new(reader: R, pending: Vec<u8>, mode: BodyMode) -> Self {
+        Self::with_deadline(reader, pending, mode, Instant::now() + REQUEST_TIMEOUT)
+    }
+
+    fn with_deadline(reader: R, pending: Vec<u8>, mode: BodyMode, deadline: Instant) -> Self {
         Self {
             reader,
             pending,
             mode,
-            deadline: Instant::now() + REQUEST_TIMEOUT,
+            deadline,
         }
     }
 
     async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, BypassError> {
+        if Instant::now() >= self.deadline {
+            return Err(timed_out("body"));
+        }
         timeout_at(self.deadline, self.next_chunk_before_deadline())
             .await
             .map_err(|_| timed_out("body"))?
@@ -800,7 +818,11 @@ mod tests {
         headers.insert("User-Agent".to_string(), "Mozilla/5.0".to_string());
 
         let response = client
-            .fetch("https://cloudflare-ech.com/", Some(&headers))
+            .fetch(
+                "https://cloudflare-ech.com/",
+                Some(&headers),
+                tokio::time::Instant::now() + super::REQUEST_TIMEOUT,
+            )
             .await
             .expect("ECH fetch should not error")
             .expect("cloudflare-ech.com should publish and accept ECH");
@@ -828,5 +850,128 @@ mod tests {
             headers,
             body: body_bytes,
         })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn http_exchange_passes_original_deadline_from_delayed_head_to_body() {
+        use tokio::io::AsyncReadExt;
+        use tokio::time::{Duration, Instant};
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(30);
+        // Time spent before the HTTP exchange must not be granted again.
+        tokio::time::advance(Duration::from_secs(18)).await;
+        let (transport, mut peer) = tokio::io::duplex(1024);
+        let server = tokio::spawn(async move {
+            let mut request = [0; 128];
+            assert!(peer.read(&mut request).await.unwrap() > 0);
+            tokio::time::sleep(Duration::from_secs(9)).await;
+            peer.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\npart")
+                .await
+                .unwrap();
+            assert_eq!(peer.read(&mut [0; 1]).await.unwrap(), 0);
+        });
+        let response = super::exchange_http(transport, "GET / HTTP/1.1\r\n\r\n", deadline)
+            .await
+            .unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(start.elapsed(), Duration::from_secs(27));
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let pump = tokio::spawn(super::pump_body(response.body, tx));
+        assert_eq!(rx.recv().await.unwrap().unwrap(), b"part");
+        assert!(rx
+            .recv()
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("timed out"));
+        assert_eq!(start.elapsed(), Duration::from_secs(30));
+        assert!(rx.recv().await.is_none());
+        pump.await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn stalled_ech_handshake_leaves_time_for_fallback() {
+        use super::{aws_lc_rs, DohResolver, EchConfig, EchConfigListBytes, EchHttpClient};
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        use tokio::io::AsyncReadExt;
+        use tokio::net::TcpListener;
+        use tokio::time::{timeout, Duration, Instant};
+
+        // A valid test-only X25519/HKDF-SHA256/AES-128-GCM ECH config.
+        // Public key is the X25519 base point; no server secrets are used.
+        let mut contents = vec![0, 0, 0x20, 0, 32, 9];
+        contents.extend([0; 31]);
+        contents.extend([0, 4, 0, 1, 0, 1, 0, 12]);
+        contents.extend(b"fixture.test");
+        contents.extend([0, 0]);
+        let mut config = ((contents.len() + 4) as u16).to_be_bytes().to_vec();
+        config.extend([0xfe, 0x0d]);
+        config.extend((contents.len() as u16).to_be_bytes());
+        config.extend(contents);
+        EchConfig::new(
+            EchConfigListBytes::from(config.clone()),
+            aws_lc_rs::hpke::ALL_SUPPORTED_SUITES,
+        )
+        .unwrap();
+        let encoded = STANDARD.encode(config);
+        let dns = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/dns-query", dns.local_addr().unwrap());
+        let dns_task = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = dns.accept().await.unwrap();
+                let mut request = [0; 2048];
+                let n = socket.read(&mut request).await.unwrap();
+                let answer = if String::from_utf8_lossy(&request[..n]).contains("type=HTTPS") {
+                    serde_json::json!({"Status":0,"Answer":[{"type":65,"TTL":300,"data":format!("1 . ech={encoded}")}]})
+                } else {
+                    serde_json::json!({"Status":0,"Answer":[{"type":1,"TTL":300,"data":"127.0.0.1"}]})
+                }.to_string();
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", answer.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "https://fixture.test:{}/",
+            target.local_addr().unwrap().port()
+        );
+        let (hello_tx, hello_rx) = tokio::sync::oneshot::channel();
+        let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+        let target_task = tokio::spawn(async move {
+            let (mut socket, _) = target.accept().await.unwrap();
+            let n = socket.read(&mut [0; 4096]).await.unwrap();
+            hello_tx.send(n).unwrap();
+            let mut rest = Vec::new();
+            let _ = socket.read_to_end(&mut rest).await;
+            let _ = closed_tx.send(());
+        });
+        let client = EchHttpClient::with_resolver(DohResolver::with_providers([
+            endpoint.clone(),
+            endpoint.clone(),
+            endpoint,
+        ]));
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(30);
+        let request =
+            tokio::spawn(async move { client.fetch_streaming(&url, None, deadline).await });
+        assert!(
+            timeout(Duration::from_secs(2), hello_rx)
+                .await
+                .unwrap()
+                .unwrap()
+                > 0
+        );
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(request.await.unwrap().unwrap().is_none());
+        assert!(deadline.duration_since(Instant::now()) > Duration::from_secs(19));
+        tokio::time::resume();
+        timeout(Duration::from_secs(1), closed_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        dns_task.abort();
+        target_task.await.unwrap();
     }
 }

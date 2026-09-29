@@ -7,14 +7,23 @@ use crate::BypassError;
 use base64::{engine::general_purpose, Engine as _};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{broadcast, Mutex, Semaphore};
+use tokio::time::{sleep_until, timeout_at, Instant};
 
 const MIN_TTL: Duration = Duration::from_secs(60);
 const MAX_TTL: Duration = Duration::from_secs(3600);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_DOH_QUERIES: usize = 2;
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(6);
+const PROVIDER_STAGGER: Duration = Duration::from_millis(250);
+const MAX_DOH_LOOKUPS: usize = 2;
+const PROVIDERS: [&str; 3] = [
+    "https://1.1.1.1/dns-query", // Cloudflare primary
+    "https://1.0.0.1/dns-query", // Cloudflare secondary
+    "https://8.8.8.8/resolve",   // Google
+];
 
 #[derive(Debug, Clone)]
 struct CacheEntry {
@@ -54,7 +63,10 @@ pub struct DohResolver {
     ech_in_flight:
         Arc<StdMutex<HashMap<String, broadcast::Sender<Result<Option<Vec<u8>>, String>>>>>,
     http_client: Arc<rquest::Client>,
+    // Admission is per logical lookup, reserving capacity for all three hedges.
+    // Two admitted lookups therefore own at most six live provider requests.
     query_slots: Arc<Semaphore>,
+    providers: [String; 3],
 }
 
 // The owner removes the entry even when its future is dropped at an await.
@@ -122,7 +134,16 @@ impl DohResolver {
             in_flight: Arc::new(StdMutex::new(HashMap::new())),
             ech_in_flight: Arc::new(StdMutex::new(HashMap::new())),
             http_client: Arc::new(client),
-            query_slots: Arc::new(Semaphore::new(MAX_DOH_QUERIES)),
+            query_slots: Arc::new(Semaphore::new(MAX_DOH_LOOKUPS)),
+            providers: PROVIDERS.map(str::to_owned),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_providers(providers: [String; 3]) -> Self {
+        Self {
+            providers,
+            ..Self::new()
         }
     }
 
@@ -238,41 +259,73 @@ impl DohResolver {
     }
 
     async fn fetch_from_doh(&self, hostname: &str) -> Result<(Vec<String>, Duration), BypassError> {
-        let providers = [
-            "https://1.1.1.1/dns-query", // Cloudflare primary
-            "https://1.0.0.1/dns-query", // Cloudflare secondary
-            "https://8.8.8.8/resolve",   // Google
-        ];
-
-        let mut last_err = None;
-        for provider in &providers {
-            match self.query_provider(provider, hostname).await {
-                Ok(result) => return Ok(result),
-                Err(e) => last_err = Some(e),
-            }
-        }
-        Err(last_err.unwrap_or_else(|| BypassError::DohError("All DoH providers failed".into())))
+        self.query_providers(|index| self.query_provider(&self.providers[index], hostname))
+            .await
     }
 
     async fn fetch_ech_from_doh(
         &self,
         hostname: &str,
     ) -> Result<(Option<Vec<u8>>, Duration), BypassError> {
-        let providers = [
-            "https://1.1.1.1/dns-query", // Cloudflare primary
-            "https://1.0.0.1/dns-query", // Cloudflare secondary
-            "https://8.8.8.8/resolve",   // Google
-        ];
+        self.query_providers(|index| self.query_ech_provider(&self.providers[index], hostname))
+            .await
+    }
 
-        let mut last_err = None;
-        for provider in &providers {
-            match self.query_ech_provider(provider, hostname).await {
-                Ok(result) => return Ok(result),
-                Err(e) => last_err = Some(e),
+    async fn query_providers<T, F, Fut>(&self, mut query: F) -> Result<T, BypassError>
+    where
+        F: FnMut(usize) -> Fut,
+        Fut: Future<Output = Result<T, BypassError>>,
+    {
+        let deadline = Instant::now() + LOOKUP_TIMEOUT;
+        timeout_at(deadline, async {
+            let _permit = self
+                .query_slots
+                .acquire()
+                .await
+                .map_err(|_| BypassError::DohError("DoH limiter closed".into()))?;
+            if Instant::now() >= deadline {
+                return Err(BypassError::DohError("DoH lookup timed out".into()));
             }
-        }
-        Err(last_err
-            .unwrap_or_else(|| BypassError::DohError("All HTTPS/SVCB providers failed".into())))
+
+            // Own the futures directly: winning, timing out or dropping this
+            // lookup drops every losing HTTP request before releasing admission.
+            let first = query(0);
+            let second = query(1);
+            let third = query(2);
+            tokio::pin!(first, second, third);
+            let mut started = 1;
+            let mut finished = [false; 3];
+            let mut next_start = Instant::now() + PROVIDER_STAGGER;
+            loop {
+                let (index, result) = tokio::select! {
+                    biased;
+                    result = &mut first, if !finished[0] => (0, result),
+                    result = &mut second, if started >= 2 && !finished[1] => (1, result),
+                    result = &mut third, if started >= 3 && !finished[2] => (2, result),
+                    _ = sleep_until(next_start), if started < 3 => {
+                        started += 1;
+                        next_start = Instant::now() + PROVIDER_STAGGER;
+                        continue;
+                    }
+                };
+                match result {
+                    Ok(answer) => return Ok(answer),
+                    Err(error) => {
+                        finished[index] = true;
+                        if finished.iter().all(|done| *done) {
+                            return Err(error);
+                        }
+                        // A known failure does not need to wait for the hedge timer.
+                        if started < 3 {
+                            started += 1;
+                            next_start = Instant::now() + PROVIDER_STAGGER;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| BypassError::DohError("DoH lookup timed out".into()))?
     }
 
     async fn query_provider(
@@ -281,12 +334,6 @@ impl DohResolver {
         hostname: &str,
     ) -> Result<(Vec<String>, Duration), BypassError> {
         let url = format!("{}?name={}&type=A", base_url, hostname);
-        let _permit = self
-            .query_slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| BypassError::DohError("DoH limiter closed".into()))?;
 
         let resp = self
             .http_client
@@ -345,12 +392,6 @@ impl DohResolver {
         hostname: &str,
     ) -> Result<(Option<Vec<u8>>, Duration), BypassError> {
         let url = format!("{}?name={}&type=HTTPS", base_url, hostname);
-        let _permit = self
-            .query_slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| BypassError::DohError("DoH limiter closed".into()))?;
 
         let resp = self
             .http_client
@@ -562,11 +603,399 @@ mod tests {
         parse_ech_config_from_https_rr, split_svcb_fields,
     };
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    #[derive(Default)]
+    struct Attempts {
+        active: AtomicUsize,
+        peak: AtomicUsize,
+        starts: AtomicUsize,
+    }
+
+    struct ActiveAttempt(Arc<Attempts>);
+
+    impl ActiveAttempt {
+        fn new(attempts: &Arc<Attempts>) -> Self {
+            attempts.starts.fetch_add(1, Ordering::SeqCst);
+            let active = attempts.active.fetch_add(1, Ordering::SeqCst) + 1;
+            attempts.peak.fetch_max(active, Ordering::SeqCst);
+            Self(Arc::clone(attempts))
+        }
+    }
+
+    impl Drop for ActiveAttempt {
+        fn drop(&mut self) {
+            self.0.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    async fn controlled_provider(
+        index: usize,
+        attempts: &Arc<Attempts>,
+    ) -> Result<usize, crate::BypassError> {
+        let _attempt = ActiveAttempt::new(attempts);
+        if index == 0 {
+            tokio::time::sleep(super::QUERY_TIMEOUT).await;
+            Err(crate::BypassError::DohError(
+                "controlled primary timeout".into(),
+            ))
+        } else {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Ok(index)
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_primary_hedge_beats_serial_baseline_and_drops_loser() {
+        let attempts = Arc::new(Attempts::default());
+        // Execute the old sequential selection over the identical controlled
+        // provider futures; these are virtual timings, not public-network RTTs.
+        let before = Instant::now();
+        for index in 0..3 {
+            if controlled_provider(index, &attempts).await.is_ok() {
+                break;
+            }
+        }
+        let serial = before.elapsed();
+        assert_eq!(serial, Duration::from_millis(5_020));
+        let resolver = super::DohResolver::new();
+        let attempts = Arc::new(Attempts::default());
+        let before = Instant::now();
+        let result = resolver
+            .query_providers(|index| controlled_provider(index, &attempts))
+            .await;
+        let hedged = before.elapsed();
+        assert_eq!(result.unwrap(), 1);
+        assert_eq!(hedged, Duration::from_millis(270));
+        assert_eq!(attempts.starts.load(Ordering::SeqCst), 2);
+        assert_eq!(attempts.active.load(Ordering::SeqCst), 0);
+        assert_eq!(resolver.query_slots.available_permits(), 2);
+        eprintln!("controlled DoH latency: serial={serial:?}, hedged={hedged:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn primary_success_and_immediate_failures_do_not_wait_for_stagger() {
+        let resolver = super::DohResolver::new();
+        for succeed_at in 0..3 {
+            let starts = AtomicUsize::new(0);
+            let before = Instant::now();
+            let result = resolver
+                .query_providers(|index| {
+                    let starts = &starts;
+                    async move {
+                        starts.fetch_add(1, Ordering::SeqCst);
+                        if index == succeed_at {
+                            Ok(index)
+                        } else {
+                            Err(crate::BypassError::DohError("controlled failure".into()))
+                        }
+                    }
+                })
+                .await;
+            assert_eq!(result.unwrap(), succeed_at);
+            assert_eq!(before.elapsed(), Duration::ZERO);
+            assert_eq!(starts.load(Ordering::SeqCst), succeed_at + 1);
+        }
+        let before = Instant::now();
+        let result = resolver
+            .query_providers(|_| async {
+                Err::<(), _>(crate::BypassError::DohError("all fail".into()))
+            })
+            .await;
+        assert!(result.unwrap_err().to_string().contains("all fail"));
+        assert_eq!(before.elapsed(), Duration::ZERO);
+        assert_eq!(resolver.query_slots.available_permits(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn saturated_lookups_reserve_hedges_and_bound_wire_work_and_queued_wait() {
+        let resolver = super::DohResolver::new();
+        let attempts = Arc::new(Attempts::default());
+        let mut tasks = Vec::new();
+        for _ in 0..3 {
+            let resolver = resolver.clone();
+            let attempts = Arc::clone(&attempts);
+            tasks.push(tokio::spawn(async move {
+                resolver
+                    .query_providers(|_| {
+                        let attempts = Arc::clone(&attempts);
+                        async move {
+                            let _active = ActiveAttempt::new(&attempts);
+                            std::future::pending::<Result<(), crate::BypassError>>().await
+                        }
+                    })
+                    .await
+            }));
+        }
+        tokio::task::yield_now().await;
+        assert_eq!(attempts.active.load(Ordering::SeqCst), 2);
+        for expected in [4, 6] {
+            tokio::time::advance(super::PROVIDER_STAGGER).await;
+            tokio::task::yield_now().await;
+            assert_eq!(attempts.active.load(Ordering::SeqCst), expected);
+        }
+        assert_eq!(resolver.query_slots.available_permits(), 0);
+        tokio::time::advance(super::LOOKUP_TIMEOUT - 2 * super::PROVIDER_STAGGER).await;
+        for task in tasks {
+            assert!(task
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("timed out"));
+        }
+        assert_eq!(attempts.starts.load(Ordering::SeqCst), 6);
+        assert_eq!(attempts.peak.load(Ordering::SeqCst), 6);
+        assert_eq!(attempts.active.load(Ordering::SeqCst), 0);
+        assert_eq!(resolver.query_slots.available_permits(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellation_drops_all_provider_futures_and_releases_admission() {
+        let resolver = super::DohResolver::new();
+        let attempts = Arc::new(Attempts::default());
+        let task = {
+            let resolver = resolver.clone();
+            let attempts = Arc::clone(&attempts);
+            tokio::spawn(async move {
+                resolver
+                    .query_providers(|_| {
+                        let attempts = Arc::clone(&attempts);
+                        async move {
+                            let _active = ActiveAttempt::new(&attempts);
+                            std::future::pending::<Result<(), crate::BypassError>>().await
+                        }
+                    })
+                    .await
+            })
+        };
+        tokio::task::yield_now().await;
+        for _ in 0..2 {
+            tokio::time::advance(super::PROVIDER_STAGGER).await;
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(attempts.active.load(Ordering::SeqCst), 3);
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_eq!(attempts.active.load(Ordering::SeqCst), 0);
+        assert_eq!(resolver.query_slots.available_permits(), 2);
+    }
+
+    enum FixtureResponse {
+        Body(String),
+        Stall,
+        Disconnect,
+    }
+
+    struct ProviderFixture {
+        url: String,
+        requests: Arc<AtomicUsize>,
+        closed: Arc<AtomicUsize>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for ProviderFixture {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn provider_fixture(response: fn(&str) -> FixtureResponse) -> ProviderFixture {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/dns-query", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicUsize::new(0));
+        let closed = Arc::new(AtomicUsize::new(0));
+        let task = {
+            let requests = Arc::clone(&requests);
+            let closed = Arc::clone(&closed);
+            tokio::spawn(async move {
+                let mut connections = tokio::task::JoinSet::new();
+                loop {
+                    tokio::select! {
+                        accepted = listener.accept() => {
+                            let (mut socket, _) = accepted.unwrap();
+                            let requests = Arc::clone(&requests);
+                            let closed = Arc::clone(&closed);
+                            connections.spawn(async move {
+                                let mut request = Vec::new();
+                                let mut buf = [0; 1024];
+                                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                                    let count = socket.read(&mut buf).await.unwrap();
+                                    if count == 0 { return; }
+                                    request.extend_from_slice(&buf[..count]);
+                                }
+                                requests.fetch_add(1, Ordering::SeqCst);
+                                match response(&String::from_utf8_lossy(&request)) {
+                                    FixtureResponse::Body(body) => {
+                                        let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                                        socket.write_all(head.as_bytes()).await.unwrap();
+                                        socket.write_all(body.as_bytes()).await.unwrap();
+                                    }
+                                    FixtureResponse::Stall => {
+                                        let _ = socket.read_to_end(&mut Vec::new()).await;
+                                        closed.fetch_add(1, Ordering::SeqCst);
+                                    }
+                                    FixtureResponse::Disconnect => {}
+                                }
+                            });
+                        }
+                        _ = connections.join_next(), if !connections.is_empty() => {}
+                    }
+                }
+            })
+        };
+        ProviderFixture {
+            url,
+            requests,
+            closed,
+            task,
+        }
+    }
+
+    fn dns_answer(request: &str) -> FixtureResponse {
+        FixtureResponse::Body(if request.contains("type=HTTPS") {
+            if request.contains("negative.test") {
+                r#"{"Status":0}"#.into()
+            } else {
+                r#"{"Status":0,"Answer":[{"type":65,"TTL":1,"data":"1 . ech=AQIDBA=="}]}"#.into()
+            }
+        } else {
+            r#"{"Status":0,"Answer":[{"type":1,"TTL":10000,"data":"192.0.2.1"}]}"#.into()
+        })
+    }
+
+    #[tokio::test]
+    async fn real_http_hedge_cancels_stalled_loser() {
+        let stalled = provider_fixture(|_| FixtureResponse::Stall).await;
+        let healthy = provider_fixture(dns_answer).await;
+        let mut resolver = super::DohResolver::new();
+        resolver.providers = [
+            stalled.url.clone(),
+            healthy.url.clone(),
+            healthy.url.clone(),
+        ];
+        let result =
+            tokio::time::timeout(Duration::from_secs(2), resolver.resolve_all("fixture.test"))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(result, vec!["192.0.2.1"]);
+        assert_eq!(stalled.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(healthy.requests.load(Ordering::SeqCst), 1);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while stalled.closed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(resolver.query_slots.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn parsed_answers_keep_normalized_a_and_positive_negative_ech_caches_and_ttl() {
+        let fixture = provider_fixture(dns_answer).await;
+        let mut resolver = super::DohResolver::new();
+        resolver.providers = [
+            fixture.url.clone(),
+            fixture.url.clone(),
+            fixture.url.clone(),
+        ];
+        assert_eq!(
+            resolver.resolve_all("FIXTURE.TEST.").await.unwrap(),
+            vec!["192.0.2.1"]
+        );
+        let cached_at = Instant::now();
+        let expires = resolver.cache.lock().await["fixture.test"].expires_at;
+        assert!(expires <= cached_at + super::MAX_TTL);
+        assert!(expires > cached_at + super::MAX_TTL - Duration::from_secs(1));
+        let _permits = resolver.query_slots.acquire_many(2).await.unwrap();
+        assert_eq!(
+            resolver.resolve_all("fixture.test").await.unwrap(),
+            vec!["192.0.2.1"]
+        );
+        drop(_permits);
+        assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
+        resolver
+            .cache
+            .lock()
+            .await
+            .get_mut("fixture.test")
+            .unwrap()
+            .expires_at = Instant::now();
+        resolver.resolve_all("fixture.test").await.unwrap();
+        assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
+        for (host, expected) in [
+            ("positive.test", Some(vec![1, 2, 3, 4])),
+            ("negative.test", None),
+        ] {
+            let before = fixture.requests.load(Ordering::SeqCst);
+            assert_eq!(resolver.resolve_ech_config(host).await.unwrap(), expected);
+            assert_eq!(resolver.resolve_ech_config(host).await.unwrap(), expected);
+            assert_eq!(fixture.requests.load(Ordering::SeqCst), before + 1);
+            let cached_at = Instant::now();
+            let expires = resolver.ech_cache.lock().await[host].expires_at;
+            assert!(expires <= cached_at + super::MIN_TTL);
+            assert!(expires > cached_at + super::MIN_TTL - Duration::from_secs(1));
+            resolver
+                .ech_cache
+                .lock()
+                .await
+                .get_mut(host)
+                .unwrap()
+                .expires_at = Instant::now();
+            assert_eq!(resolver.resolve_ech_config(host).await.unwrap(), expected);
+            assert_eq!(fixture.requests.load(Ordering::SeqCst), before + 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_answers_advance_and_transport_errors_are_not_cached() {
+        let malformed = provider_fixture(|_| FixtureResponse::Body("invalid JSON".into())).await;
+        let healthy = provider_fixture(dns_answer).await;
+        let mut resolver = super::DohResolver::new();
+        resolver.providers = [
+            malformed.url.clone(),
+            healthy.url.clone(),
+            healthy.url.clone(),
+        ];
+        assert_eq!(
+            resolver.resolve_all("fixture.test").await.unwrap(),
+            vec!["192.0.2.1"]
+        );
+        assert_eq!(malformed.requests.load(Ordering::SeqCst), 1);
+        assert_eq!(healthy.requests.load(Ordering::SeqCst), 1);
+        let disconnected = provider_fixture(|_| FixtureResponse::Disconnect).await;
+        resolver.providers = [
+            disconnected.url.clone(),
+            disconnected.url.clone(),
+            disconnected.url.clone(),
+        ];
+        for ech in [false, true] {
+            let before = disconnected.requests.load(Ordering::SeqCst);
+            for _ in 0..2 {
+                let result = if ech {
+                    resolver.resolve_ech_config("error.test").await.map(|_| ())
+                } else {
+                    resolver.resolve_all("error.test").await.map(|_| ())
+                };
+                assert!(result.is_err());
+            }
+            assert_eq!(disconnected.requests.load(Ordering::SeqCst), before + 6);
+        }
+        assert!(!resolver.cache.lock().await.contains_key("error.test"));
+        assert!(!resolver.ech_cache.lock().await.contains_key("error.test"));
+    }
+
     #[tokio::test]
     async fn cancelled_dns_and_ech_owners_wake_followers_and_allow_new_owner() {
         for ech in [false, true] {
             let resolver = super::DohResolver::new();
-            // Keep both providers queued, so this test never contacts the network.
+            // Keep both logical lookup slots occupied; this never contacts the network.
             let _permits = resolver.query_slots.acquire_many(2).await.unwrap();
             let spawn_lookup = || {
                 let resolver = resolver.clone();

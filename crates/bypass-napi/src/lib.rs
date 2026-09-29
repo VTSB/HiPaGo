@@ -20,7 +20,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// Resettable bypass client — can be recreated if the proxy dies or a transient failure occurs.
+/// Shared client: a request-local error does not invalidate other requests' state.
 static CLIENT: OnceLock<RwLock<Option<Arc<BypassClient>>>> = OnceLock::new();
 
 fn client_lock() -> &'static RwLock<Option<Arc<BypassClient>>> {
@@ -116,29 +116,15 @@ pub async fn bypass_fetch(
     url: String,
     headers: Option<HashMap<String, String>>,
 ) -> napi::Result<BypassResponseStream> {
-    // Try with existing client, reset and retry once on failure
-    for attempt in 0..2u8 {
-        let client = get_client().await?;
-        match client.fetch_streaming(&url, headers.clone()).await {
-            Ok(resp) => {
-                return Ok(BypassResponseStream {
-                    status: resp.status,
-                    headers: resp.headers,
-                    receiver: Mutex::new(resp.body_rx),
-                    closed: tokio::sync::watch::channel(false).0,
-                });
-            }
-            Err(e) => {
-                if attempt == 0 {
-                    eprintln!("[bypass-napi] streaming fetch failed, resetting client: {e}");
-                    bypass_core::reset_failed_client(client_lock(), &client).await;
-                } else {
-                    return Err(napi::Error::from_reason(format!(
-                        "Bypass fetch failed: {e}"
-                    )));
-                }
-            }
-        }
-    }
-    unreachable!()
+    let client = get_client().await?;
+    let resp = client
+        .fetch_streaming(&url, headers)
+        .await
+        .map_err(|e| napi::Error::from_reason(format!("Bypass fetch failed: {e}")))?;
+    Ok(BypassResponseStream {
+        status: resp.status,
+        headers: resp.headers,
+        receiver: Mutex::new(resp.body_rx),
+        closed: tokio::sync::watch::channel(false).0,
+    })
 }

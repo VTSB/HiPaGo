@@ -51,3 +51,55 @@ test('native body truncation rejects read instead of returning clean EOF', { tim
     stream.close();
   });
 });
+
+
+test('a malformed response head is not replayed and a later request succeeds', { timeout: 5000 }, async () => {
+  let failedRequests = 0;
+  let healthyRequests = 0;
+  await serve((request, response) => {
+    if (request.url === '/broken') {
+      failedRequests += 1;
+      // An invalid response head is a deterministic terminal parse error, not
+      // an idle pooled-socket closure that the HTTP client may safely retry.
+      request.socket.end('INVALID HTTP RESPONSE\r\n\r\n');
+      return;
+    }
+    healthyRequests += 1;
+    response.writeHead(200, { 'x-fixture': 'healthy' });
+    response.end('still usable');
+  }, async (url) => {
+    await assert.rejects(addon.exports.bypassFetch(`${url}broken`), /request|http|message/i);
+    assert.equal(failedRequests, 1, 'the binding must not repeat a failed core request');
+    const stream = await addon.exports.bypassFetch(`${url}healthy`);
+    assert.equal(stream.status, 200);
+    assert.equal(stream.headers['x-fixture'], 'healthy');
+    const chunks = [];
+    let chunk;
+    while ((chunk = await stream.read()) !== null) chunks.push(chunk);
+    assert.equal(Buffer.concat(chunks).toString(), 'still usable');
+    assert.equal(await stream.read(), null);
+    stream.close();
+    assert.equal(healthyRequests, 1);
+    assert.equal(failedRequests, 1);
+  });
+});
+
+test('a normal HTTP 404 remains a response with its headers and body', { timeout: 5000 }, async () => {
+  let requests = 0;
+  await serve((_request, response) => {
+    requests += 1;
+    response.writeHead(404, { 'x-fixture': 'missing' });
+    response.end('not found');
+  }, async (url) => {
+    const stream = await addon.exports.bypassFetch(url);
+    assert.equal(stream.status, 404);
+    assert.equal(stream.headers['x-fixture'], 'missing');
+    const chunks = [];
+    let chunk;
+    while ((chunk = await stream.read()) !== null) chunks.push(chunk);
+    assert.equal(Buffer.concat(chunks).toString(), 'not found');
+    assert.equal(await stream.read(), null);
+    stream.close();
+    assert.equal(requests, 1);
+  });
+});

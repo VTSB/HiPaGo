@@ -20,9 +20,7 @@ fn runtime() -> &'static Runtime {
     RT.get_or_init(|| Runtime::new().expect("Failed to create tokio runtime"))
 }
 
-/// Resettable bypass client. Android can keep the process alive after a SOCKS
-/// proxy/connect failure, so the next call must be able to create a fresh proxy
-/// instead of reusing the failed global client forever.
+/// Shared client: a request-local error does not invalidate other requests' state.
 static CLIENT: OnceLock<RwLock<Option<Arc<BypassClient>>>> = OnceLock::new();
 
 fn client_lock() -> &'static RwLock<Option<Arc<BypassClient>>> {
@@ -88,25 +86,14 @@ pub fn bypass_fetch(
 ) -> Result<BypassResponse, BypassError> {
     let rt = runtime();
     rt.block_on(async {
-        for attempt in 0..2u8 {
-            let client = get_client().await?;
-            match client.fetch(&url, headers.clone()).await {
-                Ok(resp) => {
-                    return Ok(BypassResponse {
-                        // bypass-core's HTTP status is u16; widen to i32 for FFI.
-                        status: i32::from(resp.status),
-                        headers: resp.headers,
-                        body: resp.body,
-                    });
-                }
-                Err(e) if attempt == 0 => {
-                    eprintln!("[bypass-uniffi] fetch failed, resetting client: {e}");
-                    bypass_core::reset_failed_client(client_lock(), &client).await;
-                }
-                Err(e) => return Err(BypassError::from(e)),
-            }
-        }
-        unreachable!()
+        let client = get_client().await?;
+        let resp = client.fetch(&url, headers).await?;
+        Ok(BypassResponse {
+            // bypass-core's HTTP status is u16; widen to i32 for FFI.
+            status: i32::from(resp.status),
+            headers: resp.headers,
+            body: resp.body,
+        })
     })
 }
 
@@ -122,20 +109,130 @@ pub fn bypass_download_to_file(
 ) -> Result<i64, BypassError> {
     let rt = runtime();
     rt.block_on(async {
-        for attempt in 0..2u8 {
-            let client = get_client().await?;
-            match client
-                .download_to_file(&url, headers.clone(), &dest_path)
-                .await
-            {
-                Ok(written) => return Ok(written as i64),
-                Err(e) if attempt == 0 => {
-                    eprintln!("[bypass-uniffi] download failed, resetting client: {e}");
-                    bypass_core::reset_failed_client(client_lock(), &client).await;
+        let client = get_client().await?;
+        let written = client.download_to_file(&url, headers, &dest_path).await?;
+        Ok(written as i64)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    struct Server {
+        url: String,
+        requests: Arc<AtomicUsize>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Server {
+        fn start() -> Self {
+            let listener = runtime()
+                .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+                .unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let requests = Arc::new(AtomicUsize::new(0));
+            let count = Arc::clone(&requests);
+            let task = runtime().spawn(async move {
+                loop {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let mut chunk = [0; 512];
+                    while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        let read = socket.read(&mut chunk).await.unwrap();
+                        assert!(read > 0 && request.len() < 8192);
+                        request.extend_from_slice(&chunk[..read]);
+                    }
+                    count.fetch_add(1, Ordering::SeqCst);
+                    let response: &[u8] = if request.starts_with(b"GET /missing ") {
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    } else if request.starts_with(b"GET /truncated ") {
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\npart"
+                    } else {
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone"
+                    };
+                    socket.write_all(response).await.unwrap();
                 }
-                Err(e) => return Err(BypassError::from(e)),
+            });
+            Self {
+                url,
+                requests,
+                task,
             }
         }
-        unreachable!()
-    })
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    #[test]
+    fn request_errors_do_not_replace_client_or_replay_downloads() {
+        let client = runtime().block_on(get_client()).unwrap();
+        let invalid = bypass_fetch("not a URL".into(), None).unwrap_err();
+        assert!(invalid.to_string().contains("Invalid URL"));
+        assert!(Arc::ptr_eq(
+            &client,
+            &runtime().block_on(get_client()).unwrap()
+        ));
+
+        let server = Server::start();
+        let directory = std::env::temp_dir().join(format!(
+            "hipago-uniffi-request-errors-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let blocked_parent = directory.join("not-a-directory");
+        std::fs::write(&blocked_parent, b"file").unwrap();
+        let destination = directory.join("image");
+        std::fs::write(&destination, b"previous").unwrap();
+
+        for (path, target, expected_error) in [
+            ("/missing", destination.clone(), "HTTP 404"),
+            ("/ok", blocked_parent.join("image"), "IO error"),
+            ("/truncated", destination.clone(), "Body read failed"),
+        ] {
+            let before = server.requests.load(Ordering::SeqCst);
+            let error = bypass_download_to_file(
+                format!("{}{path}", server.url),
+                None,
+                target.to_string_lossy().into_owned(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(expected_error), "{error}");
+            assert_eq!(server.requests.load(Ordering::SeqCst), before + 1);
+            assert!(Arc::ptr_eq(
+                &client,
+                &runtime().block_on(get_client()).unwrap()
+            ));
+            assert_eq!(std::fs::read(&destination).unwrap(), b"previous");
+
+            let healthy = bypass_fetch(format!("{}/ok", server.url), None).unwrap();
+            assert_eq!(healthy.status, 200);
+            assert_eq!(healthy.body, b"done");
+            assert_eq!(server.requests.load(Ordering::SeqCst), before + 2);
+        }
+
+        let missing = bypass_fetch(format!("{}/missing", server.url), None).unwrap();
+        assert_eq!(missing.status, 404);
+        assert!(missing.body.is_empty());
+        assert!(Arc::ptr_eq(
+            &client,
+            &runtime().block_on(get_client()).unwrap()
+        ));
+        let size = bypass_download_to_file(
+            format!("{}/ok", server.url),
+            None,
+            destination.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        assert_eq!(size, 4);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"done");
+        assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 2);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
