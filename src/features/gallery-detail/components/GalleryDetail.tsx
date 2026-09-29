@@ -50,6 +50,17 @@ export function GalleryDetail({ id }: { id: number }) {
   const cachedBlock = useGalleryBlock(id);
   const router = useRouter();
   const [copied, setCopied] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
+  const runVisibleAction = async (operation: () => Promise<void>) => {
+    setActionPending(true);
+    try {
+      await operation();
+    } catch {
+      // The shared action host displays the operation's error.
+    } finally {
+      setActionPending(false);
+    }
+  };
   const [renderState, setRenderState] = useState({ id, count: INITIAL_THUMBNAILS });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -308,7 +319,7 @@ export function GalleryDetail({ id }: { id: number }) {
             >
               {t(reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1 ? 'actions.continue' : 'detail.read')}
             </Link>
-            <button onClick={() => { if (isFav) manage(); else void actions.save(gallery).catch(() => {}); }} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm dark:border-zinc-700">{t(isFav ? 'actions.saved' : 'actions.save')}</button>
+            <button disabled={actionPending} aria-busy={actionPending} onClick={() => { if (isFav) manage(); else void runVisibleAction(() => actions.save(gallery)); }} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700">{t(isFav ? 'actions.saved' : 'actions.save')}</button>
             <button onClick={manage} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm dark:border-zinc-700">{t('actions.title')}</button>
             {files.length > 0 &&
               (dlProgress ? (
@@ -331,9 +342,11 @@ export function GalleryDetail({ id }: { id: number }) {
                 </button>
               ) : filesMissing ? (
                 <button
-                  onClick={() => { void actions.download(gallery).catch(() => {}); }}
+                  disabled={actionPending}
+                  aria-busy={actionPending}
+                  onClick={() => { void runVisibleAction(() => actions.download(gallery)); }}
                   title={t('detail.filesMissing')}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-8 py-2.5 text-base font-semibold text-amber-700 active:bg-amber-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-8 py-2.5 text-base font-semibold text-amber-700 active:bg-amber-100 disabled:cursor-wait disabled:opacity-60 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -371,8 +384,10 @@ export function GalleryDetail({ id }: { id: number }) {
                 </button>
               ) : (
                 <button
-                  onClick={() => { void actions.download(gallery).catch(() => {}); }}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+                  disabled={actionPending}
+                  aria-busy={actionPending}
+                  onClick={() => { void runVisibleAction(() => actions.download(gallery)); }}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

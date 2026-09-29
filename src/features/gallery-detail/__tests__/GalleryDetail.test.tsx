@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render as renderBase, waitFor, screen, fireEvent } from '@testing-library/react';
+import { render as renderBase, waitFor, screen, fireEvent, act } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -71,7 +71,11 @@ const galleryActions = vi.hoisted(() => ({
 vi.mock('@/shared/hooks/useGalleryActions', () => ({ useGalleryActions: () => galleryActions }));
 
 vi.mock('@/features/gallery-detail/hooks/useDownloadGallery', () => ({
-  useDownloadGallery: vi.fn(() => ({ progress: null, start: vi.fn(), cancel: vi.fn() })),
+  useDownloadGallery: vi.fn(() => ({ progress: null, start: vi.fn(), cancel: vi.fn(), queuedPosition: null, isDownloaded: false, error: null })),
+}));
+
+vi.mock('@/features/gallery-detail/hooks/useDownloadedFilesPresent', () => ({
+  useDownloadedFilesPresent: vi.fn(() => ({ filesMissing: false, checking: false })),
 }));
 
 vi.mock('@/lib/i18n/useT', () => ({
@@ -135,6 +139,7 @@ import type { GalleryBlock, GalleryFile, GalleryImages } from '@/lib/utils/types
 import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/detailEntryThumbnail';
 import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
+import { useDownloadedFilesPresent } from '../hooks/useDownloadedFilesPresent';
 
 function render(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -179,6 +184,7 @@ beforeEach(() => {
   galleryActions.open.mockClear();
   galleryActions.save.mockClear();
   galleryActions.download.mockClear();
+  vi.mocked(useDownloadedFilesPresent).mockReturnValue({ filesMissing: false, checking: false });
   vi.mocked(useOfflineImages).mockReturnValue({
     sources: null,
     urls: null,
@@ -324,7 +330,36 @@ describe('GalleryDetail shared work management', () => {
     expect(galleryActions.save).toHaveBeenCalledWith(
       expect.objectContaining({ id: 123, title: 'Test Gallery' }),
     );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'actions.save' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'actions.title' }));
     expect(galleryActions.open).toHaveBeenCalledWith(expect.objectContaining({ id: 123 }));
+  });
+
+  it.each([
+    { action: 'save' as const, outcome: 'success', missing: false },
+    { action: 'save' as const, outcome: 'failure', missing: false },
+    { action: 'download' as const, outcome: 'success', missing: false },
+    { action: 'download' as const, outcome: 'failure', missing: false },
+    { action: 'download' as const, outcome: 'success', missing: true },
+    { action: 'download' as const, outcome: 'failure', missing: true },
+  ])('disables $action (missing=$missing) and restores controls after $outcome', async ({ action, outcome, missing }) => {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    galleryActions[action].mockImplementationOnce(() => new Promise<void>((done, fail) => { resolve = done; reject = fail; }));
+    vi.mocked(useDownloadedFilesPresent).mockReturnValue({ filesMissing: missing, checking: false });
+    mockDetail(makeFiles(1));
+    render(<GalleryDetail id={123} />);
+    const save = screen.getByRole('button', { name: 'actions.save' });
+    const download = screen.getByRole('button', { name: missing ? 'detail.filesMissing' : 'detail.download' });
+    const trigger = action === 'save' ? save : download;
+    fireEvent.click(trigger);
+    expect(save).toBeDisabled();
+    expect(download).toBeDisabled();
+    expect(trigger).toHaveAttribute('aria-busy', 'true');
+    fireEvent.click(trigger);
+    expect(galleryActions[action]).toHaveBeenCalledTimes(1);
+    await act(async () => { if (outcome === 'success') resolve(); else reject(new Error('Failed')); });
+    await waitFor(() => { expect(save).toBeEnabled(); expect(download).toBeEnabled(); });
+    expect(trigger).toHaveAttribute('aria-busy', 'false');
   });
 });
