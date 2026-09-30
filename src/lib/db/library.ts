@@ -7,6 +7,17 @@ export interface LibraryCollection {
   count: number;
 }
 
+export class LibraryCollectionError extends Error {
+  constructor(
+    readonly code: 'name-empty' | 'missing' | 'cycle' | 'created-unsaved',
+    message: string,
+    readonly createdCollectionId?: number,
+  ) {
+    super(message);
+    this.name = 'LibraryCollectionError';
+  }
+}
+
 export interface ContinueReadingEntry {
   galleryId: number;
   lastPage: number;
@@ -82,7 +93,7 @@ export async function getGalleryCollectionIds(galleryId: number): Promise<number
 
 function collectionName(name: string): string {
   const trimmed = name.trim();
-  if (!trimmed) throw new Error('Collection name cannot be empty.');
+  if (!trimmed) throw new LibraryCollectionError('name-empty', 'Collection name cannot be empty.');
   return trimmed;
 }
 
@@ -97,14 +108,22 @@ export async function createCollection(
         'SELECT id FROM library_collection WHERE id = ?',
         [parentId],
       );
-      if (!rows.length) throw new Error('Collection no longer exists.');
+      if (!rows.length) throw new LibraryCollectionError('missing', 'Collection no longer exists.');
     }
     return db.execute('INSERT INTO library_collection (name, parentId) VALUES (?, ?)', [
       collectionName(name),
       parentId,
     ]);
   });
-  await persistDb();
+  try {
+    await persistDb();
+  } catch (failure) {
+    throw new LibraryCollectionError(
+      'created-unsaved',
+      failure instanceof Error ? failure.message : String(failure),
+      result.lastInsertRowId,
+    );
+  }
   return result.lastInsertRowId;
 }
 
@@ -115,7 +134,8 @@ export async function renameCollection(collectionId: number, name: string): Prom
       collectionName(name),
       collectionId,
     ]);
-    if (!result.changes) throw new Error('Collection no longer exists.');
+    if (!result.changes)
+      throw new LibraryCollectionError('missing', 'Collection no longer exists.');
   });
   await persistDb();
 }
@@ -128,17 +148,21 @@ export async function moveCollection(collectionId: number, parentId: number | nu
     );
     const parents = new Map(rows.map((row) => [row.id, row.parentId]));
     if (!parents.has(collectionId) || (parentId !== null && !parents.has(parentId))) {
-      throw new Error('Collection no longer exists.');
+      throw new LibraryCollectionError('missing', 'Collection no longer exists.');
     }
     const visited = new Set<number>();
     let ancestor = parentId;
     while (ancestor !== null) {
       if (ancestor === collectionId || visited.has(ancestor)) {
-        throw new Error('Collection cannot be moved into itself or a descendant.');
+        throw new LibraryCollectionError(
+          'cycle',
+          'Collection cannot be moved into itself or a descendant.',
+        );
       }
       visited.add(ancestor);
       const nextParent = parents.get(ancestor);
-      if (nextParent === undefined) throw new Error('Collection no longer exists.');
+      if (nextParent === undefined)
+        throw new LibraryCollectionError('missing', 'Collection no longer exists.');
       ancestor = nextParent;
     }
     await db.execute('UPDATE library_collection SET parentId = ? WHERE id = ?', [
@@ -157,7 +181,7 @@ export async function deleteCollection(collectionId: number): Promise<void> {
       'SELECT parentId FROM library_collection WHERE id = ?',
       [collectionId],
     );
-    if (!rows.length) throw new Error('Collection no longer exists.');
+    if (!rows.length) throw new LibraryCollectionError('missing', 'Collection no longer exists.');
     await db.execute('UPDATE library_collection SET parentId = ? WHERE parentId = ?', [
       rows[0].parentId,
       collectionId,

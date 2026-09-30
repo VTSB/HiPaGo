@@ -2,7 +2,7 @@
 import initSqlJs, { type SqlJsStatic } from 'sql.js';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebAdapter } from '../adapters/web';
-import { closeDb, setDb, withTransaction } from '../adapter';
+import { closeDb, persistDb, setDb, withTransaction } from '../adapter';
 import { SCHEMA_SQL } from '../schema-sql';
 import { enqueueDownload } from '../download-queue';
 import {
@@ -14,6 +14,7 @@ import {
   getCollections,
   getGalleryCollectionIds,
   getLibraryIds,
+  LibraryCollectionError,
 } from '../library';
 
 // Only redirect the browser WASM URL; all SQLite statements and exports are real.
@@ -222,6 +223,41 @@ describe('real web database transaction persistence', () => {
     expect(await getCollections()).toEqual([
       { id: first, name: 'First', parentId: null, count: 0 },
       { id: second, name: 'Second', parentId: null, count: 0 },
+    ]);
+  });
+
+  it('retries a committed folder snapshot without inserting again and reopens the same ID', async () => {
+    const parentId = await createCollection('Parent');
+    const execute = vi.spyOn(adapter, 'execute');
+    transport.failNext = true;
+    const failure = await createCollection('Child', parentId).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(LibraryCollectionError);
+    expect(failure).toMatchObject({ code: 'created-unsaved', message: 'Disk full' });
+    const committed = await adapter.query<{ id: number; name: string; parentId: number }>(
+      'SELECT id, name, parentId FROM library_collection WHERE name = ?',
+      ['Child'],
+    );
+    expect(committed).toHaveLength(1);
+    expect(failure).toHaveProperty('createdCollectionId', committed[0].id);
+    const createdId = committed[0].id;
+    expect(adapter.dirty).toBe(true);
+
+    transport.failNext = true;
+    await expect(persistDb()).rejects.toThrow('Disk full');
+    expect(await getCollections()).toEqual([
+      { id: parentId, name: 'Parent', parentId: null, count: 0 },
+      { id: createdId, name: 'Child', parentId, count: 0 },
+    ]);
+    await persistDb();
+    expect(
+      execute.mock.calls.filter(([sql]) => /INSERT INTO library_collection\s*\(/i.test(sql)),
+    ).toHaveLength(1);
+    await closeDb();
+    adapter = await WebAdapter.create();
+    setDb(adapter);
+    expect(await getCollections()).toEqual([
+      { id: parentId, name: 'Parent', parentId: null, count: 0 },
+      { id: createdId, name: 'Child', parentId, count: 0 },
     ]);
   });
 

@@ -10,6 +10,26 @@ const translations = {
   'library.collectionRename': { en: 'Rename folder', ko: '폴더 이름 변경' },
   'library.collectionDelete': { en: 'Delete folder', ko: '폴더 삭제' },
   'library.collectionName': { en: 'Folder name', ko: '폴더 이름' },
+  'library.folderError.name-empty': {
+    en: 'Enter a folder name.',
+    ko: '폴더 이름을 입력해 주세요.',
+  },
+  'library.folderError.missing': {
+    en: 'This folder or its parent no longer exists. Choose another folder.',
+    ko: '폴더 또는 상위 폴더가 사라졌습니다. 다른 폴더를 선택해 주세요.',
+  },
+  'library.folderError.cycle': {
+    en: 'A folder cannot be moved into itself or its subfolders.',
+    ko: '폴더를 자기 자신이나 하위 폴더 안으로 옮길 수 없습니다.',
+  },
+  'library.folderError.created-unsaved': {
+    en: 'The folder was created, but could not be saved to this device. Try Save again.',
+    ko: '폴더가 만들어졌지만 기기에 저장하지 못했습니다. 다시 저장해 주세요.',
+  },
+  'library.folderError.failed': {
+    en: 'The folder action could not be completed. Please try again.',
+    ko: '폴더 작업을 완료하지 못했습니다. 다시 시도해 주세요.',
+  },
   'library.collectionDeleteConfirm': {
     en: 'Delete this folder? Works and files are kept. Subfolders move up one level.',
     ko: '이 폴더를 삭제할까요? 작품과 파일은 유지되고, 하위 폴더는 한 단계 위로 이동합니다.',

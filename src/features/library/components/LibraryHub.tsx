@@ -21,10 +21,11 @@ import { DbStageSpinner } from '@/shared/components/DbStageSpinner';
 import { FloatingPageNav } from '@/shared/components/FloatingPageNav';
 import { useGalleryActions } from '@/shared/hooks/useGalleryActions';
 import { useT } from '@/lib/i18n/useT';
-import { ensureDb } from '@/lib/db/adapter';
+import { ensureDb, persistDb } from '@/lib/db/adapter';
 import { listDownloads, deserializeTags } from '@/lib/db/download';
 import { filterFavoritesByTags } from '@/lib/db/search-local';
 import {
+  LibraryCollectionError,
   getLibraryIds,
   getCollections,
   createCollection,
@@ -314,17 +315,32 @@ export function LibraryHub() {
     if (!editor || busy) return;
     const draft = editor;
     void mutate(async () => {
-      if (draft.mode === 'create') await createCollection(draft.name, draft.parentId);
-      if (draft.mode === 'rename') await renameCollection(draft.id!, draft.name);
-      if (draft.mode === 'move') await moveCollection(draft.id!, draft.parentId);
-      if (draft.mode === 'delete') {
-        await deleteCollection(draft.id!);
-        if (folderId === draft.id)
-          navigate(
-            draft.parentId === null ? { kind: 'root' } : { kind: 'folder', id: draft.parentId },
-          );
+      try {
+        if (draft.mode === 'create') {
+          if (draft.id !== undefined) await persistDb();
+          else await createCollection(draft.name, draft.parentId);
+        }
+        if (draft.mode === 'rename') await renameCollection(draft.id!, draft.name);
+        if (draft.mode === 'move') await moveCollection(draft.id!, draft.parentId);
+        if (draft.mode === 'delete') {
+          await deleteCollection(draft.id!);
+          if (folderId === draft.id)
+            navigate(
+              draft.parentId === null ? { kind: 'root' } : { kind: 'folder', id: draft.parentId },
+            );
+        }
+        setEditor(null);
+      } catch (failure) {
+        if (failure instanceof LibraryCollectionError && failure.createdCollectionId !== undefined)
+          setEditor({ ...draft, id: failure.createdCollectionId });
+        const code =
+          failure instanceof LibraryCollectionError
+            ? failure.code
+            : draft.mode === 'create' && draft.id !== undefined
+              ? 'created-unsaved'
+              : 'failed';
+        throw new Error(t(`library.folderError.${code}`));
       }
-      setEditor(null);
     });
   };
   const menuFolder = collections.find((item) => item.id === menu?.id);
@@ -592,6 +608,7 @@ export function LibraryHub() {
                 placeholder={t('library.collectionName')}
                 className={control + ' mb-3 w-full'}
                 value={editor.name}
+                readOnly={editor.mode === 'create' && editor.id !== undefined}
                 disabled={busy}
                 onChange={(event) => setEditor({ ...editor, name: event.target.value })}
               />

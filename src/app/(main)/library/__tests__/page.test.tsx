@@ -4,9 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DBDownload } from '@/lib/db/schema';
+import { LibraryCollectionError } from '@/lib/db/library';
+import { t, type TranslationKey } from '@/lib/i18n/translations';
 import LibraryPage from '../page';
 
 const state = vi.hoisted(() => ({
+  locale: null as 'ko' | 'en' | null,
+  persist: vi.fn(),
   ids: [3, 2, 1],
   beginSelection: new Map<number, () => void>(),
   downloads: [] as DBDownload[],
@@ -34,19 +38,24 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: state.replace }),
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
-vi.mock('@/lib/i18n/useT', () => ({ useT: () => (key: string) => key }));
+vi.mock('@/lib/i18n/useT', () => ({
+  useT: () => (key: TranslationKey) => (state.locale ? t(key, state.locale) : key),
+}));
 vi.mock('@/shared/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
 vi.mock('@/shared/hooks/useGalleryActions', () => ({
   useGalleryActions: () => ({ remove: state.remove, deleteFiles: state.deleteFiles }),
 }));
 vi.mock('@/lib/db/adapter', () => ({
   ensureDb: async () => ({ query: async () => state.titles }),
+  persistDb: () => state.persist(),
 }));
 vi.mock('@/lib/db/download', () => ({
   listDownloads: async () => state.downloads,
   deserializeTags: (raw: string) => JSON.parse(raw),
 }));
-vi.mock('@/lib/db/library', () => ({
+vi.mock('@/lib/db/library', async (importOriginal) => ({
+  LibraryCollectionError: (await importOriginal<typeof import('@/lib/db/library')>())
+    .LibraryCollectionError,
   getLibraryIds: (options: { collectionId?: number; unclassified?: boolean } = {}) =>
     state.getLibraryIds(options),
   getCollections: async () => state.collections,
@@ -148,6 +157,8 @@ function renderPage() {
 const workNames = () => screen.getAllByTestId('work').map((element) => element.textContent);
 beforeEach(() => {
   vi.clearAllMocks();
+  state.locale = null;
+  state.persist.mockReset().mockResolvedValue(undefined);
   state.beginSelection.clear();
   window.history.replaceState({}, '', '/library');
   state.ids = [3, 2, 1];
@@ -191,6 +202,113 @@ async function folderMenu(item: string) {
 }
 
 describe('unified saved library', () => {
+  it.each(['ko', 'en'] as const)(
+    'retries a committed creation in %s without creating or renaming another folder',
+    async (locale) => {
+      state.locale = locale;
+      state.create.mockImplementationOnce(async (name, parentId) => {
+        state.collections.push({ id: 47, name, parentId, count: 0 });
+        throw new LibraryCollectionError('created-unsaved', 'Disk full', 47);
+      });
+      state.persist.mockRejectedValueOnce(new Error('Disk full again'));
+      const label = (key: TranslationKey) => t(key, locale);
+      renderPage();
+      await screen.findByRole('button', { name: label('library.all') });
+      fireEvent.click(screen.getByRole('button', { name: label('library.collectionNew') }));
+      fireEvent.change(screen.getByRole('textbox', { name: label('library.collectionName') }), {
+        target: { value: 'Committed folder' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: label('actions.saveChanges') }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        label('library.folderError.created-unsaved'),
+      );
+      expect(
+        screen.getByRole('textbox', { name: label('library.collectionName') }),
+      ).toHaveAttribute('readonly');
+      expect(state.create).toHaveBeenCalledExactlyOnceWith('Committed folder', null);
+      expect(state.persist).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: label('actions.saveChanges') }));
+      await waitFor(() => expect(state.persist).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: label('actions.saveChanges') })).toBeEnabled(),
+      );
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        label('library.folderError.created-unsaved'),
+      );
+      expect(screen.getByRole('textbox', { name: label('library.collectionName') })).toHaveValue(
+        'Committed folder',
+      );
+      expect(
+        screen.getByRole('textbox', { name: label('library.collectionName') }),
+      ).toHaveAttribute('readonly');
+      expect(state.collections.filter((folder) => folder.name === 'Committed folder')).toEqual([
+        { id: 47, name: 'Committed folder', parentId: null, count: 0 },
+      ]);
+
+      fireEvent.click(screen.getByRole('button', { name: label('actions.saveChanges') }));
+      await waitFor(() => expect(state.persist).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('textbox', { name: label('library.collectionName') }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(screen.getAllByRole('button', { name: 'Committed folder' })).toHaveLength(1);
+      expect(state.create).toHaveBeenCalledTimes(1);
+      expect(state.rename).not.toHaveBeenCalled();
+    },
+  );
+
+  describe.each(['ko', 'en'] as const)('%s folder failure alerts', (locale) => {
+    it.each(['stale source', 'stale parent', 'cycle', 'persistence'] as const)(
+      'localizes a %s failure and retains the editor for retry',
+      async (scenario) => {
+        state.locale = locale;
+        const label = (key: TranslationKey) => t(key, locale);
+        const rawMessage = 'Internal database failure: untranslated detail';
+        renderPage();
+        await openFolder();
+        if (scenario === 'stale parent') {
+          state.create.mockRejectedValueOnce(new LibraryCollectionError('missing', rawMessage));
+          fireEvent.click(screen.getByRole('button', { name: label('library.collectionNew') }));
+          fireEvent.change(screen.getByRole('textbox', { name: label('library.collectionName') }), {
+            target: { value: 'Child' },
+          });
+        } else if (scenario === 'cycle') {
+          state.move.mockRejectedValueOnce(new LibraryCollectionError('cycle', rawMessage));
+          fireEvent.click(screen.getByRole('button', { name: label('library.folderActions') }));
+          fireEvent.click(
+            await screen.findByRole('menuitem', { name: label('library.folderMove') }),
+          );
+        } else {
+          state.rename.mockRejectedValueOnce(
+            scenario === 'stale source'
+              ? new LibraryCollectionError('missing', rawMessage)
+              : new Error(rawMessage),
+          );
+          fireEvent.click(screen.getByRole('button', { name: label('library.folderActions') }));
+          fireEvent.click(
+            await screen.findByRole('menuitem', { name: label('library.collectionRename') }),
+          );
+          fireEvent.change(screen.getByRole('textbox', { name: label('library.collectionName') }), {
+            target: { value: 'Revised' },
+          });
+        }
+        fireEvent.click(screen.getByRole('button', { name: label('actions.saveChanges') }));
+        const key =
+          scenario === 'cycle'
+            ? 'library.folderError.cycle'
+            : scenario === 'persistence'
+              ? 'library.folderError.failed'
+              : 'library.folderError.missing';
+        const alert = await screen.findByRole('alert');
+        expect(alert).toHaveTextContent(label(key));
+        expect(alert).not.toHaveTextContent(rawMessage);
+        expect(screen.getByRole('button', { name: label('actions.saveChanges') })).toBeEnabled();
+      },
+    );
+  });
+
   it('shows folder tiles without declaring a folder-only root empty', async () => {
     state.ids = [];
     state.downloads = [];
