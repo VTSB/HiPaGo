@@ -10,6 +10,14 @@ const translations = {
   'library.collectionRename': { en: 'Rename folder', ko: '폴더 이름 변경' },
   'library.collectionDelete': { en: 'Delete folder', ko: '폴더 삭제' },
   'library.collectionName': { en: 'Folder name', ko: '폴더 이름' },
+  'library.folderError.deleted-unsaved': {
+    en: 'The folder was deleted, but could not be saved to this device. Confirm again to save.',
+    ko: '폴더가 삭제되었지만 기기에 저장하지 못했습니다. 확인을 다시 눌러 저장해 주세요.',
+  },
+  'library.folderDeletePersistConfirm': {
+    en: 'Save the completed deletion to this device. Works and files are kept.',
+    ko: '삭제된 내용을 기기에 저장합니다. 작품과 파일은 그대로 유지됩니다.',
+  },
   'library.folderError.name-empty': {
     en: 'Enter a folder name.',
     ko: '폴더 이름을 입력해 주세요.',

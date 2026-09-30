@@ -9,7 +9,7 @@ export interface LibraryCollection {
 
 export class LibraryCollectionError extends Error {
   constructor(
-    readonly code: 'name-empty' | 'missing' | 'cycle' | 'created-unsaved',
+    readonly code: 'name-empty' | 'missing' | 'cycle' | 'created-unsaved' | 'deleted-unsaved',
     message: string,
     readonly createdCollectionId?: number,
   ) {
@@ -189,7 +189,14 @@ export async function deleteCollection(collectionId: number): Promise<void> {
     await db.execute('DELETE FROM library_collection_item WHERE collectionId = ?', [collectionId]);
     await db.execute('DELETE FROM library_collection WHERE id = ?', [collectionId]);
   });
-  await persistDb();
+  try {
+    await persistDb();
+  } catch (failure) {
+    throw new LibraryCollectionError(
+      'deleted-unsaved',
+      failure instanceof Error ? failure.message : String(failure),
+    );
+  }
 }
 
 /** Classifying a work also saves it, without replacing its original saved date. */

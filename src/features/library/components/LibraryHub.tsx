@@ -51,6 +51,8 @@ type Editor = {
   id?: number;
   name: string;
   parentId: number | null;
+  deletionCommitted?: boolean;
+  returnToParent?: boolean;
 };
 const iconControl =
   'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-blue-500 disabled:opacity-40 dark:text-zinc-300 dark:hover:bg-zinc-800';
@@ -309,6 +311,7 @@ export function LibraryHub() {
       id,
       name: folder?.name ?? '',
       parentId: mode === 'create' ? folderId : (folder?.parentId ?? null),
+      returnToParent: mode === 'delete' && folderId === id,
     });
   };
   const submitEditor = () => {
@@ -323,8 +326,9 @@ export function LibraryHub() {
         if (draft.mode === 'rename') await renameCollection(draft.id!, draft.name);
         if (draft.mode === 'move') await moveCollection(draft.id!, draft.parentId);
         if (draft.mode === 'delete') {
-          await deleteCollection(draft.id!);
-          if (folderId === draft.id)
+          if (draft.deletionCommitted) await persistDb();
+          else await deleteCollection(draft.id!);
+          if (draft.returnToParent)
             navigate(
               draft.parentId === null ? { kind: 'root' } : { kind: 'folder', id: draft.parentId },
             );
@@ -333,12 +337,16 @@ export function LibraryHub() {
       } catch (failure) {
         if (failure instanceof LibraryCollectionError && failure.createdCollectionId !== undefined)
           setEditor({ ...draft, id: failure.createdCollectionId });
+        if (failure instanceof LibraryCollectionError && failure.code === 'deleted-unsaved')
+          setEditor({ ...draft, deletionCommitted: true });
         const code =
           failure instanceof LibraryCollectionError
             ? failure.code
             : draft.mode === 'create' && draft.id !== undefined
               ? 'created-unsaved'
-              : 'failed';
+              : draft.mode === 'delete' && draft.deletionCommitted
+                ? 'deleted-unsaved'
+                : 'failed';
         throw new Error(t(`library.folderError.${code}`));
       }
     });
@@ -631,7 +639,11 @@ export function LibraryHub() {
       {editor?.mode === 'delete' && (
         <ConfirmActionDialog
           title={editor.name}
-          message={t('library.collectionDeleteConfirm')}
+          message={t(
+            editor.deletionCommitted
+              ? 'library.folderDeletePersistConfirm'
+              : 'library.collectionDeleteConfirm',
+          )}
           busy={busy}
           error={error}
           onCancel={closeEditor}

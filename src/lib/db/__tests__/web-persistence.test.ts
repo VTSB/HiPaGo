@@ -261,6 +261,50 @@ describe('real web database transaction persistence', () => {
     ]);
   });
 
+  it('retries a committed deletion snapshot without deleting again and reopens promoted children and saved downloads', async () => {
+    const parent = await createCollection('Parent');
+    const branch = await createCollection('Branch', parent);
+    const child = await createCollection('Child', branch);
+    const grandchild = await createCollection('Grandchild', child);
+    await addToCollection([42], branch);
+    await addToCollection([42, 43], child);
+    await enqueueDownload({ galleryId: 42, title: 'Downloaded work', thumbnail: '', tags: {} });
+    const downloads = await adapter.query('SELECT * FROM download ORDER BY galleryId');
+    const execute = vi.spyOn(adapter, 'execute');
+    transport.failNext = true;
+    await expect(deleteCollection(branch)).rejects.toMatchObject({
+      code: 'deleted-unsaved',
+      message: 'Disk full',
+    });
+    expect(adapter.dirty).toBe(true);
+    const expectedFolders = [
+      { id: parent, name: 'Parent', parentId: null, count: 0 },
+      { id: child, name: 'Child', parentId: parent, count: 2 },
+      { id: grandchild, name: 'Grandchild', parentId: child, count: 0 },
+    ];
+    expect(await getCollections()).toEqual(expectedFolders);
+    expect(await getGalleryCollectionIds(42)).toEqual([child]);
+
+    transport.failNext = true;
+    await expect(persistDb()).rejects.toThrow('Disk full');
+    expect(adapter.dirty).toBe(true);
+    expect(await getCollections()).toEqual(expectedFolders);
+    await persistDb();
+    expect(adapter.dirty).toBe(false);
+    expect(
+      execute.mock.calls.filter(([sql]) => /DELETE FROM library_collection WHERE/i.test(sql)),
+    ).toEqual([['DELETE FROM library_collection WHERE id = ?', [branch]]]);
+    await closeDb();
+    adapter = await WebAdapter.create();
+    setDb(adapter);
+    expect(await getCollections()).toEqual(expectedFolders);
+    expect(await getGalleryCollectionIds(42)).toEqual([child]);
+    expect(await getGalleryCollectionIds(43)).toEqual([child]);
+    expect(new Set(await getLibraryIds())).toEqual(new Set([42, 43]));
+    expect(persistedIds()).toEqual([42, 43]);
+    expect(await adapter.query('SELECT * FROM download ORDER BY galleryId')).toEqual(downloads);
+  });
+
   it('reopens persisted nested folders after moving and deleting their parent with membership intact', async () => {
     const root = await createCollection('Root');
     const destination = await createCollection('Destination');

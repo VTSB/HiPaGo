@@ -203,6 +203,98 @@ async function folderMenu(item: string) {
 
 describe('unified saved library', () => {
   it.each(['ko', 'en'] as const)(
+    'retries a committed nested current-folder deletion in %s and returns to its former parent',
+    async (locale) => {
+      state.locale = locale;
+      const label = (key: TranslationKey) => t(key, locale);
+      state.collections = [
+        { id: 10, name: 'Reading', count: 1, parentId: null },
+        { id: 11, name: 'Branch', count: 1, parentId: 10 },
+        { id: 12, name: 'Child', count: 1, parentId: 11 },
+      ];
+      state.getLibraryIds.mockImplementation(async (options) =>
+        options.collectionId === 10
+          ? [2]
+          : options.collectionId === 11
+            ? [3]
+            : options.collectionId === 12
+              ? [1]
+              : options.unclassified
+                ? state.collections.some((folder) => folder.id === 11) ? [] : [3]
+                : state.ids,
+      );
+      state.deleteCollection.mockImplementation(async (id) => {
+        const source = state.collections.find((folder) => folder.id === id);
+        if (!source) throw new LibraryCollectionError('missing', 'Source no longer exists');
+        state.collections = state.collections
+          .filter((folder) => folder.id !== id)
+          .map((folder) =>
+            folder.parentId === id ? { ...folder, parentId: source.parentId } : folder,
+          );
+        throw new LibraryCollectionError('deleted-unsaved', 'Disk full');
+      });
+      state.persist.mockRejectedValueOnce(new Error('Disk full again'));
+      renderPage();
+      await openFolder();
+      await openFolder('Branch');
+      await waitFor(() => expect(workNames()).toEqual(['Saved 3']));
+      fireEvent.click(screen.getByRole('button', { name: label('library.folderActions') }));
+      fireEvent.click(
+        await screen.findByRole('menuitem', { name: label('library.collectionDelete') }),
+      );
+      expect(screen.getByRole('alertdialog')).toHaveTextContent(
+        label('library.collectionDeleteConfirm'),
+      );
+      fireEvent.click(screen.getByRole('button', { name: label('actions.confirm') }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        label('library.folderError.deleted-unsaved'),
+      );
+      await screen.findByRole('button', { name: label('library.all') });
+      expect(
+        within(screen.getByRole('navigation', { name: label('library.location') }))
+          .getByRole('button', { name: label('nav.library') }),
+      ).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('alertdialog')).toHaveTextContent(
+        label('library.folderDeletePersistConfirm'),
+      );
+      expect(screen.getByRole('alertdialog')).not.toHaveTextContent(
+        label('library.collectionDeleteConfirm'),
+      );
+      expect(state.deleteCollection).toHaveBeenCalledExactlyOnceWith(11);
+      expect(state.persist).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: label('actions.confirm') }));
+      await waitFor(() => expect(state.persist).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: label('actions.confirm') })).toBeEnabled(),
+      );
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        label('library.folderError.deleted-unsaved'),
+      );
+      expect(state.deleteCollection).toHaveBeenCalledTimes(1);
+      expect(state.collections.find((folder) => folder.id === 12)?.parentId).toBe(10);
+
+      fireEvent.click(screen.getByRole('button', { name: label('actions.confirm') }));
+      await waitFor(() => expect(state.persist).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
+      expect(screen.getByRole('heading', { level: 1, name: 'Reading' })).toBeInTheDocument();
+      expect(
+        within(screen.getByRole('navigation', { name: label('library.location') }))
+          .getByRole('button', { name: 'Reading' }),
+      ).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('button', { name: 'Child' })).toBeInTheDocument();
+      await waitFor(() => expect(workNames()).toEqual(['Downloaded Beta']));
+      expect(state.deleteCollection).toHaveBeenCalledTimes(1);
+      expect(state.ids).toEqual([3, 2, 1]);
+      expect(state.downloads).toEqual([download(2)]);
+      expect(state.remove).not.toHaveBeenCalled();
+      expect(state.deleteFiles).not.toHaveBeenCalled();
+      await openFolder('Child');
+      await waitFor(() => expect(workNames()).toEqual(['Saved 1']));
+    },
+  );
+
+  it.each(['ko', 'en'] as const)(
     'retries a committed creation in %s without creating or renaming another folder',
     async (locale) => {
       state.locale = locale;
