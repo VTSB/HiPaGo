@@ -1,5 +1,6 @@
 'use client';
 
+import { SettingsNavigation, type SettingsSectionName } from './SettingsNavigation';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useClickOutside } from '@/shared/hooks/useClickOutside';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -231,15 +232,7 @@ function DefaultFilterInput({
   );
 }
 
-export const SETTINGS_SECTIONS = [
-  'general',
-  'reader',
-  'content',
-  'privacy',
-  'storage',
-  'about',
-] as const;
-export type SettingsSectionName = (typeof SETTINGS_SECTIONS)[number];
+export { SETTINGS_SECTIONS, type SettingsSectionName } from './SettingsNavigation';
 
 export function SettingsSection({ section }: { section: SettingsSectionName }) {
   const locale = useSettingsStore((s) => s.locale);
@@ -267,272 +260,289 @@ export function SettingsSection({ section }: { section: SettingsSectionName }) {
     }`;
 
   return (
-    <div className="-mx-4 sm:mx-auto sm:max-w-2xl">
-      <div className="px-4 sm:px-0">
-        <BackBar title={t(`settings.section.${section}`)} fallbackHref="/settings" />
-      </div>
+    <div className="mx-auto max-w-5xl">
+      <BackBar title={t(`settings.section.${section}`)} fallbackHref="/settings" />
       <Link
         href="/settings"
         className="mb-4 hidden text-sm text-zinc-500 hover:text-zinc-900 md:inline-block dark:hover:text-zinc-100"
       >
         ← {t('settings.title')}
       </Link>
-      <h1 className="mb-4 px-4 text-2xl font-bold leading-tight text-zinc-900 sm:mb-8 sm:px-0 dark:text-zinc-100">
-        {t(`settings.section.${section}`)}
-      </h1>
+      <div className="md:grid md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
+        <aside className="hidden md:block">
+          <SettingsNavigation current={section} />
+        </aside>
+        <div className="min-w-0">
+          <h1 className="mb-2 hidden text-2xl font-bold leading-tight text-zinc-900 md:block dark:text-zinc-100">
+            {t(`settings.section.${section}`)}
+          </h1>
+          <p className="mb-5 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {t(`settings.section.${section}.desc`)}
+          </p>
 
-      {section !== 'storage' && section !== 'about' && (
-        <div className="divide-y divide-zinc-200 border-y border-zinc-200 bg-white sm:rounded-xl sm:border dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-          {section === 'general' && (
-            <>
-              {/* System Language */}
-              <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-                    {t('settings.locale')}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-                    {t('settings.locale.desc')}
-                  </p>
-                </div>
-                <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
-                  <button
-                    type="button"
-                    onClick={() => setLocale('en')}
-                    className={segmentClass(locale === 'en')}
-                  >
-                    {t('settings.locale.en')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLocale('ko')}
-                    className={segmentClass(locale === 'ko')}
-                  >
-                    {t('settings.locale.ko')}
-                  </button>
-                </div>
-              </div>
-            </>
+          {section !== 'storage' && section !== 'about' && (
+            <div className="divide-y divide-zinc-200 rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+              {section === 'general' && (
+                <>
+                  {/* System Language */}
+                  <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                        {t('settings.locale')}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                        {t('settings.locale.desc')}
+                      </p>
+                    </div>
+                    <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setLocale('en')}
+                        aria-pressed={locale === 'en'}
+                        className={segmentClass(locale === 'en')}
+                      >
+                        {t('settings.locale.en')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLocale('ko')}
+                        aria-pressed={locale === 'ko'}
+                        className={segmentClass(locale === 'ko')}
+                      >
+                        {t('settings.locale.ko')}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {section === 'content' && (
+                <>
+                  {/* Language Filter */}
+                  <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                        {t('settings.langFilter')}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                        {t('settings.langFilter.desc')}
+                      </p>
+                    </div>
+                    <Select
+                      aria-label={t('settings.langFilter')}
+                      value={language}
+                      onChange={setLanguage}
+                      className="w-full sm:w-36"
+                      options={[
+                        { value: 'all', label: t('settings.langFilter.all') },
+                        { value: 'japanese', label: t('settings.langFilter.japanese') },
+                        { value: 'english', label: t('settings.langFilter.english') },
+                        { value: 'chinese', label: t('settings.langFilter.chinese') },
+                        { value: 'korean', label: t('settings.langFilter.korean') },
+                      ]}
+                    />
+                  </div>
+                </>
+              )}
+
+              {section === 'content' && (
+                <>
+                  {/* Tag DB Status */}
+                  <TagDbStatusCard />
+                </>
+              )}
+
+              {section === 'content' && (
+                <>
+                  {/* Default Result Filter */}
+                  <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4">
+                    <div>
+                      <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                        {t('settings.defaultFilter')}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                        {t('settings.defaultFilter.desc')}
+                      </p>
+                    </div>
+                    <DefaultFilterInput
+                      value={defaultFilterQuery}
+                      onChange={setDefaultFilterQuery}
+                    />
+                  </div>
+                </>
+              )}
+
+              {section === 'reader' && (
+                <>
+                  {/* Reader Mode */}
+                  <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                        {t('settings.reader')}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                        {t('settings.reader.desc')}
+                      </p>
+                    </div>
+                    <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setReaderMode('page')}
+                        aria-pressed={readerMode === 'page'}
+                        className={segmentClass(readerMode === 'page')}
+                      >
+                        {t('settings.reader.page')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReaderMode('scroll')}
+                        aria-pressed={readerMode === 'scroll'}
+                        className={segmentClass(readerMode === 'scroll')}
+                      >
+                        {t('settings.reader.scroll')}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {section === 'reader' && (
+                <>
+                  {/* Image Format */}
+                  <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                        {t('settings.imageFormat')}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                        {t('settings.imageFormat.desc')}
+                      </p>
+                    </div>
+                    <Select
+                      aria-label={t('settings.imageFormat')}
+                      value={imageFormat}
+                      onChange={(v) => {
+                        const valid = ['auto', 'avif', 'webp', 'original'] as const;
+                        if ((valid as readonly string[]).includes(v))
+                          setImageFormat(v as (typeof valid)[number]);
+                      }}
+                      className="w-full sm:w-32"
+                      options={[
+                        { value: 'auto', label: 'Auto' },
+                        { value: 'avif', label: 'AVIF' },
+                        { value: 'webp', label: 'WebP' },
+                        { value: 'original', label: 'Original' },
+                      ]}
+                    />
+                  </div>
+                </>
+              )}
+
+              {section === 'privacy' && (
+                <>
+                  {/* Secure Screen */}
+                  <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                        {t('settings.secureScreen')}
+                      </p>
+                      <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                        {t('settings.secureScreen.desc')}
+                      </p>
+                    </div>
+                    <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setSecureScreen(false)}
+                        aria-pressed={!secureScreen}
+                        className={segmentClass(!secureScreen)}
+                      >
+                        {t('settings.secureScreen.off')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSecureScreen(true)}
+                        aria-pressed={secureScreen}
+                        className={segmentClass(secureScreen)}
+                      >
+                        {t('settings.secureScreen.on')}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
-          {section === 'content' && (
-            <>
-              {/* Language Filter */}
-              <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-                    {t('settings.langFilter')}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-                    {t('settings.langFilter.desc')}
-                  </p>
-                </div>
-                <Select
-                  aria-label={t('settings.langFilter')}
-                  value={language}
-                  onChange={setLanguage}
-                  className="w-full sm:w-36"
-                  options={[
-                    { value: 'all', label: t('settings.langFilter.all') },
-                    { value: 'japanese', label: t('settings.langFilter.japanese') },
-                    { value: 'english', label: t('settings.langFilter.english') },
-                    { value: 'chinese', label: t('settings.langFilter.chinese') },
-                    { value: 'korean', label: t('settings.langFilter.korean') },
-                  ]}
-                />
-              </div>
-            </>
-          )}
-
-          {section === 'content' && (
-            <>
-              {/* Tag DB Status */}
-              <TagDbStatusCard />
-            </>
-          )}
-
-          {section === 'content' && (
-            <>
-              {/* Default Result Filter */}
-              <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4">
-                <div>
-                  <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-                    {t('settings.defaultFilter')}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-                    {t('settings.defaultFilter.desc')}
-                  </p>
-                </div>
-                <DefaultFilterInput value={defaultFilterQuery} onChange={setDefaultFilterQuery} />
-              </div>
-            </>
-          )}
-
-          {section === 'reader' && (
-            <>
-              {/* Reader Mode */}
-              <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-                    {t('settings.reader')}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-                    {t('settings.reader.desc')}
-                  </p>
-                </div>
-                <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
-                  <button
-                    type="button"
-                    onClick={() => setReaderMode('page')}
-                    className={segmentClass(readerMode === 'page')}
-                  >
-                    {t('settings.reader.page')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReaderMode('scroll')}
-                    className={segmentClass(readerMode === 'scroll')}
-                  >
-                    {t('settings.reader.scroll')}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
-          {section === 'reader' && (
-            <>
-              {/* Image Format */}
-              <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-                    {t('settings.imageFormat')}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-                    {t('settings.imageFormat.desc')}
-                  </p>
-                </div>
-                <Select
-                  aria-label={t('settings.imageFormat')}
-                  value={imageFormat}
-                  onChange={(v) => {
-                    const valid = ['auto', 'avif', 'webp', 'original'] as const;
-                    if ((valid as readonly string[]).includes(v))
-                      setImageFormat(v as (typeof valid)[number]);
-                  }}
-                  className="w-full sm:w-32"
-                  options={[
-                    { value: 'auto', label: 'Auto' },
-                    { value: 'avif', label: 'AVIF' },
-                    { value: 'webp', label: 'WebP' },
-                    { value: 'original', label: 'Original' },
-                  ]}
-                />
-              </div>
-            </>
-          )}
-
+          {/* Blur Tags */}
           {section === 'privacy' && (
-            <>
-              {/* Secure Screen */}
-              <div className="flex flex-col gap-3 px-4 py-5 sm:px-5 sm:py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-                    {t('settings.secureScreen')}
+            <div className="mt-4 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="px-4 py-5 sm:px-5 sm:py-4">
+                <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                  {t('settings.blurTags')}
+                </p>
+                <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:mb-3 sm:text-xs dark:text-zinc-400">
+                  {t('settings.blurTags.desc')}
+                </p>
+                <BlurTagInput onAdd={addBlurTag} />
+                {blurTags.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-2 sm:mt-3 sm:gap-1.5">
+                    {blurTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex min-h-9 items-center gap-1 rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-600 sm:min-h-0 sm:px-2.5 sm:py-0.5 sm:text-xs dark:bg-zinc-800 dark:text-zinc-400"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          aria-label={`${t('settings.blurTags')}: ${tag}`}
+                          onClick={() => removeBlurTag(tag)}
+                          className="text-zinc-400 hover:text-red-500"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-4 text-sm text-zinc-400 sm:mt-3 sm:text-xs">
+                    {t('settings.blurTags.empty')}
                   </p>
-                  <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-                    {t('settings.secureScreen.desc')}
-                  </p>
-                </div>
-                <div className="flex w-full gap-1 rounded-2xl bg-zinc-100 p-1 sm:w-auto sm:rounded-lg dark:bg-zinc-800">
-                  <button
-                    type="button"
-                    onClick={() => setSecureScreen(false)}
-                    className={segmentClass(!secureScreen)}
-                  >
-                    {t('settings.secureScreen.off')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSecureScreen(true)}
-                    className={segmentClass(secureScreen)}
-                  >
-                    {t('settings.secureScreen.on')}
-                  </button>
-                </div>
+                )}
               </div>
-            </>
+            </div>
+          )}
+
+          {/* Image cache */}
+          {section === 'storage' && <ImageCacheCard />}
+
+          {/* Download location (Android only) */}
+          {section === 'storage' && <DownloadLocationCard />}
+
+          {/* About / Updates */}
+          {section === 'about' && <UpdateCheckCard />}
+
+          {/* Open-source licenses — link to /licenses */}
+          {section === 'about' && (
+            <Link
+              href="/licenses"
+              className="mt-4 flex min-h-16 items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-4 transition-colors active:bg-zinc-50 sm:min-h-0 sm:px-5 sm:py-4 sm:hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:active:bg-zinc-800/60 sm:dark:hover:bg-zinc-800/60"
+            >
+              <div>
+                <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+                  {t('licenses.about')}
+                </p>
+                <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
+                  {t('licenses.about.desc')}
+                </p>
+              </div>
+              <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">
+                ›
+              </span>
+            </Link>
           )}
         </div>
-      )}
-
-      {/* Blur Tags */}
-      {section === 'privacy' && (
-        <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
-          <div className="px-4 py-5 sm:px-5 sm:py-4">
-            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-              {t('settings.blurTags')}
-            </p>
-            <p className="mb-4 mt-0.5 text-sm leading-snug text-zinc-500 sm:mb-3 sm:text-xs dark:text-zinc-400">
-              {t('settings.blurTags.desc')}
-            </p>
-            <BlurTagInput onAdd={addBlurTag} />
-            {blurTags.length > 0 ? (
-              <div className="mt-4 flex flex-wrap gap-2 sm:mt-3 sm:gap-1.5">
-                {blurTags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-600 sm:min-h-0 sm:px-2.5 sm:py-0.5 sm:text-xs dark:bg-zinc-800 dark:text-zinc-400"
-                  >
-                    {tag}
-                    <button
-                      type="button"
-                      aria-label={`${t('settings.blurTags')}: ${tag}`}
-                      onClick={() => removeBlurTag(tag)}
-                      className="text-zinc-400 hover:text-red-500"
-                    >
-                      &times;
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-zinc-400 sm:mt-3 sm:text-xs">
-                {t('settings.blurTags.empty')}
-              </p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Image cache */}
-      {section === 'storage' && <ImageCacheCard />}
-
-      {/* Download location (Android only) */}
-      {section === 'storage' && <DownloadLocationCard />}
-
-      {/* About / Updates */}
-      {section === 'about' && <UpdateCheckCard />}
-
-      {/* Open-source licenses — link to /licenses */}
-      {section === 'about' && (
-        <Link
-          href="/licenses"
-          className="mt-5 flex min-h-20 items-center justify-between border-y border-zinc-200 bg-white px-4 py-5 transition-colors active:bg-zinc-50 sm:mt-6 sm:min-h-0 sm:rounded-xl sm:border sm:px-5 sm:py-4 sm:hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:active:bg-zinc-800/60 sm:dark:hover:bg-zinc-800/60"
-        >
-          <div>
-            <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-              {t('licenses.about')}
-            </p>
-            <p className="mt-0.5 text-sm leading-snug text-zinc-500 sm:text-xs dark:text-zinc-400">
-              {t('licenses.about.desc')}
-            </p>
-          </div>
-          <span className="text-zinc-400 dark:text-zinc-500" aria-hidden="true">
-            ›
-          </span>
-        </Link>
-      )}
+      </div>
     </div>
   );
 }

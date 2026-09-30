@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getCollectionLabel } from '@/lib/utils/collection-tree';
 import {
   GalleryActionsContext,
   type GalleryActions,
@@ -546,7 +547,9 @@ export function GalleryActionsProvider({ children }: { children: ReactNode }) {
                     }}
                     className="h-4 w-4 accent-zinc-900"
                   />
-                  <span className="flex-1">{collection.name}</span>
+                  <span className="min-w-0 flex-1 break-words">
+                    {getCollectionLabel(state.collections, collection.id)}
+                  </span>
                   <span className="text-zinc-400">{collection.count}</span>
                 </label>
               ))}

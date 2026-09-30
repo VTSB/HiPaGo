@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
-import { useGalleryActions, type GalleryActionGallery } from '@/shared/hooks/useGalleryActions';
+import {
+  useGalleryActions,
+  type GalleryActionGallery,
+  type GalleryActionAnchor,
+} from '@/shared/hooks/useGalleryActions';
 
 /** Gesture target only; the menu itself lives above the virtualized card grid. */
 export function GalleryActionTarget({
@@ -10,6 +14,7 @@ export function GalleryActionTarget({
   focusable = false,
   onSelect,
   onBeginSelection,
+  onOpen,
   children,
 }: {
   gallery: GalleryActionGallery;
@@ -17,9 +22,14 @@ export function GalleryActionTarget({
   focusable?: boolean;
   onSelect?: () => void;
   onBeginSelection?: () => void;
+  onOpen?: (anchor?: GalleryActionAnchor) => void;
   children: ReactNode;
 }) {
   const actions = useGalleryActions();
+  const openMenu = (anchor?: GalleryActionAnchor) => {
+    if (onOpen) onOpen(anchor);
+    else actions.open(gallery, anchor, onBeginSelection);
+  };
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const suppressClick = useRef(false);
@@ -70,7 +80,7 @@ export function GalleryActionTarget({
         timer.current = setTimeout(() => {
           timer.current = null;
           suppressClick.current = true;
-          actions.open(gallery, undefined, onBeginSelection);
+          openMenu();
         }, 500);
       }}
       onPointerMove={(event) => {
@@ -111,11 +121,7 @@ export function GalleryActionTarget({
         if (touchHolding) suppressClick.current = true;
         // A touch hold already opened the sheet; do not reopen on its native callout.
         if (!openedByHold)
-          actions.open(
-            gallery,
-            touchHolding ? undefined : { x: event.clientX, y: event.clientY },
-            onBeginSelection,
-          );
+          openMenu(touchHolding ? undefined : { x: event.clientX, y: event.clientY });
       }}
       onKeyDown={(event) => {
         if (onSelect && (event.key === ' ' || event.key === 'Enter')) {
@@ -126,11 +132,7 @@ export function GalleryActionTarget({
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
         event.preventDefault();
         const rect = target.current?.getBoundingClientRect();
-        actions.open(
-          gallery,
-          rect ? { x: rect.left + 16, y: rect.top + 16 } : undefined,
-          onBeginSelection,
-        );
+        openMenu(rect ? { x: rect.left + 16, y: rect.top + 16 } : undefined);
       }}
     >
       {children}

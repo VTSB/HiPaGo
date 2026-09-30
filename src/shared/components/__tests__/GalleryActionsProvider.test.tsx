@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   exportZip: vi.fn(async () => {}),
   refresh: vi.fn(async () => {}),
   push: vi.fn(),
+  collections: [] as Array<{ id: number; name: string; count: number; parentId: number | null }>,
+  membership: [] as number[],
+  addToCollection: vi.fn(async () => {}),
+  removeFromCollection: vi.fn(async () => {}),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
 vi.mock('@/lib/i18n/useT', () => ({ useT: () => (key: string) => key }));
@@ -29,10 +33,10 @@ vi.mock('@/lib/db/library', () => ({
     mocks.saved = true;
   }),
   removeFromLibrary: mocks.remove,
-  getCollections: vi.fn(async () => []),
-  getGalleryCollectionIds: vi.fn(async () => []),
-  addToCollection: vi.fn(),
-  removeFromCollection: vi.fn(),
+  getCollections: vi.fn(async () => mocks.collections),
+  getGalleryCollectionIds: vi.fn(async () => mocks.membership),
+  addToCollection: mocks.addToCollection,
+  removeFromCollection: mocks.removeFromCollection,
 }));
 vi.mock('@/lib/db/adapter', () => ({ ensureDb: vi.fn(async () => ({})) }));
 vi.mock('@/lib/db/gallery', () => ({
@@ -144,6 +148,8 @@ beforeEach(() => {
   });
   mocks.saved = true;
   mocks.live = {};
+  mocks.collections = [];
+  mocks.membership = [];
   mocks.row = {
     galleryId: 12,
     title: 'Work',
@@ -175,6 +181,26 @@ async function confirm() {
 }
 
 describe('download file and saved membership lifetimes', () => {
+  it('distinguishes same-name nested folders with full paths and preserves overlapping membership', async () => {
+    mocks.collections = [
+      { id: 1, name: 'Reading', count: 0, parentId: null },
+      { id: 2, name: 'Later', count: 1, parentId: 1 },
+      { id: 3, name: 'Archive', count: 0, parentId: null },
+      { id: 4, name: 'Later', count: 0, parentId: 3 },
+    ];
+    mocks.membership = [2];
+    renderActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Another collections' }));
+    const existing = await screen.findByRole('checkbox', { name: /Reading \/ Later/ });
+    const destination = screen.getByRole('checkbox', { name: /Archive \/ Later/ });
+    expect(existing).toBeChecked();
+    expect(destination).not.toBeChecked();
+    fireEvent.click(destination);
+    await waitFor(() => expect(mocks.addToCollection).toHaveBeenCalledWith([13], 4));
+    expect(mocks.removeFromCollection).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.deleteGallery).not.toHaveBeenCalled();
+  });
   it('deletes files before their database index and keeps saved membership', async () => {
     renderActions();
     fireEvent.click(screen.getByRole('button', { name: 'Files' }));

@@ -53,6 +53,49 @@ afterEach(() => {
 });
 
 describe('gallery gestures', () => {
+  it('uses the folder override for holds and suppresses duplicate menus and release navigation', () => {
+    const onOpen = vi.fn();
+    const { target, link, click } = renderTarget({ onOpen });
+    pointer(target, 'pointerdown');
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledWith(undefined);
+    fireEvent.contextMenu(target);
+    pointer(target, 'pointerup');
+    expect(fireEvent.click(link)).toBe(false);
+    expect(click).not.toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('uses the folder override for anchored context and keyboard menus', () => {
+    const onOpen = vi.fn();
+    const { link } = renderTarget({ onOpen });
+    fireEvent.contextMenu(link, { clientX: 140, clientY: 200 });
+    expect(onOpen).toHaveBeenLastCalledWith({ x: 140, y: 200 });
+    fireEvent.keyDown(link, { key: 'F10', shiftKey: true });
+    expect(onOpen).toHaveBeenLastCalledWith({ x: 16, y: 16 });
+    fireEvent.keyDown(link, { key: 'ContextMenu' });
+    expect(onOpen).toHaveBeenCalledTimes(3);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('cancels a moved folder hold and preserves its normal navigation', () => {
+    const onOpen = vi.fn();
+    const { target, link, click } = renderTarget({ onOpen });
+    pointer(target, 'pointerdown');
+    pointer(target, 'pointermove', { clientX: 30 });
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+    pointer(target, 'pointerup');
+    fireEvent.click(link);
+    expect(click).toHaveBeenCalledOnce();
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
   it('opens one long-press sheet and suppresses the release click', () => {
     const { target, link, click } = renderTarget();
     pointer(target, 'pointerdown');

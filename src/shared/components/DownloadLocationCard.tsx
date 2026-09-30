@@ -78,7 +78,7 @@ export function DownloadLocationCard() {
   };
 
   return (
-    <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="mt-4 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <div className="px-4 py-5 sm:px-5 sm:py-4">
         <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
           {t('settings.downloadLocation')}

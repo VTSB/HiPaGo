@@ -76,7 +76,8 @@ CREATE INDEX IF NOT EXISTS idx_favorites_addedAt ON favorites(addedAt);
 
 CREATE TABLE IF NOT EXISTS library_collection (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL
+  name TEXT NOT NULL,
+  parentId INTEGER
 );
 CREATE TABLE IF NOT EXISTS library_collection_item (
   collectionId INTEGER NOT NULL,

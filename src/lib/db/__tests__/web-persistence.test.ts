@@ -5,7 +5,16 @@ import { WebAdapter } from '../adapters/web';
 import { closeDb, setDb, withTransaction } from '../adapter';
 import { SCHEMA_SQL } from '../schema-sql';
 import { enqueueDownload } from '../download-queue';
-import { addToLibrary, createCollection, getCollections, getLibraryIds } from '../library';
+import {
+  addToLibrary,
+  addToCollection,
+  createCollection,
+  moveCollection,
+  deleteCollection,
+  getCollections,
+  getGalleryCollectionIds,
+  getLibraryIds,
+} from '../library';
 
 // Only redirect the browser WASM URL; all SQLite statements and exports are real.
 vi.mock('sql.js', async (importOriginal) => {
@@ -211,9 +220,31 @@ describe('real web database transaction persistence', () => {
     expect(first).toBeGreaterThan(0);
     expect(second).toBeGreaterThan(first);
     expect(await getCollections()).toEqual([
-      { id: first, name: 'First', count: 0 },
-      { id: second, name: 'Second', count: 0 },
+      { id: first, name: 'First', parentId: null, count: 0 },
+      { id: second, name: 'Second', parentId: null, count: 0 },
     ]);
+  });
+
+  it('reopens persisted nested folders after moving and deleting their parent with membership intact', async () => {
+    const root = await createCollection('Root');
+    const destination = await createCollection('Destination');
+    const branch = await createCollection('Branch', root);
+    const child = await createCollection('Child', branch);
+    await addToCollection([42], branch);
+    await addToCollection([42, 43], child);
+    await moveCollection(branch, destination);
+    await deleteCollection(branch);
+    await closeDb();
+    adapter = await WebAdapter.create();
+    setDb(adapter);
+    expect(await getCollections()).toEqual([
+      { id: root, name: 'Root', parentId: null, count: 0 },
+      { id: destination, name: 'Destination', parentId: null, count: 0 },
+      { id: child, name: 'Child', parentId: destination, count: 2 },
+    ]);
+    expect(await getGalleryCollectionIds(42)).toEqual([child]);
+    expect(new Set(await getLibraryIds())).toEqual(new Set([42, 43]));
+    expect(persistedIds()).toEqual([42, 43]);
   });
 
   it('keeps foreign-key enforcement enabled after exporting a snapshot', async () => {

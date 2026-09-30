@@ -9,6 +9,7 @@ import {
   getGalleryCollectionIds,
   createCollection,
   renameCollection,
+  moveCollection,
   deleteCollection,
   addToCollection,
   removeFromCollection,
@@ -77,8 +78,8 @@ describe('optional overlapping collections', () => {
     expect(await getLibraryIds({ collectionId: second })).toEqual([1]);
     expect(await getLibraryIds({ unclassified: true })).toEqual([3]);
     expect(await getCollections()).toEqual([
-      { id: first, name: 'Reading', count: 2 },
-      { id: second, name: 'Offline', count: 1 },
+      { id: first, name: 'Reading', parentId: null, count: 2 },
+      { id: second, name: 'Offline', parentId: null, count: 1 },
     ]);
     await removeFromCollection([1], first);
     expect(await getGalleryCollectionIds(1)).toEqual([second]);
@@ -113,6 +114,126 @@ describe('optional overlapping collections', () => {
     await addToLibrary(1);
     expect((await getCollections())[0].name).toBe(name);
     expect(await getLibraryIds()).toEqual([1]);
+  });
+});
+
+describe('nested collection folders', () => {
+  it('creates roots and nested folders with direct counts and overlapping membership', async () => {
+    const root = await createCollection('Root');
+    const child = await createCollection('  Child  ', root);
+    const leaf = await createCollection('Leaf', child);
+    await addToCollection([1], root);
+    await addToCollection([1, 2], child);
+    await addToCollection([3], leaf);
+    expect(await getCollections()).toEqual([
+      { id: root, name: 'Root', parentId: null, count: 1 },
+      { id: child, name: 'Child', parentId: root, count: 2 },
+      { id: leaf, name: 'Leaf', parentId: child, count: 1 },
+    ]);
+    expect(await getLibraryIds({ collectionId: root })).toEqual([1]);
+    expect(await getGalleryCollectionIds(1)).toEqual([root, child]);
+    expect(new Set(await getLibraryIds())).toEqual(new Set([1, 2, 3]));
+  });
+
+  it('moves a subtree between folders and back to root without changing memberships', async () => {
+    const first = await createCollection('First');
+    const second = await createCollection('Second', null);
+    const child = await createCollection('Child', first);
+    const leaf = await createCollection('Leaf', child);
+    await addToCollection([1], child);
+    await moveCollection(child, second);
+    expect((await getCollections()).find((folder) => folder.id === child)?.parentId).toBe(second);
+    expect((await getCollections()).find((folder) => folder.id === leaf)?.parentId).toBe(child);
+    await moveCollection(child, null);
+    expect((await getCollections()).find((folder) => folder.id === child)?.parentId).toBeNull();
+    expect(await getGalleryCollectionIds(1)).toEqual([child]);
+  });
+
+  it('rejects stale parents, stale sources and self/descendant moves atomically', async () => {
+    const root = await createCollection('Root');
+    const child = await createCollection('Child', root);
+    const leaf = await createCollection('Leaf', child);
+    await addToCollection([1], leaf);
+    const before = await getCollections();
+    await expect(createCollection('Stale parent', leaf + 100)).rejects.toThrow();
+    await expect(renameCollection(leaf + 100, 'Stale source')).rejects.toThrow();
+    await expect(deleteCollection(leaf + 100)).rejects.toThrow();
+    await expect(moveCollection(root + 100, null)).rejects.toThrow();
+    await expect(moveCollection(child, leaf + 100)).rejects.toThrow();
+    await expect(moveCollection(root, root)).rejects.toThrow();
+    await expect(moveCollection(root, leaf)).rejects.toThrow();
+    expect(await getCollections()).toEqual(before);
+    expect(await getGalleryCollectionIds(1)).toEqual([leaf]);
+    await expect(renameCollection(root, 'Root')).resolves.toBeUndefined();
+  });
+
+  it('promotes only direct children when deleting nested and root folders, preserving works/files', async () => {
+    const root = await createCollection('Root');
+    const branch = await createCollection('Branch', root);
+    const child = await createCollection('Child', branch);
+    const sibling = await createCollection('Sibling', branch);
+    const leaf = await createCollection('Leaf', child);
+    await addToCollection([1, 2], branch);
+    await addToCollection([1], child);
+    await seedDownloaded(2);
+    await deleteCollection(branch);
+    expect(await getCollections()).toEqual([
+      { id: root, name: 'Root', parentId: null, count: 0 },
+      { id: child, name: 'Child', parentId: root, count: 1 },
+      { id: sibling, name: 'Sibling', parentId: root, count: 0 },
+      { id: leaf, name: 'Leaf', parentId: child, count: 0 },
+    ]);
+    expect(await getGalleryCollectionIds(1)).toEqual([child]);
+    expect(await getLibraryIds({ unclassified: true })).toEqual([2]);
+    expect(await getDownload(2)).not.toBeNull();
+    await deleteCollection(root);
+    expect(
+      (await getCollections())
+        .filter((folder) => folder.parentId === null)
+        .map((folder) => folder.id),
+    ).toEqual([child, sibling]);
+    expect((await getCollections()).find((folder) => folder.id === leaf)?.parentId).toBe(child);
+  });
+
+  it('rolls back folder promotion and classifications when the folder DELETE fails in SQLite', async () => {
+    const root = await createCollection('Root');
+    const branch = await createCollection('Branch', root);
+    const child = await createCollection('Child', branch);
+    await addToCollection([1], branch);
+    const before = await getCollections();
+    await getDb().exec(
+      `CREATE TEMP TRIGGER reject_folder_delete BEFORE DELETE ON library_collection WHEN OLD.id = ${branch} BEGIN SELECT RAISE(ABORT, 'folder delete failed'); END;`,
+    );
+    try {
+      await expect(deleteCollection(branch)).rejects.toThrow('folder delete failed');
+      expect(await getCollections()).toEqual(before);
+      expect(await getGalleryCollectionIds(1)).toEqual([branch]);
+      expect(await getLibraryIds()).toEqual([1]);
+    } finally {
+      await getDb().exec('DROP TRIGGER reject_folder_delete');
+    }
+    await deleteCollection(branch);
+    expect((await getCollections()).find((folder) => folder.id === child)?.parentId).toBe(root);
+    expect(await getGalleryCollectionIds(1)).toEqual([]);
+  });
+
+  it('rolls back all direct-child changes if one promotion fails in SQLite', async () => {
+    const root = await createCollection('Root');
+    const branch = await createCollection('Branch', root);
+    await createCollection('First child', branch);
+    const second = await createCollection('Second child', branch);
+    await addToCollection([1], branch);
+    const before = await getCollections();
+    await getDb().exec(
+      `CREATE TEMP TRIGGER reject_folder_promotion BEFORE UPDATE OF parentId ON library_collection WHEN OLD.id = ${second} BEGIN SELECT RAISE(ABORT, 'promotion failed'); END;`,
+    );
+    try {
+      await expect(deleteCollection(branch)).rejects.toThrow('promotion failed');
+      expect(await getCollections()).toEqual(before);
+      expect(await getGalleryCollectionIds(1)).toEqual([branch]);
+    } finally {
+      await getDb().exec('DROP TRIGGER reject_folder_promotion');
+    }
   });
 });
 

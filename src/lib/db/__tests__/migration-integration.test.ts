@@ -27,8 +27,7 @@ class InMemoryAdapter implements DbAdapter {
     this.sqlDb.run(sql, params);
     const changes = this.sqlDb.getRowsModified();
     const result = this.sqlDb.exec('SELECT last_insert_rowid() as id');
-    const lastInsertRowId =
-      result.length > 0 ? (result[0].values[0][0] as number) : 0;
+    const lastInsertRowId = result.length > 0 ? (result[0].values[0][0] as number) : 0;
     return { changes, lastInsertRowId };
   }
 
@@ -352,8 +351,11 @@ describe('Migration integration: multiple migrations — only pending run', () =
 
     // For LATEST_VERSION >= 2: set version to LATEST_VERSION - 1, verify only
     // the last migration runs.
-    const adapter = await createAdapter(CURRENT_SCHEMA_SQL);
+    const adapter = await createAdapter(LEGACY_SCHEMA_SQL);
     const startVersion = LATEST_VERSION - 1;
+    for (const migration of MIGRATIONS.filter((item) => item.version <= startVersion)) {
+      await migration.up(adapter);
+    }
     await adapter.exec(`PRAGMA user_version = ${startVersion}`);
 
     await runMigrations(adapter);

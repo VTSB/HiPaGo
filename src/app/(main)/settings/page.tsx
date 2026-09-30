@@ -2,13 +2,11 @@
 
 import Link from 'next/link';
 import { useT } from '@/lib/i18n/useT';
-import { useDbStatusStore } from '@/lib/store/db-status';
 import { BackBar } from '@/shared/components/BackBar';
-import { SETTINGS_SECTIONS } from '@/features/settings/components/SettingsSection';
+import { SettingsNavigation } from '@/features/settings/components/SettingsNavigation';
 
 export default function SettingsPage() {
   const t = useT();
-  const needsAttention = useDbStatusStore((s) => Boolean(s.dbError || s.syncError));
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -19,36 +17,13 @@ export default function SettingsPage() {
       >
         ← {t('nav.more')}
       </Link>
-      <h1 className="mb-6 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+      <h1 className="mb-2 hidden text-2xl font-bold text-zinc-900 md:block dark:text-zinc-100">
         {t('settings.title')}
       </h1>
-      <ul className="divide-y divide-zinc-200 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-        {SETTINGS_SECTIONS.map((section) => (
-          <li key={section}>
-            <Link
-              href={`/settings/${section}`}
-              className="flex min-h-20 items-center gap-4 px-4 py-4 hover:bg-zinc-50 active:bg-zinc-100 sm:px-5 dark:hover:bg-zinc-800 dark:active:bg-zinc-800"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-zinc-900 dark:text-zinc-100">
-                  {t(`settings.section.${section}`)}
-                </p>
-                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  {t(`settings.section.${section}.desc`)}
-                </p>
-              </div>
-              {section === 'content' && needsAttention && (
-                <span className="shrink-0 text-xs font-medium text-amber-600 dark:text-amber-400">
-                  {t('settings.needsAttention')}
-                </span>
-              )}
-              <span aria-hidden="true" className="text-xl text-zinc-400">
-                ›
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <p className="mb-6 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+        {t('settings.subtitle')}
+      </p>
+      <SettingsNavigation />
     </div>
   );
 }

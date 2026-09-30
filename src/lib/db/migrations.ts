@@ -147,6 +147,19 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 9,
+    description: 'Add parentId to library collections for nested folders',
+    up: async (adapter) => {
+      const cols = await adapter.query<{ name: string }>('PRAGMA table_info(library_collection)');
+      if (!cols.some((column) => column.name === 'parentId')) {
+        await adapter.exec('ALTER TABLE library_collection ADD COLUMN parentId INTEGER');
+      }
+      await adapter.exec(
+        'CREATE INDEX IF NOT EXISTS idx_library_collection_parentId ON library_collection(parentId)',
+      );
+    },
+  },
 ];
 
 // Validate that migrations are sequential at module load time

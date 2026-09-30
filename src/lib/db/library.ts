@@ -3,6 +3,7 @@ import { ensureDb, persistDb, withTransaction } from './adapter';
 export interface LibraryCollection {
   id: number;
   name: string;
+  parentId: number | null;
   count: number;
 }
 
@@ -62,11 +63,11 @@ export async function getLibraryIds(
 export async function getCollections(): Promise<LibraryCollection[]> {
   const db = await ensureDb();
   return db.query<LibraryCollection>(`
-    SELECT c.id, c.name, COUNT(f.galleryId) AS count
+    SELECT c.id, c.name, c.parentId, COUNT(f.galleryId) AS count
       FROM library_collection c
       LEFT JOIN library_collection_item i ON i.collectionId = c.id
       LEFT JOIN favorites f ON f.galleryId = i.galleryId
-      GROUP BY c.id, c.name ORDER BY c.id ASC
+      GROUP BY c.id, c.name, c.parentId ORDER BY c.id ASC
   `);
 }
 
@@ -85,11 +86,24 @@ function collectionName(name: string): string {
   return trimmed;
 }
 
-export async function createCollection(name: string): Promise<number> {
+export async function createCollection(
+  name: string,
+  parentId: number | null = null,
+): Promise<number> {
   const db = await ensureDb();
-  const result = await withTransaction(async () =>
-    db.execute('INSERT INTO library_collection (name) VALUES (?)', [collectionName(name)]),
-  );
+  const result = await withTransaction(async () => {
+    if (parentId !== null) {
+      const rows = await db.query<{ id: number }>(
+        'SELECT id FROM library_collection WHERE id = ?',
+        [parentId],
+      );
+      if (!rows.length) throw new Error('Collection no longer exists.');
+    }
+    return db.execute('INSERT INTO library_collection (name, parentId) VALUES (?, ?)', [
+      collectionName(name),
+      parentId,
+    ]);
+  });
   await persistDb();
   return result.lastInsertRowId;
 }
@@ -97,8 +111,38 @@ export async function createCollection(name: string): Promise<number> {
 export async function renameCollection(collectionId: number, name: string): Promise<void> {
   const db = await ensureDb();
   await withTransaction(async () => {
-    await db.execute('UPDATE library_collection SET name = ? WHERE id = ?', [
+    const result = await db.execute('UPDATE library_collection SET name = ? WHERE id = ?', [
       collectionName(name),
+      collectionId,
+    ]);
+    if (!result.changes) throw new Error('Collection no longer exists.');
+  });
+  await persistDb();
+}
+
+export async function moveCollection(collectionId: number, parentId: number | null): Promise<void> {
+  const db = await ensureDb();
+  await withTransaction(async () => {
+    const rows = await db.query<{ id: number; parentId: number | null }>(
+      'SELECT id, parentId FROM library_collection',
+    );
+    const parents = new Map(rows.map((row) => [row.id, row.parentId]));
+    if (!parents.has(collectionId) || (parentId !== null && !parents.has(parentId))) {
+      throw new Error('Collection no longer exists.');
+    }
+    const visited = new Set<number>();
+    let ancestor = parentId;
+    while (ancestor !== null) {
+      if (ancestor === collectionId || visited.has(ancestor)) {
+        throw new Error('Collection cannot be moved into itself or a descendant.');
+      }
+      visited.add(ancestor);
+      const nextParent = parents.get(ancestor);
+      if (nextParent === undefined) throw new Error('Collection no longer exists.');
+      ancestor = nextParent;
+    }
+    await db.execute('UPDATE library_collection SET parentId = ? WHERE id = ?', [
+      parentId,
       collectionId,
     ]);
   });
@@ -109,6 +153,15 @@ export async function renameCollection(collectionId: number, name: string): Prom
 export async function deleteCollection(collectionId: number): Promise<void> {
   const db = await ensureDb();
   await withTransaction(async () => {
+    const rows = await db.query<{ parentId: number | null }>(
+      'SELECT parentId FROM library_collection WHERE id = ?',
+      [collectionId],
+    );
+    if (!rows.length) throw new Error('Collection no longer exists.');
+    await db.execute('UPDATE library_collection SET parentId = ? WHERE parentId = ?', [
+      rows[0].parentId,
+      collectionId,
+    ]);
     await db.execute('DELETE FROM library_collection_item WHERE collectionId = ?', [collectionId]);
     await db.execute('DELETE FROM library_collection WHERE id = ?', [collectionId]);
   });

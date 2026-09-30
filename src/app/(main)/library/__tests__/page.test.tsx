@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { DBDownload } from '@/lib/db/schema';
 import LibraryPage from '../page';
@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
     { galleryId: 2, title: 'Beta' },
     { galleryId: 3, title: 'Gamma' },
   ],
-  collections: [{ id: 10, name: 'Reading', count: 2 }],
+  collections: [{ id: 10, name: 'Reading', count: 2, parentId: null as number | null }],
   classified: [2, 1],
   matches: [] as number[],
   replace: vi.fn(),
@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
   getLibraryIds: vi.fn(),
   create: vi.fn(),
   rename: vi.fn(),
+  move: vi.fn(),
   deleteCollection: vi.fn(),
   addToCollection: vi.fn(async () => {}),
   removeFromCollection: vi.fn(async () => {}),
@@ -34,6 +35,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 vi.mock('@/lib/i18n/useT', () => ({ useT: () => (key: string) => key }));
+vi.mock('@/shared/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
 vi.mock('@/shared/hooks/useGalleryActions', () => ({
   useGalleryActions: () => ({ remove: state.remove, deleteFiles: state.deleteFiles }),
 }));
@@ -45,11 +47,12 @@ vi.mock('@/lib/db/download', () => ({
   deserializeTags: (raw: string) => JSON.parse(raw),
 }));
 vi.mock('@/lib/db/library', () => ({
-  getLibraryIds: (options: { collectionId?: number; unclassified?: boolean }) =>
+  getLibraryIds: (options: { collectionId?: number; unclassified?: boolean } = {}) =>
     state.getLibraryIds(options),
   getCollections: async () => state.collections,
-  createCollection: (name: string) => state.create(name),
+  createCollection: (name: string, parentId: number | null = null) => state.create(name, parentId),
   renameCollection: (id: number, name: string) => state.rename(id, name),
+  moveCollection: (id: number, parentId: number | null) => state.move(id, parentId),
   deleteCollection: (id: number) => state.deleteCollection(id),
   addToCollection: state.addToCollection,
   removeFromCollection: state.removeFromCollection,
@@ -135,11 +138,12 @@ function download(galleryId: number, status: DBDownload['status'] = 'complete'):
 }
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <LibraryPage />
     </QueryClientProvider>,
   );
+  return { ...result, client };
 }
 const workNames = () => screen.getAllByTestId('work').map((element) => element.textContent);
 beforeEach(() => {
@@ -149,7 +153,7 @@ beforeEach(() => {
   state.ids = [3, 2, 1];
   state.downloads = [download(2)];
   state.matches = [];
-  state.collections = [{ id: 10, name: 'Reading', count: 2 }];
+  state.collections = [{ id: 10, name: 'Reading', count: 2, parentId: null }];
   state.classified = [2, 1];
   state.getLibraryIds.mockImplementation(async (options) =>
     options.collectionId
@@ -158,11 +162,12 @@ beforeEach(() => {
         ? state.ids.filter((id) => !state.classified.includes(id))
         : state.ids,
   );
-  state.create.mockImplementation(async (name) => {
-    state.collections.push({ id: 11, name, count: 0 });
+  state.create.mockImplementation(async (name, parentId) => {
+    state.collections.push({ id: 11, name, count: 0, parentId });
     return 11;
   });
   state.rename.mockResolvedValue(undefined);
+  state.move.mockResolvedValue(undefined);
   state.deleteCollection.mockImplementation(async (id) => {
     state.collections = state.collections.filter((collection) => collection.id !== id);
   });
@@ -172,17 +177,170 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function ready() {
+  fireEvent.click(await screen.findByRole('button', { name: 'library.all' }));
   await waitFor(() => expect(screen.getAllByTestId('work')).toHaveLength(3));
 }
 
+async function openFolder(name = 'Reading') {
+  fireEvent.click(await screen.findByRole('button', { name }));
+}
+
+async function folderMenu(item: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'library.folderActions' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: item }));
+}
+
 describe('unified saved library', () => {
+  it('shows folder tiles without declaring a folder-only root empty', async () => {
+    state.ids = [];
+    state.downloads = [];
+    renderPage();
+    await screen.findByRole('button', { name: 'Reading' });
+    expect(screen.getByRole('button', { name: 'library.all' })).toBeInTheDocument();
+    expect(screen.queryByText('library.savedEmpty')).not.toBeInTheDocument();
+  });
+
+  it('creates a subfolder beneath the current location', async () => {
+    renderPage();
+    await openFolder();
+    fireEvent.click(screen.getByRole('button', { name: 'library.collectionNew' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'library.collectionName' }), {
+      target: { value: 'Child' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'actions.saveChanges' }));
+    await waitFor(() => expect(state.create).toHaveBeenCalledWith('Child', 10));
+    await screen.findByRole('button', { name: 'Child' });
+  });
+
+  it('keeps sort selection and exposes the icon toggle pressed state', async () => {
+    renderPage();
+    await ready();
+    expect(screen.getByRole('button', { name: 'library.select' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Downloaded Beta' }));
+    fireEvent.click(screen.getByRole('button', { name: 'library.sort' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /library.sortOldest/ }));
+    expect(screen.getByRole('button', { name: 'Downloaded Beta' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'library.done' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('clears selection when navigating to a folder', async () => {
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Downloaded Beta' }));
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'library.location' })).getByRole('button', {
+        name: 'nav.library',
+      }),
+    );
+    await openFolder();
+    await waitFor(() => expect(workNames()).toHaveLength(2));
+    expect(screen.getByRole('button', { name: 'Downloaded Beta' })).not.toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('refreshes folder truth and falls back to root after a postcommit deletion error', async () => {
+    state.deleteCollection.mockImplementation(async (id) => {
+      state.collections = state.collections.filter((folder) => folder.id !== id);
+      throw new Error('Persistence failed after commit');
+    });
+    renderPage();
+    await openFolder();
+    await folderMenu('library.collectionDelete');
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
+    await screen.findByRole('alert');
+    await screen.findByRole('button', { name: 'library.all' });
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Reading' })).not.toBeInTheDocument(),
+    );
+    expect(state.remove).not.toHaveBeenCalled();
+    expect(state.deleteFiles).not.toHaveBeenCalled();
+  });
+
+  it('renames the active folder and refreshes its breadcrumb', async () => {
+    state.rename.mockImplementation(async (id, name) => {
+      state.collections = state.collections.map((folder) =>
+        folder.id === id ? { ...folder, name } : folder,
+      );
+    });
+    renderPage();
+    await openFolder();
+    await folderMenu('library.collectionRename');
+    fireEvent.change(screen.getByRole('textbox', { name: 'library.collectionName' }), {
+      target: { value: 'Revised' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'actions.saveChanges' }));
+    await waitFor(() => expect(state.rename).toHaveBeenCalledWith(10, 'Revised'));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('navigation', { name: 'library.location' })).getByText('Revised'),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it('offers full paths when moving a folder', async () => {
+    state.collections.push(
+      { id: 20, name: 'Archive', count: 0, parentId: null },
+      { id: 21, name: 'Later', count: 0, parentId: 20 },
+    );
+    renderPage();
+    await openFolder();
+    await folderMenu('library.folderMove');
+    fireEvent.click(await screen.findByRole('button', { name: 'Archive / Later' }));
+    fireEvent.click(screen.getByRole('button', { name: 'actions.saveChanges' }));
+    await waitFor(() => expect(state.move).toHaveBeenCalledWith(10, 21));
+  });
+
+  it('uses full paths for batch destinations without losing the selected work', async () => {
+    state.collections.push(
+      { id: 20, name: 'Archive', count: 0, parentId: null },
+      { id: 21, name: 'Reading', count: 0, parentId: 20 },
+    );
+    renderPage();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Downloaded Beta' }));
+    const destinations = screen.getByRole('combobox', { name: 'library.collectionTarget' });
+    expect(within(destinations).getByRole('option', { name: 'Archive / Reading' })).toHaveValue(
+      '21',
+    );
+    fireEvent.change(destinations, { target: { value: '21' } });
+    fireEvent.click(screen.getByRole('button', { name: 'library.collectionAdd' }));
+    await waitFor(() => expect(state.addToCollection).toHaveBeenCalledWith([2], 21));
+    expect(state.remove).not.toHaveBeenCalled();
+    expect(state.deleteFiles).not.toHaveBeenCalled();
+  });
+
+  it('returns to root when the active folder disappears after a hierarchy refresh', async () => {
+    const { client } = renderPage();
+    await openFolder();
+    await waitFor(() => expect(workNames()).toHaveLength(2));
+    state.collections = [];
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['library-collections'] });
+    });
+    await screen.findByRole('button', { name: 'library.all' });
+    await waitFor(() => expect(workNames()).toEqual(['Saved 3']));
+  });
   it('shows saved and downloaded works in one grid and passes offline metadata to common cards', async () => {
     renderPage();
     await ready();
     expect(workNames()).toEqual(['Saved 3', 'Downloaded Beta', 'Saved 1']);
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'library.more' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'library.manager' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /library.manager/ })).toHaveAttribute(
       'href',
       '/downloads',
     );
@@ -191,9 +349,10 @@ describe('unified saved library', () => {
   it('keeps manager access and filters mounted for an empty library', async () => {
     state.ids = [];
     state.downloads = [];
+    state.collections = [];
     renderPage();
     await screen.findByText('library.savedEmpty');
-    expect(screen.getByRole('link', { name: 'library.manager' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /library.manager/ })).toBeInTheDocument();
     expect(screen.getByLabelText('Filter')).toBeInTheDocument();
     expect(
       screen.getAllByRole('link').filter((link) => link.getAttribute('href') === '/downloads'),
@@ -204,20 +363,29 @@ describe('unified saved library', () => {
     state.downloads.push(download(3, 'failed'));
     renderPage();
     await ready();
-    expect(screen.getByRole('link', { name: 'library.status.failed 1' })).toHaveAttribute(
+    expect(screen.getByText('library.status.failed 1')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /library.manager/ })).toHaveAttribute(
       'href',
       '/downloads',
     );
     expect(workNames()).toContain('Failed Gamma');
   });
 
-  it('filters downloaded state without creating a second library', async () => {
+  it('offers All works as a tile and removes obsolete toolbar filters', async () => {
     renderPage();
+    await screen.findByRole('button', { name: 'library.all' });
+    await waitFor(() => expect(workNames()).toEqual(['Saved 3']));
+    expect(
+      screen.queryByRole('checkbox', { name: 'library.downloadedOnly' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'actions.manageCollections' }),
+    ).not.toBeInTheDocument();
+    expect(state.getLibraryIds).toHaveBeenCalledWith({ unclassified: true });
+    await waitFor(() => expect(state.getLibraryIds).toHaveBeenCalledWith({}));
     await ready();
-    fireEvent.click(screen.getByRole('checkbox', { name: 'library.downloadedOnly' }));
-    expect(workNames()).toEqual(['Downloaded Beta']);
-    fireEvent.click(screen.getByRole('checkbox', { name: 'library.downloadedOnly' }));
-    expect(workNames()).toHaveLength(3);
+    expect(new Set(workNames()).size).toBe(3);
   });
 
   it('searches download metadata when remote/gallery cache metadata is absent', async () => {
@@ -231,65 +399,65 @@ describe('unified saved library', () => {
   it('sorts saved works by oldest and title', async () => {
     renderPage();
     await ready();
-    fireEvent.change(screen.getByRole('combobox', { name: 'library.sort' }), {
-      target: { value: 'oldest' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'library.sort' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /library.sortOldest/ }));
     expect(workNames()).toEqual(['Saved 1', 'Downloaded Beta', 'Saved 3']);
-    fireEvent.change(screen.getByRole('combobox', { name: 'library.sort' }), {
-      target: { value: 'title' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'library.sort' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /library.sortTitle/ }));
     await waitFor(() => expect(workNames()).toEqual(['Saved 1', 'Downloaded Beta', 'Saved 3']));
   });
 
-  it('queries a collection or unclassified membership and preserves All', async () => {
+  it('navigates direct folders and members through ancestor breadcrumbs', async () => {
+    state.collections.push({ id: 11, name: 'Later', count: 1, parentId: 10 });
+    state.getLibraryIds.mockImplementation(async (options) =>
+      options.collectionId === 11
+        ? [1]
+        : options.collectionId === 10
+          ? [2]
+          : options.unclassified
+            ? [3]
+            : state.ids,
+    );
     renderPage();
-    await ready();
-    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
-      target: { value: '10' },
-    });
-    await waitFor(() => expect(workNames()).toHaveLength(2));
-    expect(state.getLibraryIds).toHaveBeenLastCalledWith({ collectionId: 10 });
-    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
-      target: { value: 'unclassified' },
-    });
+    await screen.findByRole('button', { name: 'Reading' });
+    expect(screen.queryByRole('button', { name: 'Later' })).not.toBeInTheDocument();
+    await openFolder();
+    await waitFor(() => expect(workNames()).toEqual(['Downloaded Beta']));
+    expect(state.getLibraryIds).toHaveBeenCalledWith({ collectionId: 10 });
+    await openFolder('Later');
+    await waitFor(() => expect(workNames()).toEqual(['Saved 1']));
+    const breadcrumbs = screen.getByRole('navigation', { name: 'library.location' });
+    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'Reading' }));
+    await waitFor(() => expect(workNames()).toEqual(['Downloaded Beta']));
+    fireEvent.click(within(breadcrumbs).getByRole('button', { name: 'nav.library' }));
     await waitFor(() => expect(workNames()).toEqual(['Saved 3']));
-    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
-      target: { value: 'all' },
-    });
     await ready();
   });
 
   it('creates an optional collection without moving saved works or downloading', async () => {
     renderPage();
-    await ready();
-    expect(screen.queryByRole('button', { name: 'library.collectionNew' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'actions.manageCollections' }));
+    await screen.findByRole('button', { name: 'library.all' });
     fireEvent.click(screen.getByRole('button', { name: 'library.collectionNew' }));
-    expect(screen.getByRole('button', { name: /actions.save/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'actions.saveChanges' })).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: 'library.collectionName' }), {
       target: { value: 'Later' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /actions.save/ }));
-    await waitFor(() => expect(state.create).toHaveBeenCalledWith('Later'));
-    await screen.findByRole('option', { name: 'Later (0)' });
-    expect(workNames()).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: 'actions.saveChanges' }));
+    await waitFor(() => expect(state.create).toHaveBeenCalledWith('Later', null));
+    await screen.findByRole('button', { name: 'Later' });
+    expect(workNames()).toEqual(['Saved 3']);
   });
 
   it('deletes a collection only after its keep-works message and preserves library membership', async () => {
     renderPage();
-    await ready();
-    fireEvent.change(screen.getByRole('combobox', { name: 'actions.manageCollections' }), {
-      target: { value: '10' },
-    });
+    await openFolder();
     await waitFor(() => expect(workNames()).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: 'actions.manageCollections' }));
-    fireEvent.click(screen.getByRole('button', { name: 'library.collectionDelete' }));
+    await folderMenu('library.collectionDelete');
     expect(
       screen.getByText('library.collectionDeleteConfirm', { exact: false }),
     ).toBeInTheDocument();
     expect(state.deleteCollection).not.toHaveBeenCalled();
-    const buttons = screen.getAllByRole('button', { name: 'library.collectionDelete' });
-    fireEvent.click(buttons[buttons.length - 1]);
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
     await waitFor(() => expect(state.deleteCollection).toHaveBeenCalledWith(10));
     await ready();
     expect(state.remove).not.toHaveBeenCalled();
@@ -334,7 +502,8 @@ describe('unified saved library', () => {
     await ready();
     fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
     fireEvent.click(screen.getByRole('button', { name: 'library.selectAll' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'library.downloadedOnly' }));
+    fireEvent.change(screen.getByLabelText('Filter'), { target: { value: 'Beta' } });
+    await waitFor(() => expect(workNames()).toEqual(['Downloaded Beta']));
     expect(screen.getByRole('button', { name: 'actions.remove' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Downloaded Beta' })).toHaveAttribute(
       'aria-pressed',

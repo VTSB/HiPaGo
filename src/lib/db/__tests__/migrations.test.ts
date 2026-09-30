@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import initSqlJs, { type Database as SqlJsDatabase } from 'sql.js';
 import type { DbAdapter, QueryResult } from '../adapter';
 import { runMigrations, LATEST_VERSION } from '../migrations';
+import { SCHEMA_SQL } from '../schema-sql';
 
 // ---------------------------------------------------------------------------
 // Minimal in-memory adapter — mirrors test-db.ts TestAdapter but standalone
@@ -137,6 +138,93 @@ CREATE TABLE IF NOT EXISTS sync_status (
   data TEXT NOT NULL
 );
 `;
+
+describe('runMigrations: nested folder v9 bootstrap and upgrade', () => {
+  let adapter: PragmaTestAdapter;
+  beforeEach(async () => {
+    adapter = await createAdapter();
+  });
+  afterEach(async () => {
+    await adapter.close();
+  });
+
+  it('runs actual bootstrap before upgrading a v8 collection database without losing IDs or overlapping members', async () => {
+    await adapter.exec(`
+      CREATE TABLE library_collection (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL);
+      CREATE TABLE library_collection_item (collectionId INTEGER NOT NULL, galleryId INTEGER NOT NULL, PRIMARY KEY (collectionId, galleryId));
+      INSERT INTO library_collection (id, name) VALUES (17, 'Existing'), (42, 'Overlap');
+      INSERT INTO library_collection_item VALUES (17, 5), (42, 5), (42, 6);
+      INSERT INTO favorites (galleryId, addedAt) VALUES (5, '2020-01-01'), (6, '2020-02-01');
+      PRAGMA user_version = 8;
+    `);
+    // This is the production initialization order; an index on the new column
+    // in bootstrap would fail against the already-existing v8 table here.
+    await expect(adapter.exec(SCHEMA_SQL)).resolves.toBeUndefined();
+    expect(
+      (await adapter.query<{ name: string }>('PRAGMA table_info(library_collection)')).map(
+        (column) => column.name,
+      ),
+    ).not.toContain('parentId');
+    await runMigrations(adapter);
+    expect(
+      await adapter.query('SELECT id, name, parentId FROM library_collection ORDER BY id'),
+    ).toEqual([
+      { id: 17, name: 'Existing', parentId: null },
+      { id: 42, name: 'Overlap', parentId: null },
+    ]);
+    expect(
+      await adapter.query('SELECT * FROM library_collection_item ORDER BY collectionId, galleryId'),
+    ).toEqual([
+      { collectionId: 17, galleryId: 5 },
+      { collectionId: 42, galleryId: 5 },
+      { collectionId: 42, galleryId: 6 },
+    ]);
+    expect(
+      await adapter.query('SELECT galleryId, addedAt FROM favorites ORDER BY galleryId'),
+    ).toEqual([
+      { galleryId: 5, addedAt: '2020-01-01' },
+      { galleryId: 6, addedAt: '2020-02-01' },
+    ]);
+    await adapter.execute('UPDATE library_collection SET parentId = ? WHERE id = ?', [17, 42]);
+    await adapter.exec(SCHEMA_SQL);
+    await runMigrations(adapter);
+    expect(await adapter.query('SELECT parentId FROM library_collection WHERE id = 42')).toEqual([
+      { parentId: 17 },
+    ]);
+    expect(await getUserVersion(adapter)).toBe(9);
+  });
+
+  it('supports fresh installs and repeated v9 upgrade with one nullable column and parent lookup index', async () => {
+    await adapter.exec(SCHEMA_SQL);
+    await runMigrations(adapter);
+    await adapter.execute('INSERT INTO library_collection (id, name) VALUES (?, ?)', [3, 'Root']);
+    await adapter.execute('INSERT INTO library_collection (id, name, parentId) VALUES (?, ?, ?)', [
+      4,
+      'Child',
+      3,
+    ]);
+    // Simulate an interrupted external version record after schema addition.
+    await adapter.exec('PRAGMA user_version = 8');
+    await runMigrations(adapter);
+    await runMigrations(adapter);
+    const columns = await adapter.query<{ name: string; notnull: number }>(
+      'PRAGMA table_info(library_collection)',
+    );
+    expect(columns.filter((column) => column.name === 'parentId')).toEqual([
+      expect.objectContaining({ name: 'parentId', notnull: 0 }),
+    ]);
+    expect(await adapter.query('SELECT id, parentId FROM library_collection ORDER BY id')).toEqual([
+      { id: 3, parentId: null },
+      { id: 4, parentId: 3 },
+    ]);
+    const indexes = await adapter.query<{ name: string }>('PRAGMA index_list(library_collection)');
+    const indexedColumns = await Promise.all(
+      indexes.map((index) => adapter.query<{ name: string }>(`PRAGMA index_info("${index.name}")`)),
+    );
+    expect(indexedColumns.some((columns) => columns[0]?.name === 'parentId')).toBe(true);
+    expect(await getUserVersion(adapter)).toBe(9);
+  });
+});
 
 describe('runMigrations: pre-migration DB upgrade', () => {
   let adapter: PragmaTestAdapter;
@@ -325,7 +413,7 @@ describe('runMigrations: migration v4 adds folderName + migratedAt to download',
     await runMigrations(adapter);
 
     expect(await getUserVersion(adapter)).toBe(LATEST_VERSION);
-    expect(LATEST_VERSION).toBe(8);
+    expect(LATEST_VERSION).toBe(9);
   });
 
   it('is idempotent: running v4 migration twice leaves columns present exactly once', async () => {

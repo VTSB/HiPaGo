@@ -42,7 +42,7 @@ export function UpdateCheckCard() {
   const includePrereleases = android && receiveBetaUpdates;
 
   return (
-    <div className="mt-5 border-y border-zinc-200 bg-white sm:mt-6 sm:rounded-xl sm:border dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="mt-4 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
       <div className="px-4 py-5 sm:px-5 sm:py-4">
         <p className="text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
           {t('update.about')}
@@ -69,7 +69,10 @@ export function UpdateCheckCard() {
           </div>
         )}
         {/* Reset channel-specific state while keeping focus on the switch. */}
-        <UpdateCheckState key={String(includePrereleases)} includePrereleases={includePrereleases} />
+        <UpdateCheckState
+          key={String(includePrereleases)}
+          includePrereleases={includePrereleases}
+        />
       </div>
     </div>
   );
@@ -83,7 +86,9 @@ function UpdateCheckState({ includePrereleases }: { includePrereleases: boolean 
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   const onCheck = async () => {
@@ -128,26 +133,26 @@ function UpdateCheckState({ includePrereleases }: { includePrereleases: boolean 
 
   return (
     <>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">
-              {t('update.about.currentVersion')}
-            </p>
-            <p className="font-mono text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
-              v{CURRENT_VERSION}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onCheck}
-            disabled={status.kind === 'checking' || status.kind === 'installing'}
-            className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-zinc-900 px-4 py-2 text-base font-semibold text-white shadow-sm transition-colors active:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 sm:min-h-11 sm:w-auto sm:rounded-md sm:px-3 sm:py-1.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
-          >
-            {status.kind === 'checking' ? t('update.about.checking') : t('update.about.check')}
-          </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm text-zinc-500 sm:text-xs dark:text-zinc-400">
+            {t('update.about.currentVersion')}
+          </p>
+          <p className="font-mono text-base font-semibold text-zinc-900 sm:text-sm sm:font-medium dark:text-zinc-100">
+            v{CURRENT_VERSION}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={onCheck}
+          disabled={status.kind === 'checking' || status.kind === 'installing'}
+          className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-zinc-900 px-4 py-2 text-base font-semibold text-white shadow-sm transition-colors active:bg-zinc-800 disabled:cursor-wait disabled:opacity-70 sm:min-h-11 sm:w-auto sm:rounded-md sm:px-3 sm:py-1.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
+        >
+          {status.kind === 'checking' ? t('update.about.checking') : t('update.about.check')}
+        </button>
+      </div>
 
-        {/*
+      {/*
           Status slot — always rendered so the common single-line outcomes
           (checking / upToDate / failed) fill pre-reserved space instead of
           appearing on demand and pushing the rest of the page down. The
@@ -156,7 +161,7 @@ function UpdateCheckState({ includePrereleases }: { includePrereleases: boolean 
           The taller `available` / `installing` states may expand downward —
           those are intentional, actionable content (out of scope for CLS).
         */}
-        <div data-testid="update-status-slot" className="mt-4 min-h-12 sm:min-h-9">
+      <div data-testid="update-status-slot" className="mt-4 min-h-12 sm:min-h-9">
         {status.kind === 'upToDate' && (
           <div className="flex min-h-12 items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-base text-emerald-700 sm:min-h-0 sm:rounded-md sm:px-3 sm:py-2 sm:text-sm dark:bg-emerald-950/40 dark:text-emerald-300">
             <svg
@@ -242,10 +247,12 @@ function UpdateCheckState({ includePrereleases }: { includePrereleases: boolean 
                 clipRule="evenodd"
               />
             </svg>
-            {status.action === 'install' ? t('update.banner.installFailed') : t('update.about.checkFailed')}
+            {status.action === 'install'
+              ? t('update.banner.installFailed')
+              : t('update.about.checkFailed')}
           </div>
         )}
-        </div>
+      </div>
     </>
   );
 }
