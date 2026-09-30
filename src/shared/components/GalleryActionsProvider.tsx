@@ -114,6 +114,7 @@ export function GalleryActionsProvider({ children }: { children: ReactNode }) {
     (gallery: GalleryActionGallery, anchor?: GalleryActionAnchor, selecting?: () => void) => {
       setError(null);
       setNotice(null);
+      setBusyError(false);
       setMenu({ gallery, anchor, selecting, collections: false });
     },
     [],
@@ -232,8 +233,7 @@ export function GalleryActionsProvider({ children }: { children: ReactNode }) {
         });
         const next = await getDownload(gallery.id);
         const failure = useDownloadProgressStore.getState().entries[gallery.id]?.error;
-        if (!next || failure)
-          throw new Error(failure ?? 'Failed to queue download');
+        if (!next || failure) throw new Error(failure ?? 'Failed to queue download');
         setNotice(t('actions.saved'));
       }),
     [run, queryClient, router, close, t],
@@ -344,6 +344,8 @@ export function GalleryActionsProvider({ children }: { children: ReactNode }) {
 
   const collections = useCallback((gallery: GalleryActionGallery) => {
     setError(null);
+    setNotice(null);
+    setBusyError(false);
     setMenu({ gallery, collections: true });
   }, []);
 

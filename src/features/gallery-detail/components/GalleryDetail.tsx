@@ -44,7 +44,9 @@ const TAG_ORDER: Record<string, number> = {
 };
 
 export function GalleryDetail({ id }: { id: number }) {
-  const { block, files, isLoading, error } = useGalleryDetail(id, { refreshDownloadedMetadata: true });
+  const { block, files, isLoading, error } = useGalleryDetail(id, {
+    refreshDownloadedMetadata: true,
+  });
   const offline = useOfflineImages(id);
   // Use cached block from list page as instant preview while full info loads
   const cachedBlock = useGalleryBlock(id);
@@ -163,9 +165,25 @@ export function GalleryDetail({ id }: { id: number }) {
   const relatedIds = displayBlock?.related?.slice(0, 12) ?? [];
 
   const actions = useGalleryActions();
-  const { data: isFav = false } = useQuery({ queryKey: ['library-membership', id], queryFn: async () => { await ensureDb(); return isFavorite(id); }, staleTime: 0 });
-  const { data: reading } = useQuery({ queryKey: ['reading-progress', id], queryFn: () => getReadingProgress(id), staleTime: 0 });
-  const gallery = { id, title: displayBlock?.title, thumbnail: displayBlock?.thumbnail, tags: displayBlock?.tags };
+  const { data: isFav = false } = useQuery({
+    queryKey: ['library-membership', id],
+    queryFn: async () => {
+      await ensureDb();
+      return isFavorite(id);
+    },
+    staleTime: 0,
+  });
+  const { data: reading } = useQuery({
+    queryKey: ['reading-progress', id],
+    queryFn: () => getReadingProgress(id),
+    staleTime: 0,
+  });
+  const gallery = {
+    id,
+    title: displayBlock?.title,
+    thumbnail: displayBlock?.thumbnail,
+    tags: displayBlock?.tags,
+  };
   const manage = () => actions.open(gallery);
   const {
     progress: dlProgress,
@@ -240,7 +258,7 @@ export function GalleryDetail({ id }: { id: number }) {
       <div className="grid gap-3 md:grid-cols-[300px_1fr] md:gap-6">
         <Link
           href={readerHref(id)}
-          className="group relative aspect-[3/4] w-full self-start overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
+          className="group relative aspect-[3/4] w-full max-w-[240px] self-start justify-self-center overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none md:max-w-none dark:border-zinc-800 dark:bg-zinc-900"
         >
           {!cachedThumbnail && !bigThumbnail && !offlineHero && (
             <div className="flex aspect-[3/4] items-center justify-center bg-zinc-100 text-zinc-400 dark:bg-zinc-800">
@@ -312,95 +330,125 @@ export function GalleryDetail({ id }: { id: number }) {
               {displayBlock.date.toLocaleDateString()}
             </p>
           )}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col items-start gap-3">
             <Link
-              href={readerHref(id, reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1 ? reading.lastPage + 1 : undefined)}
+              href={readerHref(
+                id,
+                reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1
+                  ? reading.lastPage + 1
+                  : undefined,
+              )}
               className="inline-flex min-h-[3.25rem] w-full items-center justify-center rounded-2xl bg-zinc-900 px-10 py-3 text-base font-semibold text-white active:bg-zinc-800 sm:min-h-12 sm:w-auto sm:rounded-lg sm:py-2.5 sm:text-sm sm:font-medium sm:hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:active:bg-zinc-200 sm:dark:hover:bg-zinc-200"
             >
-              {t(reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1 ? 'actions.continue' : 'detail.read')}
+              {t(
+                reading && reading.lastPage > 0 && reading.lastPage < reading.totalPages - 1
+                  ? 'actions.continue'
+                  : 'detail.read',
+              )}
             </Link>
-            <button disabled={actionPending} aria-busy={actionPending} onClick={() => { if (isFav) manage(); else void runVisibleAction(() => actions.save(gallery)); }} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700">{t(isFav ? 'actions.saved' : 'actions.save')}</button>
-            <button onClick={manage} className="min-h-12 rounded-xl border border-zinc-300 px-5 py-2 text-sm dark:border-zinc-700">{t('actions.title')}</button>
-            {files.length > 0 &&
-              (dlProgress ? (
-                <button
-                  onClick={handleCancelDownload}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-                >
-                  <Spinner size="sm" />
-                  {dlProgress.current}/{dlProgress.total}
-                </button>
-              ) : queuedPosition !== null ? (
-                <button
-                  onClick={handleCancelDownload}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-                >
-                  {t('library.queue.queued')}
-                  <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
-                    #{queuedPosition}
-                  </span>
-                </button>
-              ) : filesMissing ? (
-                <button
-                  disabled={actionPending}
-                  aria-busy={actionPending}
-                  onClick={() => { void runVisibleAction(() => actions.download(gallery)); }}
-                  title={t('detail.filesMissing')}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-8 py-2.5 text-base font-semibold text-amber-700 active:bg-amber-100 disabled:cursor-wait disabled:opacity-60 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-4 w-4"
+            <div className="flex w-full flex-wrap items-center gap-2">
+              <button
+                disabled={actionPending}
+                aria-busy={actionPending}
+                onClick={() => {
+                  if (isFav) manage();
+                  else void runVisibleAction(() => actions.save(gallery));
+                }}
+                className="min-h-12 shrink-0 rounded-xl border border-zinc-300 px-4 py-2 text-sm disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700"
+              >
+                {t(isFav ? 'actions.saved' : 'actions.save')}
+              </button>
+              <button
+                onClick={manage}
+                className="min-h-12 shrink-0 rounded-xl border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
+              >
+                {t('actions.title')}
+              </button>
+              {files.length > 0 &&
+                (dlProgress ? (
+                  <button
+                    onClick={handleCancelDownload}
+                    className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
                   >
-                    <path
-                      fillRule="evenodd"
-                      d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.515 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  {t('detail.filesMissing')}
-                </button>
-              ) : isDownloaded ? (
-                <button
-                  onClick={manage}
-                  title={t('detail.redownload')}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-green-600/40 bg-green-50 px-8 py-2.5 text-base font-semibold text-green-700 active:bg-green-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-green-100 dark:border-green-500/40 dark:bg-green-950/40 dark:text-green-400 dark:active:bg-green-900/40 sm:dark:hover:bg-green-900/40"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-4 w-4"
+                    <Spinner size="sm" />
+                    {dlProgress.current}/{dlProgress.total}
+                  </button>
+                ) : queuedPosition !== null ? (
+                  <button
+                    onClick={handleCancelDownload}
+                    className="inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-2xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 active:bg-zinc-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
                   >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  {t('detail.downloaded')}
-                </button>
-              ) : (
-                <button
-                  disabled={actionPending}
-                  aria-busy={actionPending}
-                  onClick={() => { void runVisibleAction(() => actions.download(gallery)); }}
-                  className="inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-8 py-2.5 text-base font-semibold text-zinc-700 active:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="h-4 w-4"
+                    {t('library.queue.queued')}
+                    <span className="text-sm font-normal text-zinc-500 dark:text-zinc-400">
+                      #{queuedPosition}
+                    </span>
+                  </button>
+                ) : filesMissing ? (
+                  <button
+                    disabled={actionPending}
+                    aria-busy={actionPending}
+                    onClick={() => {
+                      void runVisibleAction(() => actions.download(gallery));
+                    }}
+                    title={t('detail.filesMissing')}
+                    className="inline-flex min-h-12 shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-amber-600/40 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 active:bg-amber-100 disabled:cursor-wait disabled:opacity-60 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-400 dark:active:bg-amber-900/40 sm:dark:hover:bg-amber-900/40"
                   >
-                    <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
-                    <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
-                  </svg>
-                  {t('detail.download')}
-                </button>
-              ))}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="h-4 w-4"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.515 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    {t('detail.filesMissing')}
+                  </button>
+                ) : isDownloaded ? (
+                  <button
+                    onClick={manage}
+                    title={t('actions.title')}
+                    className="inline-flex min-h-12 shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-green-600/40 bg-green-50 px-4 py-2.5 text-sm font-medium text-green-700 active:bg-green-100 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-green-100 dark:border-green-500/40 dark:bg-green-950/40 dark:text-green-400 dark:active:bg-green-900/40 sm:dark:hover:bg-green-900/40"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="h-4 w-4"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                    {t('detail.downloaded')}
+                  </button>
+                ) : (
+                  <button
+                    disabled={actionPending}
+                    aria-busy={actionPending}
+                    onClick={() => {
+                      void runVisibleAction(() => actions.download(gallery));
+                    }}
+                    className="inline-flex min-h-12 shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 active:bg-zinc-100 disabled:cursor-wait disabled:opacity-60 sm:min-h-11 sm:w-auto sm:rounded-lg sm:text-sm sm:font-medium sm:hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:active:bg-zinc-800 sm:dark:hover:bg-zinc-800"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="h-4 w-4"
+                    >
+                      <path d="M10.75 2.75a.75.75 0 00-1.5 0v8.614L6.295 8.235a.75.75 0 10-1.09 1.03l4.25 4.5a.75.75 0 001.09 0l4.25-4.5a.75.75 0 00-1.09-1.03l-2.955 3.129V2.75z" />
+                      <path d="M3.5 12.75a.75.75 0 00-1.5 0v2.5A2.75 2.75 0 004.75 18h10.5A2.75 2.75 0 0018 15.25v-2.5a.75.75 0 00-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5z" />
+                    </svg>
+                    {t('detail.download')}
+                  </button>
+                ))}
+            </div>
           </div>
           {tagEntries.length > 0 && (
             <div className="space-y-2">
@@ -461,17 +509,21 @@ export function GalleryDetail({ id }: { id: number }) {
                 className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-100 shadow-sm sm:rounded-lg sm:shadow-none dark:border-zinc-800 dark:bg-zinc-900"
               >
                 <div className="aspect-[3/4] overflow-hidden">
-                  {file.hash ? <AbortableImage
-                    src={getThumbnailUrl(file)}
-                    alt={`Page ${idx + 1}`}
-                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    loading="lazy"
-                  /> : offline.sources?.[idx] ? <OfflineImage
-                    source={offline.sources[idx]}
-                    alt={`Page ${idx + 1}`}
-                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    loading="lazy"
-                  /> : null}
+                  {file.hash ? (
+                    <AbortableImage
+                      src={getThumbnailUrl(file)}
+                      alt={`Page ${idx + 1}`}
+                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : offline.sources?.[idx] ? (
+                    <OfflineImage
+                      source={offline.sources[idx]}
+                      alt={`Page ${idx + 1}`}
+                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : null}
                 </div>
                 {/* Page-number badge is always visible on touch devices
                     (no hover state) and fades in on hover on desktop. */}

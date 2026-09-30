@@ -14,6 +14,7 @@ import {
   removeFromCollection,
   getContinueReading,
   removeHistory,
+  removeHistoryBatch,
   clearHistory,
 } from '../library';
 import { getDownload, upsertDownload } from '../download';
@@ -116,6 +117,23 @@ describe('optional overlapping collections', () => {
 });
 
 describe('continue reading and history lifetime', () => {
+  it('rolls back every selected history deletion if a later record fails', async () => {
+    await recordHistory(1, 2, 5, 'page');
+    await recordHistory(2, 3, 5, 'scroll');
+    await getDb().exec(
+      "CREATE TEMP TRIGGER reject_history_delete BEFORE DELETE ON history WHEN OLD.galleryId = 2 BEGIN SELECT RAISE(ABORT, 'history delete failed'); END;",
+    );
+    try {
+      await expect(removeHistoryBatch([1, 2])).rejects.toThrow('history delete failed');
+      expect((await getReadingProgress(1))?.lastPage).toBe(2);
+      expect((await getReadingProgress(2))?.lastPage).toBe(3);
+    } finally {
+      await getDb().exec('DROP TRIGGER reject_history_delete');
+    }
+    await removeHistoryBatch([1, 2]);
+    expect(await getReadingProgress(1)).toBeNull();
+    expect(await getReadingProgress(2)).toBeNull();
+  });
   it('excludes visits, untouched first page and finished works and orders recent unfinished work', async () => {
     await recordVisit(1);
     await recordHistory(2, 0, 10, 'page');

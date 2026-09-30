@@ -45,6 +45,39 @@ describe('real Tauri deletion boundary', () => {
     await expect(store.deleteGallery(12)).rejects.toThrow('Permission denied');
     expect(native.invoke).toHaveBeenCalledOnce();
   });
+  it.each([
+    'Access is denied. (os error 5)',
+    'Disk I/O failed',
+    'The process cannot access the file because it is being used by another process. (os error 32)',
+  ])('propagates directory-list failure %s without attempting removal', async (failure) => {
+    native.invoke.mockRejectedValueOnce(failure);
+    const store = await TauriDownloadStore.create();
+    await expect(store.deleteGallery(12)).rejects.toBe(failure);
+    expect(native.invoke).toHaveBeenCalledOnce();
+    expect(native.invoke).not.toHaveBeenCalledWith('plugin:fs|remove', expect.anything());
+  });
+  it.each([
+    'No such file or directory (os error 2)',
+    'The system cannot find the path specified. (os error 3)',
+  ])('accepts an already absent downloads root: %s', async (failure) => {
+    native.invoke.mockRejectedValueOnce(failure);
+    const store = await TauriDownloadStore.create();
+    await expect(store.deleteGallery(12)).resolves.toBeUndefined();
+    expect(native.invoke).toHaveBeenCalledOnce();
+    expect(native.invoke).not.toHaveBeenCalledWith('plugin:fs|remove', expect.anything());
+  });
+  it('removes an existing gallery directory recursively', async () => {
+    native.invoke
+      .mockResolvedValueOnce([{ name: '12', isDirectory: true }])
+      .mockResolvedValueOnce(undefined);
+    const store = await TauriDownloadStore.create();
+    await expect(store.deleteGallery(12)).resolves.toBeUndefined();
+    expect(native.invoke).toHaveBeenCalledTimes(2);
+    expect(native.invoke).toHaveBeenLastCalledWith('plugin:fs|remove', {
+      path: 'downloads/12',
+      options: { baseDir: 42, recursive: true },
+    });
+  });
   it('propagates native remove failure after confirming that the gallery exists', async () => {
     native.invoke
       .mockResolvedValueOnce([{ name: '12', isDirectory: true }])
@@ -55,6 +88,22 @@ describe('real Tauri deletion boundary', () => {
       path: 'downloads/12',
       options: { baseDir: 42, recursive: true },
     });
+  });
+  it.each([2, 3])('accepts a directory disappearing before remove (os error %s)', async (code) => {
+    native.invoke
+      .mockResolvedValueOnce([{ name: '12', isDirectory: true }])
+      .mockRejectedValueOnce(`Directory disappeared (os error ${code})`);
+    const store = await TauriDownloadStore.create();
+    await expect(store.deleteGallery(12)).resolves.toBeUndefined();
+    expect(native.invoke).toHaveBeenCalledTimes(2);
+  });
+  it.each([5, 32])('retains native remove failures (os error %s)', async (code) => {
+    const failure = `Cannot remove directory (os error ${code})`;
+    native.invoke
+      .mockResolvedValueOnce([{ name: '12', isDirectory: true }])
+      .mockRejectedValueOnce(failure);
+    const store = await TauriDownloadStore.create();
+    await expect(store.deleteGallery(12)).rejects.toBe(failure);
   });
   it.each(['missing-root', 'missing-gallery'])(
     'does not attempt remove when %s is verified',

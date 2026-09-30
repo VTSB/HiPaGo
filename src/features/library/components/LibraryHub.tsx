@@ -55,6 +55,7 @@ export function LibraryHub() {
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [collectionTarget, setCollectionTarget] = useState('');
+  const [collectionTools, setCollectionTools] = useState(false);
   const [editor, setEditor] = useState<{
     mode: 'create' | 'rename' | 'delete';
     id?: number;
@@ -285,32 +286,12 @@ export function LibraryHub() {
         <button
           type="button"
           className={control}
-          onClick={() => setEditor({ mode: 'create', name: '' })}
+          aria-expanded={collectionTools}
+          aria-controls="library-collection-tools"
+          onClick={() => setCollectionTools(!collectionTools)}
         >
-          {t('library.collectionNew')}
+          {t('actions.manageCollections')}
         </button>
-        {activeCollection && (
-          <>
-            <button
-              type="button"
-              className={control}
-              onClick={() =>
-                setEditor({ mode: 'rename', id: activeCollection.id, name: activeCollection.name })
-              }
-            >
-              {t('library.collectionRename')}
-            </button>
-            <button
-              type="button"
-              className={control}
-              onClick={() =>
-                setEditor({ mode: 'delete', id: activeCollection.id, name: activeCollection.name })
-              }
-            >
-              {t('library.collectionDelete')}
-            </button>
-          </>
-        )}
         <select
           className={control}
           aria-label={t('library.sort')}
@@ -333,6 +314,50 @@ export function LibraryHub() {
           {t('library.downloadedOnly')}
         </label>
       </div>
+      {collectionTools && (
+        <div
+          id="library-collection-tools"
+          className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-zinc-100 p-3 dark:bg-zinc-800"
+        >
+          <button
+            type="button"
+            className={control}
+            onClick={() => setEditor({ mode: 'create', name: '' })}
+          >
+            {t('library.collectionNew')}
+          </button>
+          {activeCollection && (
+            <>
+              <button
+                type="button"
+                className={control}
+                onClick={() =>
+                  setEditor({
+                    mode: 'rename',
+                    id: activeCollection.id,
+                    name: activeCollection.name,
+                  })
+                }
+              >
+                {t('library.collectionRename')}
+              </button>
+              <button
+                type="button"
+                className={control}
+                onClick={() =>
+                  setEditor({
+                    mode: 'delete',
+                    id: activeCollection.id,
+                    name: activeCollection.name,
+                  })
+                }
+              >
+                {t('library.collectionDelete')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {editor && (
         <form
           className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-zinc-100 p-3 dark:bg-zinc-800"
@@ -480,7 +505,14 @@ export function LibraryHub() {
             <GalleryCardById
               id={id}
               download={downloadMap.get(id)}
-              onBeginSelection={selecting ? undefined : () => { setSelecting(true); setSelected(new Set([id])); }}
+              onBeginSelection={
+                selecting
+                  ? undefined
+                  : () => {
+                      setSelecting(true);
+                      setSelected(new Set([id]));
+                    }
+              }
               selected={selecting && selected.has(id)}
               onSelect={
                 selecting

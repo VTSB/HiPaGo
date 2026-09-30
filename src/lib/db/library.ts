@@ -15,10 +15,12 @@ export interface ContinueReadingEntry {
 /** The existing favorites table remains the single saved-library authority. */
 export async function addToLibrary(galleryId: number): Promise<void> {
   const db = await ensureDb();
-  await db.execute('INSERT OR IGNORE INTO favorites (galleryId, addedAt) VALUES (?, ?)', [
-    galleryId,
-    new Date().toISOString(),
-  ]);
+  await withTransaction(async () => {
+    await db.execute('INSERT OR IGNORE INTO favorites (galleryId, addedAt) VALUES (?, ?)', [
+      galleryId,
+      new Date().toISOString(),
+    ]);
+  });
   await persistDb();
 }
 
@@ -85,19 +87,21 @@ function collectionName(name: string): string {
 
 export async function createCollection(name: string): Promise<number> {
   const db = await ensureDb();
-  const result = await db.execute('INSERT INTO library_collection (name) VALUES (?)', [
-    collectionName(name),
-  ]);
+  const result = await withTransaction(async () =>
+    db.execute('INSERT INTO library_collection (name) VALUES (?)', [collectionName(name)]),
+  );
   await persistDb();
   return result.lastInsertRowId;
 }
 
 export async function renameCollection(collectionId: number, name: string): Promise<void> {
   const db = await ensureDb();
-  await db.execute('UPDATE library_collection SET name = ? WHERE id = ?', [
-    collectionName(name),
-    collectionId,
-  ]);
+  await withTransaction(async () => {
+    await db.execute('UPDATE library_collection SET name = ? WHERE id = ?', [
+      collectionName(name),
+      collectionId,
+    ]);
+  });
   await persistDb();
 }
 
@@ -165,13 +169,24 @@ export async function getContinueReading(limit = 8): Promise<ContinueReadingEntr
 
 /** History also owns the reading position; callers must communicate that reset. */
 export async function removeHistory(galleryId: number): Promise<void> {
+  await removeHistoryBatch([galleryId]);
+}
+
+/** A failed selected deletion leaves every history record and reading position intact. */
+export async function removeHistoryBatch(galleryIds: number[]): Promise<void> {
   const db = await ensureDb();
-  await db.execute('DELETE FROM history WHERE galleryId = ?', [galleryId]);
+  await withTransaction(async () => {
+    for (const galleryId of new Set(galleryIds)) {
+      await db.execute('DELETE FROM history WHERE galleryId = ?', [galleryId]);
+    }
+  });
   await persistDb();
 }
 
 export async function clearHistory(): Promise<void> {
   const db = await ensureDb();
-  await db.execute('DELETE FROM history');
+  await withTransaction(async () => {
+    await db.execute('DELETE FROM history');
+  });
   await persistDb();
 }

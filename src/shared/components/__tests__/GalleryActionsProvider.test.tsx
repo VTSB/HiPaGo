@@ -103,6 +103,12 @@ function Commands() {
         Download
       </button>
       <button onClick={() => actions.open(gallery, { x: 10, y: 20 })}>Menu</button>
+      <button onClick={() => actions.open({ id: 13, title: 'Another work' }, { x: 10, y: 20 })}>
+        Another menu
+      </button>
+      <button onClick={() => actions.collections({ id: 13, title: 'Another work' })}>
+        Another collections
+      </button>
     </>
   );
 }
@@ -230,6 +236,24 @@ describe('download file and saved membership lifetimes', () => {
       expect(mocks.deleteGallery).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole('button', { name: 'library.queue.title' }));
       expect(mocks.push).toHaveBeenCalledWith('/downloads');
+    },
+  );
+
+  it.each(['Another menu', 'Another collections'])(
+    'clears busy guidance when opening %s',
+    async (command) => {
+      mocks.row!.status = 'queued';
+      renderActions();
+      fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+      await screen.findByText('actions.busy');
+      expect(screen.getByRole('button', { name: 'library.queue.title' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: command }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('button', { name: 'library.queue.title' }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(screen.queryByText('actions.busy')).not.toBeInTheDocument();
     },
   );
 

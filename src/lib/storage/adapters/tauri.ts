@@ -12,6 +12,7 @@ import type { DownloadStore } from '../download-store';
 import { imageFileName, galleryFolderName } from '../download-store';
 
 const DOWNLOADS_DIR = 'downloads';
+const isMissingPath = (error: unknown) => /\(os error [23]\)/.test(String(error));
 
 type FsEntry = {
   name: string;
@@ -172,17 +173,22 @@ export class TauriDownloadStore implements DownloadStore {
     try {
       entries = await this.readDir(DOWNLOADS_DIR);
     } catch (error) {
-      // Native ENOENT is the only verified missing-root result. Permission and
-      // I/O failures must reach the caller so its download index is retained.
-      if (String(error).includes('(os error 2)')) return;
+      // Missing files (2) and Windows missing paths (3) are already removed.
+      // Permission and I/O failures retain the caller's download index.
+      if (isMissingPath(error)) return;
       throw error;
     }
-    if (!entries.some(entry => entry.name === galleryFolderName(galleryId))) return;
+    if (!entries.some((entry) => entry.name === galleryFolderName(galleryId))) return;
     const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('plugin:fs|remove', {
-      path: this.galleryPath(galleryId),
-      options: { baseDir: this.baseDir, recursive: true },
-    });
+    try {
+      await invoke('plugin:fs|remove', {
+        path: this.galleryPath(galleryId),
+        options: { baseDir: this.baseDir, recursive: true },
+      });
+    } catch (error) {
+      // The directory may disappear after its parent was listed.
+      if (!isMissingPath(error)) throw error;
+    }
   }
 
   async gallerySize(galleryId: number): Promise<number> {

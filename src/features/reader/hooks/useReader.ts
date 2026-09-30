@@ -24,61 +24,81 @@ export function useReader(galleryId: number, initialPage?: number) {
   const isLoading = useReaderStore((s) => s.isLoading);
   const error = useReaderStore((s) => s.error);
 
-  const { images: galleryImages, isLoading: galleryLoading, error: galleryError } = useGalleryDetail(galleryId);
+  const {
+    images: galleryImages,
+    isLoading: galleryLoading,
+    error: galleryError,
+  } = useGalleryDetail(galleryId);
 
   const initializedId = useRef<number | null>(null);
   const initialization = useRef(0);
 
   // Both detail images and manifest-only offline pages use the same initializer.
   // A later metadata result must not reset a reader already opened from files.
-  const initializeGallery = useCallback((id: number, nextImages: GalleryImage[]) => {
-    if (nextImages.length === 0) return;
-    const previous = useReaderStore.getState();
-    const alreadyOpened = initializedId.current === id && previous.galleryId === id;
-    const generation = alreadyOpened ? initialization.current : ++initialization.current;
-    initializedId.current = id;
-    const clamp = (page: number) => Math.max(0, Math.min(page, nextImages.length - 1));
-    setGallery(id, nextImages);
-    if (alreadyOpened) {
-      setCurrentPage(clamp(previous.currentPage));
-      setMode(previous.mode);
-      return;
-    }
-    const preferredMode = useSettingsStore.getState().readerMode;
-    setMode(preferredMode);
-    if (initialPage && Number.isFinite(initialPage) && initialPage > 0) {
-      setCurrentPage(clamp(Math.floor(initialPage) - 1));
-      return;
-    }
-    let navigated = false;
-    const unsubscribe = useReaderStore.subscribe((next, previousState) => {
-      if (next.currentPage !== previousState.currentPage || next.mode !== previousState.mode)
-        navigated = true;
-    });
-    getReadingProgress(id)
-      .then((progress) => {
-        const current = useReaderStore.getState();
-        if (progress && !navigated && initialization.current === generation &&
-          current.galleryId === id) {
-          setCurrentPage(Math.max(0, Math.min(progress.lastPage, current.totalPages - 1)));
-          setMode(progress.readerMode as 'page' | 'scroll');
-        }
-      })
-      .catch(() => {
-        // DB unavailable: default page/mode still opens the reader.
-      })
-      .finally(unsubscribe);
-  }, [initialPage, setGallery, setCurrentPage, setMode]);
+  const initializeGallery = useCallback(
+    (id: number, nextImages: GalleryImage[]) => {
+      if (nextImages.length === 0) return;
+      const previous = useReaderStore.getState();
+      const alreadyOpened = initializedId.current === id && previous.galleryId === id;
+      const generation = alreadyOpened ? initialization.current : ++initialization.current;
+      initializedId.current = id;
+      const clamp = (page: number) => Math.max(0, Math.min(page, nextImages.length - 1));
+      setGallery(id, nextImages);
+      if (alreadyOpened) {
+        setCurrentPage(clamp(previous.currentPage));
+        setMode(previous.mode);
+        return;
+      }
+      const preferredMode = useSettingsStore.getState().readerMode;
+      setMode(preferredMode);
+      if (initialPage && Number.isFinite(initialPage) && initialPage > 0) {
+        setCurrentPage(clamp(Math.floor(initialPage) - 1));
+        return;
+      }
+      let navigated = false;
+      const unsubscribe = useReaderStore.subscribe((next, previousState) => {
+        if (next.currentPage !== previousState.currentPage || next.mode !== previousState.mode)
+          navigated = true;
+      });
+      getReadingProgress(id)
+        .then((progress) => {
+          const current = useReaderStore.getState();
+          if (
+            progress &&
+            Number.isFinite(progress.totalPages) &&
+            progress.totalPages > 0 &&
+            Number.isFinite(progress.lastPage) &&
+            !navigated &&
+            initialization.current === generation &&
+            current.galleryId === id
+          ) {
+            setCurrentPage(
+              Math.max(0, Math.min(Math.floor(progress.lastPage), current.totalPages - 1)),
+            );
+            if (progress.readerMode === 'page' || progress.readerMode === 'scroll')
+              setMode(progress.readerMode);
+          }
+        })
+        .catch(() => {
+          // DB unavailable: default page/mode still opens the reader.
+        })
+        .finally(unsubscribe);
+    },
+    [initialPage, setGallery, setCurrentPage, setMode],
+  );
 
   useEffect(() => {
     if (galleryImages && galleryImages.images.length > 0)
       initializeGallery(galleryId, galleryImages.images);
   }, [galleryImages, galleryId, initializeGallery]);
 
-  useEffect(() => () => {
-    initialization.current += 1;
-    initializedId.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      initialization.current += 1;
+      initializedId.current = null;
+    },
+    [],
+  );
 
   const { goBack } = useReaderHistory();
   useReaderPersistence();

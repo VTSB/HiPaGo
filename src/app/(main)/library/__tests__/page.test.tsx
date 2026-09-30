@@ -262,6 +262,8 @@ describe('unified saved library', () => {
   it('creates an optional collection without moving saved works or downloading', async () => {
     renderPage();
     await ready();
+    expect(screen.queryByRole('button', { name: 'library.collectionNew' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'actions.manageCollections' }));
     fireEvent.click(screen.getByRole('button', { name: 'library.collectionNew' }));
     expect(screen.getByRole('button', { name: /actions.save/ })).toBeDisabled();
     fireEvent.change(screen.getByRole('textbox', { name: 'library.collectionName' }), {
@@ -280,6 +282,7 @@ describe('unified saved library', () => {
       target: { value: '10' },
     });
     await waitFor(() => expect(workNames()).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: 'actions.manageCollections' }));
     fireEvent.click(screen.getByRole('button', { name: 'library.collectionDelete' }));
     expect(
       screen.getByText('library.collectionDeleteConfirm', { exact: false }),

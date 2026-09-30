@@ -13,6 +13,11 @@ export class WebAdapter implements DbAdapter {
   private db: SqlJsDatabase;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private unloadHandler: (() => void) | null = null;
+  private transactionFinished: Promise<void> | null = null;
+  private finishTransaction: (() => void) | null = null;
+  private persistenceTurn: Promise<void> = Promise.resolve();
+  private revision = 0;
+  private closing = false;
   dirty = false;
 
   static async create(): Promise<WebAdapter> {
@@ -31,18 +36,9 @@ export class WebAdapter implements DbAdapter {
     if (typeof window !== 'undefined') {
       const handler = () => {
         if (adapter.dirty) {
-          const data = db.export();
-          // Synchronous IDB write via blocking transaction isn't possible,
-          // but navigator.sendBeacon doesn't help for IDB. Best-effort persist.
-          try {
-            const req = indexedDB.open(IDB_NAME, 1);
-            req.onsuccess = () => {
-              const tx = req.result.transaction(IDB_STORE, 'readwrite');
-              tx.objectStore(IDB_STORE).put(data, IDB_KEY);
-            };
-          } catch {
-            // Recoverable: IndexedDB write during tab close — best effort persistence
-          }
+          // Best effort: IndexedDB is asynchronous, but exporting an active
+          // sql.js transaction would roll it back even if the tab stays open.
+          void adapter.persist().catch(() => {});
         }
       };
       window.addEventListener('beforeunload', handler);
@@ -57,6 +53,7 @@ export class WebAdapter implements DbAdapter {
   }
 
   async execute(sql: string, params: unknown[] = []): Promise<QueryResult> {
+    this.assertWritable();
     const stmt = this.db.prepare(sql);
     try {
       if (params.length > 0) stmt.bind(params);
@@ -65,15 +62,10 @@ export class WebAdapter implements DbAdapter {
       stmt.free();
     }
     const changes = this.db.getRowsModified();
-    const db = this.db;
+    const result = this.db.exec('SELECT last_insert_rowid() as id');
+    const lastInsertRowId = result.length > 0 ? (result[0].values[0][0] as number) : 0;
     this.scheduleSave();
-    return {
-      changes,
-      get lastInsertRowId() {
-        const result = db.exec('SELECT last_insert_rowid() as id');
-        return result.length > 0 ? (result[0].values[0][0] as number) : 0;
-      },
-    };
+    return { changes, lastInsertRowId };
   }
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -88,31 +80,58 @@ export class WebAdapter implements DbAdapter {
   }
 
   async exec(sql: string): Promise<void> {
+    const command = sql.match(/^\s*(\w+)/)?.[1].toUpperCase();
+    this.assertWritable();
+    if (this.closing && command === 'BEGIN') throw new Error('Database is closing.');
     this.db.exec(sql);
+    if (command === 'BEGIN') {
+      this.transactionFinished = new Promise((resolve) => {
+        this.finishTransaction = resolve;
+      });
+    } else if (
+      command === 'COMMIT' ||
+      command === 'END' ||
+      (command === 'ROLLBACK' && !/^\s*ROLLBACK\s+(?:TRANSACTION\s+)?TO\b/i.test(sql))
+    ) {
+      const finish = this.finishTransaction;
+      this.transactionFinished = null;
+      this.finishTransaction = null;
+      finish?.();
+    }
     this.scheduleSave();
   }
 
+  private assertWritable(): void {
+    if (this.closing && !this.transactionFinished) throw new Error('Database is closing.');
+  }
+
   async close(): Promise<void> {
-    if (this.unloadHandler && typeof window !== 'undefined') {
-      window.removeEventListener('beforeunload', this.unloadHandler);
-      this.unloadHandler = null;
+    this.closing = true;
+    try {
+      await this.persist();
+      if (this.unloadHandler && typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', this.unloadHandler);
+        this.unloadHandler = null;
+      }
+      if (this.saveTimer) {
+        clearTimeout(this.saveTimer);
+        this.saveTimer = null;
+      }
+      this.db.close();
+    } catch (error) {
+      this.closing = false;
+      throw error;
     }
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-    await this.persist();
-    this.db.close();
   }
 
   /** Debounced save — persists at most once per second. */
   private scheduleSave(): void {
     this.dirty = true;
+    this.revision += 1;
     if (this.saveTimer) return;
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       if (this.dirty) {
-        this.dirty = false;
         this.persist().catch((e) => console.warn('[db] Persist failed:', e));
       }
     }, 1000);
@@ -120,8 +139,27 @@ export class WebAdapter implements DbAdapter {
 
   /** Save current DB state to IndexedDB. */
   async persist(): Promise<void> {
-    const data = this.db.export();
-    await saveToIndexedDB(data);
+    // sql.js export closes/reopens SQLite: wait until the transaction owner
+    // has committed or rolled back, including another owner starting meanwhile.
+    while (this.transactionFinished) await this.transactionFinished;
+    const revision = this.revision;
+    const foreignKeys = this.db.exec('PRAGMA foreign_keys')[0]?.values[0][0];
+    let data: Uint8Array;
+    try {
+      data = this.db.export();
+    } finally {
+      this.db.run(`PRAGMA foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
+    }
+    // Capture the snapshot synchronously, then write snapshots in capture order.
+    const turn = this.persistenceTurn.catch(() => {}).then(() => saveToIndexedDB(data));
+    this.persistenceTurn = turn;
+    try {
+      await turn;
+      if (this.revision === revision) this.dirty = false;
+    } catch (error) {
+      this.dirty = true;
+      throw error;
+    }
   }
 }
 
@@ -160,5 +198,6 @@ async function saveToIndexedDB(data: Uint8Array): Promise<void> {
     tx.objectStore(IDB_STORE).put(data, IDB_KEY);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB transaction aborted.'));
   });
 }

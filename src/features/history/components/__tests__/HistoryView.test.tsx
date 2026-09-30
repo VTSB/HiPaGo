@@ -4,7 +4,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { removeHistory, clearHistory } from '@/lib/db/library';
+import { removeHistoryBatch, clearHistory } from '@/lib/db/library';
 import { HistoryView } from '../HistoryView';
 
 const mockEntries = vi.hoisted(() => ({
@@ -15,8 +15,8 @@ const mockEntries = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({ useRouter: () => ({ back: vi.fn(), replace: vi.fn() }) }));
 
 vi.mock('@/lib/db/library', () => ({
-  removeHistory: vi.fn(async (id: number) => {
-    mockEntries.rows = mockEntries.rows.filter((entry) => entry.galleryId !== id);
+  removeHistoryBatch: vi.fn(async (ids: number[]) => {
+    mockEntries.rows = mockEntries.rows.filter((entry) => !ids.includes(entry.galleryId));
   }),
   clearHistory: vi.fn(async () => {
     mockEntries.rows = [];
@@ -116,7 +116,7 @@ function renderHistory() {
 
 describe('HistoryView performance rendering', () => {
   beforeEach(() => {
-    vi.mocked(removeHistory).mockClear();
+    vi.mocked(removeHistoryBatch).mockClear();
     vi.mocked(clearHistory).mockClear();
     mockEntries.rows = Array.from({ length: 30 }, (_, i) => ({
       galleryId: i + 1,
@@ -153,7 +153,7 @@ describe('HistoryView performance rendering', () => {
 
 describe('HistoryView deletion scope', () => {
   beforeEach(() => {
-    vi.mocked(removeHistory).mockClear();
+    vi.mocked(removeHistoryBatch).mockClear();
     vi.mocked(clearHistory).mockClear();
     mockEntries.rows = [
       { galleryId: 1, viewedAt: '2026-06-20T12:00:00.000Z' },
@@ -164,7 +164,7 @@ describe('HistoryView deletion scope', () => {
   it('requires a reading-position reset warning before clearing history', async () => {
     renderHistory();
     fireEvent.click(await screen.findByRole('button', { name: 'history.clear' }));
-    expect(screen.getByRole('alertdialog')).toHaveAccessibleName('history.confirmDelete');
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleName('history.clear');
     expect(clearHistory).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'actions.cancel' }));
     expect(clearHistory).not.toHaveBeenCalled();
@@ -179,11 +179,70 @@ describe('HistoryView deletion scope', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'actions.select' }));
     fireEvent.click(screen.getByRole('button', { name: '1' }));
     fireEvent.click(screen.getByRole('button', { name: 'history.remove (1)' }));
-    expect(removeHistory).not.toHaveBeenCalled();
+    expect(removeHistoryBatch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
-    await waitFor(() => expect(removeHistory).toHaveBeenCalledWith(1));
+    await waitFor(() => expect(removeHistoryBatch).toHaveBeenCalledWith([1]));
     expect(clearHistory).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(1));
     expect(screen.getByTestId('gallery-id')).toHaveTextContent('2');
+  });
+
+  it('clears hidden selections when filtering changes', async () => {
+    mockEntries.filtered = [2];
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button', { name: 'actions.select' }));
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    fireEvent.change(screen.getByLabelText('filter'), { target: { value: 'other' } });
+    await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(1));
+    expect(screen.getByRole('button', { name: 'history.remove (0)' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'history.remove (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
+    await waitFor(() => expect(removeHistoryBatch).toHaveBeenCalledWith([2]));
+  });
+
+  it('keeps a failed batch visible with selected records available for retry', async () => {
+    vi.mocked(removeHistoryBatch).mockRejectedValueOnce(new Error('DB failure'));
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button', { name: 'actions.select' }));
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'history.remove (2)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
+    await screen.findByText('actions.failed');
+    expect(screen.getAllByTestId('gallery-id')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '2' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
+    await screen.findByText('history.empty');
+    expect(removeHistoryBatch).toHaveBeenLastCalledWith([1, 2]);
+  });
+
+  it('refreshes committed removals even when browser persistence reports failure', async () => {
+    vi.mocked(removeHistoryBatch).mockImplementationOnce(async (ids) => {
+      mockEntries.rows = mockEntries.rows.filter((entry) => !ids.includes(entry.galleryId));
+      throw new Error('Persistence failed after commit');
+    });
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button', { name: 'actions.select' }));
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'history.remove (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
+    await screen.findByText('actions.failed');
+    await waitFor(() => expect(screen.getAllByTestId('gallery-id')).toHaveLength(1));
+    expect(screen.getByTestId('gallery-id')).toHaveTextContent('2');
+    fireEvent.click(screen.getByRole('button', { name: 'actions.cancel' }));
+    expect(screen.getByRole('button', { name: 'history.remove (0)' })).toBeDisabled();
+  });
+
+  it('uses the confirmed target snapshot even if filters change before confirmation', async () => {
+    mockEntries.filtered = [2];
+    renderHistory();
+    fireEvent.click(await screen.findByRole('button', { name: 'actions.select' }));
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'history.remove (1)' }));
+    fireEvent.change(screen.getByLabelText('filter'), { target: { value: 'other' } });
+    fireEvent.click(screen.getByRole('button', { name: 'actions.confirm' }));
+    await waitFor(() => expect(removeHistoryBatch).toHaveBeenCalledWith([1]));
   });
 });
