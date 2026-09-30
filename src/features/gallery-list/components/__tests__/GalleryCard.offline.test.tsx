@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, it, vi, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getDownloadedImage, hasCompleteDownloadedGallery } from '@/lib/utils/download-zip';
 const platform = vi.hoisted(() => ({ native: true }));
@@ -33,6 +33,41 @@ beforeEach(() => {
 });
 
 describe('offline downloaded card', () => {
+  it('omits completion and checking badges in a library card while keeping the local cover', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let resolveIntegrity!: (complete: boolean) => void;
+    vi.mocked(hasCompleteDownloadedGallery).mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => { resolveIntegrity = resolve; }),
+    );
+    render(
+      <QueryClientProvider client={client}>
+        <GalleryCardById id={12} hideDownloadedBadge download={{ galleryId: 12,
+          title: 'Library offline work', thumbnail: '', tags: '{}', pageCount: 5,
+          totalBytes: 100, downloadedAt: '2025-01-01', status: 'complete' }} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('img', { name: 'Library offline work' })).toHaveAttribute('src', 'blob:local-cover');
+    expect(screen.queryByText('actions.loading')).not.toBeInTheDocument();
+    await act(async () => { resolveIntegrity(true); });
+    await waitFor(() => expect(client.isFetching({ queryKey: ['download-integrity', 12] })).toBe(0));
+    expect(screen.queryByText('detail.downloaded')).not.toBeInTheDocument();
+  });
+
+  it.each(['complete', 'failed', 'paused'] as const)(
+    'retains actionable feedback for a %s download when completion badges are hidden', async (status) => {
+      vi.mocked(hasCompleteDownloadedGallery).mockResolvedValue(false);
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <GalleryCardById id={12} hideDownloadedBadge download={{ galleryId: 12,
+            title: 'Needs attention', thumbnail: '', tags: '{}', pageCount: 5,
+            totalBytes: 100, downloadedAt: '2025-01-01', status }} />
+        </QueryClientProvider>,
+      );
+      await screen.findByText(status === 'complete' ? 'library.filesMissing' : status === 'failed' ? 'library.failed' : 'library.pending');
+      expect(screen.queryByText('detail.downloaded')).not.toBeInTheDocument();
+    },
+  );
+
   it('loads a browser cover from local page bytes and revokes its blob URL when unmounted', async () => {
     platform.native = false;
     const create = vi.fn(() => 'blob:web-local-cover');

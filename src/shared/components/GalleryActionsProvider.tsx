@@ -374,8 +374,6 @@ export function GalleryActionsProvider({ children }: { children: ReactNode }) {
         close();
       },
     });
-    if (!state.saved)
-      items.push({ key: 'save', label: t('actions.save'), action: () => swallow(save(gallery)) });
     items.push({
       key: 'collections',
       label: t('actions.manageCollections'),

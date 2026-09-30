@@ -250,10 +250,8 @@ describe('unified saved library', () => {
         label('library.folderError.deleted-unsaved'),
       );
       await screen.findByRole('button', { name: label('library.all') });
-      expect(
-        within(screen.getByRole('navigation', { name: label('library.location') }))
-          .getByRole('button', { name: label('nav.library') }),
-      ).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('heading', { name: label('nav.library'), level: 1 })).toBeInTheDocument();
+      expect(screen.queryByRole('navigation', { name: label('library.location') })).not.toBeInTheDocument();
       expect(screen.getByRole('alertdialog')).toHaveTextContent(
         label('library.folderDeletePersistConfirm'),
       );
@@ -431,8 +429,9 @@ describe('unified saved library', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'library.select' }));
     fireEvent.click(screen.getByRole('button', { name: 'Downloaded Beta' }));
-    fireEvent.click(screen.getByRole('button', { name: 'library.sort' }));
+    fireEvent.click(screen.getByRole('button', { name: /^library.sort:/ }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /library.sortOldest/ }));
+    expect(screen.getByRole('button', { name: 'library.sort: library.sortOldest' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Downloaded Beta' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -609,10 +608,10 @@ describe('unified saved library', () => {
   it('sorts saved works by oldest and title', async () => {
     renderPage();
     await ready();
-    fireEvent.click(screen.getByRole('button', { name: 'library.sort' }));
+    fireEvent.click(screen.getByRole('button', { name: /^library.sort:/ }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /library.sortOldest/ }));
     expect(workNames()).toEqual(['Saved 1', 'Downloaded Beta', 'Saved 3']);
-    fireEvent.click(screen.getByRole('button', { name: 'library.sort' }));
+    fireEvent.click(screen.getByRole('button', { name: /^library.sort:/ }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /library.sortTitle/ }));
     await waitFor(() => expect(workNames()).toEqual(['Saved 1', 'Downloaded Beta', 'Saved 3']));
   });

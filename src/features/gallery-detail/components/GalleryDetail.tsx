@@ -20,8 +20,7 @@ import { useGalleryBlock } from '@/features/gallery-list/hooks/useGalleryBlock';
 import { getGgConfig } from '@/lib/api/client';
 import type { GalleryBlock } from '@/lib/utils/types';
 import { useQuery } from '@tanstack/react-query';
-import { ensureDb } from '@/lib/db/adapter';
-import { isFavorite, getReadingProgress } from '@/lib/db/gallery';
+import { getReadingProgress } from '@/lib/db/gallery';
 import { useGalleryActions } from '@/shared/hooks/useGalleryActions';
 import { useDownloadGallery } from '@/features/gallery-detail/hooks/useDownloadGallery';
 import { useDownloadedFilesPresent } from '@/features/gallery-detail/hooks/useDownloadedFilesPresent';
@@ -165,14 +164,6 @@ export function GalleryDetail({ id }: { id: number }) {
   const relatedIds = displayBlock?.related?.slice(0, 12) ?? [];
 
   const actions = useGalleryActions();
-  const { data: isFav = false } = useQuery({
-    queryKey: ['library-membership', id],
-    queryFn: async () => {
-      await ensureDb();
-      return isFavorite(id);
-    },
-    staleTime: 0,
-  });
   const { data: reading } = useQuery({
     queryKey: ['reading-progress', id],
     queryFn: () => getReadingProgress(id),
@@ -347,17 +338,6 @@ export function GalleryDetail({ id }: { id: number }) {
               )}
             </Link>
             <div className="flex w-full flex-wrap items-center gap-2">
-              <button
-                disabled={actionPending}
-                aria-busy={actionPending}
-                onClick={() => {
-                  if (isFav) manage();
-                  else void runVisibleAction(() => actions.save(gallery));
-                }}
-                className="min-h-12 shrink-0 rounded-xl border border-zinc-300 px-4 py-2 text-sm disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700"
-              >
-                {t(isFav ? 'actions.saved' : 'actions.save')}
-              </button>
               <button
                 onClick={manage}
                 className="min-h-12 shrink-0 rounded-xl border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"

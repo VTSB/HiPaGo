@@ -71,8 +71,8 @@ const translations = {
   'library.collectionAdd': { en: 'Add to folder', ko: '폴더에 추가' },
   'library.collectionRemove': { en: 'Remove from folder', ko: '폴더에서 제거' },
   'library.savedEmpty': {
-    en: 'Save a work or download it to start your library.',
-    ko: '작품을 저장하거나 다운로드하면 보관함에 모여요.',
+    en: 'Download a work to add it to your library.',
+    ko: '작품을 다운로드하면 보관함에 모여요.',
   },
   'library.gestureHint': {
     en: 'Touch and hold a work, or right-click, to manage it. Use Select for several works.',

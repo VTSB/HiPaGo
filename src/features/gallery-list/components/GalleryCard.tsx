@@ -24,7 +24,7 @@ import { getDownloadedImage, hasCompleteDownloadedGallery } from '@/lib/utils/do
 import { createDownloadStore } from '@/lib/storage/download-store';
 import { GalleryActionTarget } from '@/shared/components/GalleryActionTarget';
 
-interface CardOptions { download?: DBDownload; selected?: boolean; onSelect?: () => void; onBeginSelection?: () => void }
+interface CardOptions { download?: DBDownload; hideDownloadedBadge?: boolean; selected?: boolean; onSelect?: () => void; onBeginSelection?: () => void }
 
 const LAST_LIST_URL_KEY = 'hipago:last-list-url';
 
@@ -71,7 +71,7 @@ function CardSkeleton() {
   );
 }
 
-function CardContent({ block, onPrefetch, download, selected, onSelect, onBeginSelection }: { block: GalleryBlock; onPrefetch?: () => void } & CardOptions) {
+function CardContent({ block, onPrefetch, download, hideDownloadedBadge = false, selected, onSelect, onBeginSelection }: { block: GalleryBlock; onPrefetch?: () => void } & CardOptions) {
   const queryClient = useQueryClient();
   const t = useT();
   const blurTags = useSettingsStore((s) => s.blurTags);
@@ -194,7 +194,7 @@ function CardContent({ block, onPrefetch, download, selected, onSelect, onBeginS
       onPointerEnter={onPrefetch}
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-zinc-100 shadow-sm transition-transform active:scale-[0.985] sm:rounded-lg sm:shadow-none dark:bg-zinc-800 sm:hover:shadow-lg">
-        {download && <span className="absolute right-2 top-2 z-10 rounded-full bg-black/70 px-2 py-1 text-xs text-white">{t(download.status === 'complete' ? completeFiles === true ? 'detail.downloaded' : completeFiles === false ? 'library.filesMissing' : 'actions.loading' : download.status === 'failed' ? 'library.failed' : 'library.pending')}</span>}
+        {download && (!hideDownloadedBadge || download.status !== 'complete' || completeFiles === false) && <span className="absolute right-2 top-2 z-10 rounded-full bg-black/70 px-2 py-1 text-xs text-white">{t(download.status === 'complete' ? completeFiles === true ? 'detail.downloaded' : completeFiles === false ? 'library.filesMissing' : 'actions.loading' : download.status === 'failed' ? 'library.failed' : 'library.pending')}</span>}
         {block.thumbnail || localCover ? (
           <AbortableImage
             src={thumbSrc}

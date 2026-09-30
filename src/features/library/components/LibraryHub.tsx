@@ -357,81 +357,28 @@ export function LibraryHub() {
     : location.kind === 'folder'
       ? t('library.folderEmpty')
       : t('library.savedEmpty');
+  const sortLabel = t(
+    sort === 'newest'
+      ? 'library.sortNewest'
+      : sort === 'oldest'
+        ? 'library.sortOldest'
+        : 'library.sortTitle',
+  );
   return (
     <div className={selecting ? 'pb-64 sm:pb-44' : ''}>
-      <header className="mb-5 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="mb-1 text-xs font-medium text-zinc-500">
-            {t('library.workCount').replace('{count}', allLoading ? '…' : String(allIds.length))}
-          </p>
-          <h1 className="break-words text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-            {activeCollection?.name ?? t(location.kind === 'all' ? 'library.all' : 'nav.library')}
-          </h1>
-        </div>
-      </header>
-      <Link
-        href="/downloads"
-        className="mb-5 flex min-h-16 items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
-      >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          <LibraryIcon name="download" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-            {t('library.manager')}
-          </p>
-          <p
-            className={
-              'mt-0.5 break-words text-xs ' +
-              (statusText ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500')
-            }
-          >
-            {statusText || t('library.managerDescription')}
-          </p>
-        </div>
-        <LibraryIcon name="chevron" className="h-4 w-4 shrink-0 text-zinc-400" />
-      </Link>
-      <DbErrorBanner />
-      <div className="mb-3">
-        <FilterBar onFilterChange={onFilterChange} placeholder={t('library.searchSaved')} />
-      </div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-        <nav
-          aria-label={t('library.location')}
-          className="flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto text-sm"
-        >
-          <button
-            type="button"
-            className="min-h-11 shrink-0 rounded-lg px-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            aria-current={location.kind === 'root' ? 'page' : undefined}
-            onClick={() => navigate({ kind: 'root' })}
-          >
-            {t('nav.library')}
-          </button>
-          {path.map((folder, index) => (
-            <span key={folder.id} className="flex shrink-0 items-center gap-1">
-              <LibraryIcon name="chevron" className="h-3 w-3 text-zinc-400" />
-              <button
-                type="button"
-                title={folder.name}
-                aria-current={index === path.length - 1 ? 'page' : undefined}
-                className="min-h-11 max-w-40 truncate rounded-lg px-2 font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                onClick={() => navigate({ kind: 'folder', id: folder.id })}
-              >
-                {folder.name}
-              </button>
-            </span>
-          ))}
-          {location.kind === 'all' && (
-            <span className="flex shrink-0 items-center gap-1">
-              <LibraryIcon name="chevron" className="h-3 w-3 text-zinc-400" />
-              <span aria-current="page" className="font-medium text-zinc-700 dark:text-zinc-200">
-                {t('library.all')}
-              </span>
-            </span>
-          )}
-        </nav>
+      <header className="mb-4 flex items-start justify-between gap-2">
+        <h1 className="min-w-0 break-words pt-1 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          {activeCollection?.name ?? t(location.kind === 'all' ? 'library.all' : 'nav.library')}
+        </h1>
         <div className="flex shrink-0 items-center gap-1">
+          <Link
+            href="/downloads"
+            className={iconControl}
+            aria-label={t('library.manager')}
+            title={t('library.manager')}
+          >
+            <LibraryIcon name="download" />
+          </Link>
           {activeCollection && (
             <button
               type="button"
@@ -465,26 +412,6 @@ export function LibraryHub() {
           )}
           <button
             type="button"
-            className={iconControl}
-            aria-label={t('library.sort')}
-            title={t(
-              sort === 'newest'
-                ? 'library.sortNewest'
-                : sort === 'oldest'
-                  ? 'library.sortOldest'
-                  : 'library.sortTitle',
-            )}
-            aria-haspopup="menu"
-            aria-expanded={menu?.kind === 'sort'}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              setMenu({ kind: 'sort', anchor: { x: rect.left, y: rect.bottom } });
-            }}
-          >
-            <LibraryIcon name="sort" />
-          </button>
-          <button
-            type="button"
             className={
               iconControl +
               (selecting ? ' bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400' : '')
@@ -501,7 +428,58 @@ export function LibraryHub() {
             <LibraryIcon name={selecting ? 'close' : 'select'} />
           </button>
         </div>
+      </header>
+      {statusText && (
+        <Link
+          href="/downloads"
+          className="mb-3 inline-flex min-h-11 items-center gap-2 rounded-lg text-xs font-medium text-blue-600 dark:text-blue-400"
+        >
+          {statusText}
+          <LibraryIcon name="chevron" className="h-3 w-3" />
+        </Link>
+      )}
+      <DbErrorBanner />
+      <div className="mb-4">
+        <FilterBar onFilterChange={onFilterChange} placeholder={t('library.searchSaved')} />
       </div>
+      {location.kind !== 'root' && (
+        <div className="mb-4 border-b border-zinc-200 pb-2 dark:border-zinc-800">
+          <nav
+            aria-label={t('library.location')}
+            className="flex min-w-0 max-w-full flex-1 items-center gap-1 overflow-x-auto text-sm"
+          >
+            <button
+              type="button"
+              className="min-h-11 shrink-0 rounded-lg px-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              onClick={() => navigate({ kind: 'root' })}
+            >
+              {t('nav.library')}
+            </button>
+            {path.map((folder, index) => (
+              <span key={folder.id} className="flex shrink-0 items-center gap-1">
+                <LibraryIcon name="chevron" className="h-3 w-3 text-zinc-400" />
+                <button
+                  type="button"
+                  title={folder.name}
+                  aria-current={index === path.length - 1 ? 'page' : undefined}
+                  className="min-h-11 max-w-40 truncate rounded-lg px-2 font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                  onClick={() => navigate({ kind: 'folder', id: folder.id })}
+                >
+                  {folder.name}
+                </button>
+              </span>
+            ))}
+            {location.kind === 'all' && (
+              <span className="flex shrink-0 items-center gap-1">
+                <LibraryIcon name="chevron" className="h-3 w-3 text-zinc-400" />
+                <span aria-current="page" className="font-medium text-zinc-700 dark:text-zinc-200">
+                  {t('library.all')}
+                </span>
+              </span>
+            )}
+          </nav>
+        </div>
+      )}
       {menu && (
         <ActionMenu
           title={
@@ -670,12 +648,12 @@ export function LibraryHub() {
                   <button
                     type="button"
                     aria-label={t('library.all')}
-                    className="flex min-h-28 flex-col items-start rounded-2xl border border-blue-100 bg-blue-50/50 p-4 text-left transition-colors hover:bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/20 dark:hover:bg-blue-950/40"
+                    className="flex min-h-22 flex-col items-start rounded-2xl border border-blue-100 bg-blue-50/50 p-3 text-left transition-colors hover:bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/20 dark:hover:bg-blue-950/40"
                     onClick={() => navigate({ kind: 'all' })}
                   >
                     <LibraryIcon
                       name="all"
-                      className="mb-3 h-6 w-6 text-blue-600 dark:text-blue-400"
+                      className="mb-2 h-5 w-5 text-blue-600 dark:text-blue-400"
                     />
                     <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                       {t('library.all')}
@@ -694,12 +672,12 @@ export function LibraryHub() {
                     <button
                       type="button"
                       aria-label={folder.name}
-                      className="flex min-h-28 w-full flex-col items-start rounded-2xl border border-zinc-200 bg-white p-4 text-left transition-colors hover:border-amber-300 hover:bg-amber-50/30 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-amber-700"
+                      className="flex min-h-22 w-full flex-col items-start rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-colors hover:border-amber-300 hover:bg-amber-50/30 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-amber-700"
                       onClick={() => navigate({ kind: 'folder', id: folder.id })}
                     >
                       <LibraryIcon
                         name="folder"
-                        className="mb-3 h-7 w-7 fill-amber-100 text-amber-500 dark:fill-amber-950/50 dark:text-amber-400"
+                        className="mb-2 h-6 w-6 fill-amber-100 text-amber-500 dark:fill-amber-950/50 dark:text-amber-400"
                       />
                       <span className="break-words text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                         {folder.name}
@@ -724,19 +702,22 @@ export function LibraryHub() {
           )}
           {visibleIds.length > 0 ? (
             <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-xs font-semibold text-zinc-500">
-                  {t('library.works')} <span className="ml-1 font-normal">{visibleIds.length}</span>
-                </h2>
-                <span className="text-xs text-zinc-400">
-                  {t(
-                    sort === 'newest'
-                      ? 'library.sortNewest'
-                      : sort === 'oldest'
-                        ? 'library.sortOldest'
-                        : 'library.sortTitle',
-                  )}
-                </span>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-xs font-semibold text-zinc-500">{t('library.works')}</h2>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  aria-label={t('library.sort') + ': ' + sortLabel}
+                  aria-haspopup="menu"
+                  aria-expanded={menu?.kind === 'sort'}
+                  onClick={(event) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setMenu({ kind: 'sort', anchor: { x: rect.left, y: rect.bottom } });
+                  }}
+                >
+                  {sortLabel}
+                  <LibraryIcon name="chevron" className="h-3 w-3 rotate-90" />
+                </button>
               </div>
               <SavedGalleryGrid
                 ref={gridRef}
@@ -746,6 +727,7 @@ export function LibraryHub() {
                   <GalleryCardById
                     id={id}
                     download={downloadMap.get(id)}
+                    hideDownloadedBadge
                     onBeginSelection={
                       selecting
                         ? undefined

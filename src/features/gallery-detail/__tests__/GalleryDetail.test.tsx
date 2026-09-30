@@ -71,7 +71,14 @@ const galleryActions = vi.hoisted(() => ({
 vi.mock('@/shared/hooks/useGalleryActions', () => ({ useGalleryActions: () => galleryActions }));
 
 vi.mock('@/features/gallery-detail/hooks/useDownloadGallery', () => ({
-  useDownloadGallery: vi.fn(() => ({ progress: null, start: vi.fn(), cancel: vi.fn(), queuedPosition: null, isDownloaded: false, error: null })),
+  useDownloadGallery: vi.fn(() => ({
+    progress: null,
+    start: vi.fn(),
+    cancel: vi.fn(),
+    queuedPosition: null,
+    isDownloaded: false,
+    error: null,
+  })),
 }));
 
 vi.mock('@/features/gallery-detail/hooks/useDownloadedFilesPresent', () => ({
@@ -140,6 +147,7 @@ import { rememberDetailEntryThumbnail } from '@/features/gallery-detail/utils/de
 import { useOfflineImages } from '@/features/reader/hooks/useOfflineImages';
 import { getThumbnailUrl } from '@/lib/utils/image-url';
 import { useDownloadedFilesPresent } from '../hooks/useDownloadedFilesPresent';
+import { useDownloadGallery } from '../hooks/useDownloadGallery';
 
 function render(ui: React.ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -184,6 +192,14 @@ beforeEach(() => {
   galleryActions.open.mockClear();
   galleryActions.save.mockClear();
   galleryActions.download.mockClear();
+  vi.mocked(useDownloadGallery).mockReturnValue({
+    progress: null,
+    start: vi.fn(),
+    cancel: vi.fn(),
+    queuedPosition: null,
+    isDownloaded: false,
+    error: null,
+  });
   vi.mocked(useDownloadedFilesPresent).mockReturnValue({ filesMissing: false, checking: false });
   vi.mocked(useOfflineImages).mockReturnValue({
     sources: null,
@@ -323,43 +339,100 @@ describe('GalleryDetail thumbnail virtualization', () => {
 });
 
 describe('GalleryDetail shared work management', () => {
-  it('exposes visible save and management entries without a per-card ellipsis', async () => {
-    mockDetail();
+  it('exposes a single Download acquisition entry and visible work management', async () => {
+    mockDetail(makeFiles(1));
     render(<GalleryDetail id={123} />);
-    fireEvent.click(screen.getByRole('button', { name: 'actions.save' }));
-    expect(galleryActions.save).toHaveBeenCalledWith(
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'actions.saved' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'detail.download' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'detail.download' }));
+    expect(galleryActions.download).toHaveBeenCalledWith(
       expect.objectContaining({ id: 123, title: 'Test Gallery' }),
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'actions.save' })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'detail.download' })).toBeEnabled(),
+    );
+    expect(galleryActions.save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'actions.title' }));
     expect(galleryActions.open).toHaveBeenCalledWith(expect.objectContaining({ id: 123 }));
   });
 
   it.each([
-    { action: 'save' as const, outcome: 'success', missing: false },
-    { action: 'save' as const, outcome: 'failure', missing: false },
     { action: 'download' as const, outcome: 'success', missing: false },
     { action: 'download' as const, outcome: 'failure', missing: false },
     { action: 'download' as const, outcome: 'success', missing: true },
     { action: 'download' as const, outcome: 'failure', missing: true },
-  ])('disables $action (missing=$missing) and restores controls after $outcome', async ({ action, outcome, missing }) => {
-    let resolve!: () => void;
-    let reject!: (error: Error) => void;
-    galleryActions[action].mockImplementationOnce(() => new Promise<void>((done, fail) => { resolve = done; reject = fail; }));
-    vi.mocked(useDownloadedFilesPresent).mockReturnValue({ filesMissing: missing, checking: false });
+  ])(
+    'disables $action (missing=$missing) and restores controls after $outcome',
+    async ({ action, outcome, missing }) => {
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      galleryActions[action].mockImplementationOnce(
+        () =>
+          new Promise<void>((done, fail) => {
+            resolve = done;
+            reject = fail;
+          }),
+      );
+      vi.mocked(useDownloadedFilesPresent).mockReturnValue({
+        filesMissing: missing,
+        checking: false,
+      });
+      mockDetail(makeFiles(1));
+      render(<GalleryDetail id={123} />);
+      const download = screen.getByRole('button', {
+        name: missing ? 'detail.filesMissing' : 'detail.download',
+      });
+      const trigger = download;
+      fireEvent.click(trigger);
+      expect(download).toBeDisabled();
+      expect(trigger).toHaveAttribute('aria-busy', 'true');
+      fireEvent.click(trigger);
+      expect(galleryActions[action]).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        if (outcome === 'success') resolve();
+        else reject(new Error('Failed'));
+      });
+      await waitFor(() => expect(download).toBeEnabled());
+      expect(trigger).toHaveAttribute('aria-busy', 'false');
+      expect(galleryActions.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it('opens management from the completed detail state without starting another download', () => {
     mockDetail(makeFiles(1));
+    vi.mocked(useDownloadGallery).mockReturnValue({
+      progress: null,
+      start: vi.fn(),
+      cancel: vi.fn(),
+      queuedPosition: null,
+      isDownloaded: true,
+      error: null,
+    });
     render(<GalleryDetail id={123} />);
-    const save = screen.getByRole('button', { name: 'actions.save' });
-    const download = screen.getByRole('button', { name: missing ? 'detail.filesMissing' : 'detail.download' });
-    const trigger = action === 'save' ? save : download;
-    fireEvent.click(trigger);
-    expect(save).toBeDisabled();
-    expect(download).toBeDisabled();
-    expect(trigger).toHaveAttribute('aria-busy', 'true');
-    fireEvent.click(trigger);
-    expect(galleryActions[action]).toHaveBeenCalledTimes(1);
-    await act(async () => { if (outcome === 'success') resolve(); else reject(new Error('Failed')); });
-    await waitFor(() => { expect(save).toBeEnabled(); expect(download).toBeEnabled(); });
-    expect(trigger).toHaveAttribute('aria-busy', 'false');
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'actions.saved' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'detail.downloaded' }));
+    expect(galleryActions.open).toHaveBeenCalledWith(expect.objectContaining({ id: 123 }));
+    expect(galleryActions.download).not.toHaveBeenCalled();
+    expect(galleryActions.save).not.toHaveBeenCalled();
+  });
+
+  it('retains queued cancellation and visible download failures', () => {
+    const cancel = vi.fn();
+    mockDetail(makeFiles(1));
+    vi.mocked(useDownloadGallery).mockReturnValue({
+      progress: null,
+      start: vi.fn(),
+      cancel,
+      queuedPosition: 2,
+      isDownloaded: false,
+      error: 'Download unavailable',
+    });
+    render(<GalleryDetail id={123} />);
+    fireEvent.click(screen.getByRole('button', { name: 'library.queue.queued#2' }));
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(screen.getByText('Download unavailable')).toBeInTheDocument();
+    expect(galleryActions.download).not.toHaveBeenCalled();
   });
 });

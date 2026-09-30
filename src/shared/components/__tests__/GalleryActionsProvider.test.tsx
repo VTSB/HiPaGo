@@ -181,6 +181,26 @@ async function confirm() {
 }
 
 describe('download file and saved membership lifetimes', () => {
+  it.each([false, true])(
+    'offers Download without a separate Save entry for saved=%s works',
+    async (saved) => {
+      mocks.saved = saved;
+      mocks.row = null;
+      renderActions();
+      fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
+      const download = await screen.findByRole('menuitem', { name: 'actions.download' });
+      expect(screen.queryByRole('menuitem', { name: 'actions.save' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'actions.saved' })).not.toBeInTheDocument();
+      fireEvent.click(download);
+      await waitFor(() => expect(mocks.start).toHaveBeenCalledOnce());
+      expect(mocks.start).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 12, title: 'Work', files: expect.any(Array) }),
+      );
+      expect(mocks.downloadRejected).not.toHaveBeenCalled();
+      expect(mocks.remove).not.toHaveBeenCalled();
+    },
+  );
+
   it('distinguishes same-name nested folders with full paths and preserves overlapping membership', async () => {
     mocks.collections = [
       { id: 1, name: 'Reading', count: 0, parentId: null },
