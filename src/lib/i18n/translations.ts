@@ -163,6 +163,7 @@ const translations = {
     ko: '즐겨찾기가 없습니다. 갤러리를 둘러보고 추가해보세요!',
   },
   'history.title': { en: 'History', ko: '기록' },
+  'history.search.placeholder': { en: 'Search your history', ko: '기록 검색' },
   'history.empty': { en: 'No recently viewed galleries.', ko: '최근 본 갤러리가 없습니다.' },
   'history.today': { en: 'Today', ko: '오늘' },
   'history.yesterday': { en: 'Yesterday', ko: '어제' },

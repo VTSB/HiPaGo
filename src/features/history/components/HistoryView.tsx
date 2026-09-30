@@ -250,7 +250,7 @@ export function HistoryView({ embedded = false }: { embedded?: boolean }) {
               setFilters(next);
               setSelected([]);
             }}
-            placeholder={t('search.placeholder')}
+            placeholder={t('history.search.placeholder')}
           />
         </div>
       )}
