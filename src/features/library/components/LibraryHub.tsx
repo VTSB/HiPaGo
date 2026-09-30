@@ -821,7 +821,9 @@ export function LibraryHub() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
-              className={control + ' min-w-0 max-w-full flex-1'}
+              className={
+                control + ' w-full min-w-0 max-w-full basis-full sm:w-auto sm:basis-56 sm:flex-1'
+              }
               aria-label={t('library.collectionTarget')}
               value={collectionTarget}
               disabled={busy || loading}
